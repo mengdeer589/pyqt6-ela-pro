@@ -122,8 +122,10 @@ Win7 交付线的「补丁级二进制兼容」结论不适用于拿它当通用
    且 6.8.4 没有公开 PySide6 轮子 —— 实际上不可行。**结论：不要改 PySide6 轮子**；
    让绑定轮去对齐公开的 Qt（见问题 2 的嫌疑 1）。
 3. （2026-10-12 已执行）`PyElaWidgetTools\wheels\` 已清理：混版的 Essentials/Addons 移入
-   `wheels\win7-mix\`（附 README 说明用途与风险），原位换回从 aliyun 下载的官方 6.8.3；
+   `wheels\pyside6-win7\`（附 README 说明用途与风险），原位换回从 aliyun 下载的官方 6.8.3；
    四件套 sha256 已与 `uv.lock` 记录逐一比对一致。
+   （2026-10-15 更新：工程转入 PyQt6 线后，该官方 6.8.3 四件套已从 `wheels\` 根目录删除；
+   需要对照 / 回退时从 aliyun 重下即可——它们本就是未改动的官方轮。）
 
 ---
 
@@ -314,7 +316,7 @@ shiboken 6.8 生成**两套**类型索引：
 |---|---|---|
 | `.venv-pyside6`（构建 venv，官方 6.8.3） | 6.8.3 / 6.8.3 | ✅ 6 次独立运行全通过 |
 | `%TEMP%\opencode\ps683verify`（全新 venv，官方 6.8.3） | 6.8.3 / 6.8.3 | ✅ 全 API 通过 |
-| `%TEMP%\opencode\pswin7`（**Win7 套件** win7-mix：官方 Python 层 + 自编译 Qt 6.8.4） | 6.8.3 / 6.8.4 | ✅ 全 API 通过（绑定轮可直接配套 Win7 套件使用） |
+| `%TEMP%\opencode\pswin7`（**Win7 套件** pyside6-win7：官方 Python 层 + 自编译 Qt 6.8.4） | 6.8.3 / 6.8.4 | ✅ 全 API 通过（绑定轮可直接配套 Win7 套件使用） |
 | 转换后的 PySide6 完整示例（临时副本，不动仓库） | 6.8.3 / 6.8.3 | ✅ 启动并持续运行 20s 无异常 |
 | `%TEMP%\opencode\ps69clean`（官方 6.9.3） | 6.9.3 / 6.9.3 | ❌ `ElaWindow` 构造崩（跨 minor 不受支持，预期行为） |
 | `%TEMP%\opencode\ps683clean`（vendor 6.8.4 换装） | 6.8.3 / 6.8.4 | ❌ `QApplication` 创建处挂起（混装实验床，非有效基准） |
@@ -325,9 +327,10 @@ shiboken 6.8 生成**两套**类型索引：
 
 ### 6.3 仓库清理
 
-- `PyElaWidgetTools\wheels\`：混版 Essentials/Addons 移入 `wheels\win7-mix\`（已补成**自包含四件套**并附 README）；
+- `PyElaWidgetTools\wheels\`：混版 Essentials/Addons 移入 `wheels\pyside6-win7\`（已补成**自包含四件套**并附 README）；
   原位换回 aliyun 官方 6.8.3；四件套 sha256 与 `uv.lock` 逐一比对一致。
-- Win7 套件（`win7-mix`）2026-10-12 完成**非 QML 全模块补编**：新编 19 个模块（qtsvg / qtwebsockets /
+  （2026-10-15：根目录官方 6.8.3 已在磁盘清理中删除；`wheels\` 现只保留 `pyside6-win7\` / `pyqt6-win7\` 两套交付资产。）
+- Win7 套件（`pyside6-win7`）2026-10-12 完成**非 QML 全模块补编**：新编 19 个模块（qtsvg / qtwebsockets /
   qtimageformats / qtcharts / qtdatavis3d / qt3d / qtlocation / qttools / qtquicktimeline / qtserialport /
   qtserialbus / qtsensors / qtconnectivity / qtnetworkauth / qthttpserver / qtremoteobjects / qtscxml /
   qtspeech / qtlanguageserver 等），132 个 Qt6 DLL 中 112 个为自编译 6.8.4，仅剩 QML 专属 22 个保持官方；
@@ -350,17 +353,17 @@ shiboken 6.8 生成**两套**类型索引：
 
 ## 七、开发机运行时切到 Win7 套件（2026-10-12，用户决定）
 
-**决定**：开发机（Win11）的 `uv` 环境改用 **win7-mix 套件**（`PyElaWidgetTools/wheels/win7-mix/`）。
+**决定**：开发机（Win11）的 `uv` 环境改用 **pyside6-win7 套件**（`PyElaWidgetTools/wheels/pyside6-win7/`）。
 原先的布置是「开发机只用官方 6.8.3」（第二节修法 1），现改为**与 Win7 交付运行时一致** ——
 目的是在开发期就暴露 Qt 6.8.4 / 自编译替换带来的差异。官方 6.8.3（根 `wheels/`）保留作对照 / 回退。
 
-**落地**：`pyproject.toml` 的 `[tool.uv.sources]` 四件套 path 指向 win7-mix，`uv.lock` 重锁。
+**落地**：`pyproject.toml` 的 `[tool.uv.sources]` 四件套 path 指向 pyside6-win7，`uv.lock` 重锁。
 仍是 path 源（PySide6 解析不碰网络）；四件套必须**同时列进 `dependencies`** 才吃到 sources
 （uv 只对直接依赖应用 sources，实测）。
 
 **验证（本机，2026-10-12）**：
 
-- venv 内 `Qt6Core / Qt6Gui / Qt6Svg / Qt6Widgets.dll` 与 win7-mix 轮内文件**逐字节一致**
+- venv 内 `Qt6Core / Qt6Gui / Qt6Svg / Qt6Widgets.dll` 与 pyside6-win7 轮内文件**逐字节一致**
   （Core `6165504/2ce534186e6c`、Gui `9342976/382c1b9effd3`、Svg `516096/0cb720c3d994`、
   Widgets `6480896/b575af17f703` —— 即自编译 6.8.4 版）；
 - `qVersion()` = **6.8.4**（官方套件下为 6.8.3，可作运行期判别）；
@@ -374,7 +377,7 @@ lock 内 sha256，path wheel 的哈希 uv 不会自己重算）→ `uv sync --al
 
 ## 八、全量测试补记
 
-win7-mix 运行时下的全量测试（2026-10-12，本机）：
+pyside6-win7 运行时下的全量测试（2026-10-12，本机）：
 
 ```
 5610 passed, 35 skipped, 1298 warnings in 347.07s (0:05:47)

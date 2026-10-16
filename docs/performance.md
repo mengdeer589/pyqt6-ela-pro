@@ -163,6 +163,10 @@ class MyPage(QWidget):
   减少同时可见的控件数是唯一手段。
 - **Qt6 字体度量 1.6×**（DirectWrite）。字体极密的界面（大量 `QFontMetrics` 计算）会吃到这笔税。
 - **绘制 1.4×**：难以避免，但只在每帧重绘很多控件时才可见（配方 ④ 就是为它准备的）。
+- **透明文本视口（Win7）**：`QTextBrowser` 系在 palette `Base` 透明 + 视口不自填充时走慢速重绘路径（滚动实测 ×8）。本库查看器默认已改用不透明同色底
+  （`ElaMarkdownViewer.setViewportBackground`，bugs #14）；宿主自绘文本控件同理。
+- **CJK 字体 shaping（Win7）**：进程内渲染过 CJK 后，纯 Latin 文档重绘成本可放大 ~20–40×（Qt/DirectWrite 层，与库无关，bugs #15）；终端可用
+  `ElaTerminalView.setFontFamilies()` 指定含中文字形的等宽族，规避逐字形回退（bugs #12 的另一半）。
 
 ## 自测
 

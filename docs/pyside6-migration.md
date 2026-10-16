@@ -5,7 +5,7 @@
 
 - 权威约束清单在 `AGENTS.md`（库内硬规则，逐条可执行）；本文给**症状 → 根因 → 修法 → 守卫**的叙事与判据。
 - 轮子相关（混版、绑定生成器 bug、镜像）见 `WHEEL_ISSUES.md`；`MIGRATION.md` 是本地过程记录（gitignore，含更早一轮 6.6.2 的实测）。
-- 迁移规模与结果：**372 个文件 / +3979 −3555**；全量测试 **0 failed**（官方 6.8.3：5603 passed / 39 skipped；win7-mix 运行时：5610 passed / 35 skipped）。
+- 迁移规模与结果：**372 个文件 / +3979 −3555**；全量测试 **0 failed**（官方 6.8.3：5603 passed / 39 skipped；pyside6-win7 运行时：5610 passed / 35 skipped）。
 
 ---
 
@@ -217,9 +217,9 @@ PyQt5 只打印告警，PySide6 直接崩，而且**崩点在下一个测试的�
    另：**path wheel 的哈希 uv 不会自己重算**（`--refresh-package` / `--no-cache` 都不行），
    重编译后要把 `uv.lock` 里的 `hash` 换成文件真实 sha256（或临时改约束触发重解析）。
 
-### 5.3 Win7 交付套件（win7-mix）
+### 5.3 Win7 交付套件（pyside6-win7）
 
-`PyElaWidgetTools/wheels/win7-mix/` = 官方 Python 层 + **自编译 Qt 6.8.4**（132 个 Qt6 DLL 中 112 个自编译，
+`PyElaWidgetTools/wheels/pyside6-win7/` = 官方 Python 层 + **自编译 Qt 6.8.4**（132 个 Qt6 DLL 中 112 个自编译，
 22 个 QML 专属保持官方），用于 Win7 SP1 离线安装。开发机可刻意用它（与交付运行时一致），
 **运行期判别**：`PySide6.QtCore.qVersion()` 返回 **6.8.4**（官方 6.8.3 套件返回 6.8.3）。
 切换 = 改 `[tool.uv.sources]` 路径 + `uv lock` + 刷新 sha256。
@@ -286,7 +286,7 @@ PyQt5 只打印告警，PySide6 直接崩，而且**崩点在下一个测试的�
 | `048c520` | 全库迁移到 PySide6 6.8.3，包重命名为 `pyside6_ela_pro`（372 文件，含 `WHEEL_ISSUES.md`） |
 | `ad728ba` | 刷新绑定轮哈希；修示例页两处 PySide6 不兼容调用（`setDisplayMode(0)`、`connect(slot, arg)`）+ 新增 AST 守卫 |
 | `f1b172c` | PySide6 四件套改本地 path 源 + 解析限死 win/AMD64（uv 索引陷阱的落地） |
-| `7941d28` | 开发机切换到 win7-mix 套件（与 Win7 交付运行时一致）+ 全量结果记录 |
+| `7941d28` | 开发机切换到 pyside6-win7 套件（与 Win7 交付运行时一致）+ 全量结果记录 |
 | `8a5fc0e` / `9b40dfc` | 下拉按钮族透明底 / 去边框（迁移后按同一套状态层口径收敛的组件级修复） |
 
 ---
@@ -326,7 +326,7 @@ PyQt5 只打印告警，PySide6 直接崩，而且**崩点在下一个测试的�
 
 ### 9.4 明确**不**做
 
-- **不重编 Qt**：自编译 Win7 套件与官方 6.8.3 逐段 ±1%、同 MSVC；win7-mix 与官方轮在 Win11 同速。
+- **不重编 Qt**：自编译 Win7 套件与官方 6.8.3 逐段 ±1%、同 MSVC；pyside6-win7 与官方轮在 Win11 同速。
 - **不为省 ~5µs/对象换绑定栈**：PyQt6 需要第三套 sip 绑定生成器 + 库再迁移一次，而且拿不回重绘类（动画 / 主题 / 图标首帧与绑定弱相关）；PyQt5 会丢掉整个 Qt6 生态。
 - 样式（Fusion）/ DWM / 无障碍开关对 Qt6 控件构造没有影响（目标机实测个位数百分比）。
 

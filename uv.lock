@@ -150,53 +150,34 @@ wheels = [
 ]
 
 [[package]]
-name = "pyside6"
-version = "6.8.3"
-source = { path = "PyElaWidgetTools/wheels/win7-mix/PySide6-6.8.3-cp39-abi3-win_amd64.whl" }
+name = "pyqt6"
+version = "6.8.1"
+source = { path = "PyElaWidgetTools/wheels/pyqt6-win7/PyQt6-6.8.1-cp39-abi3-win_amd64.whl" }
 dependencies = [
-    { name = "pyside6-addons" },
-    { name = "pyside6-essentials" },
-    { name = "shiboken6" },
+    { name = "pyqt6-qt6" },
+    { name = "pyqt6-sip", version = "13.13.0", source = { registry = "https://mirrors.aliyun.com/pypi/simple/" }, marker = "python_full_version >= '3.12'" },
+    { name = "pyqt6-sip", version = "13.13.0", source = { path = "PyElaWidgetTools/wheels/pyqt6-win7/pyqt6_sip-13.13.0-cp311-cp311-win_amd64.whl" }, marker = "python_full_version < '3.12'" },
 ]
 wheels = [
-    { filename = "pyside6-6.8.3-cp39-abi3-win_amd64.whl", hash = "sha256:722dc0061d8ef6dbb8c0b99864f21e83a5b49ece1ecb2d0b890840d969e1e461" },
+    { filename = "pyqt6-6.8.1-cp39-abi3-win_amd64.whl", hash = "sha256:70bad7b890a8f9e9e5fb9598c544b832d9d9d99a9519e0009cb29c1e15e96632" },
 ]
 
 [package.metadata]
 requires-dist = [
-    { name = "pyside6-addons", specifier = "==6.8.3" },
-    { name = "pyside6-essentials", specifier = "==6.8.3" },
-    { name = "shiboken6", specifier = "==6.8.3" },
+    { name = "pyqt6-qt6", specifier = ">=6.8.0,<6.9.0" },
+    { name = "pyqt6-sip", specifier = ">=13.8,<14" },
 ]
 
 [[package]]
-name = "pyside6-addons"
-version = "6.8.3"
-source = { path = "PyElaWidgetTools/wheels/win7-mix/PySide6_Addons-6.8.3-cp39-abi3-win_amd64.whl" }
-dependencies = [
-    { name = "pyside6-essentials" },
-    { name = "shiboken6" },
-]
-wheels = [
-    { filename = "pyside6_addons-6.8.3-cp39-abi3-win_amd64.whl", hash = "sha256:4734b27a0a60fefb5015b5cf44e75b0d0a1282a40c3a95041df0ecc426f7c5bb" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "pyside6-essentials", specifier = "==6.8.3" },
-    { name = "shiboken6", specifier = "==6.8.3" },
-]
-
-[[package]]
-name = "pyside6-ela-pro"
+name = "pyqt6-ela-pro"
 source = { editable = "." }
 dependencies = [
     { name = "pypinyin" },
-    { name = "pyside6" },
-    { name = "pyside6-addons" },
-    { name = "pyside6-elawidgettools" },
-    { name = "pyside6-essentials" },
-    { name = "shiboken6" },
+    { name = "pyqt6" },
+    { name = "pyqt6-elawidgettools" },
+    { name = "pyqt6-qt6" },
+    { name = "pyqt6-sip", version = "13.13.0", source = { registry = "https://mirrors.aliyun.com/pypi/simple/" }, marker = "python_full_version >= '3.12'" },
+    { name = "pyqt6-sip", version = "13.13.0", source = { path = "PyElaWidgetTools/wheels/pyqt6-win7/pyqt6_sip-13.13.0-cp311-cp311-win_amd64.whl" }, marker = "python_full_version < '3.12'" },
 ]
 
 [package.optional-dependencies]
@@ -234,13 +215,13 @@ requires-dist = [
     { name = "polars", marker = "extra == 'parquet'", specifier = ">=1.0" },
     { name = "pygments", marker = "extra == 'all'", specifier = ">=2.15" },
     { name = "pypinyin", specifier = ">=0.50.0" },
-    { name = "pyside6", path = "PyElaWidgetTools/wheels/win7-mix/PySide6-6.8.3-cp39-abi3-win_amd64.whl" },
-    { name = "pyside6-addons", path = "PyElaWidgetTools/wheels/win7-mix/PySide6_Addons-6.8.3-cp39-abi3-win_amd64.whl" },
-    { name = "pyside6-elawidgettools", path = "PyElaWidgetTools/dist/pyside6_elawidgettools-0.13.0-cp38-abi3-win_amd64.whl" },
-    { name = "pyside6-essentials", path = "PyElaWidgetTools/wheels/win7-mix/PySide6_Essentials-6.8.3-cp39-abi3-win_amd64.whl" },
+    { name = "pyqt6", path = "PyElaWidgetTools/wheels/pyqt6-win7/PyQt6-6.8.1-cp39-abi3-win_amd64.whl" },
+    { name = "pyqt6-elawidgettools", path = "PyElaWidgetTools/wheels/pyqt6-win7/pyqt6_elawidgettools-0.13.0-cp39-abi3-win_amd64.whl" },
+    { name = "pyqt6-qt6", path = "PyElaWidgetTools/wheels/pyqt6-win7/PyQt6_Qt6-6.8.2-py3-none-win_amd64.whl" },
+    { name = "pyqt6-sip", marker = "python_full_version < '3.12'", path = "PyElaWidgetTools/wheels/pyqt6-win7/pyqt6_sip-13.13.0-cp311-cp311-win_amd64.whl" },
+    { name = "pyqt6-sip", marker = "python_full_version >= '3.12'", specifier = "==13.13.0" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=7.0.0" },
     { name = "pywin32", marker = "extra == 'all'", specifier = ">=306" },
-    { name = "shiboken6", path = "PyElaWidgetTools/wheels/win7-mix/shiboken6-6.8.3-cp39-abi3-win_amd64.whl" },
     { name = "tsdownsample", marker = "extra == 'all'", specifier = ">=0.1.5.1" },
 ]
 provides-extras = ["all", "parquet", "dev"]
@@ -255,32 +236,51 @@ dev = [
 ]
 
 [[package]]
-name = "pyside6-elawidgettools"
+name = "pyqt6-elawidgettools"
 version = "0.13.0"
-source = { path = "PyElaWidgetTools/dist/pyside6_elawidgettools-0.13.0-cp38-abi3-win_amd64.whl" }
+source = { path = "PyElaWidgetTools/wheels/pyqt6-win7/pyqt6_elawidgettools-0.13.0-cp39-abi3-win_amd64.whl" }
 dependencies = [
-    { name = "pyside6" },
+    { name = "pyqt6" },
 ]
 wheels = [
-    { filename = "pyside6_elawidgettools-0.13.0-cp38-abi3-win_amd64.whl", hash = "sha256:f8e938e880aeb5482f594fe4abc40ed003f063236d8745ea880ce2ea93d71423" },
+    { filename = "pyqt6_elawidgettools-0.13.0-cp39-abi3-win_amd64.whl", hash = "sha256:eb09124203aea14a81ebeb6f5173a6f46f2e43e8e84a7b8128a6e052d1f12fa6" },
 ]
 
 [package.metadata]
-requires-dist = [{ name = "pyside6" }]
+requires-dist = [{ name = "pyqt6", specifier = ">=6.8.1,<6.9" }]
 
 [[package]]
-name = "pyside6-essentials"
-version = "6.8.3"
-source = { path = "PyElaWidgetTools/wheels/win7-mix/PySide6_Essentials-6.8.3-cp39-abi3-win_amd64.whl" }
-dependencies = [
-    { name = "shiboken6" },
-]
+name = "pyqt6-qt6"
+version = "6.8.2"
+source = { path = "PyElaWidgetTools/wheels/pyqt6-win7/PyQt6_Qt6-6.8.2-py3-none-win_amd64.whl" }
 wheels = [
-    { filename = "pyside6_essentials-6.8.3-cp39-abi3-win_amd64.whl", hash = "sha256:f5c199fe192affb5f2060f186aaf54fabde5f2473f5250ff37c5909f5a29f0b2" },
+    { filename = "pyqt6_qt6-6.8.2-py3-none-win_amd64.whl", hash = "sha256:aa273888831a42198023384eafdc89f22d8e926ba06c183d813f051b9db0f554" },
 ]
 
-[package.metadata]
-requires-dist = [{ name = "shiboken6", specifier = "==6.8.3" }]
+[[package]]
+name = "pyqt6-sip"
+version = "13.13.0"
+source = { registry = "https://mirrors.aliyun.com/pypi/simple/" }
+resolution-markers = [
+    "python_full_version >= '3.12' and platform_machine == 'AMD64' and sys_platform == 'win32'",
+]
+sdist = { url = "https://mirrors.aliyun.com/pypi/packages/78/35/bed43ff7cf040ced6b62a17b272abecb94914755284b54e8d06844e1ed23/pyqt6_sip-13.13.0.tar.gz", hash = "sha256:2cd55f575cde208c398d6cfdecc5a13394ed2afb54226210c50e3a6df7c3a997" }
+wheels = [
+    { url = "https://mirrors.aliyun.com/pypi/packages/fb/75/d34dd327fbbc4fbd2f22325455e62f33192349b18860df39b51f4e9b1573/pyqt6_sip-13.13.0-cp311-cp311-win_amd64.whl", hash = "sha256:75d02cae78b43330917692cfd5b25c69e30d73e6e22ba8cfd53d7614fbb2774a" },
+    { url = "https://mirrors.aliyun.com/pypi/packages/37/d4/ea91156975216008e5fbfb8158478fc6f0b1b4d8c4de63e8819a8a69d6f0/pyqt6_sip-13.13.0-cp312-cp312-win_amd64.whl", hash = "sha256:c6b67d301ef64e13d313c728020616315c952473abb27029b2e5857b44a7b3e6" },
+    { url = "https://mirrors.aliyun.com/pypi/packages/9a/9c/ef3ffad75ef85067789d8bfd253785c2ca997e78872ba0d61250c8ff6458/pyqt6_sip-13.13.0-cp313-cp313-win_amd64.whl", hash = "sha256:b202f08bf0d68c0bd80def5c273acd0e1fe3deee8eda9ad8244b8286bc333e0a" },
+]
+
+[[package]]
+name = "pyqt6-sip"
+version = "13.13.0"
+source = { path = "PyElaWidgetTools/wheels/pyqt6-win7/pyqt6_sip-13.13.0-cp311-cp311-win_amd64.whl" }
+resolution-markers = [
+    "python_full_version < '3.12' and platform_machine == 'AMD64' and sys_platform == 'win32'",
+]
+wheels = [
+    { filename = "pyqt6_sip-13.13.0-cp311-cp311-win_amd64.whl", hash = "sha256:75d02cae78b43330917692cfd5b25c69e30d73e6e22ba8cfd53d7614fbb2774a" },
+]
 
 [[package]]
 name = "pytest"
@@ -338,14 +338,6 @@ sdist = { url = "https://mirrors.aliyun.com/pypi/packages/2a/64/a24f8f29d8bf158e
 wheels = [
     { url = "https://mirrors.aliyun.com/pypi/packages/fe/53/aa8f92ce6eb2f97095d8b6359a1613c5a5ee0aa9b1a33434df9294362979/resvg_py-0.5.0-cp310-abi3-win_amd64.whl", hash = "sha256:1f6b8956c4143dbfe107bcd35799d0dfd778a40a8cd537893c0bf489898a6c3c" },
     { url = "https://mirrors.aliyun.com/pypi/packages/73/5c/5b0e68ce15bd87eaee64501427437f57bece008e15bf40dd759563f0038a/resvg_py-0.5.0-cp315-abi3.abi3t-win_amd64.whl", hash = "sha256:011111a4c3f46d409e989fe88ec783a3ffae1f3877092ab0351aaf2167fe399d" },
-]
-
-[[package]]
-name = "shiboken6"
-version = "6.8.3"
-source = { path = "PyElaWidgetTools/wheels/win7-mix/shiboken6-6.8.3-cp39-abi3-win_amd64.whl" }
-wheels = [
-    { filename = "shiboken6-6.8.3-cp39-abi3-win_amd64.whl", hash = "sha256:bca3a94513ce9242f7d4bbdca902072a1631888e0aa3a8711a52cc5dbe93588f" },
 ]
 
 [[package]]
