@@ -16,10 +16,10 @@ from __future__ import annotations
 import time
 from typing import Callable, List, TypeVar
 
-import shiboken6
-from PySide6.QtCore import QObject
-from PySide6.QtTest import QTest
-from PySide6.QtWidgets import QApplication
+from PyQt6 import sip
+from PyQt6.QtCore import QObject
+from PyQt6.QtTest import QTest
+from PyQt6.QtWidgets import QApplication
 
 T = TypeVar("T", bound=QObject)
 
@@ -138,7 +138,7 @@ class WidgetFactory:
     def destroy_all(self) -> None:
         """逆序 ``deleteLater()`` 再冲刷事件循环，保证真正析构。
 
-        必须逐个用 ``not shiboken6.isValid()`` 判存活：控件常被库内部重新挂到别的
+        必须逐个用 ``sip.isdeleted()`` 判存活：控件常被库内部重新挂到别的
         parent 下（``create_ela_splitter`` 就把子控件 reparent 给 splitter），
         父控件析构会连带销毁子控件，此时再调 ``deleteLater()`` 抛
         ``RuntimeError: wrapped C/C++ object has been deleted``。
@@ -147,7 +147,7 @@ class WidgetFactory:
             if widget is None:
                 continue
             try:
-                if not shiboken6.isValid(widget):
+                if sip.isdeleted(widget):
                     continue
                 widget.deleteLater()
             except RuntimeError:  # 已销毁 / 无 deleteLater 的裸 QObject

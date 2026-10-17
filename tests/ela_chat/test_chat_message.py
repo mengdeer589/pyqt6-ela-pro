@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from pyside6_ela_pro.chat import (
+from pyqt6_ela_pro.chat import (
     ElaChatAttachment,
     ElaChatMessage,
     ElaChatReasoningStyleType,

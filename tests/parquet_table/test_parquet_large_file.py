@@ -5,9 +5,9 @@ pytest.importorskip("polars")
 import os  # noqa: E402
 
 import polars as pl  # noqa: E402
-from PySide6.QtCore import Qt  # noqa: E402
+from PyQt6.QtCore import Qt  # noqa: E402
 
-from pyside6_ela_pro.parquet_table import ElaParquetTable  # noqa: E402
+from pyqt6_ela_pro.parquet_table import ElaParquetTable  # noqa: E402
 
 _HORIZONTAL = Qt.Orientation.Horizontal
 

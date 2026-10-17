@@ -20,7 +20,7 @@ AGENTS.md 已经禁掉了用 PowerShell 的 ``Get-Content`` / ``Set-Content`` �
 2. 解码后的文本里**不含 U+FFFD**（替换字符只可能来自写坏，不是源码里真有的字符）。
 
 另外单独盯一个写坏时最容易造成**静默失效**的变体：ASCII 标识符里的字符被改掉。
-本会话实测 ``PySide6ElaWidgetTools`` 被写成 ``Pyqt5ElaWidgetTools`` —— 大小写一换，
+本会话实测 ``PyQt6ElaWidgetTools`` 被写成 ``Pyqt5ElaWidgetTools`` —— 大小写一换，
 import 直接 ``ModuleNotFoundError``（这个至少会炸，不会静默）。真正的静默变体是
 中文注释里的**颜色名/尺寸/字段名**被吃掉，那种只能靠人读；本守卫能兜住的是「文件
 根本坏掉」这一级。
@@ -32,7 +32,7 @@ import pathlib
 
 import pytest
 
-ROOTS = ("pyside6_ela_pro", "tests", "example")
+ROOTS = ("pyqt6_ela_pro", "tests", "example")
 SKIP_DIRS = {"__pycache__", ".venv", "build", "dist", ".git"}
 
 #: 替换字符。**本文件不能出现它的字面量**（否则守卫先把自己拦下来）。

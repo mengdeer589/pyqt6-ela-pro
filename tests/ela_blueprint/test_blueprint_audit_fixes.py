@@ -22,12 +22,12 @@
 from __future__ import annotations
 
 import pytest
-from PySide6.QtCore import QCoreApplication, QEvent, QPoint, QPointF, Qt
-from PySide6.QtGui import QColor, QFocusEvent, QKeyEvent, QMouseEvent
-from PySide6.QtWidgets import QApplication, QPushButton, QWidget
-from PySide6ElaWidgetTools import ElaThemeType, eTheme
+from PyQt6.QtCore import QCoreApplication, QEvent, QPoint, QPointF, Qt
+from PyQt6.QtGui import QColor, QFocusEvent, QKeyEvent, QMouseEvent
+from PyQt6.QtWidgets import QApplication, QPushButton, QWidget
+from PyQt6ElaWidgetTools import ElaThemeType, eTheme
 
-from pyside6_ela_pro.blueprint import (
+from pyqt6_ela_pro.blueprint import (
     ElaBlueprintCanvas,
     ElaBlueprintGraph,
     ElaBlueprintNode,
@@ -36,7 +36,7 @@ from pyside6_ela_pro.blueprint import (
     ElaTempWire,
     register_node_type,
 )
-from pyside6_ela_pro.blueprint import node_widget as _nw
+from pyqt6_ela_pro.blueprint import node_widget as _nw
 
 # ---------------------------------------------------------------------------
 # 事件工具（offscreen 下 QTest 的命中路由不可靠，统一 sendEvent 直达目标）
@@ -682,7 +682,7 @@ class TestCreationMenuPickIdempotent:
     def test_popup_corners_are_rounded(self, canvas):
         """弹层是真圆角：窗口透明 + 四角不铺底（grab 会把窗口底色铺满，
         用 ``render(DrawChildren)`` 跳过窗口底色才测得到）。"""
-        from PySide6.QtGui import QImage, QRegion
+        from PyQt6.QtGui import QImage, QRegion
 
         menu = ElaNodeCreationMenu(canvas)
         menu.resize(300, 300)
@@ -696,7 +696,7 @@ class TestCreationMenuPickIdempotent:
 
 class TestContextMenuSignalsReemitted:
     def test_rename_and_properties_forwarded(self, canvas, monkeypatch):
-        import pyside6_ela_pro.blueprint.canvas as canvas_mod
+        import pyqt6_ela_pro.blueprint.canvas as canvas_mod
 
         captured = {}
         monkeypatch.setattr(

@@ -15,12 +15,13 @@ from __future__ import annotations
 import inspect
 from weakref import WeakKeyDictionary
 
-from PySide6.QtCore import QCoreApplication, QEvent
-from PySide6.QtTest import QTest
-from PySide6.QtWidgets import QWidget
+from PyQt6.QtCore import QCoreApplication, QEvent
+from PyQt6.QtTest import QTest
+from PyQt6.QtWidgets import QWidget
 
-from pyside6_ela_pro import animation as A
-from pyside6_ela_pro._internal import is_deleted
+from pyqt6_ela_pro import animation as A
+from pyqt6_ela_pro._internal import is_deleted
+from PyQt6 import sip
 
 
 class TestNoDestroyedLambdaOnRegistry:
@@ -41,7 +42,7 @@ class TestNoDestroyedLambdaOnRegistry:
     def test_no_destroyed_lambda_registered_at_runtime(self, qapp):
         """运行期检查：销毁「带在途动画」的控件必须安全收尾。
 
-        PySide6 的 ``QObject.receivers()`` 对所有信号都不可用（见 MIGRATION），
+        PyQt6 的 ``QObject.receivers()`` 对所有信号都不可用（见 MIGRATION），
         无法直接数 ``destroyed`` 上的连接数 —— 改为**真的销毁并冲刷事件循环**：
         若 ``destroyed`` 上挂了 Python 回调，析构期执行它就是历史崩溃来源
         （测试进程会直接 abort，跑不过即失败）。
@@ -73,8 +74,8 @@ class TestShakeSurvivesDeletedAnimation:
     def test_source_guards_deleted_animation(self):
 
         src = inspect.getsource(A.shake_window)
-        assert "shiboken6.isValid" in src, (
-            "shake_window 必须用 shiboken6.isValid 守卫上一次的动画对象"
+        assert "is_deleted(" in src, (
+            "shake_window 必须用 _internal.is_deleted 守卫上一次的动画对象"
         )
 
     def test_shake_many_times_while_alive(self, qapp):

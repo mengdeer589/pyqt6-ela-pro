@@ -20,12 +20,12 @@ import pytest
 
 from _qthelpers import wait_until as _wait_until
 
-from pyside6_ela_pro.chat import ElaChatReasoningStyleType
-from pyside6_ela_pro.example.chat_agent_page import ChatAgentPage
-from pyside6_ela_pro.example.chat_input_page import ChatInputPage
-from pyside6_ela_pro.example.chat_overview_page import ChatOverviewPage
-from pyside6_ela_pro.example.chat_persist_page import ChatPersistPage
-from pyside6_ela_pro.example.chat_session_page import ChatSessionPage
+from pyqt6_ela_pro.chat import ElaChatReasoningStyleType
+from pyqt6_ela_pro.example.chat_agent_page import ChatAgentPage
+from pyqt6_ela_pro.example.chat_input_page import ChatInputPage
+from pyqt6_ela_pro.example.chat_overview_page import ChatOverviewPage
+from pyqt6_ela_pro.example.chat_persist_page import ChatPersistPage
+from pyqt6_ela_pro.example.chat_session_page import ChatSessionPage
 
 CHAT_PAGES = [
     (ChatOverviewPage, "聊天组件总览"),
@@ -68,7 +68,7 @@ class TestChatOverviewPage:
         assert kinds.count("stats") == 1, kinds
         # ToolCall 的成败在 `status` 上（不是 `ok` 布尔）：
         # Done=成功、Error=失败、Aborted=回合中止时未完成
-        from pyside6_ela_pro.chat import ElaChatToolStatusType
+        from pyqt6_ela_pro.chat import ElaChatToolStatusType
 
         statuses = {call.status for call in message.tool_calls}
         assert statuses == {ElaChatToolStatusType.Done, ElaChatToolStatusType.Error}, statuses

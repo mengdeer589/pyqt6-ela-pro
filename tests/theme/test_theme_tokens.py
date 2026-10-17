@@ -1,4 +1,4 @@
-"""``pyside6_ela_pro._theme`` 的单元测试。
+"""``pyqt6_ela_pro._theme`` 的单元测试。
 
 三条要钉住的不变量：
 
@@ -15,12 +15,12 @@ from __future__ import annotations
 import pathlib
 
 import pytest
-from PySide6.QtGui import QColor
+from PyQt6.QtGui import QColor
 
-from pyside6_ela_pro import _theme as T
-from PySide6ElaWidgetTools import eTheme, ElaThemeType
+from pyqt6_ela_pro import _theme as T
+from PyQt6ElaWidgetTools import eTheme, ElaThemeType
 
-_PKG = pathlib.Path(__file__).resolve().parents[2] / "pyside6_ela_pro"
+_PKG = pathlib.Path(__file__).resolve().parents[2] / "pyqt6_ela_pro"
 
 _L = ElaThemeType.ThemeMode.Light
 _D = ElaThemeType.ThemeMode.Dark
@@ -228,7 +228,7 @@ class TestPaletteAndForeground:
 
     def test_chart_palette_reuses_charts_tokens(self):
         """不另维护一份分类色 —— 直接用 charts 的那一套，避免两套漂移。"""
-        from pyside6_ela_pro.charts._tokens import ECHARTS_PALETTE
+        from pyqt6_ela_pro.charts._tokens import ECHARTS_PALETTE
 
         assert [c.name() for c in T.chartPalette()] == [
             c.lower() for c in ECHARTS_PALETTE
@@ -256,7 +256,7 @@ class TestPaletteAndForeground:
 
 class TestShadowHelpers:
     def test_shadow_margin_is_shared_constant(self):
-        from pyside6_ela_pro._styles import SHADOW_MARGIN
+        from pyqt6_ela_pro._styles import SHADOW_MARGIN
 
         assert SHADOW_MARGIN == 4
 
@@ -293,8 +293,8 @@ class TestShadowHelpers:
         )
 
     def test_toast_shadow_border_uses_shared_constant(self, qapp):
-        from pyside6_ela_pro._styles import SHADOW_MARGIN
-        from pyside6_ela_pro.ela_toast import ElaToast, ElaToastType
+        from pyqt6_ela_pro._styles import SHADOW_MARGIN
+        from pyqt6_ela_pro.ela_toast import ElaToast, ElaToastType
 
         toast = ElaToast(ElaToastType.Info, "x", 1000)
         try:
@@ -304,7 +304,7 @@ class TestShadowHelpers:
             qapp.processEvents()
 
     def test_confirm_dialog_window_includes_margin(self, qapp):
-        from pyside6_ela_pro.ela_confirm_dialog import ElaConfirmDialog
+        from pyqt6_ela_pro.ela_confirm_dialog import ElaConfirmDialog
 
         dlg = ElaConfirmDialog()
         try:
@@ -316,7 +316,7 @@ class TestShadowHelpers:
             qapp.processEvents()
 
     def test_notify_popup_window_includes_margin(self, qapp):
-        from pyside6_ela_pro.notify_popup import ElaNotifyPopup
+        from pyqt6_ela_pro.notify_popup import ElaNotifyPopup
 
         popup = ElaNotifyPopup()
         try:

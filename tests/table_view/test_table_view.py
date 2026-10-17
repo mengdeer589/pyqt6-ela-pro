@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-from PySide6.QtGui import QColor
-from PySide6.QtWidgets import QApplication
+from PyQt6.QtGui import QColor
+from PyQt6.QtWidgets import QApplication
 
-from pyside6_ela_pro.table_view import (
+from pyqt6_ela_pro.table_view import (
     TABLE_MIN_SECTION_SIZE,
     TABLE_ROW_MIN_HEIGHT,
     TABLE_THREAD_QUIT_TIMEOUT,

@@ -19,25 +19,25 @@ from __future__ import annotations
 
 import inspect
 
-from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QApplication
+from PyQt6.QtCore import Qt
+from PyQt6.QtWidgets import QApplication
 
-from pyside6_ela_pro import ElaBrowserEmbedder, ElaDataTable, ElaWindowEmbedder
-from pyside6_ela_pro.blueprint import (
+from pyqt6_ela_pro import ElaBrowserEmbedder, ElaDataTable, ElaWindowEmbedder
+from pyqt6_ela_pro.blueprint import (
     ElaBlueprintCanvas,
     ElaNodeContextMenu,
     ElaNodeCreationMenu,
     ElaNodeWidget,
 )
-from pyside6_ela_pro.blueprint.model import ElaBlueprintNode
+from pyqt6_ela_pro.blueprint.model import ElaBlueprintNode
 
 # ===================================================================== chat
-from pyside6_ela_pro.chat.binder import ElaChatStreamBinder
-from pyside6_ela_pro.chat.bubble import ElaChatBubble
-from pyside6_ela_pro.chat.message import ElaChatRoleType
-from pyside6_ela_pro.chat import ElaChatWidget
-from pyside6_ela_pro.selection_assistant import capture as capture_mod
-from pyside6_ela_pro.selection_assistant.capture import ElaClipboardCapture
+from pyqt6_ela_pro.chat.binder import ElaChatStreamBinder
+from pyqt6_ela_pro.chat.bubble import ElaChatBubble
+from pyqt6_ela_pro.chat.message import ElaChatRoleType
+from pyqt6_ela_pro.chat import ElaChatWidget
+from pyqt6_ela_pro.selection_assistant import capture as capture_mod
+from pyqt6_ela_pro.selection_assistant.capture import ElaClipboardCapture
 
 
 class TestStopGenerationOrdering:

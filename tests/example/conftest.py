@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import pytest
 
-from pyside6_ela_pro.example.base_page import ExamplePage
+from pyqt6_ela_pro.example.base_page import ExamplePage
 
 
 class _PageBuildingFactory:

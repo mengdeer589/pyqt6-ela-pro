@@ -1,12 +1,12 @@
 from __future__ import annotations
 
 from unittest.mock import MagicMock, patch
-from PySide6.QtCore import QRect
-from PySide6.QtGui import QColor, QPainter, QFont
-from PySide6.QtWidgets import QComboBox
-from PySide6ElaWidgetTools import ElaThemeType
+from PyQt6.QtCore import QRect
+from PyQt6.QtGui import QColor, QPainter, QFont
+from PyQt6.QtWidgets import QComboBox
+from PyQt6ElaWidgetTools import ElaThemeType
 
-from pyside6_ela_pro.ela_tag_combo_base import (
+from pyqt6_ela_pro.ela_tag_combo_base import (
     _TagBoxThemeMixin,
     _TagBoxAnimMixin,
     _pre_init_popup,

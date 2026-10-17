@@ -38,7 +38,7 @@ from __future__ import annotations
 import ast
 import pathlib
 
-_PKG = pathlib.Path(__file__).resolve().parents[2] / "pyside6_ela_pro"
+_PKG = pathlib.Path(__file__).resolve().parents[2] / "pyqt6_ela_pro"
 
 #: 「把外部值转数值」的容错点。命中即要求列出 ``OverflowError``。
 #: 判据是 try 体里**出现了会抛 OverflowError 的转换调用**，而不是逐个文件

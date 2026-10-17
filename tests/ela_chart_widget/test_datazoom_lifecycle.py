@@ -16,11 +16,11 @@
 from __future__ import annotations
 
 import pytest
-from PySide6.QtCore import QPoint, QPointF, Qt
-from PySide6.QtGui import QWheelEvent
-from PySide6.QtWidgets import QApplication
+from PyQt6.QtCore import QPoint, QPointF, Qt
+from PyQt6.QtGui import QWheelEvent
+from PyQt6.QtWidgets import QApplication
 
-from pyside6_ela_pro.charts import ElaChartWidget
+from pyqt6_ela_pro.charts import ElaChartWidget
 
 CATS = ["a", "b", "c", "d", "e", "f", "g", "h"]
 VALUES = [1, 3, 2, 5, 4, 7, 6, 8]

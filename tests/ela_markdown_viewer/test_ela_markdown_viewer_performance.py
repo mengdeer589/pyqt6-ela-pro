@@ -9,11 +9,11 @@ from __future__ import annotations
 import random
 
 import pytest
-from PySide6.QtTest import QTest
+from PyQt6.QtTest import QTest
 
-from pyside6_ela_pro import ela_markdown_viewer as viewer_module
-from pyside6_ela_pro import math_lite
-from pyside6_ela_pro.ela_markdown_viewer import ElaMarkdownViewer
+from pyqt6_ela_pro import ela_markdown_viewer as viewer_module
+from pyqt6_ela_pro import math_lite
+from pyqt6_ela_pro.ela_markdown_viewer import ElaMarkdownViewer
 
 
 class TestLongParagraphStreaming:
@@ -233,11 +233,14 @@ class TestCodeFontFamilyCache:
         calls = {"n": 0}
 
         class _FakeFontDatabase:
-            def families(self):
+            # ??????? ``QFontDatabase.families()``?PyQt6 ? QFontDatabase
+            # ??????????????????**??** families?
+            @staticmethod
+            def families():
                 calls["n"] += 1
                 return ["Consolas"]
 
-        monkeypatch.setattr(viewer_module, "QFontDatabase", lambda: _FakeFontDatabase())
+        monkeypatch.setattr(viewer_module, "QFontDatabase", _FakeFontDatabase)
         monkeypatch.setattr(viewer_module, "_DEFAULT_CODE_FONT_FAMILY", None)
 
         first = viewer_module._default_code_font_family()

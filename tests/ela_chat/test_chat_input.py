@@ -6,15 +6,15 @@ import os
 import re
 
 import pytest
-from PySide6.QtCore import QEvent, QMimeData, QPoint, QPointF, Qt, QUrl
-from PySide6.QtGui import QColor, QDragEnterEvent, QDropEvent, QFocusEvent, QImage
-from PySide6.QtTest import QTest
-from PySide6.QtWidgets import QApplication, QFrame
-from PySide6ElaWidgetTools import ElaIconType
+from PyQt6.QtCore import QEvent, QMimeData, QPoint, QPointF, Qt, QUrl
+from PyQt6.QtGui import QColor, QDragEnterEvent, QDropEvent, QFocusEvent, QImage
+from PyQt6.QtTest import QTest
+from PyQt6.QtWidgets import QApplication, QFrame
+from PyQt6ElaWidgetTools import ElaIconType
 
-from pyside6_ela_pro.chat import ElaChatInput, ElaChatToolBar
-from pyside6_ela_pro.chat._theme import accent_color, card_border_color
-from pyside6_ela_pro.chat.input import _MENTION_TAIL
+from pyqt6_ela_pro.chat import ElaChatInput, ElaChatToolBar
+from pyqt6_ela_pro.chat._theme import accent_color, card_border_color
+from pyqt6_ela_pro.chat.input import _MENTION_TAIL
 
 
 class TestSubmit:

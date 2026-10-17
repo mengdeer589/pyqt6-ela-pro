@@ -30,8 +30,8 @@ from pathlib import Path
 
 import pytest
 
-from pyside6_ela_pro.chat import ElaChatInput, ElaChatView, ElaChatWidget
-from pyside6_ela_pro.chat.message import ElaChatStats, ElaChatStatusType
+from pyqt6_ela_pro.chat import ElaChatInput, ElaChatView, ElaChatWidget
+from pyqt6_ela_pro.chat.message import ElaChatStats, ElaChatStatusType
 
 _WIDGET_SOURCE = Path(inspect.getfile(ElaChatWidget)).with_suffix(".py")
 

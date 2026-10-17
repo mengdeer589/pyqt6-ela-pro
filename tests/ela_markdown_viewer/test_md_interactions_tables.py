@@ -5,11 +5,11 @@ Covers: copy button focus policy, anchor history, table zebra and column widths.
 
 from __future__ import annotations
 
-from PySide6.QtCore import Qt, QUrl
-from PySide6.QtGui import QTextTable
-from PySide6.QtTest import QTest
+from PyQt6.QtCore import Qt, QUrl
+from PyQt6.QtGui import QTextTable
+from PyQt6.QtTest import QTest
 
-from pyside6_ela_pro.ela_markdown_viewer import ElaMarkdownViewer
+from pyqt6_ela_pro.ela_markdown_viewer import ElaMarkdownViewer
 
 
 def _tables(viewer: ElaMarkdownViewer) -> list:

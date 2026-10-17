@@ -11,7 +11,7 @@ import math
 
 import pytest
 
-from pyside6_ela_pro.chat import (
+from pyqt6_ela_pro.chat import (
     ElaChatMessage,
     ElaChatPart,
     ElaChatPartKindType,
@@ -177,9 +177,9 @@ class TestFromMessages:
         assert stats.usage_percent == 0  # 10 / 200000 -> 0.005% -> round 0
 
     def test_exported_from_package(self):
-        import pyside6_ela_pro
+        import pyqt6_ela_pro
 
-        assert pyside6_ela_pro.ElaChatSessionStats is ElaChatSessionStats
+        assert pyqt6_ela_pro.ElaChatSessionStats is ElaChatSessionStats
 
 
 class TestViewIntegration:

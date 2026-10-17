@@ -6,7 +6,7 @@ import sys
 
 import pytest
 
-from pyside6_ela_pro.selection_assistant._native import (
+from pyqt6_ela_pro.selection_assistant._native import (
     _VK_LBUTTON,
     _VK_MBUTTON,
     _VK_RBUTTON,
@@ -103,7 +103,7 @@ class TestPolling:
 
     def test_swapped_buttons_use_primary(self, qapp, monkeypatch):
         """系统交换主 / 次键后，物理右键才是「左键」（主键）。"""
-        from pyside6_ela_pro.selection_assistant import _native
+        from pyqt6_ela_pro.selection_assistant import _native
 
         monkeypatch.setattr(_native, "_swap_buttons", lambda: True)
         monitor = ElaMouseMonitor()

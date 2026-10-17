@@ -3,11 +3,11 @@
 两个真实 bug 的回归守护，都是「Qt 回调内异常 → 0xC0000409 静默终止」那一类：
 
 1. **``destroyed`` 连的是绑方法就等于没连**。PyQt5 不会调用「绑定到自身」的
-   ``destroyed`` 槽（实测 ``shiboken6.delete()``：绑方法 0 次、lambda / 模块级函数
+   ``destroyed`` 槽（实测 ``sip.delete()``：绑方法 0 次、lambda / 模块级函数
    各 1 次）。原实现正是 ``self.destroyed.connect(self._theme_cleanup)``，
    于是**清理从来没发生过** —— 控件销毁后 ``eTheme.themeModeChanged`` 仍会
    打进已释放的包装器。
-2. **不能依赖 ``destroyed`` 一定送达**。所以主题槽本身还带 ``not shiboken6.isValid()``
+2. **不能依赖 ``destroyed`` 一定送达**。所以主题槽本身还带 ``sip.isdeleted()``
    自愈：命中就顺手把自己断开。
 
 外加一条 ``ElaPlainTextEdit`` 的 API 事实：它**没有** ``setTextColor``。在主题
@@ -19,13 +19,13 @@ from __future__ import annotations
 import gc
 
 import pytest
-import shiboken6
-from PySide6.QtGui import QColor
-from PySide6.QtWidgets import QApplication, QWidget
-from PySide6ElaWidgetTools import ElaPlainTextEdit, ElaThemeType, eTheme
+from PyQt6 import sip
+from PyQt6.QtGui import QColor
+from PyQt6.QtWidgets import QApplication, QWidget
+from PyQt6ElaWidgetTools import ElaPlainTextEdit, ElaThemeType, eTheme
 
-from pyside6_ela_pro import _internal
-from pyside6_ela_pro._internal import _ThemeAwareMixin
+from pyqt6_ela_pro import _internal
+from pyqt6_ela_pro._internal import _ThemeAwareMixin
 
 
 class Probe(_ThemeAwareMixin, QWidget):
@@ -71,8 +71,8 @@ class TestThemeSlotLifetime:
         """销毁后**不该**再收到主题变化。"""
         probe = make(Probe)
         probe.setParent(None)
-        shiboken6.delete(probe)
-        assert not shiboken6.isValid(probe)
+        sip.delete(probe)
+        assert sip.isdeleted(probe)
         _flip(ElaThemeType.ThemeMode.Dark)  # 命中自愈分支，不该崩
         _flip(ElaThemeType.ThemeMode.Light)
 
@@ -80,7 +80,7 @@ class TestThemeSlotLifetime:
         """包装器还活着、C++ 已销毁的情形（lambda 闭包持有引用时的常态）。"""
         probe = make(Probe)
         probe.setParent(None)
-        shiboken6.delete(probe)
+        sip.delete(probe)
         gc.collect()
         # 显式再触发一次：自愈槽应当安静地把自己断开
         probe._theme_slot(ElaThemeType.ThemeMode.Dark)

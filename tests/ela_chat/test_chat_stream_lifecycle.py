@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from pyside6_ela_pro.chat import (
+from pyqt6_ela_pro.chat import (
     ElaChatReasoningStyleType,
     ElaChatBubble,
     ElaChatRoleType,

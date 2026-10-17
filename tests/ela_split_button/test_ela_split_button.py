@@ -3,12 +3,12 @@
 from __future__ import annotations
 
 import pytest
-from PySide6.QtCore import QEvent
-from PySide6.QtWidgets import QWidget
-from PySide6ElaWidgetTools import ElaIconType, ElaMenu, ElaThemeType
+from PyQt6.QtCore import QEvent
+from PyQt6.QtWidgets import QWidget
+from PyQt6ElaWidgetTools import ElaIconType, ElaMenu, ElaThemeType
 
-from pyside6_ela_pro._theme import textDisabled
-from pyside6_ela_pro.ela_split_button import ElaSplitButton
+from pyqt6_ela_pro._theme import textDisabled
+from pyqt6_ela_pro.ela_split_button import ElaSplitButton
 
 
 @pytest.fixture

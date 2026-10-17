@@ -16,9 +16,9 @@
 from __future__ import annotations
 
 import pytest
-from PySide6.QtWidgets import QApplication
+from PyQt6.QtWidgets import QApplication
 
-from pyside6_ela_pro.charts.core import ElaChartWidget
+from pyqt6_ela_pro.charts.core import ElaChartWidget
 
 #: 返回字典的键集合。改动此集合必须同步改测试与 docstring。
 BENCH_KEYS = {
@@ -371,7 +371,7 @@ class TestBenchmarkNoSideEffects:
 
     def test_hover_and_tip_state_preserved(self, make):
         """悬浮态不被清掉（``notMerge`` 会 ``tooltip.hide()``）。"""
-        from PySide6.QtCore import QPointF
+        from PyQt6.QtCore import QPointF
 
         chart = _ready(
             make(ElaChartWidget), _option([float(i % 97) for i in range(2000)])

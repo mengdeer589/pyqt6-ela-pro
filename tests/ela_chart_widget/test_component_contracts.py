@@ -17,12 +17,12 @@
 from __future__ import annotations
 
 import pytest
-from PySide6.QtCore import QPointF, Qt
-from PySide6.QtGui import QMouseEvent
-from PySide6.QtWidgets import QApplication
+from PyQt6.QtCore import QPointF, Qt
+from PyQt6.QtGui import QMouseEvent
+from PyQt6.QtWidgets import QApplication
 
-from pyside6_ela_pro.charts import ElaChartWidget
-from pyside6_ela_pro.charts import _utils
+from pyqt6_ela_pro.charts import ElaChartWidget
+from pyqt6_ela_pro.charts import _utils
 
 
 @pytest.fixture(autouse=True)
@@ -49,9 +49,9 @@ def _press(chart, pos):
     ev = QMouseEvent(
         Qt
         and __import__(
-            "PySide6.QtCore", fromlist=["QEvent"]
+            "PyQt6.QtCore", fromlist=["QEvent"]
         ).QEvent.Type.MouseButtonPress,
-        pos,
+        QPointF(pos),
         Qt.MouseButton.LeftButton,
         Qt.MouseButton.LeftButton,
         Qt.KeyboardModifier.NoModifier,
@@ -141,7 +141,7 @@ class TestMarkAreaDoesNotStealHover:
     }
 
     def test_mark_area_is_not_in_hoverable_set(self):
-        from pyside6_ela_pro.charts.core import _HOVERABLE_COMPONENTS
+        from pyqt6_ela_pro.charts.core import _HOVERABLE_COMPONENTS
 
         assert "markArea" not in _HOVERABLE_COMPONENTS
         assert "graphic" not in _HOVERABLE_COMPONENTS
@@ -330,7 +330,7 @@ class TestParseRoamShared:
         ],
     )
     def test_parse_roam(self, value, expect):
-        from pyside6_ela_pro.charts._utils import parse_roam
+        from pyqt6_ela_pro.charts._utils import parse_roam
 
         assert parse_roam(value) == expect
 
@@ -352,7 +352,7 @@ class TestParseRoamShared:
                 ],
             },
         )
-        from pyside6_ela_pro.charts._utils import parse_roam
+        from pyqt6_ela_pro.charts._utils import parse_roam
 
         assert chart.seriesRenderers[0]._roam == parse_roam(roam)
 

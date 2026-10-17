@@ -18,17 +18,17 @@
 from __future__ import annotations
 
 import pytest
-from PySide6.QtGui import QColor
-from PySide6.QtWidgets import QApplication
+from PyQt6.QtGui import QColor
+from PyQt6.QtWidgets import QApplication
 
-from pyside6_ela_pro.charts.core import ElaChartWidget
-from pyside6_ela_pro.charts.series_cartesian import (
+from pyqt6_ela_pro.charts.core import ElaChartWidget
+from pyqt6_ela_pro.charts.series_cartesian import (
     BarSeriesRenderer,
     ScatterSeriesRenderer,
 )
 
 pytestmark = pytest.mark.skipif(
-    __import__("pyside6_ela_pro.charts._downsample", fromlist=["np"]).np is None,
+    __import__("pyqt6_ela_pro.charts._downsample", fromlist=["np"]).np is None,
     reason="需要 numpy",
 )
 
@@ -217,7 +217,7 @@ class TestBarPaintFastPath:
         assert r.uniformItemStyle() is not None
         assert r._bars
         # 直接调 paint 不应抛异常（hover 态由 chart.hoverInfo 驱动）
-        from PySide6.QtGui import QImage, QPainter
+        from PyQt6.QtGui import QImage, QPainter
 
         img = QImage(600, 400, QImage.Format.Format_ARGB32_Premultiplied)
         p = QPainter(img)
@@ -293,7 +293,7 @@ class TestColorIsolation:
         r = _r(chart, BarSeriesRenderer)
         r._bars and chart.hoverInfo()
         # 模拟一次淡化绘制
-        from PySide6.QtGui import QImage, QPainter
+        from PyQt6.QtGui import QImage, QPainter
 
         img = QImage(600, 400, QImage.Format.Format_ARGB32_Premultiplied)
         p = QPainter(img)

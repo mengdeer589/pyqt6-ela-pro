@@ -2,9 +2,9 @@ from __future__ import annotations
 
 import pytest
 from _qthelpers import wait_until
-from PySide6.QtGui import QTextCursor
+from PyQt6.QtGui import QTextCursor
 
-from pyside6_ela_pro.ela_markdown_viewer import _LARGE_RENDER_CHARS, ElaMarkdownViewer
+from pyqt6_ela_pro.ela_markdown_viewer import _LARGE_RENDER_CHARS, ElaMarkdownViewer
 
 #: 明确标记旧文档内容的串 —— 新文档里绝不出现
 STALE_MARK = "AAA"

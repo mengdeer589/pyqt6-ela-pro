@@ -1,7 +1,7 @@
 """机器守卫：全库（库 + 示例）不允许出现 QSS 调用。
 
 规则见 AGENTS.md「禁用 QSS / QStyle 路线」：需要非主题色文字 / 纯色底 / 透明底 /
-圆角卡片时，用 ``pyside6_ela_pro._styles`` 里的原语，不要写 ``setStyleSheet``。
+圆角卡片时，用 ``pyqt6_ela_pro._styles`` 里的原语，不要写 ``setStyleSheet``。
 """
 
 from __future__ import annotations
@@ -10,7 +10,7 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 #: 第一方源码树（第三方 / 外部副本目录不在其中）
-GUARDED_TREES = ("pyside6_ela_pro", "example", "llm_test")
+GUARDED_TREES = ("pyqt6_ela_pro", "example", "llm_test")
 
 #: 允许出现 ``setStyleSheet`` 字样的上下文（仅文档说明，不是调用）
 _ALLOWED_MARKERS = ("``setStyleSheet``", "``setStyleSheet()``")

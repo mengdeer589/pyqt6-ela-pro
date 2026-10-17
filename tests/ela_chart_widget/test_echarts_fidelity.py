@@ -3,11 +3,11 @@ ripple / drill-down / drag / roam and layout keys."""
 
 from __future__ import annotations
 
-from PySide6.QtCore import QEvent, QPoint, QPointF, Qt
-from PySide6.QtGui import QMouseEvent, QWheelEvent
-from PySide6.QtWidgets import QApplication
+from PyQt6.QtCore import QEvent, QPoint, QPointF, Qt
+from PyQt6.QtGui import QMouseEvent, QWheelEvent
+from PyQt6.QtWidgets import QApplication
 
-from pyside6_ela_pro.charts import ECHARTS_PALETTE, ElaChartWidget
+from pyqt6_ela_pro.charts import ECHARTS_PALETTE, ElaChartWidget
 
 
 def _make(option, size=(600, 400)):
@@ -480,8 +480,8 @@ class TestGraphDrag:
 
 def _wheel_event(pos: QPointF):
     return QWheelEvent(
-        pos,
-        pos.toPoint(),
+        QPointF(pos),
+        QPointF(pos.toPoint()),
         QPoint(0, 0),
         QPoint(0, 120),
         Qt.MouseButton.NoButton,
@@ -509,8 +509,8 @@ class TestMapRoam:
         renderer = chart.seriesRenderers[0]
         rect = renderer._rect
         wheel = QWheelEvent(
-            rect.center(),
-            chart.mapToGlobal(rect.center().toPoint()),
+            QPointF(rect.center()),
+            QPointF(chart.mapToGlobal(rect.center().toPoint())),
             QPoint(0, 0),
             QPoint(0, 120),
             Qt.MouseButton.NoButton,
@@ -541,8 +541,8 @@ class TestMapRoam:
         renderer = chart.seriesRenderers[0]
         rect = renderer._rect
         wheel = QWheelEvent(
-            rect.center(),
-            chart.mapToGlobal(rect.center().toPoint()),
+            QPointF(rect.center()),
+            QPointF(chart.mapToGlobal(rect.center().toPoint())),
             QPoint(0, 0),
             QPoint(0, 120),
             Qt.MouseButton.NoButton,

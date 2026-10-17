@@ -3,12 +3,12 @@
 from __future__ import annotations
 
 import pytest
-from PySide6.QtCore import QEvent, QMimeData, QPoint, QPointF, Qt
-from PySide6.QtGui import QDragEnterEvent, QDragLeaveEvent, QEnterEvent, QMouseEvent
-from PySide6.QtWidgets import QFileDialog
-from PySide6ElaWidgetTools import ElaThemeType
+from PyQt6.QtCore import QEvent, QMimeData, QPoint, QPointF, Qt
+from PyQt6.QtGui import QDragEnterEvent, QDragLeaveEvent, QEnterEvent, QMouseEvent
+from PyQt6.QtWidgets import QFileDialog
+from PyQt6ElaWidgetTools import ElaThemeType
 
-from pyside6_ela_pro.ela_upload_area import ElaUploadArea
+from pyqt6_ela_pro.ela_upload_area import ElaUploadArea
 
 
 @pytest.fixture
@@ -203,7 +203,7 @@ class TestElaUploadAreaEvents:
 
     def test_enter_event_sets_hover(self, area):
         pos = QPointF(1, 1)
-        area.enterEvent(QEnterEvent(pos, pos, pos))
+        area.enterEvent(QEnterEvent(QPointF(pos), QPointF(pos), QPointF(pos)))
         assert area._is_hover is True
 
     def test_leave_event_clears_hover(self, area):
@@ -293,8 +293,8 @@ class TestElaUploadAreaMouseButtons:
                 area,
                 QMouseEvent(
                     event_type,
-                    pos,
-                    glob,
+                    QPointF(pos),
+                    QPointF(glob),
                     button,
                     buttons,
                     Qt.KeyboardModifier.NoModifier,

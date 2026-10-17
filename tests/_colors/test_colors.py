@@ -3,10 +3,10 @@ from __future__ import annotations
 import re
 
 import pytest
-from PySide6.QtGui import QColor
-from PySide6ElaWidgetTools import ElaThemeType
+from PyQt6.QtGui import QColor
+from PyQt6ElaWidgetTools import ElaThemeType
 
-from pyside6_ela_pro._colors import (
+from pyqt6_ela_pro._colors import (
     _COLOR_ALIAS,
     _COLOR_PALETTE,
     _contrast_ratio,
@@ -15,7 +15,7 @@ from pyside6_ela_pro._colors import (
     get_color_scheme,
     state_tint,
 )
-from pyside6_ela_pro._colors import (
+from pyqt6_ela_pro._colors import (
     STATE_HOVER_ALPHA as _HOVER_ALPHA,
     STATE_PRESS_ALPHA as _PRESS_ALPHA,
 )

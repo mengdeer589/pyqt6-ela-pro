@@ -3,14 +3,14 @@
 from __future__ import annotations
 
 import pytest
-from PySide6.QtCore import QEvent, QPoint, QPointF, QRect, Qt
-from PySide6.QtGui import QEnterEvent, QFontMetrics
-from PySide6.QtTest import QTest
-from PySide6.QtWidgets import QApplication, QWidget
-from PySide6ElaWidgetTools import ElaThemeType
+from PyQt6.QtCore import QEvent, QPoint, QPointF, QRect, Qt
+from PyQt6.QtGui import QEnterEvent, QFontMetrics
+from PyQt6.QtTest import QTest
+from PyQt6.QtWidgets import QApplication, QWidget
+from PyQt6ElaWidgetTools import ElaThemeType
 
-from pyside6_ela_pro._styles import SHADOW_MARGIN
-from pyside6_ela_pro.ela_confirm_dialog import ElaConfirmDialog, _ElaConfirmButton
+from pyqt6_ela_pro._styles import SHADOW_MARGIN
+from pyqt6_ela_pro.ela_confirm_dialog import ElaConfirmDialog, _ElaConfirmButton
 
 
 @pytest.fixture
@@ -146,7 +146,7 @@ class TestElaConfirmButton:
 
     def test_button_enter_leave_events(self, confirm_btn):
         pos = QPointF(1, 1)
-        confirm_btn.enterEvent(QEnterEvent(pos, pos, pos))
+        confirm_btn.enterEvent(QEnterEvent(QPointF(pos), QPointF(pos), QPointF(pos)))
         assert confirm_btn._is_hovered is True
         confirm_btn.leaveEvent(QEvent(QEvent.Type.Leave))
         assert confirm_btn._is_hovered is False

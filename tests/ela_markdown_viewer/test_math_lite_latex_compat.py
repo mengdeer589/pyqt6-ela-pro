@@ -8,11 +8,11 @@ the viewer-level extraction changes.
 from __future__ import annotations
 
 import pytest
-from PySide6.QtCore import QUrl
-from PySide6.QtGui import QColor, QImage, QTextDocument
+from PyQt6.QtCore import QUrl
+from PyQt6.QtGui import QColor, QImage, QTextDocument
 
-from pyside6_ela_pro.ela_markdown_viewer import ElaMarkdownViewer
-from pyside6_ela_pro.math_lite import _Parser, _atom_text, render_formula
+from pyqt6_ela_pro.ela_markdown_viewer import ElaMarkdownViewer
+from pyqt6_ela_pro.math_lite import _Parser, _atom_text, render_formula
 
 COLOR = QColor("#202020")
 

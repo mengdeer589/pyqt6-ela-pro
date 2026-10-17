@@ -5,12 +5,12 @@ from __future__ import annotations
 
 import pytest
 from _qthelpers import wait_for_clipboard as _wait_for_clipboard
-from PySide6.QtCore import QTimer
-from PySide6.QtGui import QColor, QContextMenuEvent, QFont
-from PySide6.QtWidgets import QApplication, QPlainTextEdit
-from PySide6ElaWidgetTools import ElaThemeType, eTheme
+from PyQt6.QtCore import QTimer
+from PyQt6.QtGui import QColor, QContextMenuEvent, QFont
+from PyQt6.QtWidgets import QApplication, QPlainTextEdit
+from PyQt6ElaWidgetTools import ElaThemeType, eTheme
 
-from pyside6_ela_pro.terminal_view import (
+from pyqt6_ela_pro.terminal_view import (
     _HIGHLIGHT,
     _HIGHLIGHT_RATIO,
     ElaTerminalView,
@@ -525,7 +525,7 @@ class TestAppearance:
         view.setFontSize(14)
         assert (
             view._edit.font().styleHint() == QFont.StyleHint.Monospace
-        ), "Qt6 里 Monospace 是 StyleHint（旧写法 QFont.Monospace 已移除）"
+        ), "Qt6 里 Monospace 是 StyleHint（旧写法 QFont.StyleHint.Monospace 已移除）"
 
     def test_word_wrap(self, view):
         assert view.wordWrap() is False
@@ -815,7 +815,7 @@ class TestContextMenu:
     def _open_and_close(qapp, owner) -> list:
         """真弹一次菜单并**自动关掉**，返回弹出来的菜单列表。
 
-        ``QMenu.exec`` 阻塞到菜单被关闭；PySide6 里 ``ElaMenu.exec`` 是 shiboken
+        ``QMenu.exec`` 阻塞到菜单被关闭；PyQt6 里 ``ElaMenu.exec`` 是 shiboken
         方法，**类级 monkeypatch 拦不住**（实测 ``menu.exec`` 仍解析到 C++ 方法），
         所以只能在测试里放一个定时器把弹层关掉。
         """
@@ -876,7 +876,7 @@ class TestContextMenu:
     def test_export_dialog_cancel_is_safe(self, view, monkeypatch):
         called = []
         monkeypatch.setattr(
-            "pyside6_ela_pro.terminal_view.QFileDialog.getSaveFileName",
+            "pyqt6_ela_pro.terminal_view.QFileDialog.getSaveFileName",
             lambda *a, **k: (called.append(True), ("", ""))[1],
         )
         view._export_dialog()

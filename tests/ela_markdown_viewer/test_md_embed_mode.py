@@ -4,12 +4,12 @@ from __future__ import annotations
 
 
 from _qthelpers import wait_until as _wait_until
-from PySide6.QtCore import QPoint, QPointF, Qt
-from PySide6.QtGui import QColor, QImage, QWheelEvent
-from PySide6.QtWidgets import QApplication, QWidget
-from PySide6ElaWidgetTools import ElaThemeType
+from PyQt6.QtCore import QPoint, QPointF, Qt
+from PyQt6.QtGui import QColor, QImage, QRegion, QWheelEvent
+from PyQt6.QtWidgets import QApplication, QWidget
+from PyQt6ElaWidgetTools import ElaThemeType
 
-from pyside6_ela_pro.ela_markdown_viewer import ElaMarkdownViewer
+from pyqt6_ela_pro.ela_markdown_viewer import ElaMarkdownViewer
 
 SHORT = "一行文本"
 LONG = "\n\n".join(f"第 {i} 段正文，用于把文档高度撑起来。" for i in range(20))
@@ -19,10 +19,10 @@ CODE = "```python\nprint('hi')\nprint('there')\n```"
 def _render_image(
     viewer: ElaMarkdownViewer, width: int = 320, height: int = 240
 ) -> QImage:
-    image = QImage(width, height, QImage.Format_ARGB32)
+    image = QImage(width, height, QImage.Format.Format_ARGB32)
     image.fill(QColor(0, 0, 0, 0))
     viewer.resize(width, height)
-    viewer.render(image, renderFlags=QWidget.RenderFlag.DrawChildren)
+    viewer.render(image, QPoint(), QRegion(), QWidget.RenderFlag.DrawChildren)
     return image
 
 

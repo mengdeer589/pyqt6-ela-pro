@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 import pytest
-from PySide6ElaWidgetTools import ElaThemeType
+from PyQt6ElaWidgetTools import ElaThemeType
 
-from pyside6_ela_pro.ela_dashboard_gauge import ElaDashboardGauge
+from pyqt6_ela_pro.ela_dashboard_gauge import ElaDashboardGauge
 
 
 @pytest.fixture

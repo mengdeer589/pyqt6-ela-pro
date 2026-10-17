@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-from PySide6.QtCore import QPropertyAnimation, QTimer, Qt
-from PySide6.QtWidgets import QWidget
+from PyQt6.QtCore import QPropertyAnimation, QTimer, Qt
+from PyQt6.QtWidgets import QWidget
 
-from pyside6_ela_pro import shake_window
+from pyqt6_ela_pro import shake_window
 
 
 class TestShakeWindow:
@@ -61,7 +61,7 @@ class TestShakeWindow:
         """Test shake_window removes _shake_animation attribute after finish."""
         widget = QWidget()
         widget.setFixedSize(200, 100)
-        widget.setWindowFlags(Qt.Window)
+        widget.setWindowFlags(Qt.WindowType.Window)
 
         shake_window(widget, duration=100, loop_count=1)
 
@@ -80,7 +80,7 @@ class TestShakeWindow:
         """Test shake_window doesn't raise when no callback provided."""
         widget = QWidget()
         widget.setFixedSize(200, 100)
-        widget.setWindowFlags(Qt.Window)
+        widget.setWindowFlags(Qt.WindowType.Window)
 
         shake_window(widget, duration=100, loop_count=1)
 

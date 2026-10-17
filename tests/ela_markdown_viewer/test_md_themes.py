@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-from PySide6ElaWidgetTools import ElaThemeType
+from PyQt6ElaWidgetTools import ElaThemeType
 
-from pyside6_ela_pro import (
+from pyqt6_ela_pro import (
     ElaMarkdownViewer,
     defaultMarkdownTheme,
     markdownThemes,
@@ -12,7 +12,7 @@ from pyside6_ela_pro import (
     setDefaultMarkdownTheme,
     unregisterMarkdownTheme,
 )
-from pyside6_ela_pro.ela_markdown_viewer import _MD_THEMES
+from pyqt6_ela_pro.ela_markdown_viewer import _MD_THEMES
 
 
 def _fragment_color(viewer: ElaMarkdownViewer, needle: str) -> str:

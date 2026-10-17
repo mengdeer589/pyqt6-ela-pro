@@ -3,13 +3,13 @@
 from __future__ import annotations
 
 import pytest
-from PySide6.QtCore import QEvent, QPoint, Qt
-from PySide6.QtGui import QMouseEvent
-from PySide6.QtWidgets import QWidget
-from PySide6ElaWidgetTools import ElaIconType, ElaMenu, ElaThemeType
+from PyQt6.QtCore import QEvent, QPoint, Qt, QPointF
+from PyQt6.QtGui import QMouseEvent
+from PyQt6.QtWidgets import QWidget
+from PyQt6ElaWidgetTools import ElaIconType, ElaMenu, ElaThemeType
 
-from pyside6_ela_pro._theme import textDisabled
-from pyside6_ela_pro.ela_dropdown_button import ElaDropDownButton
+from pyqt6_ela_pro._theme import textDisabled
+from pyqt6_ela_pro.ela_dropdown_button import ElaDropDownButton
 
 
 @pytest.fixture
@@ -109,7 +109,7 @@ class TestElaDropDownButtonEvents:
         btn.mousePressEvent(
             QMouseEvent(
                 QEvent.Type.MouseButtonPress,
-                QPoint(10, 10),
+                QPointF(QPoint(10, 10)),
                 Qt.MouseButton.LeftButton,
                 Qt.MouseButton.LeftButton,
                 Qt.KeyboardModifier.NoModifier,
@@ -142,7 +142,7 @@ class TestElaDropDownButtonAppearance:
         """无外框（用户明确要求去掉）：状态层只画底、不传 border。"""
         calls: list[dict] = []
         monkeypatch.setattr(
-            "pyside6_ela_pro.ela_dropdown_button.paintRoundedCard",
+            "pyqt6_ela_pro.ela_dropdown_button.paintRoundedCard",
             lambda painter, rect, **kwargs: calls.append(kwargs),
         )
 

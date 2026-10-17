@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 import pytest
-from PySide6.QtWidgets import QApplication
+from PyQt6.QtWidgets import QApplication
 
-from pyside6_ela_pro.ela_figure_canvas import (
+from pyqt6_ela_pro.ela_figure_canvas import (
     _CJK_FONTS,
     _DARK_RC_PARAMS,
     _LIGHT_RC_PARAMS,

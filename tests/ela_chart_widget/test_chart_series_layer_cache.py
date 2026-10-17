@@ -13,13 +13,13 @@
 from __future__ import annotations
 
 import pytest
-from PySide6.QtWidgets import QApplication
+from PyQt6.QtWidgets import QApplication
 
-from pyside6_ela_pro.charts.core import ElaChartWidget
-from pyside6_ela_pro.charts.data import toBuffer
+from pyqt6_ela_pro.charts.core import ElaChartWidget
+from pyqt6_ela_pro.charts.data import toBuffer
 
 pytestmark = pytest.mark.skipif(
-    __import__("pyside6_ela_pro.charts._downsample", fromlist=["np"]).np is None,
+    __import__("pyqt6_ela_pro.charts._downsample", fromlist=["np"]).np is None,
     reason="需要 numpy",
 )
 
@@ -59,7 +59,7 @@ def _ready(chart, option, w=600, h=400):
 
 
 def _render(chart):
-    from PySide6.QtGui import QImage, QPainter
+    from PyQt6.QtGui import QImage, QPainter
 
     img = QImage(
         chart.width(), chart.height(), QImage.Format.Format_ARGB32_Premultiplied
@@ -232,20 +232,20 @@ class TestSeriesLayerInvalidation:
         key_a = chart._series_pixmap_key
         assert key_a[4] is not None
         # 键含主题模式；切换后必然不同（不依赖手动 invalidate）
-        from PySide6ElaWidgetTools import ElaThemeType, eTheme
+        from PyQt6ElaWidgetTools import ElaThemeType, eTheme
 
         try:
             eTheme.setThemeMode(
-                ElaThemeType.Dark
-                if eTheme.getThemeMode() == ElaThemeType.Light
-                else ElaThemeType.Light
+                ElaThemeType.ThemeMode.Dark
+                if eTheme.getThemeMode() == ElaThemeType.ThemeMode.Light
+                else ElaThemeType.ThemeMode.Light
             )
             for _ in range(2):
                 QApplication.processEvents()
             _render(chart)
             assert chart._series_pixmap_key != key_a, "主题切换后缓存未失效"
         finally:
-            eTheme.setThemeMode(ElaThemeType.Light)
+            eTheme.setThemeMode(ElaThemeType.ThemeMode.Light)
 
 
 class TestSeriesLayerCorrectness:

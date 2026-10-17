@@ -7,8 +7,8 @@ link signal, zoom, search, export helpers and context menu.
 from __future__ import annotations
 
 from _qthelpers import wait_for_clipboard as _wait_for_clipboard
-from PySide6.QtCore import QCoreApplication, QEvent, QTimer, QUrl
-from PySide6.QtGui import (
+from PyQt6.QtCore import QCoreApplication, QEvent, QTimer, QUrl
+from PyQt6.QtGui import (
     QColor,
     QContextMenuEvent,
     QImage,
@@ -16,11 +16,11 @@ from PySide6.QtGui import (
     QTextCursor,
     QTextTable,
 )
-from PySide6.QtWidgets import QApplication
-from PySide6ElaWidgetTools import ElaMenu
+from PyQt6.QtWidgets import QApplication
+from PyQt6ElaWidgetTools import ElaMenu
 
-from pyside6_ela_pro._internal import is_deleted
-from pyside6_ela_pro.ela_markdown_viewer import ElaMarkdownViewer
+from pyqt6_ela_pro._internal import is_deleted
+from pyqt6_ela_pro.ela_markdown_viewer import ElaMarkdownViewer
 
 
 def _fragments(viewer: ElaMarkdownViewer) -> list:
@@ -42,7 +42,7 @@ def _image_fragments(viewer: ElaMarkdownViewer) -> list:
 
 
 def _make_image(tmp_path, name: str, width: int, height: int) -> str:
-    image = QImage(width, height, QImage.Format_ARGB32)
+    image = QImage(width, height, QImage.Format.Format_ARGB32)
     image.fill(QColor("red"))
     path = tmp_path / name
     image.save(str(path))
@@ -286,7 +286,7 @@ class TestExportAndMenu:
     def test_show_context_menu_execs_the_menu(self, qapp, make):
         """``_show_context_menu`` 真的把菜单弹出来（execElaMenu：兜底 + 回收）。
 
-        ``QMenu.exec`` 会**阻塞到菜单被关闭**（PySide6 里 ``ElaMenu.exec`` 是
+        ``QMenu.exec`` 会**阻塞到菜单被关闭**（PyQt6 里 ``ElaMenu.exec`` 是
         shiboken 方法，类级打补丁拦不住 —— 实测 ``menu.exec`` 绕过 Python 类属性），
         所以这里放一个**挂在 viewer 上的定时器**把弹层关掉，再验证兜底与回收。
         """

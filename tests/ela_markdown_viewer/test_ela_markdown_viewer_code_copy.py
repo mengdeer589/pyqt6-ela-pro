@@ -7,12 +7,12 @@ buttons (hover, copy, feedback, resync on re-render).
 from __future__ import annotations
 
 from _qthelpers import wait_for_clipboard as _wait_for_clipboard
-from PySide6.QtCore import QEvent, QPoint, QPointF, Qt
-from PySide6.QtGui import QMouseEvent, QTextTable
-from PySide6.QtTest import QTest
-from PySide6.QtWidgets import QApplication
+from PyQt6.QtCore import QEvent, QPoint, QPointF, Qt
+from PyQt6.QtGui import QMouseEvent, QTextTable
+from PyQt6.QtTest import QTest
+from PyQt6.QtWidgets import QApplication
 
-from pyside6_ela_pro.ela_markdown_viewer import (
+from pyqt6_ela_pro.ela_markdown_viewer import (
     _CODE_LANG_PROPERTY,
     ElaMarkdownViewer,
 )
@@ -163,7 +163,7 @@ class TestCopyButtons:
             viewport,
             QMouseEvent(
                 QEvent.Type.MouseMove,
-                pos,
+                QPointF(pos),
                 Qt.MouseButton.NoButton,
                 Qt.MouseButton.NoButton,
                 Qt.KeyboardModifier.NoModifier,

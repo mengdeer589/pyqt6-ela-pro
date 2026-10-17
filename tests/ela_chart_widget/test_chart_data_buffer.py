@@ -12,11 +12,11 @@
 from __future__ import annotations
 
 import pytest
-from PySide6.QtWidgets import QApplication
+from PyQt6.QtWidgets import QApplication
 
-from pyside6_ela_pro.charts import _downsample as _ds
-from pyside6_ela_pro.charts.core import ElaChartWidget
-from pyside6_ela_pro.charts.data import (
+from pyqt6_ela_pro.charts import _downsample as _ds
+from pyqt6_ela_pro.charts.core import ElaChartWidget
+from pyqt6_ela_pro.charts.data import (
     ElaNumericBuffer,
     isBufferLike,
     numpyAvailable,

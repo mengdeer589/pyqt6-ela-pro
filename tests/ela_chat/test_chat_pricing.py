@@ -14,9 +14,9 @@ from __future__ import annotations
 
 import pytest
 
-import pyside6_ela_pro.chat as chat_pkg
-from pyside6_ela_pro.chat import _pricing
-from pyside6_ela_pro.chat._pricing import ModelPricing, cost_from_parts, stats_cost
+import pyqt6_ela_pro.chat as chat_pkg
+from pyqt6_ela_pro.chat import _pricing
+from pyqt6_ela_pro.chat._pricing import ModelPricing, cost_from_parts, stats_cost
 
 BASE = ModelPricing(input_per_m=3.0, output_per_m=15.0)
 TIER_200K = ModelPricing(input_per_m=6.0, output_per_m=22.5)

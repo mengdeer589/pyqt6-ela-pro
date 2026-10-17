@@ -3,11 +3,11 @@
 from __future__ import annotations
 
 import pytest
-from PySide6.QtCore import QEvent, QPoint, Qt
-from PySide6.QtGui import QMouseEvent
-from PySide6ElaWidgetTools import ElaThemeType
+from PyQt6.QtCore import QEvent, QPoint, Qt, QPointF
+from PyQt6.QtGui import QMouseEvent
+from PyQt6ElaWidgetTools import ElaThemeType
 
-from pyside6_ela_pro.ela_rating_control import ElaRatingControl
+from pyqt6_ela_pro.ela_rating_control import ElaRatingControl
 
 
 @pytest.fixture
@@ -127,7 +127,7 @@ class TestElaRatingControlReadOnly:
         r.mousePressEvent(
             QMouseEvent(
                 QEvent.Type.MouseButtonPress,
-                QPoint(50, 12),
+                QPointF(QPoint(50, 12)),
                 Qt.MouseButton.LeftButton,
                 Qt.MouseButton.LeftButton,
                 Qt.KeyboardModifier.NoModifier,

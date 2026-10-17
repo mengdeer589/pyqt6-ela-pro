@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
-from PySide6.QtCore import Qt
-from PySide6.QtGui import QColor, QFont, QTextCursor, QTextFormat
-from PySide6ElaWidgetTools import ElaThemeType
+from PyQt6.QtCore import Qt
+from PyQt6.QtGui import QColor, QFont, QTextCursor, QTextFormat
+from PyQt6ElaWidgetTools import ElaThemeType
 
-from pyside6_ela_pro.ela_markdown_viewer import (
+from pyqt6_ela_pro.ela_markdown_viewer import (
     _HEADING_RULE_WIDTH,
     _HR_MARK,
     _INLINE_CODE_MARK,
@@ -147,7 +147,7 @@ class TestTypograhySpec:
         v = _viewer(qapp)
         hr = next(b for b in _blocks(v) if b.blockFormat().property(_HR_MARK))
         assert not hr.blockFormat().hasProperty(
-            QTextFormat.BlockTrailingHorizontalRulerWidth
+            QTextFormat.Property.BlockTrailingHorizontalRulerWidth
         )
         assert hr.blockFormat().topMargin() == 16.0
         assert hr.blockFormat().bottomMargin() == 16.0

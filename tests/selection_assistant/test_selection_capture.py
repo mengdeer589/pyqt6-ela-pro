@@ -7,8 +7,8 @@ import time
 from _qthelpers import wait_for_clipboard
 from _qthelpers import wait_until as _wait_until
 
-from pyside6_ela_pro import ElaClipboardCapture
-from pyside6_ela_pro.selection_assistant import capture as capture_module
+from pyqt6_ela_pro import ElaClipboardCapture
+from pyqt6_ela_pro.selection_assistant import capture as capture_module
 
 
 def _speed_up(capture: ElaClipboardCapture, timeout_ms: int = 120) -> None:

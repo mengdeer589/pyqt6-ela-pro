@@ -8,10 +8,10 @@
 from __future__ import annotations
 
 import pytest
-from PySide6.QtWidgets import QVBoxLayout, QWidget
+from PyQt6.QtWidgets import QVBoxLayout, QWidget
 
-from PySide6ElaWidgetTools import eTheme, ElaThemeType
-from pyside6_ela_pro import ElaMarkdownViewer, ela_markdown_viewer as md_module
+from PyQt6ElaWidgetTools import eTheme, ElaThemeType
+from pyqt6_ela_pro import ElaMarkdownViewer, ela_markdown_viewer as md_module
 
 BIG_MD = ("## 标题\n\n正文一段。\n\n```python\n" + "x = 1\n" * 10 + "```\n\n") * 20
 

@@ -5,17 +5,17 @@ from __future__ import annotations
 import os
 
 from _qthelpers import wait_until as _wait_until
-from PySide6.QtCore import QMimeData, QPoint, QPointF, Qt, QUrl
-from PySide6.QtGui import QColor, QDragEnterEvent, QDropEvent, QImage
+from PyQt6.QtCore import QMimeData, QPoint, QPointF, Qt, QUrl
+from PyQt6.QtGui import QColor, QDragEnterEvent, QDropEvent, QImage
 
-import pyside6_ela_pro.chat.widget as widget_mod
-from pyside6_ela_pro.chat import (
+import pyqt6_ela_pro.chat.widget as widget_mod
+from pyqt6_ela_pro.chat import (
     ElaChatRoleType,
     ElaChatStats,
     ElaChatStatusType,
     ElaChatWidget,
 )
-from pyside6_ela_pro.chat.blocks import _ImageAttachmentCard
+from pyqt6_ela_pro.chat.blocks import _ImageAttachmentCard
 
 
 class TestRoundTrip:
@@ -570,7 +570,7 @@ class TestHostActions:
     def test_undo_message_restores_pasted_image(self, qapp, make):
         """粘贴图片的**图像**要跟着附件回填（不是退化成文件 chip）。"""
         chat = make(ElaChatWidget)
-        image = QImage(24, 24, QImage.Format_ARGB32)
+        image = QImage(24, 24, QImage.Format.Format_ARGB32)
         image.fill(QColor("#ff5500"))
         assert chat.chatInput()._on_image_pasted(image) is True
         chat.chatInput().setText("带图的问题")

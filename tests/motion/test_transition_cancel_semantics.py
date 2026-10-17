@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 import pytest
-from PySide6.QtCore import QAbstractAnimation, QPropertyAnimation, QTimer
+from PyQt6.QtCore import QAbstractAnimation, QPropertyAnimation, QTimer
 
-from pyside6_ela_pro._motion import ElaMotionKindType, ElaMotionModeType, motion, start_transition
+from pyqt6_ela_pro._motion import ElaMotionKindType, ElaMotionModeType, motion, start_transition
 
 
 @pytest.fixture
@@ -77,7 +77,7 @@ class TestNotifyPopupReplay:
     def test_replay_after_close_stays_visible(self, make, qapp):
         from _qthelpers import wait_until
 
-        from pyside6_ela_pro.notify_popup import ElaNotifyPopup
+        from pyqt6_ela_pro.notify_popup import ElaNotifyPopup
 
         closed: list[int] = []
         popup = make(ElaNotifyPopup, title="t", content="c", timeout=0)

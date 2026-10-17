@@ -7,16 +7,17 @@
 **规则**：`QTimer.singleShot(ms, callable)` 这种「无 context」形态必须避开。
 带 context 的 ``singleShot(ms, ctx, callable)`` 重载**也不能单独当保障**
 （实测传了 context 照样崩），所以本守卫只做静态形状检查 + 给出建议写法，
-真正稳妥的是「定时器作为 ctx 的子对象」或回调里 ``not shiboken6.isValid()`` 自查。
+真正稳妥的是「定时器作为 ctx 的子对象」或回调里 ``sip.isdeleted()`` 自查。
 """
 
 from __future__ import annotations
 
 import ast
 import pathlib
+from PyQt6 import sip
 
 _ROOT = pathlib.Path(__file__).resolve().parents[2]
-_SCANNED = [_ROOT / "pyside6_ela_pro"]
+_SCANNED = [_ROOT / "pyqt6_ela_pro"]
 
 #: 允许「无 context」的地方：纯数学延迟（``loop.quit`` 等），不碰任何控件。
 _SAFE_FIRST_ARG_EXACT = {"loop.quit"}
@@ -85,19 +86,19 @@ class TestNoUnparentedSingleShotInLibrary:
             "已释放对象 = 0xC0000409 零 traceback 终止：\n"
             + "\n".join("  {}:{}  {}".format(*o) for o in offenders)
             + "\n\n稳妥写法：t = QTimer(ctx); t.setSingleShot(True); "
-            "t.timeout.connect(...) —— 或回调里 not shiboken6.isValid() 自查。"
+            "t.timeout.connect(...) —— 或回调里 sip.isdeleted() 自查。"
         )
 
     def test_scanner_finds_planted_sites(self, tmp_path):
         """守卫本身要有效：坏形状必须被抓到、安全形状必须放过。"""
         bad = (
-            "from PySide6.QtCore import QTimer\n"
+            "from PyQt6.QtCore import QTimer\n"
             "def f(w):\n"
             "    QTimer.singleShot(1200, lambda: w.setText('x'))\n"
             "    QTimer.singleShot(50, w.hide)\n"
         )
         good = (
-            "from PySide6.QtCore import QTimer\n"
+            "from PyQt6.QtCore import QTimer\n"
             "def f(w, loop):\n"
             "    QTimer.singleShot(1200, w, w.hide)\n"
             "    QTimer.singleShot(50, loop.quit)\n"
@@ -112,11 +113,11 @@ class TestNoUnparentedSingleShotInLibrary:
         ``ctx`` 的子对象，``ctx`` 析构时 Qt 连带销毁并丢掉待触发的 timeout。
         """
         src = (
-            _ROOT / "pyside6_ela_pro" / "ela_confirm_dialog.py"
+            _ROOT / "pyqt6_ela_pro" / "ela_confirm_dialog.py"
         ).read_text(encoding="utf-8")
         assert "single_shot_on(self, 0, self._positionDialog)" in src
         assert not _sites_in(
-            _ROOT / "pyside6_ela_pro" / "ela_confirm_dialog.py"
+            _ROOT / "pyqt6_ela_pro" / "ela_confirm_dialog.py"
         )
 
 

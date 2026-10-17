@@ -16,10 +16,10 @@ from __future__ import annotations
 
 import logging
 
-from PySide6.QtTest import QTest
-from PySide6.QtWidgets import QVBoxLayout, QWidget
+from PyQt6.QtTest import QTest
+from PyQt6.QtWidgets import QVBoxLayout, QWidget
 
-from pyside6_ela_pro import setResizeReflowDeferred
+from pyqt6_ela_pro import setResizeReflowDeferred
 
 #: 钉住断言用的超长防抖：保证 burst 期间绝不释放（测试机节奏不稳）
 _LONG_MS = 60000

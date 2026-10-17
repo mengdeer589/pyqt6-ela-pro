@@ -3,30 +3,30 @@
 from __future__ import annotations
 
 import pytest
-from PySide6.QtCore import QEvent, QPoint, Qt
-from PySide6.QtGui import QMouseEvent
-from PySide6.QtWidgets import QHBoxLayout, QPushButton, QWidget
-from PySide6ElaWidgetTools import ElaDrawerArea as NativeDrawerArea
-from PySide6ElaWidgetTools import ElaText, ElaToggleSwitch
+from PyQt6.QtCore import QEvent, QPoint, Qt, QPointF
+from PyQt6.QtGui import QMouseEvent
+from PyQt6.QtWidgets import QHBoxLayout, QPushButton, QWidget
+from PyQt6ElaWidgetTools import ElaDrawerArea as NativeDrawerArea
+from PyQt6ElaWidgetTools import ElaText, ElaToggleSwitch
 
-from pyside6_ela_pro.ela_drawer_area import ElaDrawerArea
-from pyside6_ela_pro.widget_base import ElaThemeWidget
+from pyqt6_ela_pro.ela_drawer_area import ElaDrawerArea
+from pyqt6_ela_pro.widget_base import ElaThemeWidget
 
 
 def _click(qapp, widget: QWidget, pos: QPoint) -> None:
     """向 *widget* 发送一次左键点击（按下 + 释放）。"""
     press = QMouseEvent(
         QEvent.Type.MouseButtonPress,
-        pos,
-        widget.mapToGlobal(pos),
+        QPointF(pos),
+        QPointF(widget.mapToGlobal(pos)),
         Qt.MouseButton.LeftButton,
         Qt.MouseButton.LeftButton,
         Qt.KeyboardModifier.NoModifier,
     )
     release = QMouseEvent(
         QEvent.Type.MouseButtonRelease,
-        pos,
-        widget.mapToGlobal(pos),
+        QPointF(pos),
+        QPointF(widget.mapToGlobal(pos)),
         Qt.MouseButton.LeftButton,
         Qt.MouseButton.NoButton,
         Qt.KeyboardModifier.NoModifier,

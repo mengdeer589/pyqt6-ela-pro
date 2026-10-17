@@ -37,7 +37,7 @@ import pathlib
 
 import pytest
 
-_PKG = pathlib.Path(__file__).resolve().parents[2] / "pyside6_ela_pro"
+_PKG = pathlib.Path(__file__).resolve().parents[2] / "pyqt6_ela_pro"
 #: 由 tests/ela_chat/test_chat_agent_features.py::TestFontScale 覆盖（运行时更准）
 _SKIP_DIRS = {"chat"}
 _TEXT_CLASSES = {"ElaText", "ColorText"}

@@ -3,11 +3,11 @@
 from __future__ import annotations
 
 #: 整圆填充的 SVG（中心像素即填充色，便于断言）
-from PySide6.QtGui import QColor, QImage, QPixmap
+from PyQt6.QtGui import QColor, QImage, QPixmap
 
 from _pixels import opaque_colors, skip_if_no_pixels
 
-from pyside6_ela_pro.chat import (
+from pyqt6_ela_pro.chat import (
     ElaChatBubble,
     ElaChatRoleType,
     ElaChatView,
@@ -58,7 +58,7 @@ class TestAvatarBadge:
         avatar = bubble.header().avatar()
         assert _center_color(avatar, qapp) == "#00aa66"
 
-        image = QImage(30, 30, QImage.Format_ARGB32)
+        image = QImage(30, 30, QImage.Format.Format_ARGB32)
         image.fill(QColor("#2244cc"))
         bubble.setAvatarImage(image)
         assert _center_color(bubble.header().avatar(), qapp) == "#2244cc"

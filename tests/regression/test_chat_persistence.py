@@ -22,8 +22,8 @@ import json
 
 import pytest
 
-from pyside6_ela_pro.chat import ElaChatWidget
-from pyside6_ela_pro.chat.message import (
+from pyqt6_ela_pro.chat import ElaChatWidget
+from pyqt6_ela_pro.chat.message import (
     SCHEMA_VERSION,
     ElaChatAttachment,
     ElaChatMessage,

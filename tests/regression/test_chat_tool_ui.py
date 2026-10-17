@@ -18,10 +18,10 @@ from __future__ import annotations
 import json
 
 import pytest
-from PySide6.QtWidgets import QLabel, QWidget
+from PyQt6.QtWidgets import QLabel, QWidget
 
-from pyside6_ela_pro.chat import ElaChatView
-from pyside6_ela_pro.chat.blocks import (
+from pyqt6_ela_pro.chat import ElaChatView
+from pyqt6_ela_pro.chat.blocks import (
     ContextToolGroupCard,
     ToolCallCard,
     toolArgumentPairs,
@@ -30,8 +30,8 @@ from pyside6_ela_pro.chat.blocks import (
     toolSubtitle,
     toolSubtitleParts,
 )
-from pyside6_ela_pro.chat.bubble import ElaChatBubble
-from pyside6_ela_pro.chat.message import (
+from pyqt6_ela_pro.chat.bubble import ElaChatBubble
+from pyqt6_ela_pro.chat.message import (
     ElaChatRoleType,
     ElaChatToolCall,
     ElaChatToolStatusType,

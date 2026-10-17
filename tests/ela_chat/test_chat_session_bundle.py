@@ -6,7 +6,7 @@ import json
 
 import pytest
 
-from pyside6_ela_pro.chat import (
+from pyqt6_ela_pro.chat import (
     ElaChatReasoningStyleType,
     SESSION_SCHEMA_VERSION,
     ElaChatAttachment,

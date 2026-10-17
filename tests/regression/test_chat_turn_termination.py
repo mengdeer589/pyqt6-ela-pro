@@ -14,9 +14,9 @@ settle 所有打开项；跨进程还有 ``failInterruptedTools`` 把遗留的 p
 from __future__ import annotations
 
 import pytest
-from PySide6.QtCore import QObject, Signal
+from PyQt6.QtCore import QObject, pyqtSignal
 
-from pyside6_ela_pro.chat import (
+from pyqt6_ela_pro.chat import (
     ElaChatPart,
     ElaChatPartKindType,
     ElaChatStats,
@@ -43,13 +43,13 @@ class _Clock:
 class _FakeWorker(QObject):
     """最小后端（信号契约与 ElaChatMockBackend 同构）。"""
 
-    llmStarted = Signal()
-    chunkReceived = Signal(object)
-    toolStarted = Signal(dict)
-    toolEnded = Signal(dict, str)
-    statsReady = Signal(object, float, float)
-    emptyTurn = Signal(str)
-    turnFinished = Signal(int)
+    llmStarted = pyqtSignal()
+    chunkReceived = pyqtSignal(object)
+    toolStarted = pyqtSignal(dict)
+    toolEnded = pyqtSignal(dict, str)
+    statsReady = pyqtSignal(object, float, float)
+    emptyTurn = pyqtSignal(str)
+    turnFinished = pyqtSignal(int)
 
     def __init__(self, ready: bool = True) -> None:
         super().__init__()

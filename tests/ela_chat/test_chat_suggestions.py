@@ -4,15 +4,15 @@ from __future__ import annotations
 
 import os
 
-from PySide6.QtCore import QMimeData, Qt, QUrl
-from PySide6.QtGui import QColor, QImage, QPainter
-from PySide6.QtTest import QTest
-from PySide6.QtWidgets import QApplication
+from PyQt6.QtCore import QMimeData, Qt, QUrl
+from PyQt6.QtGui import QColor, QImage, QPainter
+from PyQt6.QtTest import QTest
+from PyQt6.QtWidgets import QApplication
 
 from _pixels import skip_if_no_pixels
 
-from pyside6_ela_pro.chat import ElaChatInput, ElaChatSuggestion
-from pyside6_ela_pro.chat.suggestions import SuggestionPopup
+from pyqt6_ela_pro.chat import ElaChatInput, ElaChatSuggestion
+from pyqt6_ela_pro.chat.suggestions import SuggestionPopup
 
 
 class TestSuggestionPopup:
@@ -99,7 +99,7 @@ class TestNoStyleSheetOnElaListView:
             qapp.processEvents()
         image = QImage(popup.width(), popup.height(), QImage.Format.Format_ARGB32)
         image.fill(QColor(0, 0, 0, 0))
-        # PySide6 的 ``render`` 只接受绘图设备（``render(painter)`` 需要 targetOffset，
+        # PyQt6 的 ``render`` 只接受绘图设备（``render(painter)`` 需要 targetOffset，
         # 抛错会让 QPainter 悬空 → 后续用例 abort）
         popup.render(image)
         painted = 0

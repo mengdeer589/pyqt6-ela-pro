@@ -1,6 +1,6 @@
 """扫全库的「Qt6 一次性字体陷阱」：``QFont().defaultFamily()``。
 
-PySide6/Qt6 下**首次** ``QFont().defaultFamily()`` 要 ~190ms（解析系统默认字体、初始化
+PyQt6/Qt6 下**首次** ``QFont().defaultFamily()`` 要 ~190ms（解析系统默认字体、初始化
 字体引擎；PyQt5/Qt5 几乎为 0）。它会随机落在宿主的第一个页面构造里，让那一页莫名多
 190ms（实测落在某个无关演示节，那一节从 4ms 变成 194ms —— 见 ``docs/performance.md``）。
 
@@ -15,9 +15,9 @@ import ast
 import pathlib
 
 _ROOT = pathlib.Path(__file__).resolve().parents[2]
-_SCANNED = [_ROOT / "pyside6_ela_pro"]
+_SCANNED = [_ROOT / "pyqt6_ela_pro"]
 #: 允许出现 ``defaultFamily()`` 的文件（相对 ``_ROOT``，正斜杠）
-_ALLOWED = {"pyside6_ela_pro/splash_screen.py"}
+_ALLOWED = {"pyqt6_ela_pro/splash_screen.py"}
 
 
 def _iter_py_files():
@@ -68,7 +68,7 @@ class TestNoFontWarmupTrap:
 
     def test_scanner_finds_planted_sites(self):
         """守卫本身要有效：坏形状必须被抓到。"""
-        bad = "from PySide6.QtGui import QFont\nfam = QFont().defaultFamily()\n"
+        bad = "from PyQt6.QtGui import QFont\nfam = QFont().defaultFamily()\n"
         assert _hits(ast.parse(bad), "<snippet>") != []
-        good = "from PySide6.QtWidgets import QApplication\nfam = QApplication.font().family()\n"
+        good = "from PyQt6.QtWidgets import QApplication\nfam = QApplication.font().family()\n"
         assert _hits(ast.parse(good), "<snippet>") == []

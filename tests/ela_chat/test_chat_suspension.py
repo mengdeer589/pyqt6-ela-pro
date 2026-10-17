@@ -5,7 +5,7 @@ from __future__ import annotations
 
 from _qthelpers import wait_until as _wait_until
 
-from pyside6_ela_pro.chat import (
+from pyqt6_ela_pro.chat import (
     ElaChatReasoningStyleType,
     ElaChatPartKindType,
     ElaChatRoleType,

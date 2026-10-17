@@ -17,12 +17,12 @@ from __future__ import annotations
 import math
 
 import pytest
-from PySide6.QtCore import QPointF, Qt
-from PySide6.QtGui import QPolygonF
-from PySide6.QtWidgets import QApplication
+from PyQt6.QtCore import QPointF, Qt
+from PyQt6.QtGui import QPolygonF
+from PyQt6.QtWidgets import QApplication
 
-from pyside6_ela_pro.charts import ElaChartWidget
-from pyside6_ela_pro.charts.series_hierarchy import _dist_to_polygon_edge
+from pyqt6_ela_pro.charts import ElaChartWidget
+from pyqt6_ela_pro.charts.series_hierarchy import _dist_to_polygon_edge
 
 
 def _chart(make, option, w=600, h=400):

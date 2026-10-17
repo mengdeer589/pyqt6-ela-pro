@@ -1,10 +1,10 @@
 from __future__ import annotations
 
-from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QWidget
-from PySide6ElaWidgetTools import ElaThemeType
+from PyQt6.QtCore import Qt
+from PyQt6.QtWidgets import QWidget
+from PyQt6ElaWidgetTools import ElaThemeType
 
-from pyside6_ela_pro.ela_toast import ElaToast, ElaToastType
+from pyqt6_ela_pro.ela_toast import ElaToast, ElaToastType
 
 
 class TestElaToastInit:
@@ -21,7 +21,7 @@ class TestElaToastInit:
     def test_frameless_window_hint(self):
         toast = ElaToast(ElaToastType.Success, "成功", 2000)
         flags = toast.windowFlags()
-        assert flags & Qt.FramelessWindowHint
+        assert flags & Qt.WindowType.FramelessWindowHint
         toast.close()
         toast.deleteLater()
 

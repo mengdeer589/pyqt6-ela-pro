@@ -21,16 +21,16 @@ import textwrap
 from pathlib import Path
 
 import pytest
-from PySide6.QtWidgets import QWidget
+from PyQt6.QtWidgets import QWidget
 
 #: 0xC0000409（PyQt 回调未捕获异常）/ 0xC0000005（访问冲突）等致命退出码
-from pyside6_ela_pro import ElaChartWidget
-from pyside6_ela_pro.charts.axes import niceTicks
-from pyside6_ela_pro.charts.core import _opt_float
-from pyside6_ela_pro.dialog_base import ElaDialogBase
-from pyside6_ela_pro.message_dialog import ElaMessageDialog
-from pyside6_ela_pro.ela_button import ElaButton
-from pyside6_ela_pro.svg_icon import svg_icon_loader
+from pyqt6_ela_pro import ElaChartWidget
+from pyqt6_ela_pro.charts.axes import niceTicks
+from pyqt6_ela_pro.charts.core import _opt_float
+from pyqt6_ela_pro.dialog_base import ElaDialogBase
+from pyqt6_ela_pro.message_dialog import ElaMessageDialog
+from pyqt6_ela_pro.ela_button import ElaButton
+from pyqt6_ela_pro.svg_icon import svg_icon_loader
 
 _ABORT_CODES = {
     0xC0000409,  # STATUS_STACK_BUFFER_OVERRUN —— PyQt 回调异常
@@ -44,11 +44,11 @@ _PRELUDE = textwrap.dedent(
     import sys, warnings
     sys.path.insert(0, ".")
     warnings.filterwarnings("ignore")
-    from PySide6.QtWidgets import QApplication, QWidget
-    from PySide6.QtCore import Qt
+    from PyQt6.QtWidgets import QApplication, QWidget
+    from PyQt6.QtCore import Qt
     app = QApplication([])
-    import pyside6_ela_pro as P
-    from PySide6ElaWidgetTools import eApp
+    import pyqt6_ela_pro as P
+    from PyQt6ElaWidgetTools import eApp
     eApp.init()
     """
 )
@@ -99,8 +99,8 @@ class TestDialogParentContract:
     def test_subprocess_no_abort_on_missing_parent(self):
         result = _run(
             """
-            from pyside6_ela_pro.dialog_base import ElaDialogBase
-            from pyside6_ela_pro.message_dialog import ElaMessageDialog
+            from pyqt6_ela_pro.dialog_base import ElaDialogBase
+            from pyqt6_ela_pro.message_dialog import ElaMessageDialog
             for factory in (ElaDialogBase, lambda: ElaMessageDialog(title="t", message="m")):
                 try:
                     factory()
@@ -143,7 +143,7 @@ class TestSvgIconPaintSafety:
     def test_subprocess_no_abort_on_bad_icon(self):
         result = _run(
             """
-            from pyside6_ela_pro import ElaButton
+            from pyqt6_ela_pro import ElaButton
             b = ElaButton("x")
             b.setSvgIcon("definitely-not-an-icon")
             b.resize(120, 40); b.show()
@@ -194,7 +194,7 @@ class TestChartFontSizeRobustness:
     def test_subprocess_no_abort_on_bad_font_size(self):
         result = _run(
             """
-            from pyside6_ela_pro import ElaChartWidget
+            from pyqt6_ela_pro import ElaChartWidget
             c = ElaChartWidget(); c.resize(400, 300); c.show()
             c.setOption({"title": {"text": "hi", "textStyle": {"fontSize": "14px"}},
                          "series": [{"type": "line", "data": [1, 2]}]}, notMerge=True)

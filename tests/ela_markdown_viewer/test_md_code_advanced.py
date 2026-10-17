@@ -7,10 +7,10 @@ from __future__ import annotations
 
 import pytest
 from _qthelpers import wait_for_clipboard as _wait_for_clipboard
-from PySide6.QtCore import QUrl
-from PySide6.QtTest import QTest
+from PyQt6.QtCore import QUrl
+from PyQt6.QtTest import QTest
 
-from pyside6_ela_pro.ela_markdown_viewer import (
+from pyqt6_ela_pro.ela_markdown_viewer import (
     _MD_THEMES,
     ElaMarkdownViewer,
 )

@@ -5,14 +5,14 @@ from __future__ import annotations
 import pytest
 from _qthelpers import wait_for_clipboard as _wait_for_clipboard
 from _qthelpers import wait_until as _wait_until
-from PySide6.QtCore import Qt
-from PySide6.QtGui import QPalette
-from PySide6.QtWidgets import QWidget
-from PySide6ElaWidgetTools import ElaThemeType
+from PyQt6.QtCore import Qt
+from PyQt6.QtGui import QPalette
+from PyQt6.QtWidgets import QWidget
+from PyQt6ElaWidgetTools import ElaThemeType
 
-from pyside6_ela_pro.chat._theme import muted_color
+from pyqt6_ela_pro.chat._theme import muted_color
 
-from pyside6_ela_pro.chat import (
+from pyqt6_ela_pro.chat import (
     DISCLAIMER_TEXT,
     ElaChatBubble,
     ElaChatPart,
@@ -333,7 +333,7 @@ class TestAssistantBubble:
 
     def test_avatar_icon_offset_aligns_to_device_pixels(self, qapp):
         """头像位图落点要对齐设备像素网格（高 DPI 下发虚 / 偏移的根因）。"""
-        from pyside6_ela_pro.chat.blocks import AVATAR_SIZE, _AvatarBadge
+        from pyqt6_ela_pro.chat.blocks import AVATAR_SIZE, _AvatarBadge
 
         badge = _AvatarBadge(ElaChatRoleType.Assistant)
         badge.resize(AVATAR_SIZE, AVATAR_SIZE)

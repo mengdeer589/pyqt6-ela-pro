@@ -11,9 +11,9 @@
 
 from __future__ import annotations
 
-from PySide6ElaWidgetTools import ElaLineEdit
+from PyQt6ElaWidgetTools import ElaLineEdit
 
-from pyside6_ela_pro.example.blueprint_page import BlueprintPage
+from pyqt6_ela_pro.example.blueprint_page import BlueprintPage
 
 
 class TestSimulation:

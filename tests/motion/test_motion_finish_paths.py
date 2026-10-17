@@ -14,12 +14,12 @@
 from __future__ import annotations
 
 import pytest
-from PySide6.QtWidgets import QWidget
+from PyQt6.QtWidgets import QWidget
 
-from pyside6_ela_pro._motion import ElaMotionModeType, motion
-from pyside6_ela_pro.ela_side_drawer import ElaDrawer
-from pyside6_ela_pro.ela_toast import ElaToast, ElaToastType
-from pyside6_ela_pro.notify_popup import ElaNotifyPopup
+from pyqt6_ela_pro._motion import ElaMotionModeType, motion
+from pyqt6_ela_pro.ela_side_drawer import ElaDrawer
+from pyqt6_ela_pro.ela_toast import ElaToast, ElaToastType
+from pyqt6_ela_pro.notify_popup import ElaNotifyPopup
 
 
 @pytest.fixture
@@ -142,7 +142,7 @@ class TestNotifyPopupClosePath:
     def test_close_completion_not_stacked(self, popup, disabled_motion):
         """回归：关闭动画的收尾不得叠两遍（旧实现的 disconnect 舞蹈会让 closed 发两次）。
 
-        ``QObject.receivers()`` 在 PySide6 下不可用（见 MIGRATION），改为数
+        ``QObject.receivers()`` 在 PyQt6 下不可用（见 MIGRATION），改为数
         ``closed`` 的真实触发次数：两次「打开→关闭」应各发一次。
         """
         closed: list[int] = []

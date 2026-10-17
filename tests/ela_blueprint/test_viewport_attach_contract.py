@@ -14,10 +14,10 @@ from __future__ import annotations
 import logging
 
 import pytest
-from PySide6.QtWidgets import QWidget
+from PyQt6.QtWidgets import QWidget
 
-from pyside6_ela_pro.blueprint import viewport as viewport_module
-from pyside6_ela_pro.blueprint.canvas import ElaBlueprintCanvas
+from pyqt6_ela_pro.blueprint import viewport as viewport_module
+from pyqt6_ela_pro.blueprint.canvas import ElaBlueprintCanvas
 
 _WARNING_MARK = "原生子窗口"
 

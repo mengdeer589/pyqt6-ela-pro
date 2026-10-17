@@ -3,10 +3,10 @@
 from __future__ import annotations
 
 import pytest
-from PySide6.QtWidgets import QWidget
-from PySide6ElaWidgetTools import ElaThemeType, eTheme
+from PyQt6.QtWidgets import QWidget
+from PyQt6ElaWidgetTools import ElaThemeType, eTheme
 
-from pyside6_ela_pro.ela_spotlight import ElaSpotlight
+from pyqt6_ela_pro.ela_spotlight import ElaSpotlight
 
 
 @pytest.fixture

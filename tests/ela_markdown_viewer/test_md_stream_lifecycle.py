@@ -8,9 +8,9 @@ from __future__ import annotations
 
 import time
 
-import shiboken6
+from PyQt6 import sip
 
-from pyside6_ela_pro.ela_markdown_viewer import ElaMarkdownViewer
+from pyqt6_ela_pro.ela_markdown_viewer import ElaMarkdownViewer
 
 
 class TestStreamAfterDelete:
@@ -23,8 +23,8 @@ class TestStreamAfterDelete:
         qapp.processEvents()
 
         # 直接销毁 C++ 对象（等价于窗口关闭 / 消息重建后的迟到回调场景）
-        shiboken6.delete(viewer)
-        assert not shiboken6.isValid(viewer)
+        sip.delete(viewer)
+        assert sip.isdeleted(viewer)
 
         # 修复前：_flush_stream 访问已删除的浏览器 → RuntimeError → abort
         viewer._stream_flush()
@@ -38,8 +38,8 @@ class TestStreamAfterDelete:
         viewer.setMarkdown("\n\n".join(f"第 {i} 段" for i in range(5)))
         qapp.processEvents()
 
-        shiboken6.delete(viewer)
-        assert not shiboken6.isValid(viewer)
+        sip.delete(viewer)
+        assert sip.isdeleted(viewer)
 
         viewer._render_large_step()
         viewer._refresh_mermaid_priorities()

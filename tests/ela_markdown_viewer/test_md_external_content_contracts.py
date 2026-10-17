@@ -14,10 +14,10 @@ from __future__ import annotations
 import base64
 
 import pytest
-from PySide6.QtCore import QBuffer, QIODevice
-from PySide6.QtGui import QColor, QImage, QPainter
+from PyQt6.QtCore import QBuffer, QIODevice
+from PyQt6.QtGui import QColor, QImage, QPainter
 
-from pyside6_ela_pro.ela_markdown_viewer import (
+from pyqt6_ela_pro.ela_markdown_viewer import (
     _INLINE_CODE_MARK,
     _INLINE_LINK_RE,
     _normalize_text,
@@ -98,9 +98,9 @@ class TestDataUriImages:
     def test_oversized_payload_rejected(self):
         # 一行 Markdown 不该能分配任意内存。**在解码层钉**，而不是端到端 ——
         # 超过 64 KB 的文档必然走分块渲染路径，端到端那侧压根不经过这里。
-        from PySide6.QtCore import QUrl
+        from PyQt6.QtCore import QUrl
 
-        from pyside6_ela_pro.ela_markdown_viewer import _decode_data_uri
+        from pyqt6_ela_pro.ela_markdown_viewer import _decode_data_uri
 
         # 解码后约 37 MiB> 32 MiB 上限
         huge = _decode_data_uri(
@@ -217,7 +217,7 @@ class TestExternalLinkSchemeWhitelist:
 
     @staticmethod
     def _click(viewer, url: str) -> None:
-        from PySide6.QtCore import QUrl
+        from PyQt6.QtCore import QUrl
 
         viewer._on_anchor_clicked(QUrl(url))
 
@@ -233,7 +233,7 @@ class TestExternalLinkSchemeWhitelist:
         ],
     )
     def test_blocked_scheme_is_not_opened(self, make, monkeypatch, url):
-        from PySide6.QtGui import QDesktopServices
+        from PyQt6.QtGui import QDesktopServices
 
         opened: list = []
         monkeypatch.setattr(
@@ -254,7 +254,7 @@ class TestExternalLinkSchemeWhitelist:
         "url", ["http://example.com", "https://example.com/a?b=1", "mailto:a@b.c"]
     )
     def test_allowed_scheme_is_opened(self, make, monkeypatch, url):
-        from PySide6.QtGui import QDesktopServices
+        from PyQt6.QtGui import QDesktopServices
 
         opened: list = []
         monkeypatch.setattr(
@@ -267,7 +267,7 @@ class TestExternalLinkSchemeWhitelist:
         assert [u.toString() for u in opened] == [url]
 
     def test_scheme_check_is_case_insensitive(self, make, monkeypatch):
-        from PySide6.QtGui import QDesktopServices
+        from PyQt6.QtGui import QDesktopServices
 
         opened: list = []
         monkeypatch.setattr(
@@ -280,7 +280,7 @@ class TestExternalLinkSchemeWhitelist:
         assert len(opened) == 1
 
     def test_switch_off_still_blocks(self, make, monkeypatch):
-        from PySide6.QtGui import QDesktopServices
+        from PyQt6.QtGui import QDesktopServices
 
         opened: list = []
         monkeypatch.setattr(
@@ -294,7 +294,7 @@ class TestExternalLinkSchemeWhitelist:
         assert not opened
 
     def test_whitelist_is_configurable(self, make, monkeypatch):
-        from PySide6.QtGui import QDesktopServices
+        from PyQt6.QtGui import QDesktopServices
 
         opened: list = []
         monkeypatch.setattr(
@@ -313,7 +313,7 @@ class TestExternalLinkSchemeWhitelist:
 
     def test_internal_anchors_unaffected(self, make, monkeypatch):
         """内部控制锚点不走外链路径（任务勾选 / 折叠 / 锚点跳转必须照常工作）。"""
-        from PySide6.QtGui import QDesktopServices
+        from PyQt6.QtGui import QDesktopServices
 
         opened: list = []
         monkeypatch.setattr(
@@ -323,7 +323,7 @@ class TestExternalLinkSchemeWhitelist:
         )
         viewer = make(ElaMarkdownViewer)
         viewer.setMarkdown("- [ ] 任务一\n")
-        from PySide6.QtCore import QUrl
+        from PyQt6.QtCore import QUrl
 
         viewer._on_anchor_clicked(QUrl("#elatask-0"))
         assert not opened

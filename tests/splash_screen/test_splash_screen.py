@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 import pytest
-from PySide6.QtGui import QPixmap
+from PyQt6.QtGui import QPixmap
 
-from pyside6_ela_pro.splash_screen import ElaSplashScreen
+from pyqt6_ela_pro.splash_screen import ElaSplashScreen
 
 
 @pytest.fixture
@@ -83,7 +83,7 @@ class TestWarmTextStack:
 
     def test_show_schedules_warm_once(self, splash, qapp, monkeypatch):
         from _qthelpers import wait_until as _wait_until
-        from pyside6_ela_pro import splash_screen as splash_module
+        from pyqt6_ela_pro import splash_screen as splash_module
 
         calls: list[int] = []
         monkeypatch.setattr(splash_module, "_warmTextStack", lambda: calls.append(1))
@@ -95,7 +95,7 @@ class TestWarmTextStack:
 
     def test_warm_is_idempotent(self, monkeypatch):
         """????????????????? 0.0x ms??"""
-        from pyside6_ela_pro import splash_screen as splash_module
+        from pyqt6_ela_pro import splash_screen as splash_module
 
         counts = {"n": 0}
 

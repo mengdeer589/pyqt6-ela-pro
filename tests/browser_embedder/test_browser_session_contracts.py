@@ -17,10 +17,10 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-from PySide6.QtCore import QProcess
+from PyQt6.QtCore import QProcess
 
-from pyside6_ela_pro import browser_embedder as be
-from pyside6_ela_pro.browser_embedder import _BrowserSession
+from pyqt6_ela_pro import browser_embedder as be
+from pyqt6_ela_pro.browser_embedder import _BrowserSession
 
 BOGUS = Path(r"C:\definitely\not\here\chrome.exe")
 PROFILE = Path(r"%LOCALAPPDATA%")  # 只当占位，测试里不真建
@@ -54,9 +54,19 @@ class _FakeSignal:
 class _FakeProcess:
     """替身：不真的起浏览器，只验「信号连上了」+「start() 被调了」。"""
 
-    SeparateChannels = QProcess.SeparateChannels
-    Running = QProcess.Running
-    NotRunning = QProcess.NotRunning
+    # ????? PyQt6 ????????``QProcess.ProcessChannelMode.X``??
+    # ????????????? AttributeError?
+    class ProcessChannelMode:
+        SeparateChannels = QProcess.ProcessChannelMode.SeparateChannels
+
+    class ProcessState:
+        Running = QProcess.ProcessState.Running
+        NotRunning = QProcess.ProcessState.NotRunning
+
+    # ???????
+    SeparateChannels = QProcess.ProcessChannelMode.SeparateChannels
+    Running = QProcess.ProcessState.Running
+    NotRunning = QProcess.ProcessState.NotRunning
     instances: list = []
 
     def __init__(self):

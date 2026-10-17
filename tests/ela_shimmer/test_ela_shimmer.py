@@ -1,4 +1,4 @@
-"""``pyside6_ela_pro.ela_shimmer`` 的单元测试。
+"""``pyqt6_ela_pro.ela_shimmer`` 的单元测试。
 
 钉住的核心不变量（都是搬运时踩过或改道过的）：
 
@@ -13,12 +13,12 @@
 from __future__ import annotations
 
 import pytest
-from PySide6.QtCore import QRectF
-from PySide6.QtGui import QColor, QPainter, QPixmap
+from PyQt6.QtCore import QRectF
+from PyQt6.QtGui import QColor, QPainter, QPixmap
 
-from pyside6_ela_pro._motion import ElaMotionModeType, motion
-from pyside6_ela_pro._theme import blend, surface
-from pyside6_ela_pro.ela_shimmer import (
+from pyqt6_ela_pro._motion import ElaMotionModeType, motion
+from pyqt6_ela_pro._theme import blend, surface
+from pyqt6_ela_pro.ela_shimmer import (
     ElaShimmer,
     ShimmerElement,
     ElaShimmerShapeType,
@@ -31,7 +31,7 @@ from pyside6_ela_pro.ela_shimmer import (
     shimmerPalette,
     textBlockElements,
 )
-from PySide6ElaWidgetTools import eTheme
+from PyQt6ElaWidgetTools import eTheme
 
 
 @pytest.fixture
@@ -384,7 +384,7 @@ class TestMotionPolicyIntegration:
 
 class TestThemeSwitch:
     def test_palette_follows_theme(self, motion_full):
-        from PySide6ElaWidgetTools import ElaThemeType as TT
+        from PyQt6ElaWidgetTools import ElaThemeType as TT
 
         previous = eTheme.getThemeMode()
         try:

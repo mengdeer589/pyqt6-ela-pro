@@ -3,11 +3,11 @@
 from __future__ import annotations
 
 import pytest
-from PySide6.QtCore import QEvent, Qt
-from PySide6.QtGui import QMouseEvent
-from PySide6ElaWidgetTools import ElaThemeType
+from PyQt6.QtCore import QEvent, Qt, QPointF
+from PyQt6.QtGui import QMouseEvent
+from PyQt6ElaWidgetTools import ElaThemeType
 
-from pyside6_ela_pro.ela_pagination import ElaPagination
+from pyqt6_ela_pro.ela_pagination import ElaPagination
 
 
 @pytest.fixture
@@ -237,8 +237,8 @@ class TestElaPaginationHoverReset:
             widget,
             QMouseEvent(
                 event_type,
-                pos,
-                glob,
+                QPointF(pos),
+                QPointF(glob),
                 Qt.MouseButton.NoButton,
                 Qt.MouseButton.NoButton,
                 Qt.KeyboardModifier.NoModifier,

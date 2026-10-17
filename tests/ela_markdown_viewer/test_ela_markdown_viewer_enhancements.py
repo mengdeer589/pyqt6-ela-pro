@@ -6,10 +6,10 @@ callouts, heading anchors/TOC, footnotes.
 
 from __future__ import annotations
 
-from PySide6.QtCore import Qt
-from PySide6.QtGui import QTextCharFormat, QTextTable
+from PyQt6.QtCore import Qt
+from PyQt6.QtGui import QTextCharFormat, QTextTable
 
-from pyside6_ela_pro.ela_markdown_viewer import ElaMarkdownViewer
+from pyqt6_ela_pro.ela_markdown_viewer import ElaMarkdownViewer
 
 
 def _fragments(viewer: ElaMarkdownViewer) -> list:

@@ -5,11 +5,11 @@ from __future__ import annotations
 from unittest.mock import patch
 
 import pytest
-from PySide6.QtCore import Signal
-from PySide6.QtWidgets import QWidget
+from PyQt6.QtCore import pyqtSignal
+from PyQt6.QtWidgets import QWidget
 
-from pyside6_ela_pro import taskbar_progress as tp
-from pyside6_ela_pro.taskbar_progress import (
+from pyqt6_ela_pro import taskbar_progress as tp
+from pyqt6_ela_pro.taskbar_progress import (
     _TBPF_ERROR,
     _TBPF_NOPROGRESS,
     _TBPF_NORMAL,
@@ -95,7 +95,7 @@ def test_module_imports():
     ["valueChanged", "pausedChanged", "stoppedChanged", "visibilityChanged"],
 )
 def test_declares_signal(signal_name):
-    assert isinstance(getattr(ElaTaskbarProgress, signal_name), Signal)
+    assert isinstance(getattr(ElaTaskbarProgress, signal_name), pyqtSignal)
 
 
 def test_has_on_window_handle_created_method():

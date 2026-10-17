@@ -16,10 +16,10 @@ from __future__ import annotations
 
 import time
 
-from PySide6.QtTest import QTest
+from PyQt6.QtTest import QTest
 
-import pyside6_ela_pro.ela_markdown_viewer as M
-from pyside6_ela_pro.ela_markdown_viewer import ElaMarkdownViewer
+import pyqt6_ela_pro.ela_markdown_viewer as M
+from pyqt6_ela_pro.ela_markdown_viewer import ElaMarkdownViewer
 
 
 def _count_renders(monkeypatch, qapp, text: str, chunk: int, wait_ms: int = 8):

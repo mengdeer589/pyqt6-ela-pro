@@ -21,7 +21,7 @@ from __future__ import annotations
 
 import json
 
-from pyside6_ela_pro.chat import ElaChatPartKindType, ElaChatWidget
+from pyqt6_ela_pro.chat import ElaChatPartKindType, ElaChatWidget
 
 
 def _texts(parts) -> list:

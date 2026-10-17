@@ -5,10 +5,11 @@ from __future__ import annotations
 import time
 
 import pytest
-from PySide6.QtCore import QCoreApplication, QEvent, QObject, QPoint, Signal
+from PyQt6.QtCore import QCoreApplication, QEvent, QObject, QPoint, pyqtSignal
 
-from pyside6_ela_pro import ElaMenuItem, ElaSelectionAssistant
-from pyside6_ela_pro.selection_assistant import assistant as assistant_module
+from pyqt6_ela_pro import ElaMenuItem, ElaSelectionAssistant
+from pyqt6_ela_pro.selection_assistant import assistant as assistant_module
+from PyQt6 import sip
 
 #: 测试用宿主自定义动作（组件本身不内置任何动作）
 _HOST_ACTIONS = (
@@ -18,10 +19,10 @@ _HOST_ACTIONS = (
 
 
 class _FakeMonitor(QObject):
-    leftPressed = Signal(object)
-    leftReleased = Signal(object, object)
-    otherPressed = Signal(object)
-    wheelScrolled = Signal()
+    leftPressed = pyqtSignal(object)
+    leftReleased = pyqtSignal(object, object)
+    otherPressed = pyqtSignal(object)
+    wheelScrolled = pyqtSignal()
 
     def __init__(self) -> None:
         super().__init__()
@@ -37,8 +38,8 @@ class _FakeMonitor(QObject):
 
 
 class _FakeCapture(QObject):
-    captured = Signal(str)
-    failed = Signal()
+    captured = pyqtSignal(str)
+    failed = pyqtSignal()
 
     def __init__(self) -> None:
         super().__init__()
@@ -159,24 +160,22 @@ class TestEnable:
 
     def test_destroy_with_lazy_monitor_does_not_touch_dead_child(self, qapp):
         """懒创建的 monitor 是 self 的子对象：Qt 先 deleteChildren() 再 emit
-        destroyed()，所以清理逻辑必须先 shiboken6.isValid 判存活。"""
-        import shiboken6
+        destroyed()，所以清理逻辑必须先 sip.isdeleted 判存活。"""
 
-        from pyside6_ela_pro.selection_assistant._native import ElaMouseMonitor
+        from pyqt6_ela_pro.selection_assistant._native import ElaMouseMonitor
 
         assistant = ElaSelectionAssistant(capture=_FakeCapture())
         assistant._monitor = ElaMouseMonitor(assistant)  # 同 _ensure_monitor
         assistant._enabled = True
-        shiboken6.delete(assistant)  # 走真实的析构顺序（不给 deleteLater 缓冲）
-        assert not shiboken6.isValid(assistant._monitor)
+        sip.delete(assistant)  # 走真实的析构顺序（不给 deleteLater 缓冲）
+        assert sip.isdeleted(assistant._monitor)
 
     def test_destroy_stops_injected_monitor(self, qapp):
         """注入的 monitor 不是 self 的子对象，仍必须被停掉。"""
-        import shiboken6
 
         monitor = _FakeMonitor()
         assistant = ElaSelectionAssistant(monitor=monitor, capture=_FakeCapture())
-        shiboken6.delete(assistant)
+        sip.delete(assistant)
         assert monitor.stopped is True
 
     def test_destroy_reclaims_popup(self, qapp):
@@ -186,7 +185,6 @@ class TestEnable:
         不调用绑定到自身的槽（实测 lambda/functools.partial 才会触发），于是
         这段清理从未执行 —— 助手销毁后动作条永久留在屏幕上，宿主也再也拿不到
         它去关。"""
-        import shiboken6
 
         assistant, _, _ = _make(qapp)
         assistant.setActions(_HOST_ACTIONS)
@@ -196,7 +194,7 @@ class TestEnable:
         popup = assistant.popup()
         assert popup.isVisible() is True
 
-        shiboken6.delete(assistant)
+        sip.delete(assistant)
         # 用户可见的结果：动作条从屏幕上消失
         assert popup.isVisible() is False
         # 再确认 deleteLater 真的排上了。
@@ -204,7 +202,7 @@ class TestEnable:
         # （它只在事件循环回到更低层级时才派发），所以无父顶层窗要用
         # ``sendPostedEvents`` 显式冲刷，否则连裸 QWidget 都测不出删除。
         QCoreApplication.sendPostedEvents(popup, QEvent.Type.DeferredDelete)
-        assert not shiboken6.isValid(popup) is True
+        assert sip.isdeleted(popup) is True
 
 
 class TestGestures:

@@ -1,4 +1,4 @@
-"""``pyside6_ela_pro.ela_avatar`` 的单元测试。
+"""``pyqt6_ela_pro.ela_avatar`` 的单元测试。
 
 钉住的核心不变量：
 
@@ -16,11 +16,11 @@
 from __future__ import annotations
 
 import pytest
-from PySide6.QtCore import QRect, QRectF, Qt
-from PySide6.QtGui import QColor, QPainter, QPixmap
+from PyQt6.QtCore import QRect, QRectF, Qt
+from PyQt6.QtGui import QColor, QPainter, QPixmap
 
-from pyside6_ela_pro._styles import drawCoverPixmap
-from pyside6_ela_pro._theme import (
+from pyqt6_ela_pro._styles import drawCoverPixmap
+from pyqt6_ela_pro._theme import (
     ElaStatusRoleType,
     chartPalette,
     currentMode,
@@ -30,7 +30,7 @@ from pyside6_ela_pro._theme import (
     surfaceRaised,
     textDisabled,
 )
-from pyside6_ela_pro.ela_avatar import (
+from pyqt6_ela_pro.ela_avatar import (
     _PRESENCE_DOT,
     _PRESENCE_RING,
     SURFACE_PROPERTY,
@@ -258,7 +258,7 @@ class TestPresence:
 
 class TestSurroundingSurface:
     def test_reads_ancestor_dynamic_property(self, make):
-        holder = make(__import__("PySide6.QtWidgets", fromlist=["QWidget"]).QWidget)
+        holder = make(__import__("PyQt6.QtWidgets", fromlist=["QWidget"]).QWidget)
         holder.setProperty(SURFACE_PROPERTY, QColor("#123456"))
         child = make(ElaAvatar, holder)
         assert child._surroundingSurface().name() == QColor("#123456").name()
@@ -268,7 +268,7 @@ class TestSurroundingSurface:
 
     def test_skips_ancestors_without_the_property(self, make):
         """属性在中间某一层就该在那层命中，不必是直接父亲。"""
-        from PySide6.QtWidgets import QWidget
+        from PyQt6.QtWidgets import QWidget
 
         outer = make(QWidget)
         middle = make(QWidget, outer)
@@ -304,12 +304,12 @@ class TestImage:
 class TestPaintSafety:
     """曾经踩过的绑定层坑：现在钉**行为**而不是「该不该抛 TypeError」。
 
-    PySide6 比 PyQt5 宽松：混类型矩形不再抛错、``QRect.adjusted`` 静默取整 ——
+    PyQt6 比 PyQt5 宽松：混类型矩形不再抛错、``QRect.adjusted`` 静默取整 ——
     断言要写「可观测结果」，不能写「绑定层是否报错」（见 MIGRATION §5）。
     """
 
     def test_drawpixmap_rect_type_pairings(self):
-        """``drawPixmap`` 的同类型配对必须能画；混类型也不再抛错（PySide6 容忍）。
+        """``drawPixmap`` 的同类型配对必须能画；混类型也不再抛错（PyQt6 容忍）。
 
         注意 ``QPainter(device)`` **不接管所有权** —— 传临时 ``QPixmap(...)`` 会在
         构造完立刻被 GC，painter 随后握着悬空指针 = 0xC0000005。所以两个位图都得
@@ -324,23 +324,26 @@ class TestPaintSafety:
             # 同类型两两配对：必须能画
             painter.drawPixmap(QRectF(0, 0, 4, 4), source, QRectF(source.rect()))
             painter.drawPixmap(QRect(0, 0, 4, 4), source, QRect(source.rect()))
-            # 混类型：PySide6 容忍（不抛），同样不该崩
-            painter.drawPixmap(QRectF(0, 0, 4, 4), source, QRect(0, 0, 4, 4))
+            # 混类型：PyQt6 容忍（不抛），同样不该崩
+            # ????QRectF ?? + QRect ???PyQt6 **??**?? TypeError
+            with pytest.raises(TypeError):
+                painter.drawPixmap(QRectF(0, 0, 4, 4), source, QRect(0, 0, 4, 4))
         finally:
             painter.end()
 
     def test_half_pixel_inset_needs_qrectf(self):
         """``QRect`` 只有整数坐标：半像素内缩必须走 ``QRectF``。
 
-        PySide6 下 ``QRect.adjusted(0.5, ...)`` 静默取整（PyQt5 抛 TypeError），
-        所以这里钉「取整后原样」与「QRectF 精确缩放」两种结果。
+        PyQt6 下 ``QRect.adjusted(0.5, ...)`` **抛 TypeError**（PySide6 是静默取整），
+        所以半像素内缩只能走 ``QRectF``。
         """
-        assert QRect(0, 0, 10, 10).adjusted(0.5, 0.5, -0.5, -0.5) == QRect(0, 0, 10, 10)
+        with pytest.raises(TypeError):
+            QRect(0, 0, 10, 10).adjusted(0.5, 0.5, -0.5, -0.5)
         inset = QRectF(QRect(0, 0, 10, 10)).adjusted(0.5, 0.5, -0.5, -0.5)
         assert (inset.x(), inset.y(), inset.width(), inset.height()) == (0.5, 0.5, 9.0, 9.0)
 
     def test_device_independent_size_exists(self):
-        """Qt6 / PySide6 暴露了 ``QPixmap.deviceIndependentSize()``（= 物理尺寸 / DPR）。"""
+        """Qt6 / PyQt6 暴露了 ``QPixmap.deviceIndependentSize()``（= 物理尺寸 / DPR）。"""
         pm = QPixmap(4, 4)
         pm.setDevicePixelRatio(2.0)
         assert pm.deviceIndependentSize().width() == 2.0
@@ -355,7 +358,7 @@ class TestPaintSafety:
         self, make, motion_full, tier, shape, content
     ):
         """把所有档位 × 形状 × 内容组合都画一遍 —— 崩在组合里最难查。"""
-        from PySide6.QtWidgets import QWidget
+        from PyQt6.QtWidgets import QWidget
 
         host = make(QWidget)
         host.show()
@@ -374,7 +377,7 @@ class TestPaintSafety:
         assert a.grab().isNull() is False
 
     def test_disabled_avatar_paints(self, make):
-        from PySide6.QtWidgets import QWidget
+        from PyQt6.QtWidgets import QWidget
 
         host = make(QWidget)
         host.show()
@@ -426,7 +429,7 @@ class TestNoQss:
     def test_no_setstylesheet_in_the_module(self):
         import pathlib
 
-        import pyside6_ela_pro.ela_avatar as mod
+        import pyqt6_ela_pro.ela_avatar as mod
 
         source = pathlib.Path(mod.__file__).read_text(encoding="utf-8")
         assert ".setStyleSheet(" not in source

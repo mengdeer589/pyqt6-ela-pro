@@ -14,14 +14,14 @@ from __future__ import annotations
 
 import pytest
 from _qthelpers import wait_for_clipboard as _wait_for_clipboard
-import shiboken6
-from PySide6.QtCore import QCoreApplication, QEvent, QPoint, QRect, QSize, Qt
-from PySide6.QtGui import QKeyEvent
-from PySide6.QtWidgets import QApplication
-from PySide6ElaWidgetTools import ElaIconType, ElaThemeType, eTheme
+from PyQt6 import sip
+from PyQt6.QtCore import QCoreApplication, QEvent, QPoint, QRect, QSize, Qt
+from PyQt6.QtGui import QKeyEvent
+from PyQt6.QtWidgets import QApplication
+from PyQt6ElaWidgetTools import ElaIconType, ElaThemeType, eTheme
 
-from pyside6_ela_pro import ElaSelectionResultDialog
-from pyside6_ela_pro.selection_assistant.result_dialog import (
+from pyqt6_ela_pro import ElaSelectionResultDialog
+from pyqt6_ela_pro.selection_assistant.result_dialog import (
     _EDGE_GAP,
     _PREVIEW_SOURCE_MAX,
     _PREVIEW_TIP_WIDTH,
@@ -93,7 +93,7 @@ class TestOpen:
 
     def test_empty_selection_clears_stale_preview_tooltip(self, make):
         """换一次空原文必须摘掉上一轮的悬浮提示（否则弹出上一轮原文）。"""
-        from pyside6_ela_pro import tooltips
+        from pyqt6_ela_pro import tooltips
 
         dialog = _make(make)
         dialog._preview_text.setFullText(_SOURCE)
@@ -776,7 +776,7 @@ class TestPreviewTooltip:
 
     @staticmethod
     def _tooltip(dialog):
-        from pyside6_ela_pro.tooltips import _tooltip_dict
+        from pyqt6_ela_pro.tooltips import _tooltip_dict
 
         return _tooltip_dict.get(dialog._preview_text)
 
@@ -825,7 +825,7 @@ class TestLifecycle:
         # 无父顶层窗的 deleteLater 对 processEvents 不生效，必须显式冲刷
         QCoreApplication.sendPostedEvents(dialog, QEvent.Type.DeferredDelete)
         qapp.processEvents()
-        assert not shiboken6.isValid(dialog) is True
+        assert sip.isdeleted(dialog) is True
 
     def test_python_sources_carry_no_qss(self):
         # 全库禁用 QSS。ElaWidget 的 C++ 构造函数自己会写一条
@@ -833,7 +833,7 @@ class TestLifecycle:
         # 侧读得到 styleSheet 但不是我们写的），所以这里扫**源码**而不是读属性。
         import inspect
 
-        from pyside6_ela_pro.selection_assistant import result_dialog
+        from pyqt6_ela_pro.selection_assistant import result_dialog
 
         source = inspect.getsource(result_dialog)
         assert ".setStyleSheet(" not in source

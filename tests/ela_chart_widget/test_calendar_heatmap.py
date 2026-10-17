@@ -4,12 +4,12 @@ from __future__ import annotations
 
 from datetime import date, timedelta
 
-from PySide6.QtCore import QRectF
-from PySide6.QtGui import QColor
+from PyQt6.QtCore import QRectF
+from PyQt6.QtGui import QColor
 
-from pyside6_ela_pro.charts import ElaChartWidget
-from pyside6_ela_pro.charts.axes import CalendarCoord
-from pyside6_ela_pro.charts.series_cartesian import HeatmapSeriesRenderer
+from pyqt6_ela_pro.charts import ElaChartWidget
+from pyqt6_ela_pro.charts.axes import CalendarCoord
+from pyqt6_ela_pro.charts.series_cartesian import HeatmapSeriesRenderer
 
 
 def _calendar_data(year: int = 2026, skip_mod: int = 0):

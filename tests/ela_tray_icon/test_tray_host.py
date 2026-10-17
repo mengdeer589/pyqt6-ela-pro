@@ -3,11 +3,11 @@
 from __future__ import annotations
 
 import pytest
-from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QWidget
+from PyQt6.QtCore import Qt
+from PyQt6.QtWidgets import QWidget
 
-from pyside6_ela_pro import ElaMenuItem
-from pyside6_ela_pro.example.tray_host import (
+from pyqt6_ela_pro import ElaMenuItem
+from pyqt6_ela_pro.example.tray_host import (
     QUIT_ID,
     SEPARATOR,
     TOGGLE_WINDOW_ID,
@@ -186,7 +186,7 @@ class TestTrayToggle:
         assert host.trayIcon().isVisible() is False
 
     def test_single_click_triggers_toggle(self, host, window):
-        from PySide6.QtWidgets import QSystemTrayIcon
+        from PyQt6.QtWidgets import QSystemTrayIcon
 
         seen = []
         host.windowVisibilityRequested.connect(seen.append)
@@ -194,7 +194,7 @@ class TestTrayToggle:
         assert seen == [True]
 
     def test_double_click_does_not_toggle(self, host):
-        from PySide6.QtWidgets import QSystemTrayIcon
+        from PyQt6.QtWidgets import QSystemTrayIcon
 
         seen = []
         host.windowVisibilityRequested.connect(seen.append)

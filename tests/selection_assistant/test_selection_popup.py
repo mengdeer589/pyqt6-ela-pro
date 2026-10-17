@@ -2,14 +2,14 @@
 
 from __future__ import annotations
 
-from PySide6.QtCore import QPoint
-from PySide6.QtWidgets import QApplication
-from PySide6ElaWidgetTools import ElaIconType
+from PyQt6.QtCore import QPoint
+from PyQt6.QtWidgets import QApplication
+from PyQt6ElaWidgetTools import ElaIconType
 
-from pyside6_ela_pro import ElaMenuItem, ElaSelectionPopup
+from pyqt6_ela_pro import ElaMenuItem, ElaSelectionPopup
 
 #: 测试用宿主自定义动作（组件本身不内置任何动作）
-from pyside6_ela_pro import tooltips as tt
+from pyqt6_ela_pro import tooltips as tt
 
 _ACTIONS = (
     ElaMenuItem(id="copy", label="复制", icon=ElaIconType.IconName.Copy),
@@ -125,7 +125,7 @@ class TestActions:
 
     def test_shadow_margin_reserved_in_layout(self, qapp):
         """阴影边距必须从共享常量预留（否则阴影被自身窗口裁掉）。"""
-        from pyside6_ela_pro._styles import SHADOW_MARGIN
+        from pyqt6_ela_pro._styles import SHADOW_MARGIN
 
         popup = ElaSelectionPopup()
         margins = popup.layout().contentsMargins()

@@ -31,7 +31,7 @@ import pytest
 
 EXAMPLE_DIR = os.path.join(
     os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
-    "pyside6_ela_pro",
+    "pyqt6_ela_pro",
     "example",
 )
 

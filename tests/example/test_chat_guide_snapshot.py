@@ -7,8 +7,8 @@ from pathlib import Path
 
 import pytest
 
-from pyside6_ela_pro.ela_markdown_viewer import ElaMarkdownViewer
-from pyside6_ela_pro.example.chat_guide_page import (
+from pyqt6_ela_pro.ela_markdown_viewer import ElaMarkdownViewer
+from pyqt6_ela_pro.example.chat_guide_page import (
     LLM_TEST_AGENT_DEMO_SOURCE,
     LLM_TEST_MAIN_SOURCE,
     ChatGuidePage,

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from _qthelpers import wait_until as _wait_until
 
-from pyside6_ela_pro.chat import ElaChatMockBackend, ElaChatMockUsage
+from pyqt6_ela_pro.chat import ElaChatMockBackend, ElaChatMockUsage
 
 
 def _drain(qapp, worker, timeout_ms: int = 3000) -> bool:

@@ -3,11 +3,11 @@
 from __future__ import annotations
 
 import pytest
-from PySide6.QtCore import QPropertyAnimation
+from PyQt6.QtCore import QPropertyAnimation
 
-from pyside6_ela_pro._motion import Duration
-from pyside6_ela_pro.ela_tag_combo_base import _get_target_mark_width, _pre_init_popup
-from pyside6_ela_pro.ela_tag_multi_box import ElaTagMultiBox
+from pyqt6_ela_pro._motion import Duration
+from pyqt6_ela_pro.ela_tag_combo_base import _get_target_mark_width, _pre_init_popup
+from pyqt6_ela_pro.ela_tag_multi_box import ElaTagMultiBox
 
 
 @pytest.fixture

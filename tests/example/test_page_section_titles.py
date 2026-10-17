@@ -24,7 +24,7 @@ from collections import Counter, defaultdict
 import pytest
 
 _EXAMPLE_DIR = (
-    pathlib.Path(__file__).resolve().parents[2] / "pyside6_ela_pro" / "example"
+    pathlib.Path(__file__).resolve().parents[2] / "pyqt6_ela_pro" / "example"
 )
 
 _TITLE_RE = re.compile(r"^(\d+)\.\s*(.*)$")

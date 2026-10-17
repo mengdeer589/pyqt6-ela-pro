@@ -1,4 +1,4 @@
-"""``pyside6_ela_pro._ownership`` 的单元测试。
+"""``pyqt6_ela_pro._ownership`` 的单元测试。
 
 钉住的核心不变量：
 
@@ -12,11 +12,11 @@
 from __future__ import annotations
 
 import pytest
-import shiboken6
-from PySide6.QtCore import QCoreApplication, QEvent, Qt
-from PySide6.QtWidgets import QLabel, QWidget
+from PyQt6 import sip
+from PyQt6.QtCore import QCoreApplication, QEvent, Qt
+from PyQt6.QtWidgets import QLabel, QWidget
 
-from pyside6_ela_pro._ownership import ContentSlot, ElaWidgetOwnershipType, releaseWidget
+from pyqt6_ela_pro._ownership import ContentSlot, ElaWidgetOwnershipType, releaseWidget
 
 
 @pytest.fixture
@@ -150,7 +150,7 @@ class TestReleaseAndTake:
         slot.setWidget(content, ElaWidgetOwnershipType.Owned)
         slot.releaseWidget()
         _flush(content)
-        assert not shiboken6.isValid(content)
+        assert sip.isdeleted(content)
 
     def test_owned_without_delete_flag_keeps_widget(self, host, qapp):
         """析构路径要这个：Qt 的 parent-child 删除会在宿主析构**之后**处理。"""
@@ -158,7 +158,7 @@ class TestReleaseAndTake:
         slot = ContentSlot(host, "t")
         slot.setWidget(content, ElaWidgetOwnershipType.Owned)
         slot.releaseWidget(deleteOwned=False)
-        assert not shiboken6.isValid(content) is False
+        assert sip.isdeleted(content) is False
         assert content.parentWidget() is None
 
     def test_take_returns_parentless_and_never_deletes(self, host, qapp):
@@ -169,7 +169,7 @@ class TestReleaseAndTake:
         _flush(got)
         assert got is content
         assert got.parentWidget() is None
-        assert not shiboken6.isValid(content) is False
+        assert sip.isdeleted(content) is False
 
     def test_take_ignores_restore_parent(self, host, qt_cleanup):
         """``take`` 的语义是「交还」，必须无父，不能放回原 parent。"""

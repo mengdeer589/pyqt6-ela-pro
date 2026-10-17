@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
-from PySide6.QtCore import Qt
-from PySide6.QtGui import QTextCursor
+from PyQt6.QtCore import Qt
+from PyQt6.QtGui import QTextCursor
 
-from pyside6_ela_pro.ela_markdown_viewer import ElaMarkdownViewer
-from pyside6_ela_pro.example.markdown_page import (
+from pyqt6_ela_pro.ela_markdown_viewer import ElaMarkdownViewer
+from pyqt6_ela_pro.example.markdown_page import (
     _MARKDOWN_ALL,
     _MARKDOWN_CODE,
     _MARKDOWN_MATH,

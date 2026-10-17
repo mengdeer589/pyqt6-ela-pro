@@ -8,11 +8,11 @@ sendEvent 目标明确且与 eventFilter 分发链等价。
 from __future__ import annotations
 
 import pytest
-from PySide6.QtCore import QEvent, QPoint, QPointF, Qt
-from PySide6.QtGui import QMouseEvent, QWheelEvent
-from PySide6.QtWidgets import QApplication
+from PyQt6.QtCore import QEvent, QPoint, QPointF, Qt
+from PyQt6.QtGui import QMouseEvent, QWheelEvent
+from PyQt6.QtWidgets import QApplication
 
-from pyside6_ela_pro.blueprint import (
+from pyqt6_ela_pro.blueprint import (
     ElaBlueprintCanvas,
     ElaBlueprintNode,
     ElaNodeCreationMenu,
@@ -100,21 +100,21 @@ class TestInteraction:
         center = widget.rect().center()
         send_to(
             widget,
-            QEvent.MouseButtonPress,
+            QEvent.Type.MouseButtonPress,
             center,
             Qt.MouseButton.LeftButton,
             Qt.MouseButton.LeftButton,
         )
         send_to(
             widget,
-            QEvent.MouseMove,
+            QEvent.Type.MouseMove,
             center + QPoint(60, 40),
             Qt.MouseButton.NoButton,
             Qt.MouseButton.LeftButton,
         )
         send_to(
             widget,
-            QEvent.MouseButtonRelease,
+            QEvent.Type.MouseButtonRelease,
             center + QPoint(60, 40),
             Qt.MouseButton.LeftButton,
             Qt.MouseButton.NoButton,
@@ -130,17 +130,17 @@ class TestInteraction:
         p1, p2 = h1.rect().center(), h2.rect().center()
         send_to(
             h1,
-            QEvent.MouseButtonPress,
+            QEvent.Type.MouseButtonPress,
             p1,
             Qt.MouseButton.LeftButton,
             Qt.MouseButton.LeftButton,
         )
         send_to(
-            h2, QEvent.MouseMove, p2, Qt.MouseButton.NoButton, Qt.MouseButton.LeftButton
+            h2, QEvent.Type.MouseMove, p2, Qt.MouseButton.NoButton, Qt.MouseButton.LeftButton
         )
         send_to(
             h2,
-            QEvent.MouseButtonRelease,
+            QEvent.Type.MouseButtonRelease,
             p2,
             Qt.MouseButton.LeftButton,
             Qt.MouseButton.NoButton,
@@ -166,17 +166,17 @@ class TestInteraction:
         p1, p2 = h1.rect().center(), h2.rect().center()
         send_to(
             h1,
-            QEvent.MouseButtonPress,
+            QEvent.Type.MouseButtonPress,
             p1,
             Qt.MouseButton.LeftButton,
             Qt.MouseButton.LeftButton,
         )
         send_to(
-            h2, QEvent.MouseMove, p2, Qt.MouseButton.NoButton, Qt.MouseButton.LeftButton
+            h2, QEvent.Type.MouseMove, p2, Qt.MouseButton.NoButton, Qt.MouseButton.LeftButton
         )
         send_to(
             h2,
-            QEvent.MouseButtonRelease,
+            QEvent.Type.MouseButtonRelease,
             p2,
             Qt.MouseButton.LeftButton,
             Qt.MouseButton.NoButton,
@@ -196,21 +196,21 @@ class TestInteraction:
         start, end = QPoint(80, 80), QPoint(320, 260)
         send_to(
             vp,
-            QEvent.MouseButtonPress,
+            QEvent.Type.MouseButtonPress,
             start,
             Qt.MouseButton.LeftButton,
             Qt.MouseButton.LeftButton,
         )
         send_to(
             vp,
-            QEvent.MouseMove,
+            QEvent.Type.MouseMove,
             end,
             Qt.MouseButton.NoButton,
             Qt.MouseButton.LeftButton,
         )
         send_to(
             vp,
-            QEvent.MouseButtonRelease,
+            QEvent.Type.MouseButtonRelease,
             end,
             Qt.MouseButton.LeftButton,
             Qt.MouseButton.NoButton,

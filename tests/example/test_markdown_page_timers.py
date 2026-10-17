@@ -20,15 +20,15 @@ import re
 from pathlib import Path
 
 import pytest
-import shiboken6
-from PySide6.QtCore import QCoreApplication, QEventLoop, QTimer
+from PyQt6 import sip
+from PyQt6.QtCore import QCoreApplication, QEventLoop, QTimer
 
-from pyside6_ela_pro.ela_tag_multi_box import ElaTagMultiBox
-from pyside6_ela_pro.ela_tag_search_multi_box import ElaTagSearchMultiBox
+from pyqt6_ela_pro.ela_tag_multi_box import ElaTagMultiBox
+from pyqt6_ela_pro.ela_tag_search_multi_box import ElaTagSearchMultiBox
 
 _PAGE = (
     Path(__file__).resolve().parents[2]
-    / "pyside6_ela_pro"
+    / "pyqt6_ela_pro"
     / "example"
     / "markdown_page.py"
 )
@@ -65,7 +65,7 @@ class TestNoUnparentedSingleShot:
 
         注意 PyQt5 的 ``singleShot(ms, ctx, callable)`` 重载**也不能单独当保障**
         （实测传了 context 照样崩）；这里只是要求「至少写了 context」，
-        真要稳妥用「定时器作为 ctx 的子对象」或 ``not shiboken6.isValid()`` 自查。
+        真要稳妥用「定时器作为 ctx 的子对象」或 ``sip.isdeleted()`` 自查。
         """
         src = _PAGE.read_text(encoding="utf-8")
         offenders = []
@@ -108,8 +108,8 @@ class TestTeardownSurvivesOldTimerWindow:
         是控件的子对象，控件析构时连带销毁并丢掉待触发的 timeout。
         """
         widget = factory()
-        shiboken6.delete(widget)  # 同步销毁（不走事件循环）
-        assert not shiboken6.isValid(widget)
+        sip.delete(widget)  # 同步销毁（不走事件循环）
+        assert sip.isdeleted(widget)
         _pump(_OLD_TIMER_MS + 400)  # 跑到「旧定时器该触发」之后
         QCoreApplication.processEvents()
         assert True
@@ -117,17 +117,17 @@ class TestTeardownSurvivesOldTimerWindow:
     def test_page_survives_teardown_past_old_timer_delay(self, qapp):
         """建页面 → 同步销毁 → 把事件循环跑过 1.2s，进程必须还在。
 
-        ``shiboken6.delete()`` 是**同步**销毁（不走事件循环），保证「控件已死、
+        ``sip.delete()`` 是**同步**销毁（不走事件循环），保证「控件已死、
         还有东西可能在后面触发」这个窗口真的出现过。不崩就是通过
         （崩了是 pytest 进程静默消失、零输出）。
         """
-        from pyside6_ela_pro.example.markdown_page import MarkdownPage
+        from pyqt6_ela_pro.example.markdown_page import MarkdownPage
 
         page = MarkdownPage()
         page.show()
         _pump(120)
-        shiboken6.delete(page)
-        assert not shiboken6.isValid(page)
+        sip.delete(page)
+        assert sip.isdeleted(page)
         _pump(_OLD_TIMER_MS + 400)
         QCoreApplication.processEvents()
         assert True

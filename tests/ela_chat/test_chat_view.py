@@ -3,13 +3,13 @@
 from __future__ import annotations
 
 from _qthelpers import wait_until as _wait_until
-from PySide6.QtCore import QPoint, QPointF, Qt
-from PySide6.QtGui import QMouseEvent, QPalette, QWheelEvent
-from PySide6.QtTest import QTest
-from PySide6.QtWidgets import QTextEdit
-from PySide6ElaWidgetTools import ElaThemeType
+from PyQt6.QtCore import QPoint, QPointF, Qt
+from PyQt6.QtGui import QMouseEvent, QPalette, QWheelEvent
+from PyQt6.QtTest import QTest
+from PyQt6.QtWidgets import QTextEdit
+from PyQt6ElaWidgetTools import ElaThemeType
 
-from pyside6_ela_pro.chat import (
+from pyqt6_ela_pro.chat import (
     ElaChatReasoningStyleType,
     DISCLAIMER_TEXT,
     ElaChatRoleType,

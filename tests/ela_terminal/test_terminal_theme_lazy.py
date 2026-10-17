@@ -8,12 +8,12 @@
 from __future__ import annotations
 
 import pytest
-from PySide6.QtTest import QTest
-from PySide6.QtWidgets import QVBoxLayout, QWidget
+from PyQt6.QtTest import QTest
+from PyQt6.QtWidgets import QVBoxLayout, QWidget
 
-from PySide6ElaWidgetTools import eTheme, ElaThemeType
-from pyside6_ela_pro import ElaTerminalView
-from pyside6_ela_pro.terminal_view import terminalThemes
+from PyQt6ElaWidgetTools import eTheme, ElaThemeType
+from pyqt6_ela_pro import ElaTerminalView
+from pyqt6_ela_pro.terminal_view import terminalThemes
 
 LINES = 500
 

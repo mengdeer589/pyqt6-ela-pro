@@ -18,18 +18,18 @@ from __future__ import annotations
 import inspect
 
 import pytest
-from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QLabel, QWidget
+from PyQt6.QtCore import Qt
+from PyQt6.QtWidgets import QLabel, QWidget
 
-import pyside6_ela_pro.ela_toast as T
+import pyqt6_ela_pro.ela_toast as T
 
 # ---------------------------------------------------------------------- 1
-from pyside6_ela_pro import ElaDrawer
-from pyside6_ela_pro.chat.blocks import ToolCallCard
-from pyside6_ela_pro.chat.input import ElaChatInput
-from pyside6_ela_pro.chat.message import ElaChatToolCall
-from pyside6_ela_pro.combo_box import ElaSearchMultiBox
-from pyside6_ela_pro.ela_side_drawer import ElaDrawerPanel
+from pyqt6_ela_pro import ElaDrawer
+from pyqt6_ela_pro.chat.blocks import ToolCallCard
+from pyqt6_ela_pro.chat.input import ElaChatInput
+from pyqt6_ela_pro.chat.message import ElaChatToolCall
+from pyqt6_ela_pro.combo_box import ElaSearchMultiBox
+from pyqt6_ela_pro.ela_side_drawer import ElaDrawerPanel
 
 
 class TestDrawerCornerRadiusPropagates:

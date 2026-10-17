@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import pytest
 
-import pyside6_ela_pro.ela_pyqtgraph_canvas as mod
-from pyside6_ela_pro.ela_pyqtgraph_canvas import (
+import pyqt6_ela_pro.ela_pyqtgraph_canvas as mod
+from pyqt6_ela_pro.ela_pyqtgraph_canvas import (
     _DARK_THEME,
     _LIGHT_THEME,
     ElaPlotWidget,

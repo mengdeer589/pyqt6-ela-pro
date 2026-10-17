@@ -1,4 +1,4 @@
-"""``pyside6_ela_pro.ela_selector_bar`` 的单元测试。
+"""``pyqt6_ela_pro.ela_selector_bar`` 的单元测试。
 
 钉住的核心不变量：
 
@@ -15,11 +15,11 @@
 from __future__ import annotations
 
 import pytest
-from PySide6.QtCore import QEvent, QPoint, Qt
-from PySide6.QtGui import QKeyEvent
+from PyQt6.QtCore import QEvent, QPoint, Qt, QPointF
+from PyQt6.QtGui import QKeyEvent
 
-from pyside6_ela_pro._motion import ElaMotionModeType, motion
-from pyside6_ela_pro.ela_selector_bar import (
+from pyqt6_ela_pro._motion import ElaMotionModeType, motion
+from pyqt6_ela_pro.ela_selector_bar import (
     _Metrics,
     ElaSelectorBar,
     SelectorBarItem,
@@ -546,7 +546,7 @@ class TestActivation:
 
 class TestKeyboard:
     def _key(self, bar, key):
-        from PySide6.QtWidgets import QApplication
+        from PyQt6.QtWidgets import QApplication
 
         event = QKeyEvent(QEvent.Type.KeyPress, key, Qt.KeyboardModifier.NoModifier)
         QApplication.sendEvent(bar, event)
@@ -611,20 +611,20 @@ class TestKeyboard:
 
 class TestMouse:
     def _click(self, bar, rect):
-        from PySide6.QtGui import QMouseEvent
-        from PySide6.QtWidgets import QApplication
+        from PyQt6.QtGui import QMouseEvent
+        from PyQt6.QtWidgets import QApplication
 
         center = rect.center()
         press = QMouseEvent(
             QEvent.Type.MouseButtonPress,
-            center,
+            QPointF(center),
             Qt.MouseButton.LeftButton,
             Qt.MouseButton.LeftButton,
             Qt.KeyboardModifier.NoModifier,
         )
         release = QMouseEvent(
             QEvent.Type.MouseButtonRelease,
-            center,
+            QPointF(center),
             Qt.MouseButton.LeftButton,
             Qt.MouseButton.NoButton,
             Qt.KeyboardModifier.NoModifier,
@@ -648,8 +648,8 @@ class TestMouse:
 
     def test_press_then_drag_off_cancels(self, make, qapp):
         """按下与抬起必须是同一目标才激活。"""
-        from PySide6.QtGui import QMouseEvent
-        from PySide6.QtWidgets import QApplication
+        from PyQt6.QtGui import QMouseEvent
+        from PyQt6.QtWidgets import QApplication
 
         bar = _bar(make)
         bar.setSelectedIndex(0)
@@ -659,7 +659,7 @@ class TestMouse:
             bar,
             QMouseEvent(
                 QEvent.Type.MouseButtonPress,
-                source,
+                QPointF(source),
                 Qt.MouseButton.LeftButton,
                 Qt.MouseButton.LeftButton,
                 Qt.KeyboardModifier.NoModifier,
@@ -670,7 +670,7 @@ class TestMouse:
             bar,
             QMouseEvent(
                 QEvent.Type.MouseButtonRelease,
-                empty,
+                QPointF(empty),
                 Qt.MouseButton.LeftButton,
                 Qt.MouseButton.NoButton,
                 Qt.KeyboardModifier.NoModifier,
@@ -679,8 +679,8 @@ class TestMouse:
         assert bar.selectedIndex() == 0
 
     def test_hovering_a_disabled_item_gives_no_feedback(self, make, qapp):
-        from PySide6.QtGui import QMouseEvent
-        from PySide6.QtWidgets import QApplication
+        from PyQt6.QtGui import QMouseEvent
+        from PyQt6.QtWidgets import QApplication
 
         bar = _bar(make)
         bar.setItemEnabled(1, False)
@@ -688,7 +688,7 @@ class TestMouse:
             bar,
             QMouseEvent(
                 QEvent.Type.MouseMove,
-                bar.itemGeometry(1).center(),
+                QPointF(bar.itemGeometry(1).center()),
                 Qt.MouseButton.NoButton,
                 Qt.MouseButton.NoButton,
                 Qt.KeyboardModifier.NoModifier,
@@ -781,7 +781,7 @@ class TestNoQss:
     def test_no_setstylesheet_in_the_module(self):
         import pathlib
 
-        import pyside6_ela_pro.ela_selector_bar as mod
+        import pyqt6_ela_pro.ela_selector_bar as mod
 
         source = pathlib.Path(mod.__file__).read_text(encoding="utf-8")
         assert ".setStyleSheet(" not in source

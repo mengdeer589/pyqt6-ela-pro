@@ -28,31 +28,31 @@ from __future__ import annotations
 import json
 
 import pytest
-from PySide6.QtCore import QEvent, QPoint, Qt
-from PySide6.QtGui import QColor, QKeyEvent, QMouseEvent
-from PySide6.QtWidgets import QApplication, QWidget
-from PySide6ElaWidgetTools import (
+from PyQt6.QtCore import QEvent, QPoint, Qt, QPointF
+from PyQt6.QtGui import QColor, QKeyEvent, QMouseEvent
+from PyQt6.QtWidgets import QApplication, QWidget
+from PyQt6ElaWidgetTools import (
     ElaCheckBox,
     ElaRadioButton,
     ElaThemeType,
     eTheme,
 )
 
-from pyside6_ela_pro._styles import ColorText
-from pyside6_ela_pro.chat import (
+from pyqt6_ela_pro._styles import ColorText
+from pyqt6_ela_pro.chat import (
     ElaChatOption,
     ElaChatPermission,
     ElaChatPermissionStatusType,
     ElaChatQuestion,
     ElaChatWidget,
 )
-from pyside6_ela_pro.chat._question import (
+from pyqt6_ela_pro.chat._question import (
     CUSTOM_ANSWER_LABEL,
     GLOW_ALPHA,
     QuestionOptionCard,
     question_colors,
 )
-from pyside6_ela_pro.chat.blocks import PermissionCard, PermissionRecord
+from pyqt6_ela_pro.chat.blocks import PermissionCard, PermissionRecord
 
 
 @pytest.fixture
@@ -227,7 +227,7 @@ class TestWizardShape:
         此前 pending 态把标题染成 ``blend(base, text, 0.35)``，整条头部弱得读不出，
         而它恰恰是「现在需要你做什么」这句话本身（用户反馈：「顶部怎么能是灰色」）。
         """
-        from pyside6_ela_pro.chat._theme import text_color
+        from pyqt6_ela_pro.chat._theme import text_color
 
         chat = make(ElaChatWidget)
         card = _single(chat, _turn(chat), header="范围")
@@ -247,7 +247,7 @@ class TestWizardShape:
 
         「细条像划痕」的观感其实来自圆角：画成 1px 圆角就成了方头短横。
         """
-        from pyside6_ela_pro.chat._question import SEGMENT_BAR, SEGMENT_HIT
+        from pyqt6_ela_pro.chat._question import SEGMENT_BAR, SEGMENT_HIT
 
         assert SEGMENT_BAR == (16, 2)
         assert SEGMENT_HIT == 16
@@ -1163,7 +1163,7 @@ class TestTheming:
         **按钮上不印快捷键**：``Alt+←`` / ``Ctrl+⏎`` 这种内联提示比按钮本身还抢眼
         （实测截图里「忽略」被两个提示压成了配角），而快捷键仍然照常生效。
         """
-        from pyside6_ela_pro.ela_button import ElaButton
+        from pyqt6_ela_pro.ela_button import ElaButton
 
         chat = make(ElaChatWidget)
         card = _wizard(chat, _turn(chat), count=2)
@@ -1240,7 +1240,7 @@ class TestOptionCardContract:
         row.mousePressEvent(
             QMouseEvent(
                 QEvent.Type.MouseButtonPress,
-                QPoint(int(mark.center().x()), int(mark.center().y())),
+                QPointF(QPoint(int(mark.center().x()), int(mark.center().y()))),
                 Qt.MouseButton.LeftButton,
                 Qt.MouseButton.LeftButton,
                 Qt.KeyboardModifier.NoModifier,
@@ -1261,7 +1261,7 @@ class TestOptionCardContract:
         row.mousePressEvent(
             QMouseEvent(
                 QEvent.Type.MouseButtonPress,
-                QPoint(2, 22),
+                QPointF(QPoint(2, 22)),
                 Qt.MouseButton.LeftButton,
                 Qt.MouseButton.LeftButton,
                 Qt.KeyboardModifier.NoModifier,
@@ -1277,7 +1277,7 @@ class TestOptionCardContract:
         row.mouseReleaseEvent(
             QMouseEvent(
                 QEvent.Type.MouseButtonRelease,
-                QPoint(160, 22),
+                QPointF(QPoint(160, 22)),
                 Qt.MouseButton.LeftButton,
                 Qt.MouseButton.NoButton,
                 Qt.KeyboardModifier.NoModifier,
@@ -1306,7 +1306,7 @@ class TestOptionCardContract:
         row.mousePressEvent(
             QMouseEvent(
                 QEvent.Type.MouseButtonPress,
-                pos,
+                QPointF(pos),
                 Qt.MouseButton.LeftButton,
                 Qt.MouseButton.LeftButton,
                 Qt.KeyboardModifier.NoModifier,
@@ -1315,7 +1315,7 @@ class TestOptionCardContract:
         row.mouseReleaseEvent(
             QMouseEvent(
                 QEvent.Type.MouseButtonRelease,
-                pos,
+                QPointF(pos),
                 Qt.MouseButton.LeftButton,
                 Qt.MouseButton.LeftButton,
                 Qt.KeyboardModifier.NoModifier,
@@ -1332,7 +1332,7 @@ class TestOptionCardContract:
         row.mousePressEvent(
             QMouseEvent(
                 QEvent.Type.MouseButtonPress,
-                pos,
+                QPointF(pos),
                 Qt.MouseButton.LeftButton,
                 Qt.MouseButton.LeftButton,
                 Qt.KeyboardModifier.NoModifier,
@@ -1341,7 +1341,7 @@ class TestOptionCardContract:
         row.mouseReleaseEvent(
             QMouseEvent(
                 QEvent.Type.MouseButtonRelease,
-                pos,
+                QPointF(pos),
                 Qt.MouseButton.LeftButton,
                 Qt.MouseButton.LeftButton,
                 Qt.KeyboardModifier.NoModifier,
@@ -1364,7 +1364,7 @@ class TestOptionCardContract:
         row.mousePressEvent(
             QMouseEvent(
                 QEvent.Type.MouseButtonPress,
-                pos,
+                QPointF(pos),
                 Qt.MouseButton.LeftButton,
                 Qt.MouseButton.LeftButton,
                 Qt.KeyboardModifier.NoModifier,
@@ -1386,7 +1386,7 @@ class TestOptionCardContract:
         row.mousePressEvent(
             QMouseEvent(
                 QEvent.Type.MouseButtonPress,
-                QPoint(200, 22),
+                QPointF(QPoint(200, 22)),
                 Qt.MouseButton.LeftButton,
                 Qt.MouseButton.LeftButton,
                 Qt.KeyboardModifier.NoModifier,

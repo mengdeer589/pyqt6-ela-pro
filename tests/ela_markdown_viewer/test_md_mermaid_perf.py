@@ -10,14 +10,14 @@ import time
 from unittest.mock import patch
 
 from _qthelpers import wait_until as _wait_until
-from PySide6.QtGui import QColor, QImage
+from PyQt6.QtGui import QColor, QImage
 
-import pyside6_ela_pro.mermaid_support as support
-from pyside6_ela_pro.ela_markdown_viewer import (
+import pyqt6_ela_pro.mermaid_support as support
+from pyqt6_ela_pro.ela_markdown_viewer import (
     _MERMAID_PENDING_PREFIX,
     ElaMarkdownViewer,
 )
-from pyside6_ela_pro.mermaid_support import (
+from pyqt6_ela_pro.mermaid_support import (
     ElaMermaidRenderer,
     adaptive_zoom,
     svg_size,
@@ -48,7 +48,7 @@ def _images(viewer: ElaMarkdownViewer) -> list:
 
 
 def _fake_image(theme: str) -> QImage:
-    image = QImage(200, 100, QImage.Format_ARGB32)
+    image = QImage(200, 100, QImage.Format.Format_ARGB32)
     image.fill(QColor("steelblue" if theme == "dark" else "gold"))
     return image
 

@@ -3,12 +3,12 @@
 from __future__ import annotations
 
 import pytest
-from PySide6.QtCore import QEvent, QPoint, QPointF, Qt
-from PySide6.QtGui import QColor, QMouseEvent, QWheelEvent
-from PySide6.QtWidgets import QApplication
+from PyQt6.QtCore import QEvent, QPoint, QPointF, Qt
+from PyQt6.QtGui import QColor, QMouseEvent, QWheelEvent
+from PyQt6.QtWidgets import QApplication
 
-from pyside6_ela_pro import ElaFigureCanvas
-from pyside6_ela_pro.charts import (
+from pyqt6_ela_pro import ElaFigureCanvas
+from pyqt6_ela_pro.charts import (
     ElaChartWidget,
     SeriesRenderer,
     chartToken,
@@ -65,7 +65,7 @@ def _release(chart, pos: QPointF):
 def _wheel(chart, pos: QPointF):
     event = QWheelEvent(
         QPointF(pos),
-        chart.mapToGlobal(QPointF(pos).toPoint()),
+        QPointF(chart.mapToGlobal(QPointF(pos).toPoint())),
         QPoint(0, 0),
         QPoint(0, 120),
         Qt.MouseButton.NoButton,

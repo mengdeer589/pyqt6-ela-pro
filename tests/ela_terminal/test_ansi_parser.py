@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from pyside6_ela_pro.terminal_view import (
+from pyqt6_ela_pro.terminal_view import (
     AnsiColor,
     AnsiParser,
     TerminalLine,

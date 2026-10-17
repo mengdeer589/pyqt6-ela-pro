@@ -9,12 +9,12 @@ from __future__ import annotations
 import json
 
 import pytest
-import shiboken6
-from PySide6.QtCore import QEvent, Qt
-from PySide6.QtGui import QKeyEvent, QMouseEvent
-from PySide6.QtWidgets import QApplication
+from PyQt6 import sip
+from PyQt6.QtCore import QEvent, Qt, QPointF
+from PyQt6.QtGui import QKeyEvent, QMouseEvent
+from PyQt6.QtWidgets import QApplication
 
-from pyside6_ela_pro.chat import (
+from pyqt6_ela_pro.chat import (
     ElaChatBubble,
     ElaChatMockBackend,
     ElaChatOption,
@@ -32,13 +32,13 @@ from pyside6_ela_pro.chat import (
     ElaChatWidget,
     ReasoningBlock,
 )
-from pyside6_ela_pro.chat.blocks import (
+from pyqt6_ela_pro.chat.blocks import (
     CompactionSeparator,
     PermissionCard,
     PermissionRecord,
     ToolCallCard,
 )
-from pyside6_ela_pro.chat.message import ElaChatToolCall, ElaChatToolStatusType
+from pyqt6_ela_pro.chat.message import ElaChatToolCall, ElaChatToolStatusType
 
 
 def _turn(chat) -> int:
@@ -239,7 +239,7 @@ class TestPermissionDockPromotion:
         )
         card = bubble.interactivePermissionCard(part_id)
         assert card is not None
-        shiboken6.delete(card)
+        sip.delete(card)
 
         assert bubble.resolvePermission("r1", "allowed") is True
         assert bubble.permissionCard("r1") is not None
@@ -352,7 +352,7 @@ class TestCompactionWidgets:
     def _press(widget) -> None:
         event = QMouseEvent(
             QMouseEvent.Type.MouseButtonPress,
-            widget.rect().center(),
+            QPointF(widget.rect().center()),
             Qt.MouseButton.LeftButton,
             Qt.MouseButton.LeftButton,
             Qt.KeyboardModifier.NoModifier,

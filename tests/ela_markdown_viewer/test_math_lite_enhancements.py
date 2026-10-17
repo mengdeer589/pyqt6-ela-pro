@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-from PySide6.QtGui import QColor
+from PyQt6.QtGui import QColor
 
-from pyside6_ela_pro.math_lite import render_formula
-from pyside6_ela_pro.ela_markdown_viewer import ElaMarkdownViewer
+from pyqt6_ela_pro.math_lite import render_formula
+from pyqt6_ela_pro.ela_markdown_viewer import ElaMarkdownViewer
 
 COLOR = QColor("#202020")
 

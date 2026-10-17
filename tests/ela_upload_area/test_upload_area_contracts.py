@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import pytest
 
-from pyside6_ela_pro.ela_upload_area import ElaUploadArea
+from pyqt6_ela_pro.ela_upload_area import ElaUploadArea
 
 
 @pytest.fixture

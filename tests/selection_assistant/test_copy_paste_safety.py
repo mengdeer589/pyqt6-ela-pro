@@ -20,11 +20,11 @@ from __future__ import annotations
 
 import pytest
 from _qthelpers import wait_for_clipboard
-from PySide6.QtCore import QCoreApplication, QObject, Signal
+from PyQt6.QtCore import QCoreApplication, QObject, pyqtSignal
 
-from pyside6_ela_pro import ElaSelectionAssistant
-from pyside6_ela_pro.selection_assistant import _native
-from pyside6_ela_pro.selection_assistant import assistant as assistant_module
+from pyqt6_ela_pro import ElaSelectionAssistant
+from pyqt6_ela_pro.selection_assistant import _native
+from pyqt6_ela_pro.selection_assistant import assistant as assistant_module
 
 
 @pytest.fixture
@@ -42,10 +42,10 @@ def no_injection(monkeypatch):
 
 
 class _FakeMonitor(QObject):
-    leftPressed = Signal(object)
-    leftReleased = Signal(object, object)
-    otherPressed = Signal(object)
-    wheelScrolled = Signal()
+    leftPressed = pyqtSignal(object)
+    leftReleased = pyqtSignal(object, object)
+    otherPressed = pyqtSignal(object)
+    wheelScrolled = pyqtSignal()
 
     def start(self) -> bool:
         return True
@@ -55,8 +55,8 @@ class _FakeMonitor(QObject):
 
 
 class _FakeCapture(QObject):
-    captured = Signal(str)
-    failed = Signal()
+    captured = pyqtSignal(str)
+    failed = pyqtSignal()
 
     def __init__(self) -> None:
         super().__init__()
@@ -300,7 +300,7 @@ class TestRestoreKeepsUserCopy:
 
         原实现只看文本，会把用户这次复制覆盖回旧值（用户 Ctrl+V 拿到旧内容）。
         """
-        from pyside6_ela_pro.selection_assistant import capture as capture_mod
+        from pyqt6_ela_pro.selection_assistant import capture as capture_mod
 
         cap = capture_mod.ElaClipboardCapture()
         cap._old_text = "旧内容"
@@ -323,7 +323,7 @@ class TestRestoreKeepsUserCopy:
 
         否则用户复制的图片被清空，Ctrl+V 直接粘不出来（静默数据丢失）。
         """
-        from pyside6_ela_pro.selection_assistant import capture as capture_mod
+        from pyqt6_ela_pro.selection_assistant import capture as capture_mod
 
         cap = capture_mod.ElaClipboardCapture()
         cap._old_text = ""
@@ -344,8 +344,8 @@ class TestRestoreKeepsUserCopy:
 
     def test_non_text_probe_detects_image(self, qapp):
         """``_has_non_text_format`` 能认出图片剪贴板。"""
-        from PySide6.QtGui import QImage
-        from pyside6_ela_pro.selection_assistant.capture import _has_non_text_format
+        from PyQt6.QtGui import QImage
+        from pyqt6_ela_pro.selection_assistant.capture import _has_non_text_format
 
         cb = qapp.clipboard()
         cb.setImage(QImage(4, 4, QImage.Format.Format_RGB32))
@@ -359,7 +359,7 @@ class TestRestoreKeepsUserCopy:
 
     def test_plain_restore_still_works(self, qapp, clipboard):
         """对照组：没人动过剪贴板时仍然正常还原。"""
-        from pyside6_ela_pro.selection_assistant import capture as capture_mod
+        from pyqt6_ela_pro.selection_assistant import capture as capture_mod
 
         cap = capture_mod.ElaClipboardCapture()
         cap._old_text = "用户原本的内容"

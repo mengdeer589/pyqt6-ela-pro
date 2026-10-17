@@ -6,8 +6,8 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from pyside6_ela_pro import parquet_table
-from pyside6_ela_pro.parquet_table import (
+from pyqt6_ela_pro import parquet_table
+from pyqt6_ela_pro.parquet_table import (
     INFO_BAR_HEIGHT,
     INFO_BAR_SPACING,
     ElaInfoBarWidget,

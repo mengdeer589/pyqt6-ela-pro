@@ -17,11 +17,11 @@
 from __future__ import annotations
 
 import pytest
-from PySide6ElaWidgetTools import ElaIconType, ElaText, ElaWindow
+from PyQt6ElaWidgetTools import ElaIconType, ElaText, ElaWindow
 
-from pyside6_ela_pro import ElaButton, ElaTrayIcon
-from pyside6_ela_pro.example.app_shell_page import AppShellPage
-from pyside6_ela_pro.example.selection_page import SelectionAssistantPage
+from pyqt6_ela_pro import ElaButton, ElaTrayIcon
+from pyqt6_ela_pro.example.app_shell_page import AppShellPage
+from pyqt6_ela_pro.example.selection_page import SelectionAssistantPage
 
 
 @pytest.fixture(scope="module")

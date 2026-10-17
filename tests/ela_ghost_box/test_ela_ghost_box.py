@@ -3,14 +3,14 @@
 from __future__ import annotations
 
 import pytest
-from PySide6.QtCore import QEvent, Qt
-from PySide6.QtGui import QMouseEvent, QPixmap
-from PySide6.QtTest import QTest
-from PySide6.QtWidgets import QWidget
-from PySide6ElaWidgetTools import ElaIconType
+from PyQt6.QtCore import QEvent, Qt, QPointF
+from PyQt6.QtGui import QMouseEvent, QPixmap
+from PyQt6.QtTest import QTest
+from PyQt6.QtWidgets import QWidget
+from PyQt6ElaWidgetTools import ElaIconType
 from _qthelpers import wait_until
 
-from pyside6_ela_pro.ela_ghost_box import ElaGhostBox
+from pyqt6_ela_pro.ela_ghost_box import ElaGhostBox
 
 
 @pytest.fixture
@@ -30,8 +30,8 @@ def _click_row(box: ElaGhostBox, qapp, row: int) -> None:
     ):
         event = QMouseEvent(
             event_type,
-            pos,
-            global_pos,
+            QPointF(pos),
+            QPointF(global_pos),
             Qt.MouseButton.LeftButton,
             Qt.MouseButton.LeftButton,
             Qt.KeyboardModifier.NoModifier,

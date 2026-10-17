@@ -11,12 +11,12 @@ from types import SimpleNamespace
 
 from _qthelpers import wait_for_clipboard as _wait_for_clipboard
 from _qthelpers import wait_until as _wait
-from PySide6.QtGui import QImage, QTextCursor
-from PySide6.QtPrintSupport import QPrinter
+from PyQt6.QtGui import QImage, QTextCursor
+from PyQt6.QtPrintSupport import QPrinter
 
-from pyside6_ela_pro import ela_markdown_viewer as viewer_module
-from pyside6_ela_pro import math_lite
-from pyside6_ela_pro.ela_markdown_viewer import ElaMarkdownViewer
+from pyqt6_ela_pro import ela_markdown_viewer as viewer_module
+from pyqt6_ela_pro import math_lite
+from pyqt6_ela_pro.ela_markdown_viewer import ElaMarkdownViewer
 
 
 def _image_fragments(viewer: ElaMarkdownViewer) -> list:

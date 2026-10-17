@@ -12,11 +12,11 @@ import time
 import pytest
 from _qthelpers import wait_for_clipboard as _wait_for_clipboard
 from _qthelpers import wait_until as _wait_until
-from PySide6.QtGui import QColor, QImage, QTextCursor, QTextTable
+from PyQt6.QtGui import QColor, QImage, QTextCursor, QTextTable
 
-import pyside6_ela_pro.mermaid_support as support
-from pyside6_ela_pro.ela_markdown_viewer import ElaMarkdownViewer
-from pyside6_ela_pro.mermaid_support import (
+import pyqt6_ela_pro.mermaid_support as support
+from pyqt6_ela_pro.ela_markdown_viewer import ElaMarkdownViewer
+from pyqt6_ela_pro.mermaid_support import (
     MERMAID_THEME_VARIABLES,
     ElaMermaidRenderer,
     _build_config,
@@ -65,7 +65,7 @@ def _code_tables(viewer: ElaMarkdownViewer) -> list:
 
 
 def _fake_image(theme: str) -> QImage:
-    image = QImage(200, 100, QImage.Format_ARGB32)
+    image = QImage(200, 100, QImage.Format.Format_ARGB32)
     image.fill(QColor("steelblue" if theme == "dark" else "gold"))
     return image
 
@@ -225,7 +225,7 @@ class TestMermaidRendererUnit:
         new_calls = []
 
         def _tagged(width: int, color: str) -> QImage:
-            image = QImage(width, 100, QImage.Format_ARGB32)
+            image = QImage(width, 100, QImage.Format.Format_ARGB32)
             image.fill(QColor(color))
             return image
 

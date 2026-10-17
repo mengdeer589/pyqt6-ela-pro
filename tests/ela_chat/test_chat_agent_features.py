@@ -16,10 +16,10 @@ import json
 
 import pytest
 
-from PySide6.QtCore import QEvent, QPoint, Qt
-from PySide6.QtGui import QMouseEvent
+from PyQt6.QtCore import QEvent, QPoint, Qt, QPointF
+from PyQt6.QtGui import QMouseEvent
 
-from pyside6_ela_pro.chat import (
+from pyqt6_ela_pro.chat import (
     ElaChatStats,
     ElaChatStatusType,
     ElaChatToolStatusType,
@@ -29,12 +29,12 @@ from pyside6_ela_pro.chat import (
     formatCost,
     stats_cost,
 )
-from pyside6_ela_pro.chat.blocks import (
+from pyqt6_ela_pro.chat.blocks import (
     RETRYABLE_ERROR_TYPES,
     CompactionSeparator,
     PermissionRecord,
 )
-from pyside6_ela_pro.chat.message import (
+from pyqt6_ela_pro.chat.message import (
     ElaChatMessage,
     ElaChatOption,
     ElaChatPart,
@@ -136,7 +136,7 @@ class TestManualRetry:
         assert chat.chatView().messageError(mid) == ("", "")
 
     def test_binder_does_not_mangle_type(self, qapp, make):
-        from pyside6_ela_pro.chat import ElaChatStreamBinder
+        from pyqt6_ela_pro.chat import ElaChatStreamBinder
 
         chat = make(ElaChatWidget)
         binder = ElaChatStreamBinder(chat)
@@ -206,7 +206,7 @@ class TestSteer:
         assert message.text == "模型正文"
 
     def test_binder_drains_at_step_boundary(self, qapp, make):
-        from pyside6_ela_pro.chat import ElaChatStreamBinder
+        from pyqt6_ela_pro.chat import ElaChatStreamBinder
 
         chat = make(ElaChatWidget)
         binder = ElaChatStreamBinder(chat)
@@ -218,7 +218,7 @@ class TestSteer:
         assert chat.steerCount() == 0
 
     def test_binder_respects_disabled_flag(self, qapp, make):
-        from pyside6_ela_pro.chat import ElaChatStreamBinder
+        from pyqt6_ela_pro.chat import ElaChatStreamBinder
 
         chat = make(ElaChatWidget)
         chat.setSteerEnabled(False)
@@ -474,7 +474,7 @@ class TestFontScale:
         return mid
 
     def test_every_color_text_has_an_explicit_size(self, qapp, make):
-        from pyside6_ela_pro._styles import ColorText
+        from pyqt6_ela_pro._styles import ColorText
 
         chat = make(ElaChatWidget)
         self._populate(chat)
@@ -490,7 +490,7 @@ class TestFontScale:
 
     def test_the_default_really_is_huge(self, qapp, make):
         """把「默认到底多大」钉住 —— 这是上面那条测试存在的原因。"""
-        from pyside6_ela_pro._styles import ColorText
+        from pyqt6_ela_pro._styles import ColorText
 
         probe = make(ColorText, "probe")
         assert probe.font().pixelSize() > self.MAX_PX, (
@@ -620,7 +620,7 @@ class TestCompaction:
         assert parts[0].text == "## 摘要"
 
     def test_journal_records_compaction(self):
-        from pyside6_ela_pro.chat import ElaChatTurnJournal
+        from pyqt6_ela_pro.chat import ElaChatTurnJournal
 
         journal = ElaChatTurnJournal(messageId=1).begin()
         journal.beginCompaction("auto")
@@ -637,7 +637,7 @@ class TestCompaction:
         assert parts[0].status == ElaChatStatusType.Done
 
     def test_journal_tolerates_truncated_compaction(self):
-        from pyside6_ela_pro.chat import ElaChatTurnJournal
+        from pyqt6_ela_pro.chat import ElaChatTurnJournal
 
         journal = ElaChatTurnJournal(messageId=1).begin()
         journal.beginCompaction("auto")
@@ -875,7 +875,7 @@ class TestContextUsage:
             ring.mousePressEvent(
                 QMouseEvent(
                     QEvent.Type.MouseButtonPress,
-                    at,
+                    QPointF(at),
                     Qt.MouseButton.LeftButton,
                     Qt.MouseButton.LeftButton,
                     Qt.KeyboardModifier.NoModifier,
@@ -884,7 +884,7 @@ class TestContextUsage:
             ring.mouseReleaseEvent(
                 QMouseEvent(
                     QEvent.Type.MouseButtonRelease,
-                    at,
+                    QPointF(at),
                     Qt.MouseButton.LeftButton,
                     Qt.MouseButton.NoButton,
                     Qt.KeyboardModifier.NoModifier,
@@ -900,7 +900,7 @@ class TestContextUsage:
         ring.mousePressEvent(
             QMouseEvent(
                 QEvent.Type.MouseButtonPress,
-                QPoint(11, 11),
+                QPointF(QPoint(11, 11)),
                 Qt.MouseButton.LeftButton,
                 Qt.MouseButton.LeftButton,
                 Qt.KeyboardModifier.NoModifier,
@@ -909,7 +909,7 @@ class TestContextUsage:
         ring.mouseReleaseEvent(
             QMouseEvent(
                 QEvent.Type.MouseButtonRelease,
-                QPoint(-5, -5),
+                QPointF(QPoint(-5, -5)),
                 Qt.MouseButton.LeftButton,
                 Qt.MouseButton.NoButton,
                 Qt.KeyboardModifier.NoModifier,

@@ -13,12 +13,12 @@
 from __future__ import annotations
 
 import pytest
-from PySide6.QtCore import QCoreApplication, Qt
-from PySide6.QtGui import QImage, QPixmap
-from PySide6.QtWidgets import QApplication
+from PyQt6.QtCore import QCoreApplication, Qt
+from PyQt6.QtGui import QImage, QPixmap
+from PyQt6.QtWidgets import QApplication
 
-from pyside6_ela_pro import svg_icon as svg_mod
-from pyside6_ela_pro.selection_assistant.capture import ElaClipboardCapture
+from pyqt6_ela_pro import svg_icon as svg_mod
+from pyqt6_ela_pro.selection_assistant.capture import ElaClipboardCapture
 
 SVG = (
     '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16">'
@@ -75,7 +75,7 @@ def fake_clipboard(monkeypatch):
 
     返回 ``(cb, state)``；``state["n"]`` 是序列号，任何写入都推进它。
     """
-    from pyside6_ela_pro.selection_assistant import capture as capture_mod
+    from pyqt6_ela_pro.selection_assistant import capture as capture_mod
 
     state = {"n": 1000, "text": ""}
 

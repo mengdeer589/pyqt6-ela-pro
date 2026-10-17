@@ -6,10 +6,10 @@ front matter stripping, link tooltips and ``renderIssues``.
 
 from __future__ import annotations
 
-from PySide6.QtCore import QUrl
-from PySide6.QtTest import QTest
+from PyQt6.QtCore import QUrl
+from PyQt6.QtTest import QTest
 
-from pyside6_ela_pro.ela_markdown_viewer import ElaMarkdownViewer
+from pyqt6_ela_pro.ela_markdown_viewer import ElaMarkdownViewer
 
 
 def _plain(viewer: ElaMarkdownViewer) -> str:

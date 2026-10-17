@@ -19,19 +19,19 @@ class TestNonFiniteValuesDoNotEscape:
 
     @pytest.mark.parametrize("value", _NON_FINITE)
     def test_opt_float_never_raises(self, value):
-        from pyside6_ela_pro.charts.core import _opt_float
+        from pyqt6_ela_pro.charts.core import _opt_float
 
         out = _opt_float(value, 7.0)
         assert isinstance(out, float)
 
     @pytest.mark.parametrize("value", [float("inf"), 10**400])
     def test_to_buffer_never_raises(self, value):
-        from pyside6_ela_pro.charts.data import toBuffer
+        from pyqt6_ela_pro.charts.data import toBuffer
 
         toBuffer([value] + [1.0] * 8)
 
     def test_split_number_inf_does_not_escape_setoption(self, qapp, make):
-        from pyside6_ela_pro.charts import ElaChartWidget
+        from pyqt6_ela_pro.charts import ElaChartWidget
 
         chart = make(ElaChartWidget)
         chart.setOption(
@@ -45,7 +45,7 @@ class TestNonFiniteValuesDoNotEscape:
         assert chart.primaryCoord() is not None
 
     def test_axis_label_infinities_do_not_escape_paint(self, qapp, make):
-        from pyside6_ela_pro.charts import ElaChartWidget
+        from pyqt6_ela_pro.charts import ElaChartWidget
 
         for key in ("fontWeight", "interval", "fontSize", "rotate"):
             chart = make(ElaChartWidget)
@@ -65,7 +65,7 @@ class TestNonFiniteValuesDoNotEscape:
             chart.grab()  # 不得静默终止
 
     def test_dispatch_with_infinite_index_does_not_escape(self, qapp, make):
-        from pyside6_ela_pro.charts import ElaChartWidget
+        from pyqt6_ela_pro.charts import ElaChartWidget
 
         chart = make(ElaChartWidget)
         chart.setOption(
@@ -87,7 +87,7 @@ class TestNonFiniteValuesDoNotEscape:
 
     def test_series_data_scalar_does_not_escape_setoption(self, qapp, make):
         """``data: 5`` 之类：此前 ``setOption`` 直接抛 TypeError。"""
-        from pyside6_ela_pro.charts import ElaChartWidget
+        from pyqt6_ela_pro.charts import ElaChartWidget
 
         for bad in (5, 3.5, True):
             chart = make(ElaChartWidget)

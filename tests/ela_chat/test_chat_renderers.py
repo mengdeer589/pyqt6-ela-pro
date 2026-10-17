@@ -1,4 +1,4 @@
-"""工具结果富渲染注册表（``pyside6_ela_pro.chat.renderers``）。
+"""工具结果富渲染注册表（``pyqt6_ela_pro.chat.renderers``）。
 
 守三件容易踩的事：
 
@@ -16,9 +16,9 @@ from __future__ import annotations
 import gc
 
 import pytest
-from PySide6.QtWidgets import QLabel, QVBoxLayout, QWidget
+from PyQt6.QtWidgets import QLabel, QVBoxLayout, QWidget
 
-from pyside6_ela_pro.chat import (
+from pyqt6_ela_pro.chat import (
     ElaChatBubble,
     ToolRenderContext,
     clearToolRenderers,
@@ -28,13 +28,13 @@ from pyside6_ela_pro.chat import (
     toolRendererNames,
     unregisterToolRenderer,
 )
-from pyside6_ela_pro.chat.blocks import (
+from pyqt6_ela_pro.chat.blocks import (
     CONTEXT_TOOLS,
     ToolCallCard,
     toolArgumentPairs,
 )
-from pyside6_ela_pro.chat.message import ElaChatToolCall, ElaChatToolStatusType
-from pyside6_ela_pro.chat.renderers import (
+from pyqt6_ela_pro.chat.message import ElaChatToolCall, ElaChatToolStatusType
+from pyqt6_ela_pro.chat.renderers import (
     _CONTEXT_TOOLS,
     parseToolArguments,
     toolRendererSubtitle,
@@ -350,13 +350,13 @@ class TestBubbleIntegration:
         assert bubble.toolGrouping() is True
         bubble.addToolCall("read", '{"path": "a.py"}')
         # 没进分组卡 => 没有 ContextToolGroupCard
-        from pyside6_ela_pro.chat.blocks import ContextToolGroupCard
+        from pyqt6_ela_pro.chat.blocks import ContextToolGroupCard
 
         assert bubble.toolPanel().findChild(ContextToolGroupCard) is None
         assert bubble.toolPanel().findChild(ToolCallCard) is not None
 
     def test_context_tool_without_renderer_still_groups(self, qapp, make):
-        from pyside6_ela_pro.chat.blocks import ContextToolGroupCard
+        from pyqt6_ela_pro.chat.blocks import ContextToolGroupCard
 
         bubble = make(ElaChatBubble, "assistant")
         bubble.addToolCall("read", '{"path": "a.py"}')

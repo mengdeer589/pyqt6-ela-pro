@@ -3,11 +3,11 @@
 from __future__ import annotations
 
 import pytest
-from PySide6.QtCore import QPropertyAnimation
+from PyQt6.QtCore import QPropertyAnimation
 
-from pyside6_ela_pro._motion import Duration
-from pyside6_ela_pro.combo_box import ElaSearchBox
-from pyside6_ela_pro.ela_tag_search_box import ElaTagSearchBox
+from pyqt6_ela_pro._motion import Duration
+from pyqt6_ela_pro.combo_box import ElaSearchBox
+from pyqt6_ela_pro.ela_tag_search_box import ElaTagSearchBox
 
 
 @pytest.fixture

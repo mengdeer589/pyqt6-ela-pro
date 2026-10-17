@@ -19,12 +19,12 @@
 from __future__ import annotations
 
 import pytest
-from PySide6.QtCore import QPointF
-from PySide6.QtWidgets import QApplication
+from PyQt6.QtCore import QPointF
+from PyQt6.QtWidgets import QApplication
 
 np = pytest.importorskip("numpy")
 
-from pyside6_ela_pro.charts import ElaChartWidget  # noqa: E402
+from pyqt6_ela_pro.charts import ElaChartWidget  # noqa: E402
 
 
 def _chart(make, option, w=1200, h=700):

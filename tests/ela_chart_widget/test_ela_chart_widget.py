@@ -7,27 +7,27 @@ import random
 import time
 
 import pytest
-from PySide6.QtCore import QPoint, QPointF, Qt
-from PySide6.QtGui import QWheelEvent
-from PySide6.QtWidgets import QApplication, QScrollArea, QVBoxLayout, QWidget
-from PySide6ElaWidgetTools import ElaThemeType, eTheme
+from PyQt6.QtCore import QPoint, QPointF, Qt
+from PyQt6.QtGui import QWheelEvent
+from PyQt6.QtWidgets import QApplication, QScrollArea, QVBoxLayout, QWidget
+from PyQt6ElaWidgetTools import ElaThemeType, eTheme
 
-from pyside6_ela_pro.charts import (
+from pyqt6_ela_pro.charts import (
     SERIES_REGISTRY,
     ElaChartWidget,
     formatValue,
     niceTicks,
     parseDataPoint,
 )
-from pyside6_ela_pro.charts import _downsample as ds
-from pyside6_ela_pro.charts.axes import GridCoord
-from pyside6_ela_pro.charts.series_cartesian import (
+from pyqt6_ela_pro.charts import _downsample as ds
+from pyqt6_ela_pro.charts.axes import GridCoord
+from pyqt6_ela_pro.charts.series_cartesian import (
     BarSeriesRenderer,
     HeatmapSeriesRenderer,
     LineSeriesRenderer,
     ScatterSeriesRenderer,
 )
-from pyside6_ela_pro.charts.series_hierarchy import PieSeriesRenderer
+from pyqt6_ela_pro.charts.series_hierarchy import PieSeriesRenderer
 
 
 def _line_option():
@@ -600,8 +600,8 @@ class TestInteract:
         sb = sa.verticalScrollBar()
         plot = chart.coords[0].plot
         ev = QWheelEvent(
-            plot.center(),
-            chart.mapToGlobal(plot.center().toPoint()),
+            QPointF(plot.center()),
+            QPointF(chart.mapToGlobal(plot.center().toPoint())),
             QPoint(0, 0),
             QPoint(0, 120),
             Qt.MouseButton.NoButton,
@@ -637,7 +637,7 @@ class TestInteract:
         dz = next(c for c in chart.components if c.optionKey == "dataZoom")
         ev = QWheelEvent(
             QPointF(4, chart.height() - 6),
-            chart.mapToGlobal(QPoint(4, chart.height() - 6)),
+            QPointF(chart.mapToGlobal(QPoint(4, chart.height() - 6))),
             QPoint(0, 0),
             QPoint(0, 120),
             Qt.MouseButton.NoButton,
@@ -671,8 +671,8 @@ class TestInteract:
         dz = next(c for c in chart.components if c.optionKey == "dataZoom")
         track = dz._track
         ev = QWheelEvent(
-            track.center(),
-            chart.mapToGlobal(track.center().toPoint()),
+            QPointF(track.center()),
+            QPointF(chart.mapToGlobal(track.center().toPoint())),
             QPoint(0, 0),
             QPoint(0, 120),
             Qt.MouseButton.NoButton,

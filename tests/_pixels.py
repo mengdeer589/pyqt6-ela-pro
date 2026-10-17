@@ -12,7 +12,7 @@
 
 from __future__ import annotations
 
-from PySide6.QtGui import QColor
+from PyQt6.QtGui import QColor
 
 
 def opaque_colors(widget) -> set:

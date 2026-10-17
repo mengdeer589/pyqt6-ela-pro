@@ -16,9 +16,9 @@ from __future__ import annotations
 
 import pytest
 
-from pyside6_ela_pro.charts import _downsample as _ds
-from pyside6_ela_pro.charts import axes as _axes
-from pyside6_ela_pro.charts.data import numpyAvailable
+from pyqt6_ela_pro.charts import _downsample as _ds
+from pyqt6_ela_pro.charts import axes as _axes
+from pyqt6_ela_pro.charts.data import numpyAvailable
 
 np = _ds.np
 
@@ -37,7 +37,7 @@ class _Stub:
 
 @pytest.fixture
 def coord():
-    from pyside6_ela_pro.charts.axes import GridCoord
+    from pyqt6_ela_pro.charts.axes import GridCoord
 
     _axes._EXTENT_CACHE.clear()
     return GridCoord(_Stub(), {"xAxis": {"type": "value"}, "yAxis": {}})
@@ -128,7 +128,7 @@ class TestExtentCache:
 
     def test_buffer_input_supported(self, coord):
         """缓冲区（大数组摄入后的常态）也能算范围。"""
-        from pyside6_ela_pro.charts.data import toBuffer
+        from pyqt6_ela_pro.charts.data import toBuffer
 
         buf = toBuffer(_data(1000))
         assert buf is not None
@@ -138,7 +138,7 @@ class TestExtentCache:
 
     def test_nan_gaps_do_not_poison_extent(self, coord):
         """None 间隙（→NaN）不得把轴范围变成 NaN（nanmin/nanmax 口径）。"""
-        from pyside6_ela_pro.charts.data import toBuffer
+        from pyqt6_ela_pro.charts.data import toBuffer
 
         data = [1.0] * 600
         data[100] = None
@@ -153,7 +153,7 @@ class TestExtentCache:
 
     def test_all_nan_returns_none(self, coord):
         """全 NaN 无有效范围 → None（调用方回退默认 0~1）。"""
-        from pyside6_ela_pro.charts.data import toBuffer
+        from pyqt6_ela_pro.charts.data import toBuffer
 
         buf = toBuffer([None] * 600)
         assert coord._extent(buf) is None

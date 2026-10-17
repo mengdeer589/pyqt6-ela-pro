@@ -4,7 +4,7 @@
 ``self._longPressBtn.setDuration(ms)``，而组件当时暴露的是 ``set_duration`` ——
 ``AttributeError`` 从按钮的 ``clicked`` 槽里抛出去，PyQt5 直接 0xC0000409
 **静默终止**（连 pytest 报告都没有）。全量测试绿、ruff 绿，只有真的
-``python -m pyside6_ela_pro.example`` 才暴露。
+``python -m pyqt6_ela_pro.example`` 才暴露。
 
 所以这里逐个点名调用那些**确定无副作用**的演示回调：只改控件属性 / 发信号，
 不弹模态框（``ElaConfirmDialog`` 在测试进程里会直接阻塞）、不开文件对话框。
@@ -13,10 +13,10 @@
 from __future__ import annotations
 
 import pytest
-from PySide6.QtGui import QColor
-from PySide6.QtWidgets import QApplication
+from PyQt6.QtGui import QColor
+from PyQt6.QtWidgets import QApplication
 
-from pyside6_ela_pro.example.buttons_menus_page import ButtonsMenusPage
+from pyqt6_ela_pro.example.buttons_menus_page import ButtonsMenusPage
 
 
 @pytest.fixture

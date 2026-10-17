@@ -16,9 +16,9 @@
 from __future__ import annotations
 
 import pytest
-from PySide6.QtGui import QFocusEvent
+from PyQt6.QtGui import QFocusEvent
 
-from pyside6_ela_pro.ela_selector_bar import ElaSelectorBar, SelectorBarItem
+from pyqt6_ela_pro.ela_selector_bar import ElaSelectorBar, SelectorBarItem
 
 
 @pytest.fixture
@@ -194,7 +194,7 @@ class TestIndicatorValueChangedConnectedOnce:
     def test_receiver_count_stays_at_one(self, bar, monkeypatch):
         """每切一次不得叠一个 ``valueChanged`` 接收者。
 
-        ``QObject.receivers()`` 在 PySide6 下对所有信号都不可用（见 MIGRATION），
+        ``QObject.receivers()`` 在 PyQt6 下对所有信号都不可用（见 MIGRATION），
         改为**数处理函数实际被调用的次数** —— 槽虽幂等，但叠连接会让次数线性增长。
         """
         bar.show()

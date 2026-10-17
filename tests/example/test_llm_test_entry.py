@@ -20,7 +20,7 @@ if not (_REPO_ROOT / "llm_test" / "main.py").is_file():
 import llm_test.agent_demo as agent_demo  # noqa: E402
 from llm_test.main import DemoWindow, classify_error, create_worker  # noqa: E402
 
-from pyside6_ela_pro.chat import ElaChatMockBackend, ElaChatRoleType  # noqa: E402
+from pyqt6_ela_pro.chat import ElaChatMockBackend, ElaChatRoleType  # noqa: E402
 
 
 class TestCreateWorker:

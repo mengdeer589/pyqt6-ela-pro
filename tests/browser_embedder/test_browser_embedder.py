@@ -5,11 +5,11 @@ import ctypes
 import pytest
 from unittest.mock import MagicMock, patch
 from pathlib import Path
-from PySide6.QtCore import QUrl
+from PyQt6.QtCore import QUrl
 
-import pyside6_ela_pro.browser_embedder as browser_embedder_mod
+import pyqt6_ela_pro.browser_embedder as browser_embedder_mod
 
-from pyside6_ela_pro.browser_embedder import (
+from pyqt6_ela_pro.browser_embedder import (
     _BrowserController,
     _BrowserSession,
     _normalize_url,
@@ -21,7 +21,7 @@ from pyside6_ela_pro.browser_embedder import (
 def _make_embedder() -> ElaBrowserEmbedder:
     """构造一个不依赖真实 pywin32 的实例（win32 全部替换为 mock）。"""
     with patch.multiple(
-        "pyside6_ela_pro.browser_embedder",
+        "pyqt6_ela_pro.browser_embedder",
         win32gui=MagicMock(),
         win32con=MagicMock(),
         win32process=MagicMock(),
@@ -49,7 +49,7 @@ class TestBrowserControllerInit:
 
 class TestBrowserControllerConnection:
     def test_connect_creates_websocket(self):
-        with patch("pyside6_ela_pro.browser_embedder.QWebSocket") as mock_ws:
+        with patch("pyqt6_ela_pro.browser_embedder.QWebSocket") as mock_ws:
             ctrl = _BrowserController("ws://127.0.0.1:9222")
             ctrl.connect()
             mock_ws_instance = mock_ws.return_value
@@ -126,16 +126,16 @@ class TestBrowserControllerCallbacks:
 
 class TestElaBrowserEmbedderInit:
     def test_check_dependencies_raises_without_win32(self):
-        with patch("pyside6_ela_pro.browser_embedder.win32gui", None):
-            with patch("pyside6_ela_pro.browser_embedder.win32con", None):
-                import pyside6_ela_pro.browser_embedder as be
+        with patch("pyqt6_ela_pro.browser_embedder.win32gui", None):
+            with patch("pyqt6_ela_pro.browser_embedder.win32con", None):
+                import pyqt6_ela_pro.browser_embedder as be
 
                 with pytest.raises(ImportError, match="pywin32"):
                     be.ElaBrowserEmbedder._checkDependencies()
 
     def test_has_signals(self):
         with patch.multiple(
-            "pyside6_ela_pro.browser_embedder",
+            "pyqt6_ela_pro.browser_embedder",
             win32gui=MagicMock(),
             win32con=MagicMock(),
             win32process=MagicMock(),
@@ -158,7 +158,7 @@ class TestElaBrowserEmbedderStatic:
 class TestElaBrowserEmbedderNavigateRunJS:
     def test_navigate_returns_none_when_no_controller(self):
         with patch.multiple(
-            "pyside6_ela_pro.browser_embedder",
+            "pyqt6_ela_pro.browser_embedder",
             win32gui=MagicMock(),
             win32con=MagicMock(),
             win32process=MagicMock(),
@@ -170,7 +170,7 @@ class TestElaBrowserEmbedderNavigateRunJS:
 
     def test_runJS_returns_none_when_no_controller(self):
         with patch.multiple(
-            "pyside6_ela_pro.browser_embedder",
+            "pyqt6_ela_pro.browser_embedder",
             win32gui=MagicMock(),
             win32con=MagicMock(),
             win32process=MagicMock(),
@@ -182,7 +182,7 @@ class TestElaBrowserEmbedderNavigateRunJS:
 
     def test_load_url_path_conversion(self):
         with patch.multiple(
-            "pyside6_ela_pro.browser_embedder",
+            "pyqt6_ela_pro.browser_embedder",
             win32gui=MagicMock(),
             win32con=MagicMock(),
             win32process=MagicMock(),
@@ -194,7 +194,7 @@ class TestElaBrowserEmbedderNavigateRunJS:
 
     def test_load_url_string(self):
         with patch.multiple(
-            "pyside6_ela_pro.browser_embedder",
+            "pyqt6_ela_pro.browser_embedder",
             win32gui=MagicMock(),
             win32con=MagicMock(),
             win32process=MagicMock(),
@@ -389,7 +389,7 @@ class TestEmbedSessionAcquire:
         try:
             with (
                 patch.multiple(
-                    "pyside6_ela_pro.browser_embedder",
+                    "pyqt6_ela_pro.browser_embedder",
                     win32gui=MagicMock(),
                     win32con=MagicMock(),
                     win32process=MagicMock(),

@@ -1,4 +1,4 @@
-"""``pyside6_ela_pro.ela_field`` 的单元测试。
+"""``pyqt6_ela_pro.ela_field`` 的单元测试。
 
 钉住的核心不变量（搬运时改道 / 踩过的）：
 
@@ -15,18 +15,18 @@
 from __future__ import annotations
 
 import pytest
-from PySide6.QtCore import QCoreApplication, QEvent, Qt
-from PySide6.QtWidgets import QLineEdit, QWidget
+from PyQt6.QtCore import QCoreApplication, QEvent, Qt
+from PyQt6.QtWidgets import QLineEdit, QWidget
 
-from pyside6_ela_pro._ownership import ElaWidgetOwnershipType
-from pyside6_ela_pro._theme import (
+from pyqt6_ela_pro._ownership import ElaWidgetOwnershipType
+from pyqt6_ela_pro._theme import (
     ElaStatusRoleType,
     currentMode,
     statusColor,
     text,
     textMuted,
 )
-from pyside6_ela_pro.ela_field import (
+from pyqt6_ela_pro.ela_field import (
     _GAP,
     _ICON_HOST,
     _LABEL_PX,
@@ -35,7 +35,8 @@ from pyside6_ela_pro.ela_field import (
     ElaFieldStatusType,
 )
 
-from PySide6ElaWidgetTools import ElaIconType
+from PyQt6ElaWidgetTools import ElaIconType
+from PyQt6 import sip
 
 
 @pytest.fixture
@@ -283,37 +284,33 @@ class TestEditorSlot:
         assert got is editor
         assert got.parentWidget() is None
         _flush(got)
-        import shiboken6
 
-        assert not shiboken6.isValid(got) is False
+        assert sip.isdeleted(got) is False
 
     def test_take_never_deletes_even_when_owned(self, field):
         """``take`` 的语义是「交还」，不套用 Owned 的删除。"""
-        import shiboken6
 
         editor = QLineEdit()
         field.setEditor(editor, ElaWidgetOwnershipType.Owned)
         got = field.takeEditor()
         _flush(got)
-        assert not shiboken6.isValid(got) is False
+        assert sip.isdeleted(got) is False
 
     def test_release_owned_deletes(self, field, qapp):
-        import shiboken6
 
         editor = QLineEdit()
         field.setEditor(editor, ElaWidgetOwnershipType.Owned)
         field.releaseEditor()
         _flush(editor)
-        assert not shiboken6.isValid(editor) is True
+        assert sip.isdeleted(editor) is True
 
     def test_release_borrowed_keeps_widget(self, field, qapp):
-        import shiboken6
 
         editor = QLineEdit()
         field.setEditor(editor, ElaWidgetOwnershipType.Borrowed)
         field.releaseEditor()
         _flush(editor)
-        assert not shiboken6.isValid(editor) is False
+        assert sip.isdeleted(editor) is False
         assert editor.parentWidget() is None
 
     def test_external_destruction_self_heals(self, field, qapp):
@@ -348,7 +345,7 @@ class TestThemeSwitch:
         这条钉的是「钩子名写错」这类静默失效：接不上 ``themeModeChanged`` 时切完主题
         标题与说明会停在旧色，而所有 setter 都正常、**不报任何错**。
         """
-        from PySide6ElaWidgetTools import ElaThemeType as TT, eTheme
+        from PyQt6ElaWidgetTools import ElaThemeType as TT, eTheme
 
         f = self.make(ElaField)
         f.setHelperText("x")
@@ -365,7 +362,7 @@ class TestThemeSwitch:
         assert light != dark
 
     def test_caption_color_follows_theme(self, motion_full):
-        from PySide6ElaWidgetTools import ElaThemeType as TT, eTheme
+        from PyQt6ElaWidgetTools import ElaThemeType as TT, eTheme
 
         f = self.make(ElaField)
         f.setLabel("x")
@@ -378,7 +375,7 @@ class TestThemeSwitch:
         assert dark == text(TT.ThemeMode.Dark).name()
 
     def test_required_mark_color_follows_theme(self, motion_full):
-        from PySide6ElaWidgetTools import ElaThemeType as TT, eTheme
+        from PyQt6ElaWidgetTools import ElaThemeType as TT, eTheme
 
         f = self.make(ElaField)
         f.setRequired(True)
@@ -396,7 +393,7 @@ class TestNoQss:
         """机器守卫：本模块（及它依赖的 Field 组件面）不得出现 ``setStyleSheet``。"""
         import pathlib
 
-        import pyside6_ela_pro.ela_field as mod
+        import pyqt6_ela_pro.ela_field as mod
 
         source = pathlib.Path(mod.__file__).read_text(encoding="utf-8")
         assert ".setStyleSheet(" not in source

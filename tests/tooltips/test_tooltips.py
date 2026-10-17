@@ -2,14 +2,14 @@
 
 from __future__ import annotations
 
-import shiboken6
-from PySide6.QtCore import QCoreApplication, QEvent, QObject, QPoint, Qt, Signal
-from PySide6.QtGui import QColor, QHelpEvent, QPalette
-from PySide6.QtWidgets import QApplication, QLabel, QVBoxLayout, QWidget
-from PySide6ElaWidgetTools import ElaThemeType, eTheme
+from PyQt6 import sip
+from PyQt6.QtCore import QCoreApplication, QEvent, QObject, QPoint, Qt, pyqtSignal
+from PyQt6.QtGui import QColor, QHelpEvent, QPalette
+from PyQt6.QtWidgets import QApplication, QLabel, QVBoxLayout, QWidget
+from PyQt6ElaWidgetTools import ElaThemeType, eTheme
 
-import pyside6_ela_pro.tooltips as tooltips_module
-from pyside6_ela_pro.tooltips import (
+import pyqt6_ela_pro.tooltips as tooltips_module
+from pyqt6_ela_pro.tooltips import (
     TOOLTIP_BORDER_RADIUS,
     ElaStateToolTip,
     ElaToolTip,
@@ -37,7 +37,7 @@ class TestToolTip:
         tooltip = ElaToolTip()
 
         flags = tooltip.windowFlags()
-        assert flags & Qt.FramelessWindowHint
+        assert flags & Qt.WindowType.FramelessWindowHint
 
         tooltip.deleteLater()
 
@@ -46,7 +46,7 @@ class TestToolTip:
         tooltip = ElaToolTip()
 
         flags = tooltip.windowFlags()
-        assert flags & Qt.Tool
+        assert flags & Qt.WindowType.Tool
 
         tooltip.deleteLater()
 
@@ -55,7 +55,7 @@ class TestToolTip:
         tooltip = ElaToolTip()
 
         flags = tooltip.windowFlags()
-        assert flags & Qt.WindowStaysOnTopHint
+        assert flags & Qt.WindowType.WindowStaysOnTopHint
 
         tooltip.deleteLater()
 
@@ -101,7 +101,7 @@ class TestToolTip:
         assert tooltip.size().width() == 60 + 24
         assert first.parent() is None
         QCoreApplication.sendPostedEvents(first, QEvent.Type.DeferredDelete)
-        assert not shiboken6.isValid(first)
+        assert sip.isdeleted(first)
 
         tooltip.deleteLater()
         qapp.processEvents()
@@ -144,7 +144,7 @@ class TestToolTip:
         """Test ElaToolTip has translucent background."""
         tooltip = ElaToolTip()
 
-        assert tooltip.testAttribute(Qt.WA_TranslucentBackground)
+        assert tooltip.testAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
 
         tooltip.deleteLater()
 
@@ -254,7 +254,7 @@ class TestSetTooltip:
         qapp.processEvents()
 
     def test_custom_tooltip_suppresses_native_tooltip(self, qapp):
-        """绑定自定义提示后吞掉 QEvent.ToolTip，避免原生 QToolTip 双提示。"""
+        """绑定自定义提示后吞掉 QEvent.Type.ToolTip，避免原生 QToolTip 双提示。"""
 
         widget = QWidget()
         widget.setToolTip("提示")
@@ -295,7 +295,7 @@ class TestToolTipClamp:
 
     def _child(self, qapp):
         parent = QWidget()
-        parent.setWindowFlags(Qt.Window)
+        parent.setWindowFlags(Qt.WindowType.Window)
         parent.setGeometry(320, 240, 260, 200)
         parent.show()
         child = QWidget(parent)
@@ -397,7 +397,7 @@ class TestToolTipTheme:
     def test_theme_signal_reconnects_text_color(self, qapp, monkeypatch):
 
         class _FakeTheme(QObject):
-            themeModeChanged = Signal(object)
+            themeModeChanged = pyqtSignal(object)
 
             def getThemeMode(self):
                 return ElaThemeType.ThemeMode.Light

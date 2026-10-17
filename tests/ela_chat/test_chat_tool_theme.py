@@ -23,19 +23,19 @@
 from __future__ import annotations
 
 import pytest
-from PySide6.QtGui import QColor
-from PySide6ElaWidgetTools import ElaThemeType, eTheme
+from PyQt6.QtGui import QColor
+from PyQt6ElaWidgetTools import ElaThemeType, eTheme
 
-from pyside6_ela_pro._styles import ColorText
-from pyside6_ela_pro.chat import ElaChatWidget
-from pyside6_ela_pro.chat._theme import (
+from pyqt6_ela_pro._styles import ColorText
+from pyqt6_ela_pro.chat import ElaChatWidget
+from pyqt6_ela_pro.chat._theme import (
     accent_color,
     base_color,
     blend,
     muted_color,
     text_color,
 )
-from pyside6_ela_pro.chat.blocks import ToolCallCard
+from pyqt6_ela_pro.chat.blocks import ToolCallCard
 
 
 @pytest.fixture
@@ -205,7 +205,11 @@ class TestToolAreaLegibility:
         for panel in bubble.toolPanels():
             for label in [panel._title_label, *panel.findChildren(ColorText)]:
                 assert label._text_color is not None
-                assert not label.getElaIcon(), "工具区不该有图标模式 ColorText"
+                # ``getElaIcon()`` 在 PyQt6 返回枚举成员（``None_`` 恒真），要显式比 0
+                icon = label.getElaIcon()
+                assert icon is None or int(getattr(icon, "value", icon)) == 0, (
+                    "工具区不该有图标模式 ColorText"
+                )
                 assert not label.getIsWrapAnywhere(), (
                     "工具区不该有 wrap-anywhere ColorText（会绕过自愈分支）"
                 )

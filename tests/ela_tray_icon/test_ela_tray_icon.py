@@ -8,13 +8,13 @@ from __future__ import annotations
 
 import pytest
 from _qthelpers import flush_events
-from PySide6.QtCore import QCoreApplication, QEvent, Qt
-from PySide6.QtGui import QColor, QIcon, QPainter, QPixmap
-from PySide6.QtWidgets import QMenu, QSystemTrayIcon
+from PyQt6.QtCore import QCoreApplication, QEvent, Qt
+from PyQt6.QtGui import QColor, QIcon, QPainter, QPixmap
+from PyQt6.QtWidgets import QMenu, QSystemTrayIcon
 
-from pyside6_ela_pro import ElaMenuItem, ElaTrayIcon
-from pyside6_ela_pro._internal import is_deleted
-from pyside6_ela_pro.ela_tray_icon import ElaTrayIcon as _Direct
+from pyqt6_ela_pro import ElaMenuItem, ElaTrayIcon
+from pyqt6_ela_pro._internal import is_deleted
+from pyqt6_ela_pro.ela_tray_icon import ElaTrayIcon as _Direct
 
 
 def dot(color: str) -> QIcon:
@@ -43,12 +43,12 @@ class TestPublicApi:
     def test_exported_from_package(self):
         assert ElaTrayIcon is _Direct
         assert (
-            "ElaTrayIcon" in __import__("pyside6_ela_pro", fromlist=["__all__"]).__all__
+            "ElaTrayIcon" in __import__("pyqt6_ela_pro", fromlist=["__all__"]).__all__
         )
 
     def test_menu_item_is_shared(self):
         """菜单项模型与划词助手共用同一个 dataclass。"""
-        from pyside6_ela_pro import menu_item as module
+        from pyqt6_ela_pro import menu_item as module
 
         assert module.ElaMenuItem is ElaMenuItem
         assert ElaMenuItem("a", "A").enabled is True
@@ -115,7 +115,7 @@ class TestMenu:
         assert tray.menu() is None
 
     def test_accepts_ela_menu(self, make, tray):
-        from PySide6ElaWidgetTools import ElaMenu
+        from PyQt6ElaWidgetTools import ElaMenu
 
         menu = ElaMenu()
         tray.setMenu(menu)
@@ -201,7 +201,7 @@ class TestLifecycle:
 
     def test_theme_change_after_delete_does_not_raise(self, make, qapp):
         """析构时断开 themeModeChanged：之后切主题不得再回调到野对象。"""
-        from PySide6ElaWidgetTools import ElaThemeType, eTheme
+        from PyQt6ElaWidgetTools import ElaThemeType, eTheme
 
         t = make(ElaTrayIcon, dot("#ff0000"))
         t.show()

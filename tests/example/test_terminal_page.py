@@ -9,8 +9,8 @@
 from __future__ import annotations
 
 from _qthelpers import wait_until as _wait_until
-from pyside6_ela_pro import ElaButton, ElaTerminalView, terminalThemes
-from pyside6_ela_pro.example.terminal_page import TerminalPage
+from pyqt6_ela_pro import ElaButton, ElaTerminalView, terminalThemes
+from pyqt6_ela_pro.example.terminal_page import TerminalPage
 
 
 def _buttons(page):

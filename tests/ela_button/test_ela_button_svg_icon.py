@@ -13,13 +13,13 @@
 from __future__ import annotations
 
 import pytest
-from PySide6.QtCore import QSize
-from PySide6.QtGui import QColor
+from PyQt6.QtCore import QSize
+from PyQt6.QtGui import QColor
 
-from PySide6ElaWidgetTools import ElaIconType, ElaThemeType, eTheme
+from PyQt6ElaWidgetTools import ElaIconType, ElaThemeType, eTheme
 
-from pyside6_ela_pro.ela_button import ElaButton
-from pyside6_ela_pro.svg_icon import svg_icon_loader
+from pyqt6_ela_pro.ela_button import ElaButton
+from pyqt6_ela_pro.svg_icon import svg_icon_loader
 
 #: 带主题色占位符的描边 SVG（占位符会被替换成当前主题文字色）
 _SVG = (
@@ -165,7 +165,7 @@ class TestThemeFollow:
         用**整图标范围**扫而不是角点采样：``M4 4h16v16H4z`` 描边宽 2，
         角点 (4,4) 落在圆角外侧，本来就是透明的。
         """
-        from pyside6_ela_pro.svg_icon import svg_to_pixmap
+        from pyqt6_ela_pro.svg_icon import svg_to_pixmap
         from _pixels import skip_if_no_pixels
 
         colored = svg_to_pixmap(_SVG, 16, "#ff0000")

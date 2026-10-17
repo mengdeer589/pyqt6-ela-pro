@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-from PySide6.QtCore import QRect, Qt
+from PyQt6.QtCore import QRect, Qt
 
-from pyside6_ela_pro.notify_popup import ElaNotifyManager, ElaNotifyPopup
+from pyqt6_ela_pro.notify_popup import ElaNotifyManager, ElaNotifyPopup
 
 
 class TestElaNotifyPopup:
@@ -66,7 +66,7 @@ class TestElaNotifyPopup:
         popup = ElaNotifyPopup()
 
         flags = popup.windowFlags()
-        assert flags & Qt.FramelessWindowHint
+        assert flags & Qt.WindowType.FramelessWindowHint
 
         popup.deleteLater()
 
@@ -74,7 +74,7 @@ class TestElaNotifyPopup:
         """Test ElaNotifyPopup has translucent background attribute."""
         popup = ElaNotifyPopup()
 
-        assert popup.testAttribute(Qt.WA_TranslucentBackground)
+        assert popup.testAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
 
         popup.deleteLater()
 

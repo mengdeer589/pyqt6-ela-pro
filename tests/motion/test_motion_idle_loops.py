@@ -13,12 +13,13 @@
 from __future__ import annotations
 
 import pytest
-from PySide6.QtCore import QTimer
-from PySide6.QtWidgets import QWidget
+from PyQt6 import sip
+from PyQt6.QtCore import QTimer
+from PyQt6.QtWidgets import QWidget
 
-import pyside6_ela_pro._motion as _motion
+import pyqt6_ela_pro._motion as _motion
 
-from pyside6_ela_pro._motion import (
+from pyqt6_ela_pro._motion import (
     ElaMotionKindType,
     ElaMotionModeType,
     idle_loop_running,
@@ -144,16 +145,15 @@ class TestStartIdleLoop:
         t.timeout.connect(lambda: None)
         start_idle_loop(t, 50)
         host.deleteLater()
-        import shiboken6  # noqa: F401
+        from PyQt6 import sip  # noqa: F401
 
         from _qthelpers import wait_until
 
-        wait_until(qapp, lambda: not shiboken6.isValid(host), timeout_ms=500, use_qwait=True)
+        wait_until(qapp, lambda: sip.isdeleted(host), timeout_ms=500, use_qwait=True)
         motion.setMode(ElaMotionModeType.Reduced)  # 不应抛出
         motion.setMode(ElaMotionModeType.Full)
 
     def test_idle_loop_running_handles_deleted(self, qapp):
-        import shiboken6
 
         host = QWidget()
         t = QTimer(host)
@@ -162,7 +162,7 @@ class TestStartIdleLoop:
         host.deleteLater()
         from _qthelpers import wait_until
 
-        wait_until(qapp, lambda: not shiboken6.isValid(host), timeout_ms=500, use_qwait=True)
+        wait_until(qapp, lambda: sip.isdeleted(host), timeout_ms=500, use_qwait=True)
         assert idle_loop_running(t) is False
 
     def test_repeated_registration_does_not_duplicate(self, qapp, motion_full):
@@ -189,7 +189,7 @@ class TestStartIdleLoop:
         import gc
         import weakref
 
-        from PySide6.QtCore import QCoreApplication, QEvent
+        from PyQt6.QtCore import QCoreApplication, QEvent
 
         class Owner(QWidget):
             def __init__(self):
@@ -229,7 +229,7 @@ class TestStartIdleLoop:
         import gc
         import weakref
 
-        from PySide6.QtCore import QCoreApplication, QEvent
+        from PyQt6.QtCore import QCoreApplication, QEvent
 
         class Owner(QWidget):
             def __init__(self):
@@ -296,7 +296,7 @@ class TestRealIdleLoops:
 
         停在低相位就是个若隐若现的灰点，用户看不出「正在生成」。
         """
-        from pyside6_ela_pro.chat.blocks import _StatusDot
+        from pyqt6_ela_pro.chat.blocks import _StatusDot
 
         dot = _StatusDot()
         dot.setActive(True)
@@ -305,7 +305,7 @@ class TestRealIdleLoops:
 
     def test_spinner_arc_freezes_rather_than_disappears(self, qapp, reduced_motion):
         """旋转类：角度冻结即静态基态（仍是一段可见的弧）。"""
-        from pyside6_ela_pro.blueprint._spinner import SpinnerArc
+        from pyqt6_ela_pro.blueprint._spinner import SpinnerArc
 
         arc = SpinnerArc(size=24)
         assert arc.isRunning() is False
@@ -317,7 +317,7 @@ class TestRealIdleLoops:
         停在 phase 0 等于把光标删掉，用户会以为流式卡住了。这是「停掉 ≠ 不画」
         最容易踩的一条。
         """
-        from pyside6_ela_pro.ela_markdown_viewer import ElaMarkdownViewer
+        from pyqt6_ela_pro.ela_markdown_viewer import ElaMarkdownViewer
 
         viewer = ElaMarkdownViewer()
         try:
@@ -329,7 +329,7 @@ class TestRealIdleLoops:
             qapp.processEvents()
 
     def test_tooltip_spinner_stops(self, qapp, reduced_motion):
-        from pyside6_ela_pro.tooltips import (
+        from pyqt6_ela_pro.tooltips import (
             TOOLTIP_ROTATE_TIMER_INTERVAL,
             ElaStateToolTip,
         )
@@ -345,7 +345,7 @@ class TestRealIdleLoops:
             qapp.processEvents()
 
     def test_chart_loading_spinner_stops(self, qapp, reduced_motion):
-        from pyside6_ela_pro.charts.core import ElaChartWidget
+        from pyqt6_ela_pro.charts.core import ElaChartWidget
 
         chart = ElaChartWidget()
         try:
@@ -361,7 +361,7 @@ class TestRealIdleLoops:
 class TestHandRolledTransitions:
     def test_gauge_settles_to_target_under_disabled(self, qapp, disabled_motion):
         """桶 A2：gauge 的插值被 snap 时必须**直接落到目标值**。"""
-        from pyside6_ela_pro.ela_dashboard_gauge import ElaDashboardGauge
+        from pyqt6_ela_pro.ela_dashboard_gauge import ElaDashboardGauge
 
         gauge = ElaDashboardGauge()
         try:
@@ -376,7 +376,7 @@ class TestHandRolledTransitions:
             qapp.processEvents()
 
     def test_spotlight_fade_in_lands_at_one(self, qapp, disabled_motion):
-        from pyside6_ela_pro.ela_spotlight import ElaSpotlight
+        from pyqt6_ela_pro.ela_spotlight import ElaSpotlight
 
         spot = ElaSpotlight()
         try:
@@ -393,7 +393,7 @@ class TestHandRolledTransitions:
         splash 的收尾是「关自己 + show/raise/activate 主窗口」—— 这是一条完整的
         应用交接流程，丢了就等于应用永远停在启动屏。
         """
-        from pyside6_ela_pro.splash_screen import ElaSplashScreen
+        from pyqt6_ela_pro.splash_screen import ElaSplashScreen
 
         closed: list[int] = []
         main = QWidget()

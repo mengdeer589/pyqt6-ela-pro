@@ -1,18 +1,18 @@
-"""``pyside6_ela_pro._styles`` 的禁 QSS 原语（内部模块，直接测行为）。"""
+"""``pyqt6_ela_pro._styles`` 的禁 QSS 原语（内部模块，直接测行为）。"""
 
 from __future__ import annotations
 
-from PySide6.QtGui import QColor, QPainter, QPalette
-from PySide6.QtWidgets import QFrame, QTextBrowser, QWidget
+from PyQt6.QtGui import QColor, QPainter, QPalette
+from PyQt6.QtWidgets import QFrame, QTextBrowser, QWidget
 
-from pyside6_ela_pro._styles import (
+from pyqt6_ela_pro._styles import (
     BareButton,
     ColorText,
     FlatIconButton,
     paintRoundedCard,
     setPlainFrame,
     setSolidBackground,
-    setTransparentTextBase,
+    setTextBaseColor,
 )
 
 from _pixels import opaque_colors, skip_if_no_pixels
@@ -117,7 +117,7 @@ class TestTransparentTextBase:
         browser = make(QTextBrowser, container)
         browser.setPlainText("x")
         browser.setGeometry(10, 10, 200, 100)
-        setTransparentTextBase(browser)
+        setTextBaseColor(browser, None)
         container.show()
         qapp.processEvents()
         assert browser.palette().color(QPalette.ColorRole.Base).alpha() == 0

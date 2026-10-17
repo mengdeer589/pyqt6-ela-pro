@@ -24,10 +24,10 @@ import weakref
 from unittest.mock import MagicMock
 
 import pytest
-from PySide6.QtWidgets import QWidget
+from PyQt6.QtWidgets import QWidget
 
-from pyside6_ela_pro import browser_embedder as be
-from pyside6_ela_pro.browser_embedder import _BrowserController
+from pyqt6_ela_pro import browser_embedder as be
+from pyqt6_ela_pro.browser_embedder import _BrowserController
 
 URL = "ws://127.0.0.1:9222/devtools/page/stub"
 

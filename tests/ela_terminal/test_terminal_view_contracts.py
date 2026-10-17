@@ -12,9 +12,9 @@
 from __future__ import annotations
 
 import pytest
-from PySide6.QtGui import QColor
+from PyQt6.QtGui import QColor
 
-from pyside6_ela_pro.terminal_view import (
+from pyqt6_ela_pro.terminal_view import (
     _HIGHLIGHT,
     _HIGHLIGHT_RATIO,
     ElaTerminalView,

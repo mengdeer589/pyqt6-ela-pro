@@ -11,9 +11,9 @@
 
 from __future__ import annotations
 
-from PySide6.QtGui import QColor
-from PySide6.QtWidgets import QLabel, QWidget
-from PySide6ElaWidgetTools import (
+from PyQt6.QtGui import QColor
+from PyQt6.QtWidgets import QLabel, QWidget
+from PyQt6ElaWidgetTools import (
     ElaColorDialog,
     ElaContentDialog,
     ElaRoller,
@@ -21,11 +21,11 @@ from PySide6ElaWidgetTools import (
     ElaToggleButton,
 )
 
-from pyside6_ela_pro import ElaTagLineEdit
-from pyside6_ela_pro.example.buttons_menus_page import ButtonsMenusPage
-from pyside6_ela_pro.example.container_layout_page import ContainerLayoutPage
-from pyside6_ela_pro.example.drawer_tooltip_page import DrawerTooltipPage
-from pyside6_ela_pro.example.input_select_page import InputSelectPage
+from pyqt6_ela_pro import ElaTagLineEdit
+from pyqt6_ela_pro.example.buttons_menus_page import ButtonsMenusPage
+from pyqt6_ela_pro.example.container_layout_page import ContainerLayoutPage
+from pyqt6_ela_pro.example.drawer_tooltip_page import DrawerTooltipPage
+from pyqt6_ela_pro.example.input_select_page import InputSelectPage
 
 
 # ================================================================ ElaTagLineEdit

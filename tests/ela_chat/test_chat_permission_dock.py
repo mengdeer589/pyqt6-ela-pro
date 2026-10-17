@@ -15,11 +15,11 @@
 from __future__ import annotations
 
 import pytest
-import shiboken6
-from PySide6.QtCore import QRect, Qt
-from PySide6.QtWidgets import QScrollArea
+from PyQt6 import sip
+from PyQt6.QtCore import QRect, Qt
+from PyQt6.QtWidgets import QScrollArea
 
-from pyside6_ela_pro.chat import (
+from pyqt6_ela_pro.chat import (
     ElaChatBubble,
     ElaChatOption,
     ElaChatPermission,
@@ -28,10 +28,10 @@ from pyside6_ela_pro.chat import (
     ElaChatRoleType,
     ElaChatWidget,
 )
-from pyside6_ela_pro.chat.blocks import PermissionCard, PermissionRecord
-from pyside6_ela_pro.chat.docks import ElaChatPermissionDock
-from pyside6_ela_pro.chat._question import CARD_PADDING
-from pyside6_ela_pro.ela_button import ElaButton
+from pyqt6_ela_pro.chat.blocks import PermissionCard, PermissionRecord
+from pyqt6_ela_pro.chat.docks import ElaChatPermissionDock
+from pyqt6_ela_pro.chat._question import CARD_PADDING
+from pyqt6_ela_pro.ela_button import ElaButton
 
 
 def _turn(chat):
@@ -44,7 +44,7 @@ def _question(key="q0", **kwargs):
         key=key,
         question="哪些目录需要一起看？",
         options=(
-            ElaChatOption("pyside6_ela_pro/", "组件库本体"),
+            ElaChatOption("pyqt6_ela_pro/", "组件库本体"),
             ElaChatOption("tests/", "回归测试"),
         ),
         **kwargs,
@@ -605,7 +605,7 @@ class TestLayoutContract:
                     ElaChatQuestion(
                         key="q0",
                         question="哪些目录要不要一起看？",
-                        options=(ElaChatOption("pyside6_ela_pro/", long_desc),),
+                        options=(ElaChatOption("pyqt6_ela_pro/", long_desc),),
                     ),
                 ),
             ),
@@ -806,7 +806,7 @@ class TestPendingPermissionLifetime:
         chat.clearPermissionDock()
         qapp.processEvents()
         assert chat.permissionDock().card() is None
-        assert not shiboken6.isValid(card1) is False, "dock 只是借用卡片，不能销毁它"
+        assert sip.isdeleted(card1) is False, "dock 只是借用卡片，不能销毁它"
 
         # 再插一张把 dock 重新武装起来：落定后 promote 会把最早的 r1 顶回来
         _ask(chat, mid, ElaChatPermission(request_id="r3", action="edit"))
@@ -844,7 +844,7 @@ class TestNoNullWidgetWarning:
         刷 ``QLayout: Cannot add a null widget to QVBoxLayout/``。警告本身无害，
         但它意味着审批路径每次插卡都在给布局塞空指针 —— 不能留。
         """
-        from PySide6.QtCore import qInstallMessageHandler
+        from PyQt6.QtCore import qInstallMessageHandler
 
         chat = make(ElaChatWidget)
         view = chat.chatView()

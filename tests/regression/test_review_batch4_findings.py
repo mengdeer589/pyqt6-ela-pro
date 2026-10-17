@@ -17,30 +17,30 @@ import inspect
 import warnings
 
 import pytest
-from PySide6.QtCore import QEvent, QObject, QPoint, Qt, Signal
-from PySide6.QtGui import QColor, QMouseEvent, QPainter, QPixmap
+from PyQt6.QtCore import QEvent, QObject, QPoint, Qt, pyqtSignal, QPointF
+from PyQt6.QtGui import QColor, QMouseEvent, QPainter, QPixmap
 
-from pyside6_ela_pro import (
+from pyqt6_ela_pro import (
     ElaDataTable,
     ElaDrawerArea,
     ElaRatingControl,
 )
-from pyside6_ela_pro import (
+from pyqt6_ela_pro import (
     ela_drawer_area as DA,
 )
-from pyside6_ela_pro.blueprint import edge_widget as EW
-from pyside6_ela_pro.blueprint.edge_widget import _cached_pen
-from pyside6_ela_pro.chat.blocks import ReasoningBlock
-from pyside6_ela_pro.chat.message import ElaChatAttachment
-from pyside6_ela_pro.selection_assistant import _native as N
-from pyside6_ela_pro.selection_assistant import assistant
-from pyside6_ela_pro.selection_assistant._native import safe_connect
+from pyqt6_ela_pro.blueprint import edge_widget as EW
+from pyqt6_ela_pro.blueprint.edge_widget import _cached_pen
+from pyqt6_ela_pro.chat.blocks import ReasoningBlock
+from pyqt6_ela_pro.chat.message import ElaChatAttachment
+from pyqt6_ela_pro.selection_assistant import _native as N
+from pyqt6_ela_pro.selection_assistant import assistant
+from pyqt6_ela_pro.selection_assistant._native import safe_connect
 
 
 class _Sig(QObject):
-    """带类级信号的最小 QObject（Signal 必须定义在类上才会成为绑定信号）。"""
+    """带类级信号的最小 QObject（pyqtSignal 必须定义在类上才会成为绑定信号）。"""
 
-    sig = Signal(object)
+    sig = pyqtSignal(object)
 
 
 # ------------------------------------------------------------------ 1 & 2
@@ -105,8 +105,8 @@ class TestDrawerAreaButtonFilter:
                 header,
                 QMouseEvent(
                     QEvent.Type.MouseButtonRelease,
-                    pos,
-                    glob,
+                    QPointF(pos),
+                    QPointF(glob),
                     button,
                     Qt.MouseButton.NoButton,
                     Qt.KeyboardModifier.NoModifier,

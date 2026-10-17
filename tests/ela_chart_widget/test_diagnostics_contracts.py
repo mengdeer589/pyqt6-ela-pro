@@ -13,13 +13,13 @@
 from __future__ import annotations
 
 import pytest
-from PySide6.QtCore import QEvent, QPointF, Qt
-from PySide6.QtGui import QMouseEvent
-from PySide6.QtWidgets import QApplication
+from PyQt6.QtCore import QEvent, QPointF, Qt
+from PyQt6.QtGui import QMouseEvent
+from PyQt6.QtWidgets import QApplication
 
-from pyside6_ela_pro.charts import ElaChartWidget
-from pyside6_ela_pro.charts import _utils
-from pyside6_ela_pro.charts._utils import warn_once
+from pyqt6_ela_pro.charts import ElaChartWidget
+from pyqt6_ela_pro.charts import _utils
+from pyqt6_ela_pro.charts._utils import warn_once
 
 OPT = {
     "animation": False,
@@ -64,7 +64,7 @@ def _chart(make, option=None):
 def _send(chart, kind, local=QPointF(300.0, 200.0), button=Qt.MouseButton.LeftButton):
     ev = QMouseEvent(
         _EVENT_FOR[kind],
-        local,
+        QPointF(local),
         button,
         button if kind == "release" else Qt.MouseButton.NoButton,
         Qt.KeyboardModifier.NoModifier,
@@ -77,7 +77,7 @@ class TestWarnOnceKeysAreDistinguishing:
     """F2：去重键必须能区分故障，而不是「同一个类只报一次」。"""
 
     def test_same_class_different_exception_types_both_reported(self, capsys):
-        from pyside6_ela_pro.charts._utils import warn_key
+        from pyqt6_ela_pro.charts._utils import warn_key
 
         warn_once(warn_key("t", "BarRenderer", "A", "AttributeError"), "第一个故障")
         warn_once(warn_key("t", "BarRenderer", "A", "TypeError"), "第二个故障")
@@ -86,7 +86,7 @@ class TestWarnOnceKeysAreDistinguishing:
         assert "第二个故障" in err, "同类不同异常被去重键吞掉了"
 
     def test_different_series_same_exception_both_reported(self, capsys):
-        from pyside6_ela_pro.charts._utils import warn_key
+        from pyqt6_ela_pro.charts._utils import warn_key
 
         warn_once(warn_key("t", "BarRenderer", "A", "TypeError"), "A 故障")
         warn_once(warn_key("t", "BarRenderer", "B", "TypeError"), "B 故障")
@@ -95,7 +95,7 @@ class TestWarnOnceKeysAreDistinguishing:
 
     def test_identical_key_still_deduped(self, capsys):
         """去重的本职（同一故障不刷屏）不能被破坏。"""
-        from pyside6_ela_pro.charts._utils import warn_key
+        from pyqt6_ela_pro.charts._utils import warn_key
 
         key = warn_key("t", "BarRenderer", "A", "TypeError")
         warn_once(key, "同一个故障")
@@ -104,7 +104,7 @@ class TestWarnOnceKeysAreDistinguishing:
 
     def test_warn_key_drops_empty_parts(self):
         """``None`` / 空串不能进键，否则两个不同的「无名字」撞键。"""
-        from pyside6_ela_pro.charts._utils import warn_key
+        from pyqt6_ela_pro.charts._utils import warn_key
 
         assert warn_key("t", "R", None, "E") == warn_key("t", "R", "", "E")
         assert "None" not in warn_key("t", "R", None)
