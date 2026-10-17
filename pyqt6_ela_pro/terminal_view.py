@@ -1954,12 +1954,12 @@ class ElaTerminalView(ElaThemeWidget):
         if watched is viewport and event.type() == QEvent.Type.ContextMenu:
             # 右键实际投递到 viewport（QAbstractScrollArea 的视口）—— 只挂
             # ``self._edit`` 拦不到，会落到 Qt 自带的「复制 / 全选」菜单
-            self._show_context_menu(event.globalPosition().toPoint())
+            self._show_context_menu(event.globalPos())
             return True
         if watched is self._edit:
             etype = event.type()
             if etype == QEvent.Type.ContextMenu:
-                self._show_context_menu(event.globalPosition().toPoint())
+                self._show_context_menu(event.globalPos())
                 return True
             if etype == QEvent.Type.FocusIn:
                 self._card.setFocused(True)

@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from typing import Optional
 
-from PyQt6.QtCore import pyqtSignal, QTimer, Qt, QRect, QRectF, QSize
+from PyQt6.QtCore import pyqtSignal, QTimer, QPointF, Qt, QRect, QRectF, QSize
 from PyQt6.QtGui import (
     QColor,
     QPainter,
@@ -235,7 +235,7 @@ class ElaLongPressButton(_ThemeAwareMixin, ElaPushButton):
         painter.setClipPath(path)
 
         p = min(self._progress, 1.0)
-        gradient = QLinearGradient(rect.topLeft(), rect.topRight())
+        gradient = QLinearGradient(QPointF(rect.topLeft()), QPointF(rect.topRight()))
         gradient.setColorAt(0, self._progress_color)
         gradient.setColorAt(p, self._progress_color)
         gradient.setColorAt(min(p + 0.05, 1.0), QColor(0, 0, 0, 0))

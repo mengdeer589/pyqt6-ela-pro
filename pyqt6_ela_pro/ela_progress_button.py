@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from typing import Optional
 
-from PyQt6.QtCore import pyqtSignal, QRect, QRectF, QSize
+from PyQt6.QtCore import pyqtSignal, QPointF, QRect, QRectF, QSize
 from PyQt6.QtGui import QColor, QPainter, QLinearGradient, QPainterPath, QPaintEvent
 from PyQt6.QtWidgets import QWidget
 
@@ -163,7 +163,7 @@ class ElaProgressButton(_ThemeAwareMixin, ElaPushButton):
 
             if self._progress < 1.0:
                 p = self._progress
-                gradient = QLinearGradient(rect.topLeft(), rect.topRight())
+                gradient = QLinearGradient(QPointF(rect.topLeft()), QPointF(rect.topRight()))
                 gradient.setColorAt(0, self._progress_color)
                 gradient.setColorAt(p, self._progress_color)
                 gradient.setColorAt(min(p + 0.001, 1.0), QColor(0, 0, 0, 0))

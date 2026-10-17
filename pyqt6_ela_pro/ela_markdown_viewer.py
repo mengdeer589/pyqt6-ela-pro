@@ -2063,7 +2063,7 @@ class ElaMarkdownViewer(ElaThemeWidget):
             writer.setResolution(96)
             writer.setPageSize(size)
             writer.setPageMargins(margins, QPageLayout.Unit.Millimeter)
-            self.document().print_(writer)
+            self.document().print(writer)
         except Exception:
             return False
         return os.path.exists(path)
@@ -2082,7 +2082,7 @@ class ElaMarkdownViewer(ElaThemeWidget):
                 dialog = QPrintDialog(printer, self)
                 if dialog.exec() != QDialog.DialogCode.Accepted:
                     return False
-            self.document().print_(printer)
+            self.document().print(printer)
         except Exception:
             return False
         return True
@@ -5048,7 +5048,7 @@ class ElaMarkdownViewer(ElaThemeWidget):
             # 右键实际投递到 **viewport**（QAbstractScrollArea 的视口）—— 只拦
             # QTextBrowser 本体的话走的是 Qt 自带菜单（复制 / 复制链接 / 全选），
             # 自建菜单可达性为 0。坐标统一用 globalPos，免得再换算视口偏移。
-            self._show_context_menu(event.globalPosition().toPoint())
+            self._show_context_menu(event.globalPos())
             return True
         if obj is viewport:
             if event_type == QEvent.Type.MouseMove:

@@ -38,6 +38,7 @@ from PyQt6.QtCore import (
 )
 from PyQt6.QtGui import (
     QColor,
+    QEnterEvent,
     QFontMetrics,
     QKeyEvent,
     QPainter,
@@ -90,7 +91,7 @@ class _ElaConfirmButton(ElaThemeWidget):
         self._theme_mode = mode
         self.update()
 
-    def enterEvent(self, event: QEvent) -> None:
+    def enterEvent(self, event: QEnterEvent) -> None:
         self._is_hovered = True
         self.update()
         super().enterEvent(event)

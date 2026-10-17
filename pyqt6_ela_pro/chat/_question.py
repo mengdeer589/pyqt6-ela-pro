@@ -545,7 +545,7 @@ class QuestionOptionCard(QAbstractButton):
         行内其它位置（标签 / 说明）则把焦点**还给编辑器**：走 ``super()`` 会让
         ``QAbstractButton`` 抢走焦点，随后按 Enter 落到行上等于什么都没发生。
         """
-        if self._mark_rect().contains(event.position().toPoint()):
+        if self._mark_rect().contains(event.position()):
             self._press_on_mark = True
             self.markClicked.emit(self._value)
             event.accept()

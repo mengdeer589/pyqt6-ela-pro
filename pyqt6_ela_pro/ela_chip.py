@@ -366,7 +366,7 @@ class ElaChip(ElaThemeWidget):
 
     def mouseMoveEvent(self, event: QMouseEvent) -> None:
         if self._is_closable:
-            over = self._close_rect().contains(event.position().toPoint())
+            over = self._close_rect().contains(event.position())
             if over != self._close_hovered:
                 self._close_hovered = over
                 self.setCursor(
@@ -379,7 +379,7 @@ class ElaChip(ElaThemeWidget):
 
     def mousePressEvent(self, event: QMouseEvent) -> None:
         if event.button() == Qt.MouseButton.LeftButton:
-            if self._is_closable and self._close_rect().contains(event.position().toPoint()):
+            if self._is_closable and self._close_rect().contains(event.position()):
                 self._animate_close()
                 event.accept()
                 return

@@ -9,7 +9,7 @@ from __future__ import annotations
 from typing import Optional
 
 from PyQt6.QtCore import Qt, QRectF, QEvent
-from PyQt6.QtGui import QPainter, QPen, QPaintEvent, QMouseEvent
+from PyQt6.QtGui import QEnterEvent, QPainter, QPen, QPaintEvent, QMouseEvent
 from PyQt6.QtWidgets import QSplitter, QSplitterHandle, QWidget, QBoxLayout
 
 from PyQt6ElaWidgetTools import eTheme, ElaThemeType
@@ -43,7 +43,7 @@ class ElaSplitterHandle(_ThemeAwareMixin, QSplitterHandle):
         self._theme_mode = mode
         self.update()
 
-    def enterEvent(self, event: QEvent) -> None:
+    def enterEvent(self, event: QEnterEvent) -> None:
         self._is_hover = True
         self.update()
         super().enterEvent(event)

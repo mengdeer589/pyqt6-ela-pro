@@ -40,6 +40,7 @@ from PyQt6.QtCore import (
 )
 from PyQt6.QtGui import (
     QColor,
+    QEnterEvent,
     QFont,
     QFontMetrics,
     QIcon,
@@ -195,7 +196,7 @@ class _GhostFooterButton(QWidget):
         width += QFontMetrics(self.font()).horizontalAdvance(self._text)
         return QSize(width, self.height())
 
-    def enterEvent(self, _event: QEvent) -> None:  # noqa: N802 (Qt 命名)
+    def enterEvent(self, _event: QEnterEvent) -> None:  # noqa: N802 (Qt 命名)
         self._hovered = True
         self.update()
 

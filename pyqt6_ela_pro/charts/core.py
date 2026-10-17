@@ -3790,7 +3790,7 @@ class ElaChartWidget(QWidget):
     def mousePressEvent(self, event) -> None:
         if self._loading:
             return
-        pos = event.localPos()
+        pos = event.position()
         if self._dispatch_hook("onMousePress", pos):
             super().mousePressEvent(event)
             return
@@ -3893,7 +3893,7 @@ class ElaChartWidget(QWidget):
     def mouseMoveEvent(self, event) -> None:
         if self._loading:
             return
-        pos = event.localPos()
+        pos = event.position()
         consumed = self._dispatch_hook("onMouseMove", pos)
         if not consumed:
             if self.isInteractionEnabled("tooltip"):
@@ -3906,13 +3906,13 @@ class ElaChartWidget(QWidget):
     def mouseReleaseEvent(self, event) -> None:
         if self._loading:
             return
-        self._dispatch_hook("onMouseRelease", event.localPos())
+        self._dispatch_hook("onMouseRelease", event.position())
         super().mouseReleaseEvent(event)
 
     def mouseDoubleClickEvent(self, event) -> None:
         if self._loading:
             return
-        self._dispatch_hook("onMouseDoubleClick", event.localPos())
+        self._dispatch_hook("onMouseDoubleClick", event.position())
         super().mouseDoubleClickEvent(event)
 
     def wheelEvent(self, event) -> None:

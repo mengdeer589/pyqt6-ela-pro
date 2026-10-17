@@ -421,7 +421,15 @@ class ColorText(ElaText):
         self.setPalette(palette)
 
     def paintEvent(self, event) -> None:  # noqa: N802 (Qt 命名)
-        if self._text_color is None or self.getElaIcon() or self.getIsWrapAnywhere():
+        # ``getElaIcon()`` ? PyQt6 ???**????**?``IconName.None_`` ???
+        # int 0?????????? 0 ?? ????????????????????
+        # ?????????
+        icon = self.getElaIcon()
+        if (
+            self._text_color is None
+            or (icon is not None and int(getattr(icon, "value", icon)) != 0)
+            or self.getIsWrapAnywhere()
+        ):
             super().paintEvent(event)
             return
         # ElaText 在 C++ 构造里连了 themeModeChanged → onThemeChanged，主题信号一发
