@@ -79,6 +79,8 @@ from ._utils import to_float as _to_float
 from ._utils import component_opt as _component_opt
 from ._utils import warn_key, warn_once
 from .exporter import ChartExporter
+from .interaction import ChartInteraction
+from .layout import layout_all
 from .axes import (
     CalendarCoord,
     Coord,
@@ -1526,6 +1528,8 @@ class ElaChartWidget(QWidget):
         self._event_handlers: dict = {}
         #: 导出（导出逻辑与画布状态分离，见 ``exporter.py``）
         self._exporter = ChartExporter(self)
+        #: 鼠标交互（事件行为与画布状态分离，见 ``interaction.py``）
+        self._interaction = ChartInteraction(self)
         #: 双击复位视图（Plotly ``doubleClick: 'reset'`` 语义，默认开）
         self._double_click_reset = True
         #: 图例悬停高亮的系列名（None = 无）
@@ -3490,135 +3494,32 @@ class ElaChartWidget(QWidget):
         self._layout_key = None
         self._geometry_epoch += 1
 
-    def _layout_cache_key(self):
-        """布局缓存键：option 版本 / 视口尺寸 / 主题 / dataZoom 窗口状态。"""
-        theme = eTheme.getThemeMode()
-        dz = tuple(
-            (getattr(c, "start", 0.0), getattr(c, "end", 100.0))
-            for c in self._components
-            if getattr(c, "optionKey", "") == "dataZoom"
-        )
-        return (self._opt_version, self.width(), self.height(), theme, dz)
 
     #: 底部组件条带顺序（从外到内，最外层贴近画布底边）
-    _BOTTOM_BAND_ORDER = ("timeline", "dataZoom", "visualMap")
 
-    def _layout_all(self, force: bool = False) -> None:
-        """全量布局：组件条带 / 坐标系 / 系列 / 组件几何。
-
-        组件条带：竖直 visualMap 占右侧，timeline 占最底部、dataZoom 在其上；
-        坐标系与系列避开全部条带，组件各自落在专属条带内（互不遮挡）。
-
-        布局缓存：键命中直接返回；动画进行中不缓存（每帧重算）。
-        """
-        if force:
-            self._layout_key = None
-        elif not self.anim.isRunning():
-            key = self._layout_cache_key()
-            if key == self._layout_key:
-                return
-            self._layout_key = key
-        content = self._content_rect()
-        right_reserves = []  # [(component, size)]
-        bottom_reserves = []  # [(component, size)]
-        for comp in self._components:
-            right_fn = getattr(comp, "reserveRight", None)
-            if callable(right_fn):
-                try:
-                    size = float(right_fn())
-                except Exception:
-                    size = 0.0
-                if size > 0:
-                    right_reserves.append((comp, size))
-            bottom_fn = getattr(comp, "reserveBottom", None)
-            if callable(bottom_fn):
-                try:
-                    size = float(bottom_fn())
-                except Exception:
-                    size = 0.0
-                if size > 0:
-                    bottom_reserves.append((comp, size))
-        band_order = {key: index for index, key in enumerate(self._BOTTOM_BAND_ORDER)}
-        bottom_reserves.sort(
-            key=lambda item: band_order.get(getattr(item[0], "optionKey", ""), 99)
-        )
-        bottom_total = sum(size for _, size in bottom_reserves)
-        right_total = sum(size for _, size in right_reserves)
-
-        coord_content = QRectF(content)
-        if right_total > 0:
-            coord_content.setRight(
-                max(coord_content.left() + 20.0, coord_content.right() - right_total)
-            )
-        if bottom_total > 0:
-            coord_content.setBottom(
-                max(coord_content.top() + 20.0, coord_content.bottom() - bottom_total)
-            )
-
-        # 组件专属条带（bottom 自底向上；right 自右向左）
-        band_rects = {}
-        cursor = content.bottom()
-        for comp, size in bottom_reserves:
-            band_rects[id(comp)] = QRectF(
-                content.left(), cursor - size, content.width(), size
-            )
-            cursor -= size
-        cursor = content.right()
-        for comp, size in right_reserves:
-            band_rects[id(comp)] = QRectF(
-                cursor - size,
-                content.top(),
-                size,
-                max(20.0, content.height() - bottom_total),
-            )
-            cursor -= size
-
-        # dataZoom 窗口必须先写回坐标轴，再排系列：系列按**当前轴窗口**做
-        # 「窗口裁剪 + 采样」，顺序反了就是「新轴 + 旧采样」的错配，且帧末布局
-        # 缓存键（含窗口值）已命中 → 下一次布局 early-return，错配永久留下
-        # （症状：缩放 / 平移后曲线变稀）。``apply()`` 本身幂等。
-        for comp in self._components:
-            apply_window = getattr(comp, "applyWindow", None)
-            if not callable(apply_window):
-                continue
-            try:
-                apply_window()
-            except Exception as exc:
-                warn_once(
-                    warn_key(
-                        "apply-window",
-                        comp.__class__.__name__,
-                        type(exc).__name__,
-                    ),
-                    f"窗口写回坐标轴失败（{comp.__class__.__name__}）: {exc!r}",
-                )
-        for c in self._coords:
-            c.layout(coord_content)
-        for r in self._series:
-            try:
-                r.layout(coord_content)
-            except Exception as exc:
-                warn_once(
-                    warn_key(
-                        "series-layout",
-                        r.__class__.__name__,
-                        r.name,
-                        type(exc).__name__,
-                    ),
-                    f"系列布局异常（{r.name}）: {exc!r}",
-                )
-        for comp in self._components:
-            layout = getattr(comp, "layout", None)
-            if callable(layout):
-                try:
-                    layout(band_rects.get(id(comp), content))
-                except Exception as exc:
-                    warn_once(
-                        f"component-layout:{comp.__class__.__name__}",
-                        f"组件布局异常（{comp.__class__.__name__}）: {exc!r}",
-                    )
 
     # ------------------------------------------------------------- Qt 事件
+    def mousePressEvent(self, event) -> None:
+        self._interaction.mouse_press(event)
+
+    def mouseMoveEvent(self, event) -> None:
+        self._interaction.mouse_move(event)
+
+    def mouseReleaseEvent(self, event) -> None:
+        self._interaction.mouse_release(event)
+
+    def mouseDoubleClickEvent(self, event) -> None:
+        self._interaction.mouse_double_click(event)
+
+    def wheelEvent(self, event) -> None:
+        self._interaction.wheel(event)
+
+    def leaveEvent(self, event) -> None:
+        self._interaction.leave(event)
+
+    def _layout_all(self, force: bool = False) -> None:
+        layout_all(self, force)
+
     def resizeEvent(self, event) -> None:
         super().resizeEvent(event)
         self._layout_all()
@@ -3845,46 +3746,7 @@ class ElaChartWidget(QWidget):
         """可见系列（渲染器可覆写 onMousePress/Move/Release/onWheel 获得交互）。"""
         return [r for r in self._series if r.visible]
 
-    def mousePressEvent(self, event) -> None:
-        if self._loading:
-            return
-        pos = event.position()
-        consumed = self._dispatch_hook("onMousePress", pos)
-        # 记下这次按下：拖拽类组件（dataZoom ``inside`` / brush）会「吞掉」按下事件
-        # （它们只能在这一刻起手），但**按下 → 原地松开**是一次点击，不该被吞 ——
-        # 否则配了 dataZoom inside 的图表点数据点 / 点空区全都不发 ``itemClicked``
-        # （ECharts 的 click 也是在松开时判定的）。
-        self._press_ctx = (QPointF(pos), bool(consumed))
-        if consumed:
-            super().mousePressEvent(event)
-            return
-        if self.legend.shown and self.isInteractionEnabled("legend"):
-            name = self.legend.hitTest(pos)
-            if name is not None:
-                self.legend.toggle(name)
-                super().mousePressEvent(event)
-                return
-        self._emit_click_at(pos, event)
-        super().mousePressEvent(event)
 
-    def _emit_click_at(self, pos: QPointF, event=None) -> None:
-        """命中数据点 → ``itemClicked``；空区且开 ``clickanywhere`` → 数据坐标载荷。"""
-        if not self._interactive:
-            return
-        found = self._hitItemWithSeries(pos)
-        if found is not None:
-            renderer, hit = found
-            self.itemClicked.emit(
-                self._make_item_params(renderer, hit, "click", event, pos)
-            )
-            return
-        if self._emptyAreaEnabled("clickanywhere"):
-            # Plotly ``clickanywhere``：空区点击也发事件，载荷带光标的数据坐标
-            empty = self._emptyAreaHit(pos)
-            if empty is not None:
-                empty["type"] = "click"
-                empty["event"] = event
-                self.itemClicked.emit(empty)
 
     def _make_item_params(
         self, renderer, hit: dict, event_type: str, event=None, pos=None
@@ -3967,91 +3829,10 @@ class ElaChartWidget(QWidget):
                 return True
         return False
 
-    def mouseMoveEvent(self, event) -> None:
-        if self._loading:
-            return
-        pos = event.position()
-        consumed = self._dispatch_hook("onMouseMove", pos)
-        if not consumed:
-            # 图例悬停高亮优先于提示框：指针在图例上时不出 tooltip，只高亮系列
-            legend_hover = (
-                self.legend.hitTest(pos)
-                if self.legend.shown and self.isInteractionEnabled("legend")
-                else None
-            )
-            if legend_hover != self._legend_hover:
-                self._legend_hover = legend_hover
-                self.update()
-            if legend_hover is not None:
-                if self.tooltip.active:
-                    self.tooltip.hide()
-                if self._hover is not None:
-                    self._hover = None
-                    self.update()
-            elif self.isInteractionEnabled("tooltip"):
-                self._update_tooltip(pos)
-            elif self.tooltip.active:
-                self.tooltip.hide()
-                self.update()
-        super().mouseMoveEvent(event)
 
-    def mouseReleaseEvent(self, event) -> None:
-        if self._loading:
-            return
-        pos = event.position()
-        self._dispatch_hook("onMouseRelease", pos)
-        ctx = getattr(self, "_press_ctx", None)
-        self._press_ctx = None
-        if ctx is not None:
-            start, consumed = ctx
-            # 位移 ≤ 4px 视作点击：把被拖拽组件吞掉的这次按下还给「点击」语义
-            dragged = math.hypot(pos.x() - start.x(), pos.y() - start.y()) > 4.0
-            if consumed and not dragged:
-                over_legend = False
-                if self.legend.shown:
-                    over_legend = self.legend.hitTest(start) is not None
-                if not over_legend:
-                    self._emit_click_at(pos, event)
 
-    def mouseDoubleClickEvent(self, event) -> None:
-        if self._loading:
-            return
-        # 交互组件（如 roam / dataZoom）先接：被消费就不做默认复位。
-        if self._dispatch_hook("onMouseDoubleClick", event.position()):
-            super().mouseDoubleClickEvent(event)
-            return
-        # 双击复位（Plotly ``doubleClick: 'reset'`` 语义）：把缩放 / 平移 / 缩放窗口
-        # 还原到初始状态。可用 ``setDoubleClickReset(False)`` 关掉。
-        if self._double_click_reset:
-            self.resetView()
-            event.accept()
-            return
-        super().mouseDoubleClickEvent(event)
 
-    def wheelEvent(self, event) -> None:
-        """滚轮：优先交给交互组件（如 dataZoom inside）消费。
 
-        组件经 ``onWheel(event)`` 钩子返回 True 时显式 ``event.accept()``，
-        事件状态为「已消费」—— 祖先滚动区（ElaScrollArea / 页面）不会再
-        同时滚动，解决「图表缩放与页面滚动同时触发」的问题；未被消费的
-        滚轮按默认路径向上冒泡（图表外区域页面正常滚动）。
-        交互关闭（``setInteractive`` / ``setInteractionEnabled``）时不消费。
-        """
-        if self._loading:
-            return
-        if self._dispatch_hook("onWheel", event):
-            event.accept()
-            return
-        super().wheelEvent(event)
-
-    def leaveEvent(self, event) -> None:
-        self.tooltip.hide()
-        if self._hover is not None:
-            self._hover = None
-        if self._legend_hover is not None:
-            self._legend_hover = None
-        self.update()
-        super().leaveEvent(event)
 
     # -- tooltip 聚合 ------------------------------------------------------
     def textStyle(self) -> dict:
