@@ -74,6 +74,7 @@ from .message import (
     _as_int,
 )
 from .session import SESSION_SCHEMA_VERSION, ElaChatSessionInfo, ElaChatSessionStats
+from .store import ChatMessageStore
 
 #: 判定「贴底」的容差（像素，对齐 opencode 的 10px）
 _BOTTOM_MARGIN = 10
@@ -204,19 +205,12 @@ class ElaChatView(ElaThemeWidget):
 
     def __init__(self, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
-        self._messages: list[ElaChatMessage] = []
-        #: id -> 快照（长历史下避免每次物化 / 查询都线性扫描）
-        self._message_index: dict = {}
-        #: id -> 在 ``_messages`` 中的下标（逐条更新时不重新扫描整个列表）
-        self._message_positions: dict = {}
-        #: id -> 高度估算用的轻量统计（parts 数 / 字符数 / 步数），避免反复遍历 parts
-        self._height_meta_cache: dict = {}
+        self._store = ChatMessageStore()
         #: 壳虚拟化的前缀高度（messageId 顺序 / start 偏移），二分可见区间
         self._virtual_order: list = []
         self._virtual_prefix: list = []
         self._virtual_prefix_dirty = True
         self._bubbles: dict = {}
-        self._next_id = 1
         self._stick = True
         self._avatar_visible = True
         self._avatar_shape = AVATAR_DEFAULT_SHAPE
@@ -234,7 +228,6 @@ class ElaChatView(ElaThemeWidget):
         self._jump_threshold = None
         self._scroll_guards: list = []
         self._guards_by_message: dict = {}
-        self._dirty_syncs: set = set()
         self._strict_ids = False
 
         layout = QVBoxLayout(self)
@@ -337,9 +330,33 @@ class ElaChatView(ElaThemeWidget):
 
     # -- 查询 --------------------------------------------------------------
 
+    @property
+    def _messages(self) -> list[ElaChatMessage]:
+        return self._store.items
+
+    @property
+    def _message_index(self) -> dict[int, ElaChatMessage]:
+        return self._store.index
+
+    @property
+    def _height_meta_cache(self) -> dict[int, tuple]:
+        return self._store.height_meta
+
+    @property
+    def _next_id(self) -> int:
+        return self._store.next_id
+
+    @_next_id.setter
+    def _next_id(self, value: int) -> None:
+        self._store.next_id = int(value)
+
+    @property
+    def _dirty_syncs(self) -> set[int]:
+        return self._store.dirty
+
     def count(self) -> int:
         """消息条数。"""
-        return len(self._messages)
+        return self._store.count()
 
     def messages(self) -> list:
         """消息只读快照（``ElaChatMessage`` 列表）。"""
@@ -1919,9 +1936,7 @@ class ElaChatView(ElaThemeWidget):
             bubble.cancelPendingPermissions()
         if not self._detach_message(messageId):
             return
-        self._messages = [m for m in self._messages if m.id != messageId]
-        self._reindex_messages()
-        self._height_meta_cache.pop(messageId, None)
+        self._store.remove(messageId)
         self._virtual_prefix_dirty = True
         if not self._messages:
             self._empty.setVisible(True)
@@ -1950,10 +1965,7 @@ class ElaChatView(ElaThemeWidget):
                 bubble.cancelPendingPermissions()
         for mid in removed:
             self._detach_message(mid)
-        self._messages = [m for m in self._messages if m.id not in removed_set]
-        self._reindex_messages()
-        for mid in removed:
-            self._height_meta_cache.pop(mid, None)
+        self._store.remove_ids(removed_set)
         self._virtual_prefix_dirty = True
         if not self._messages:
             self._empty.setVisible(True)
@@ -1997,14 +2009,10 @@ class ElaChatView(ElaThemeWidget):
         self._virtual_heights.clear()
         self._virtual_bubble_ids.clear()
         self._bubbles.clear()
-        self._messages.clear()
-        self._message_index.clear()
-        self._message_positions.clear()
-        self._height_meta_cache.clear()
+        self._store.clear()
         self._virtual_order.clear()
         self._virtual_prefix.clear()
         self._virtual_prefix_dirty = True
-        self._dirty_syncs.clear()
         self._render_queue.clear()
         self._render_timer.stop()
         # **渐进渲染被打断时必须自己收尾**：``beginBatch`` 关掉了视口刷新，而恢复
@@ -2607,39 +2615,16 @@ class ElaChatView(ElaThemeWidget):
 
     def _remember_message(self, message: ElaChatMessage) -> None:
         """追加快照并维护 id 索引 / 高度缓存失效。"""
-        self._messages.append(message)
-        self._message_positions[message.id] = len(self._messages) - 1
-        self._message_index[message.id] = message
-        self._height_meta_cache.pop(message.id, None)
+        self._store.add(message)
         self._virtual_prefix_dirty = True
 
     def _reindex_messages(self) -> None:
-        """重建 id → 下标 / 快照索引（列表结构变化后调用）。
-
-        只在追加 / 删除后各跑一次 O(n)，把「逐条更新快照」的线性扫描摊薄：
-        ``restoreMessages`` 与批量删除都是「一次结构调整 + 多次按 id 更新」。
-        """
-        self._message_positions = {
-            message.id: index for index, message in enumerate(self._messages)
-        }
-        self._message_index = {message.id: message for message in self._messages}
+        """重建 id → 下标 / 快照索引（列表结构变化后调用）。"""
+        self._store.reindex()
 
     def _update_snapshot(self, messageId: int, updater) -> None:
-        position = self._message_positions.get(messageId)
-        if (
-            position is None
-            or position >= len(self._messages)
-            or self._messages[position].id != messageId
-        ):
-            # 索引缺失 / 漂移（外部直接动过列表）：重建一次再取
-            self._reindex_messages()
-            position = self._message_positions.get(messageId)
-            if position is None:
-                return
-        updated = updater(self._messages[position])
-        self._messages[position] = updated
-        self._message_index[messageId] = updated
-        self._height_meta_cache.pop(messageId, None)
+        if not self._store.update(messageId, updater):
+            return
         self._virtual_prefix_dirty = True
 
     def _sync_parts(self, messageId: int) -> None:
@@ -2664,8 +2649,7 @@ class ElaChatView(ElaThemeWidget):
         """
         if not self._dirty_syncs:
             return
-        dirty = self._dirty_syncs
-        self._dirty_syncs = set()
+        dirty = self._store.take_dirty()
         for index, message in enumerate(self._messages):
             if message.id not in dirty:
                 continue
@@ -2673,9 +2657,7 @@ class ElaChatView(ElaThemeWidget):
             if bubble is None or bubble.role() != ElaChatRoleType.Assistant:
                 continue
             updated = message.withParts(bubble.parts())
-            self._messages[index] = updated
-            self._message_index[message.id] = updated
-            self._height_meta_cache.pop(message.id, None)
+            self._store.replace_at(index, updated)
             self._virtual_prefix_dirty = True
 
     def _on_bubble_stream_finished(self, messageId: int) -> None:

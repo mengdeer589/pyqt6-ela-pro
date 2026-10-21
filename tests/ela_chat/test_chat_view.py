@@ -568,7 +568,7 @@ class TestBatchRemoveAndSync:
             ids[3],
             ids[4],
         ]
-        assert view._message_positions == {
+        assert view._store.positions == {
             message.id: index for index, message in enumerate(view.messages())
         }
 
