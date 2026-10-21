@@ -56,6 +56,11 @@ class TestColorText:
         assert make(ColorText, parent).text() == ""
         assert make(ColorText, "标题", parent).text() == "标题"
 
+    def test_constructor_accepts_color_and_pixel_size(self, qapp, make):
+        label = make(ColorText, "abc", color="#0000ff", pixelSize=18)
+        assert label.textColor().name() == "#0000ff"
+        assert label.font().pixelSize() == 18
+
     def test_rendered_pixels_use_color(self, qapp, make):
         label = make(ColorText, "MMMM")
         label.setTextPixelSize(24)

@@ -405,13 +405,17 @@ class ColorText(ElaText):
     不持有全文引用；文本 / 宽度 / 字体任一变化自然换键，缓存条数有上限。
     """
 
-    def __init__(self, *args) -> None:
+    def __init__(self, *args, color=None, pixelSize=None) -> None:
         # ElaText 有 (parent) / (text, parent) / (text, height, parent) 三个重载，
-        # 这里原样透传，别自己解释参数。
+        # 这里原样透传，别自己解释参数；color / pixelSize 是便捷初始化。
         super().__init__(*args)
         self._text_color: Optional[QColor] = None
         #: ``(kind, width, 文本摘要, 外观签名)`` → 尺寸结果
         self._size_cache: dict = {}
+        if pixelSize is not None:
+            self.setTextPixelSize(int(pixelSize))
+        if color is not None:
+            self.setTextColor(color)
 
     def setText(self, text) -> None:  # noqa: N802 (Qt 命名)
         cache = getattr(self, "_size_cache", None)
