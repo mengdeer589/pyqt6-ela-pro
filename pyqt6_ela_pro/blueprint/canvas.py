@@ -14,6 +14,9 @@
 - 边：hover 加粗、点击选中、running 路径 flowing 虚线动画；
 - 序列化：``to_dict`` / ``from_dict``（含节点位置与画布 zoom/offset）。
 
+手势行为（事件路由 / 拖节点 / 平移 / 框选 / 连线）在
+:mod:`pyqt6_ela_pro.blueprint.interaction`；本类只持有手势状态、绘制与公共 API。
+
 节点为真实子控件（``ElaNodeWidget``，挂在内部绘制视口之下）；边、临时线、
 网格、选中发光由视口统一自绘——**默认软件视口**（``QWidget``），设
 ``ELABLUEPRINT_GL=on`` 才用 ``QOpenGLWidget``（GPU 加速；它是原生子窗口，
@@ -30,7 +33,6 @@ from __future__ import annotations
 import logging
 
 from PyQt6.QtCore import (
-    QEvent,
     QPoint,
     QPointF,
     QRect,
@@ -48,22 +50,19 @@ from .._motion import start_idle_loop
 from ._tokens import T, shadow_md, theme_changed_slot
 from .edge_widget import (
     ElaEdgeWidget,
-    ElaTempWire,
     _cached_color,
     _cached_pen,
-    bezier_path,
 )
 from .execution import ElaExecutionController
-from .menu import ElaNodeContextMenu, ElaNodeCreationMenu
+from .interaction import ZOOM_MAX, ZOOM_MIN, CanvasInteraction
+from .menu import ElaNodeContextMenu
 from .model import (
     ElaBlueprintGraph,
     ElaBlueprintNode,
     ElaEdge,
-    ElaPinDirectionType,
     _finite,
-    types_compatible,
 )
-from .node_widget import ElaNodeWidget, ElaPinHandle
+from .node_widget import ElaNodeWidget
 from .registry import ElaNodeRegistry
 from .viewport import create_viewport
 
@@ -71,14 +70,8 @@ __all__ = ["ElaBlueprintCanvas"]
 
 logger = logging.getLogger(__name__)
 
-#: 缩放范围
-ZOOM_MIN, ZOOM_MAX = 0.25, 2.5
 #: 流动边线虚线相位的推进间隔（ms）。持续动效，Reduced/Disabled 下冻结。
 EDGE_FLOW_TICK_MS = 50
-#: 磁吸半径（视图像素）
-MAGNET_R = 22.0
-#: 右键抬起判定为点击的位移阈值（px）
-CLICK_TOL = 4.0
 #: 背景网格点半径（视图像素）
 GRID_DOT_R = 1.3
 
@@ -160,7 +153,9 @@ class ElaBlueprintCanvas(QWidget):
         self._zoom_settle = QTimer(self)
         self._zoom_settle.setSingleShot(True)
         self._zoom_settle.setInterval(150)
-        self._zoom_settle.timeout.connect(self._end_zoom_gesture)
+
+        self._interaction = CanvasInteraction(self)
+        self._zoom_settle.timeout.connect(self._interaction.end_zoom_gesture)
 
         self._execution = ElaExecutionController(self)
 
@@ -551,504 +546,37 @@ class ElaBlueprintCanvas(QWidget):
     # 事件过滤（节点控件 / 引脚热区）
     # ------------------------------------------------------------------
     def eventFilter(self, obj, event):
-        etype = event.type()
-        if etype not in (
-            QEvent.Type.MouseButtonPress,
-            QEvent.Type.MouseButtonRelease,
-            QEvent.Type.MouseMove,
-        ):
-            return False
-        # 平移进行中：事件此时可能落在节点 / 引脚热区上（中键或空格+左键
-        # 从它们上面起手，隐式 grab 留在子控件），统一在这里推进 / 收尾。
-        if self._panning:
-            if etype == QEvent.Type.MouseMove:
-                self._offset = self._offset_start + (
-                    self.view_pos_of_event(obj, event) - self._pan_start
-                )
-                self._view_changed(gesture=True)
-                return True
-            if (
-                etype == QEvent.Type.MouseButtonRelease
-                and event.button() == Qt.MouseButton.LeftButton
-            ):
-                self._panning = False
-                self.unsetCursor()
-                self._settle_view_gesture()
-                return True
-            return False
-        if isinstance(obj, ElaPinHandle):
-            if (
-                etype == QEvent.Type.MouseButtonPress
-                and event.button() == Qt.MouseButton.LeftButton
-            ):
-                if self._space_down:
-                    # 空格 = 强制平移：按在引脚上也不起拖线
-                    self._start_pan(self.view_pos_of_event(obj, event))
-                    return True
-                self._begin_wire(obj)
-                return True
-            if self._wire is not None:
-                if etype == QEvent.Type.MouseMove:
-                    self._update_wire(self.view_pos_of_event(obj, event))
-                    return True
-                if (
-                    etype == QEvent.Type.MouseButtonRelease
-                    and event.button() == Qt.MouseButton.LeftButton
-                ):
-                    self._finish_wire(self.view_pos_of_event(obj, event))
-                    return True
-            return False
-        if isinstance(obj, ElaNodeWidget):
-            if etype == QEvent.Type.MouseButtonPress:
-                view_pos = self.view_pos_of_event(obj, event)
-                if event.button() == Qt.MouseButton.LeftButton:
-                    if self._space_down:
-                        # 空格 = 强制平移：按在节点上也不拖节点
-                        self._start_pan(view_pos)
-                        return True
-                    self._node_press(obj, view_pos, event.modifiers())
-                    return True
-                if event.button() == Qt.MouseButton.RightButton:
-                    self._rpress = (view_pos, obj)
-                    self._rpan = False
-                    self._pan_start = QPointF(view_pos)
-                    self._offset_start = QPointF(self._offset)
-                    return True
-            if etype == QEvent.Type.MouseMove:
-                view_pos = self.view_pos_of_event(obj, event)
-                if self._drag is not None:
-                    self._drag_to(view_pos)
-                    return True
-                if (
-                    self._rpress is not None
-                    and event.buttons() & Qt.MouseButton.RightButton
-                ):
-                    # 节点上右键拖拽平移：与空画布右键拖拽行为一致
-                    start, _target = self._rpress
-                    if (QPointF(view_pos) - start).manhattanLength() > CLICK_TOL:
-                        self._rpan = True
-                        self.setCursor(Qt.CursorShape.ClosedHandCursor)
-                    if self._rpan:
-                        self._offset = self._offset_start + (
-                            QPointF(view_pos) - self._pan_start
-                        )
-                        self._view_changed(gesture=True)
-                    return True
-            if etype == QEvent.Type.MouseButtonRelease:
-                view_pos = self.view_pos_of_event(obj, event)
-                if (
-                    event.button() == Qt.MouseButton.LeftButton
-                    and self._drag is not None
-                ):
-                    self._end_drag()
-                    return True
-                if (
-                    event.button() == Qt.MouseButton.RightButton
-                    and self._rpress is not None
-                ):
-                    target_node = self._rpress[1]
-                    was_pan = self._rpan
-                    self._rpress = None
-                    self._rpan = False
-                    if was_pan:
-                        # 平移结束：恢复光标并结算手势（补偿节点几何落位）
-                        self.unsetCursor()
-                        self._settle_view_gesture()
-                    elif target_node is obj:
-                        self._open_node_menu(obj, event.globalPosition().toPoint())
-                    return True
-        return False
+        return self._interaction.handle_event(obj, event)
 
     def view_pos_of_event(self, obj, event) -> QPointF:
         """把子控件上的事件坐标换算为画布视图坐标。"""
-        return QPointF(obj.mapTo(self, event.position().toPoint()))
-
-    # -- 节点拖动 ---------------------------------------------------------
-    def _node_press(self, widget: ElaNodeWidget, view_pos: QPointF, modifiers) -> None:
-        nid = widget.node.id
-        if modifiers & Qt.KeyboardModifier.ControlModifier:
-            self.toggle_node_selected(nid)
-        elif nid not in self._selected_nodes:
-            self.select_nodes([nid])
-        if nid in self._selected_nodes:
-            starts = {
-                i: QPointF(self.graph.node(i).pos)
-                for i in self._selected_nodes
-                if self.graph.node(i)
-            }
-            self._drag = (QPointF(view_pos), starts)
-            self._drag_moved = False
-
-    def _drag_to(self, view_pos: QPointF) -> None:
-        start_view, starts = self._drag
-        delta = (QPointF(view_pos) - start_view) / self._zoom
-        if not self._drag_moved and delta.manhattanLength() * self._zoom < 2.0:
-            return
-        self._drag_moved = True
-        defer = bool(getattr(self._viewport, "supports_node_proxy", False))
-        # 受影响边（两端任一在被拖节点上）的旧包围盒仅软件模式的局部
-        # 重绘需要；GL 代理模式整幅重绘，跳过该统计开销
-        affected = []
-        old_rects = []
-        if not defer:
-            for nid in starts:
-                for e in self.graph.edges_of(nid):
-                    ew = self._edge_widgets.get(e.id)
-                    if ew is not None and ew not in affected:
-                        affected.append(ew)
-                        old_rects.append(ew.bounding_rect())
-        for nid, start_pos in starts.items():
-            node = self.graph.node(nid)
-            if node is None:
-                continue
-            node.pos = start_pos + delta
-            w = self._node_widgets.get(nid)
-            if w is not None and defer:
-                # 带可见自定义体的被拖节点同样切换手势位图代理（幂等）
-                w.begin_gesture_proxy()
-            # 位图代理节点由视口按场景坐标实时绘制，拖动期间无需逐帧落位
-            if w is not None and not (defer and w.uses_proxy()):
-                w.apply_view(self.scene_to_view(node.pos), self._zoom)
-        if defer:
-            self._gesture_deferred = True
-            self.update()
-        else:
-            # 局部重绘：边的新旧包围盒即可（节点控件自行随几何移动重绘）
-            self._update_scene_rects(
-                old_rects + [ew.bounding_rect() for ew in affected]
-            )
-
-    def _end_drag(self) -> None:
-        start_view, starts = self._drag
-        self._drag = None
-        if self._drag_moved:
-            for nid in starts:
-                node = self.graph.node(nid)
-                if node is not None:
-                    self.node_moved.emit(nid, QPointF(node.pos))
-        self._drag_moved = False
-        # 拖动中跳过的代理节点几何落位补偿（引脚热区恢复精确）
-        self._settle_view_gesture()
-
-    # ------------------------------------------------------------------
-    # 连线（引脚拖拽）
-    # ------------------------------------------------------------------
-    def _begin_wire(self, handle: ElaPinHandle) -> None:
-        pin = handle.pin
-        node = handle.node_widget.node
-        start = node.pos + handle.logical_center()
-        self._wire = ElaTempWire(start, pin.data_type, parent=self)
-        self._wire_src = (node.id, pin)
-        self._wire_target = None
-        self._update_scene_rects([self._wire_scene_rect(self._wire)])
-
-    def _wire_scene_rect(self, wire: ElaTempWire) -> QRectF:
-        """临时线（含端点小圆点与描边余量）的场景包围盒。"""
-        r = bezier_path(wire.start, wire.end).boundingRect()
-        return r.adjusted(-12.0, -12.0, 12.0, 12.0)
-
-    def _wire_ring_rect(self, target) -> QRectF:
-        """磁吸高亮圈的场景包围盒（无目标时返回空矩形）。"""
-        if target is None:
-            return QRectF()
-        nid, pin = target
-        c = self.pin_scene_pos(nid, pin.id, pin.direction)
-        return QRectF(c - QPointF(12.0, 12.0), QSizeF(24.0, 24.0))
-
-    def _update_wire(self, view_pos: QPointF) -> None:
-        old_rects = [
-            self._wire_scene_rect(self._wire),
-            self._wire_ring_rect(self._wire_target),
-        ]
-        scene_pt = self.view_to_scene(view_pos)
-        self._wire.set_end(scene_pt)
-        self._wire_target = self._find_compatible_pin(scene_pt)
-        self._wire.magnet = self._wire_target is not None
-        if self._wire_target is not None:
-            nid, pin = self._wire_target
-            self._wire.set_end(self.pin_scene_pos(nid, pin.id, pin.direction))
-        self._update_scene_rects(
-            old_rects
-            + [
-                self._wire_scene_rect(self._wire),
-                self._wire_ring_rect(self._wire_target),
-            ]
-        )
-
-    def _find_compatible_pin(self, scene_pt: QPointF):
-        """在磁吸半径内找最近的兼容引脚（方向相反 + 类型兼容 + 非本节点）。"""
-        src_nid, src_pin = self._wire_src
-        want_dir = (
-            ElaPinDirectionType.Input
-            if src_pin.direction is ElaPinDirectionType.Output
-            else ElaPinDirectionType.Output
-        )
-        radius = MAGNET_R / self._zoom
-        probe = QRectF(scene_pt, scene_pt).adjusted(-radius, -radius, radius, radius)
-        best = None
-        best_d = radius
-        for nid, widget in self._node_widgets.items():
-            if nid == src_nid:
-                continue
-            if not probe.intersects(QRectF(widget.node.pos, widget.node.size)):
-                continue
-            pins = (
-                widget.node.inputs
-                if want_dir is ElaPinDirectionType.Input
-                else widget.node.outputs
-            )
-            for pin in pins:
-                if src_pin.direction is ElaPinDirectionType.Output:
-                    ok = types_compatible(src_pin.data_type, pin.data_type)
-                else:
-                    ok = types_compatible(pin.data_type, src_pin.data_type)
-                if not ok:
-                    continue
-                c = self.pin_scene_pos(nid, pin.id, pin.direction)
-                d = (c - scene_pt).manhattanLength()
-                if d < best_d:
-                    best = (nid, pin)
-                    best_d = d
-        return best
-
-    def _finish_wire(self, view_pos: QPointF) -> None:
-        src_nid, src_pin = self._wire_src
-        target = self._find_compatible_pin(self.view_to_scene(view_pos))
-        wire, self._wire, self._wire_src, self._wire_target = (
-            self._wire,
-            None,
-            None,
-            None,
-        )
-        dirty = []
-        if wire is not None:
-            dirty.append(self._wire_scene_rect(wire))
-            wire.deleteLater()
-        if target is not None:
-            dirty.append(self._wire_ring_rect(target))
-            tgt_nid, tgt_pin = target
-            if src_pin.direction is ElaPinDirectionType.Output:
-                self.graph.add_edge(src_nid, src_pin.id, tgt_nid, tgt_pin.id)
-            else:
-                self.graph.add_edge(tgt_nid, tgt_pin.id, src_nid, src_pin.id)
-        else:
-            # 拖到空白松开：弹创建菜单，创建后自动连接（UE5 行为）
-            scene_pt = self.view_to_scene(view_pos)
-            self._pending_wire = (src_nid, src_pin, scene_pt)
-            menu = ElaNodeCreationMenu(self, owner=self._owner)
-            want_dir = (
-                ElaPinDirectionType.Input
-                if src_pin.direction is ElaPinDirectionType.Output
-                else ElaPinDirectionType.Output
-            )
-            menu.type_chosen.connect(self._create_node_for_wire)
-            menu.popup_at(
-                self.mapToGlobal(QPoint(int(view_pos.x()), int(view_pos.y()))),
-                compatible=(want_dir, src_pin.data_type),
-            )
-        if dirty:
-            self._update_scene_rects(dirty)
-
-    def _create_node_for_wire(self, type_name: str) -> None:
-        """拖线松开菜单回调：创建节点并自动连接对应引脚。"""
-        pending = self._pending_wire
-        self._pending_wire = None
-        if pending is None:
-            return
-        src_nid, src_pin, scene_pt = pending
-        node = self.add_node_at(type_name, scene_pt)
-        want_dir = (
-            ElaPinDirectionType.Input
-            if src_pin.direction is ElaPinDirectionType.Output
-            else ElaPinDirectionType.Output
-        )
-        pins = node.inputs if want_dir is ElaPinDirectionType.Input else node.outputs
-        for pin in pins:
-            if src_pin.direction is ElaPinDirectionType.Output:
-                ok = types_compatible(src_pin.data_type, pin.data_type)
-            else:
-                ok = types_compatible(pin.data_type, src_pin.data_type)
-            if not ok:
-                continue
-            if src_pin.direction is ElaPinDirectionType.Output:
-                self.graph.add_edge(src_nid, src_pin.id, node.id, pin.id)
-            else:
-                self.graph.add_edge(node.id, pin.id, src_nid, src_pin.id)
-            break
+        return self._interaction.view_pos_of_event(obj, event)
 
     # ------------------------------------------------------------------
     # 画布鼠标事件（空白区）
     # ------------------------------------------------------------------
     def mousePressEvent(self, event) -> None:
-        pos = QPointF(event.position().toPoint())
-        if event.button() == Qt.MouseButton.MiddleButton:
-            self._start_pan(pos)
-            return
-        if event.button() == Qt.MouseButton.LeftButton:
-            if self._space_down:
-                self._start_pan(pos)
-                return
-            hit = self._edge_at(self.view_to_scene(pos))
-            if hit is not None:
-                self._select_edge(
-                    hit, bool(event.modifiers() & Qt.KeyboardModifier.ControlModifier)
-                )
-                return
-            self._band = (pos, pos)
-            self._band_additive = bool(
-                event.modifiers() & Qt.KeyboardModifier.ControlModifier
-            )
-            if not self._band_additive:
-                self.clear_selection()
-            self.update()
-            return
-        if event.button() == Qt.MouseButton.RightButton:
-            self._rpress = (pos, None)
-            self._rpan = False
-            self._pan_start = QPointF(pos)
-            self._offset_start = QPointF(self._offset)
-            return
-        super().mousePressEvent(event)
+        self._interaction.mouse_press(event)
 
     def mouseMoveEvent(self, event) -> None:
-        pos = QPointF(event.position().toPoint())
-        if self._wire is not None:
-            # 拖线中：某些平台事件直接投递到画布而非引脚热区
-            self._update_wire(pos)
-            return
-        if self._panning:
-            self._offset = self._offset_start + (pos - self._pan_start)
-            self._view_changed(gesture=True)
-            return
-        if self._rpress is not None and event.buttons() & Qt.MouseButton.RightButton:
-            start, _target = self._rpress
-            if (pos - start).manhattanLength() > CLICK_TOL:
-                self._rpan = True
-                self.setCursor(Qt.CursorShape.ClosedHandCursor)
-            if self._rpan:
-                self._offset = self._offset_start + (pos - self._pan_start)
-                self._view_changed(gesture=True)
-            return
-        if self._band is not None:
-            old_rect = QRectF(self._band[0], self._band[1]).normalized()
-            self._band = (self._band[0], pos)
-            new_rect = QRectF(self._band[0], self._band[1]).normalized()
-            dirty = old_rect.united(new_rect).adjusted(-3.0, -3.0, 3.0, 3.0)
-            self.update(dirty.toAlignedRect().intersected(self.rect()))
-            return
-        self._update_edge_hover(self.view_to_scene(pos))
-        super().mouseMoveEvent(event)
+        self._interaction.mouse_move(event)
 
     def mouseReleaseEvent(self, event) -> None:
-        pos = QPointF(event.position().toPoint())
-        if event.button() == Qt.MouseButton.LeftButton and self._wire is not None:
-            self._finish_wire(pos)
-            return
-        if event.button() == Qt.MouseButton.MiddleButton and self._panning:
-            self._panning = False
-            self.unsetCursor()
-            self._settle_view_gesture()
-            return
-        if event.button() == Qt.MouseButton.LeftButton:
-            if self._panning:
-                self._panning = False
-                self.unsetCursor()
-                self._settle_view_gesture()
-                return
-            if self._band is not None:
-                self._finish_band()
-                return
-        if event.button() == Qt.MouseButton.RightButton and self._rpress is not None:
-            was_pan = self._rpan
-            self._rpress = None
-            self._rpan = False
-            if was_pan:
-                self._panning = False
-                self.unsetCursor()
-                self._settle_view_gesture()
-            else:
-                scene_pt = self.view_to_scene(pos)
-                menu = ElaNodeCreationMenu(self, owner=self._owner)
-                menu.type_chosen.connect(lambda t, sp=scene_pt: self.add_node_at(t, sp))
-                menu.popup_at(event.globalPosition().toPoint())
-            return
-        super().mouseReleaseEvent(event)
+        self._interaction.mouse_release(event)
 
     def wheelEvent(self, event) -> None:
-        delta = event.angleDelta().y()
-        if delta == 0:
-            return
-        factor = 1.15 ** (delta / 120.0)
-        new_zoom = max(ZOOM_MIN, min(ZOOM_MAX, self._zoom * factor))
-        if abs(new_zoom - self._zoom) < 1e-6:
-            return
-        cursor = event.position()
-        self._offset = cursor - (cursor - self._offset) * (new_zoom / self._zoom)
-        self._zoom = new_zoom
-        self._view_changed(gesture=True)
-        self._zooming = True
-        self._zoom_settle.start()
-        event.accept()
-
-    def _end_zoom_gesture(self) -> None:
-        """滚轮缩放手势结束：补偿几何落位并触发节点缓存按最终缩放重建。"""
-        self._zooming = False
-        self._settle_view_gesture()
-        self.update()
+        self._interaction.wheel(event)
 
     def keyPressEvent(self, event) -> None:
-        if event.key() == Qt.Key.Key_Space and not event.isAutoRepeat():
-            self._space_down = True
-            return
-        if event.key() in (Qt.Key.Key_Delete, Qt.Key.Key_Backspace):
-            self.delete_selection()
-            return
-        super().keyPressEvent(event)
+        self._interaction.key_press(event)
 
     def keyReleaseEvent(self, event) -> None:
-        if event.key() == Qt.Key.Key_Space and not event.isAutoRepeat():
-            self._space_down = False
-            if self._panning:
-                self._panning = False
-                self.unsetCursor()
-                # 空格提前松开也必须完整结算（与左键松开路径一致）
-                self._settle_view_gesture()
-            return
-        super().keyReleaseEvent(event)
+        self._interaction.key_release(event)
 
     # -- 平移 / 框选 -------------------------------------------------------
     def _cancel_gestures(self) -> None:
-        """复位所有「按住类」手势状态（失焦 / 隐藏 / 载入新图时调用）。
-
-        这些状态**只由成对的按下-松开维护**，而松开事件在若干情况下根本
-        不会到达：
-
-        - 按住空格后 Alt+Tab / 点到别的控件 → ``focusOutEvent`` 之后没有
-          ``keyRelease``，``_space_down`` 永远True → **之后每次左键都变成
-          平移，框选彻底失效**（实测）；
-        - 框选进行中失焦 → ``_band`` 的起点留在上一个位置，下次鼠标移动
-          会对着它画框（实测）。
-
-        顺带把 ``_rpress`` / ``_wire`` 一起清掉：它们会与 ``_band`` 并存
-        （框选中按下右键时两者同时非None），松右键会弹创建菜单而框选状态
-        继续挂着。临时线要**回收对象**（``deleteLater``）并清掉端点邻居
-        状态 —— 只把 ``_wire`` 置 None 会让 ``ElaTempWire`` 永久挂在画布
-        底下，``_wire_src`` / ``_wire_target`` 也停在上一笔上。
-        """
-        self._space_down = False
-        self._band = None
-        self._band_additive = False
-        self._rpress = None
-        self._rpan = False
-        if self._wire is not None:
-            self._wire.deleteLater()
-        self._wire = None
-        self._wire_src = None
-        self._wire_target = None
-        self._pending_wire = None
-        if self._panning:
-            self._panning = False
-            self.unsetCursor()
+        """复位所有「按住类」手势状态（失焦 / 隐藏 / 载入新图时调用）。"""
+        self._interaction.cancel()
 
     def leaveEvent(self, event) -> None:
         """鼠标离开画布：清掉边 hover（否则最后一次悬停的边一直保持加粗）。"""
@@ -1063,26 +591,6 @@ class ElaBlueprintCanvas(QWidget):
     def hideEvent(self, event) -> None:
         self._cancel_gestures()
         super().hideEvent(event)
-
-    def _start_pan(self, view_pos: QPointF) -> None:
-        self._panning = True
-        self._pan_start = QPointF(view_pos)
-        self._offset_start = QPointF(self._offset)
-        self.setCursor(Qt.CursorShape.ClosedHandCursor)
-
-    def _finish_band(self) -> None:
-        start, end = self._band
-        self._band = None
-        rect = QRectF(self.view_to_scene(start), self.view_to_scene(end)).normalized()
-        ids = []
-        if rect.width() > 2 / self._zoom or rect.height() > 2 / self._zoom:
-            for nid, widget in self._node_widgets.items():
-                node = widget.node
-                if rect.intersects(QRectF(node.pos, node.size)):
-                    ids.append(nid)
-        if ids:
-            self.select_nodes(ids, additive=self._band_additive)
-        self.update()
 
     def delete_selection(self) -> None:
         """删除选中的边与节点（节点连带其全部边），发相应信号。"""
