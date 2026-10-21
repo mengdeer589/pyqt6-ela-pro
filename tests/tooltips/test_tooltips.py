@@ -474,6 +474,25 @@ class TestToolTipTheme:
         tooltip.deleteLater()
         qapp.processEvents()
 
+    def test_label_heals_palette_reset_on_paint(self, qapp):
+        """原生顶层窗 / 平台样式把 palette 刷回时，绘制前要恢复显式色。"""
+        dark = eTheme.getThemeColor(
+            ElaThemeType.ThemeMode.Dark, ElaThemeType.ThemeColor.BasicText
+        ).name()
+        tooltip = ElaToolTip("提示")
+        tooltip._onThemeChanged(ElaThemeType.ThemeMode.Dark)
+        label = tooltip._label
+
+        palette = label.palette()
+        palette.setColor(QPalette.ColorRole.WindowText, QColor("#123456"))
+        label.setPalette(palette)
+        assert label.palette().color(QPalette.ColorRole.WindowText).name() == "#123456"
+
+        label.grab()  # 触发 paintEvent
+        assert label.palette().color(QPalette.ColorRole.WindowText).name() == dark
+        tooltip.deleteLater()
+        qapp.processEvents()
+
     def test_theme_signal_reconnects_text_color(self, qapp, monkeypatch):
 
         class _FakeTheme(QObject):

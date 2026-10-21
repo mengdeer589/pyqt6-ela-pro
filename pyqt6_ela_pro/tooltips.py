@@ -30,7 +30,6 @@ from PyQt6.QtCore import (
 
 from ._internal import is_deleted, single_shot_on
 from ._motion import Duration, start_idle_loop, start_transition
-from ._styles import setTextColor
 from .widget_base import ElaThemeWidget
 from PyQt6.QtGui import (
     QPainter,
@@ -101,6 +100,36 @@ class ElaToolTipPositionType(Enum):
     """显示在目标右下方"""
 
 
+class _ToolTipLabel(QLabel):
+    """提示文本标签：绘制前自愈显式色。
+
+    提示框是原生 ``Qt.Tool`` 顶层窗；创建 / 改窗口标志 / 平台样式切换都可能把
+    子标签的 palette 刷回应用默认色（深色下就是黑字）。和 ``ColorText`` 同一套
+    做法：颜色存实例上，绘制前发现 palette 被改回就重写一次。
+    """
+
+    def __init__(self, text: str = "", parent: Optional[QWidget] = None) -> None:
+        super().__init__(text, parent)
+        self._text_color: Optional[QColor] = None
+
+    def setTextColor(self, color) -> None:  # noqa: N802 (Qt 命名)
+        self._text_color = QColor(color)
+        self._apply_text_color()
+
+    def _apply_text_color(self) -> None:
+        if self._text_color is None:
+            return
+        palette = self.palette()
+        role = self.foregroundRole()
+        if palette.color(role) != self._text_color:
+            palette.setColor(role, self._text_color)
+            self.setPalette(palette)
+
+    def paintEvent(self, event) -> None:  # noqa: N802 (Qt 命名)
+        self._apply_text_color()
+        super().paintEvent(event)
+
+
 class ElaToolTip(QWidget):
     """轻量级悬浮提示组件。
 
@@ -129,7 +158,7 @@ class ElaToolTip(QWidget):
         # 建聊天页 / 工具栏时必中）。
         self.hide()
 
-        self._label = QLabel(text, self)
+        self._label = _ToolTipLabel(text, self)
         self._label.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
 
         font = QFont()
@@ -168,7 +197,7 @@ class ElaToolTip(QWidget):
         color = eTheme.getThemeColor(
             self._currentTheme, ElaThemeType.ThemeColor.BasicText
         )
-        setTextColor(self._label, color)
+        self._label.setTextColor(color)
 
     def _onThemeChanged(self, mode: ElaThemeType.ThemeMode) -> None:
         """主题切换：更新底色、边框与文字颜色。"""
