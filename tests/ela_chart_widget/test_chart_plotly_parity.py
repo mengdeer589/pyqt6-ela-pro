@@ -168,9 +168,7 @@ class TestSvgExport:
             make, toolbox={"feature": ["saveAsSvg"]}, dataZoom=[{"type": "inside"}]
         )
         # 无路径时 offscreen 会直接返回空；这里注入路径验证「按钮 → 落盘」链路
-        monkeypatch.setattr(
-            chart, "saveImage", lambda *a, **k: chart._save_svg.__self__ and ""
-        )
+        monkeypatch.setattr(chart, "saveImage", lambda *a, **k: "")
         box = chart._component("toolbox")
         box.trigger("saveAsSvg")  # 不抛即可
         assert box.last_saved is None

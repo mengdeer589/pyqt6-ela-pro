@@ -23,7 +23,6 @@ from __future__ import annotations
 
 import copy
 import math
-import pathlib
 import time
 from collections import defaultdict
 from typing import Optional
@@ -31,14 +30,10 @@ from typing import Optional
 from .._internal import is_deleted
 from PyQt6.QtCore import (
     QAbstractAnimation,
-    QBuffer,
     QEasingCurve,
-    QIODevice,
     QObject,
     QPointF,
-    QRect,
     QRectF,
-    QSize,
     Qt,
     QTimer,
     QVariantAnimation,
@@ -47,13 +42,12 @@ from PyQt6.QtCore import (
 from PyQt6.QtGui import (
     QColor,
     QFontMetricsF,
-    QGuiApplication,
     QImage,
     QPainter,
     QPen,
     QPolygonF,
 )
-from PyQt6.QtWidgets import QFileDialog, QWidget
+from PyQt6.QtWidgets import QWidget
 from PyQt6ElaWidgetTools import eTheme
 
 from .._internal import connect_theme_signal, disconnect_theme
@@ -70,6 +64,7 @@ from ._tokens import (
 from ._utils import to_float as _to_float
 from ._utils import component_opt as _component_opt
 from ._utils import warn_key, warn_once
+from .exporter import ChartExporter
 from .axes import (
     CalendarCoord,
     Coord,
@@ -1780,6 +1775,8 @@ class ElaChartWidget(QWidget):
         #: 生命周期 / ECharts 事件
         self._disposed = False
         self._event_handlers: dict = {}
+        #: 导出（导出逻辑与画布状态分离，见 ``exporter.py``）
+        self._exporter = ChartExporter(self)
         #: 双击复位视图（Plotly ``doubleClick: 'reset'`` 语义，默认开）
         self._double_click_reset = True
         #: 图例悬停高亮的系列名（None = 无）
@@ -2699,44 +2696,7 @@ class ElaChartWidget(QWidget):
         ``backgroundColor``；``excludeComponents`` 暂不支持（忽略）。
         """
         opts = dict(opts or {})
-        fmt = str(opts.get("type") or "png").lower()
-        if fmt == "svg":
-            return self._svg_data_url()
-        fmt = "jpeg" if fmt in ("jpeg", "jpg") else "png"
-        try:
-            image = self._grab_without_toolbox().toImage()
-        except Exception:
-            return ""
-        if image.isNull():
-            return ""
-        try:
-            ratio = float(opts.get("pixelRatio") or 1.0)
-        except (TypeError, ValueError, OverflowError):
-            ratio = 1.0
-        if ratio > 0 and abs(ratio - 1.0) > 1e-6:
-            image = image.scaled(
-                max(1, int(image.width() * ratio)),
-                max(1, int(image.height() * ratio)),
-                Qt.AspectRatioMode.IgnoreAspectRatio,
-                Qt.TransformationMode.SmoothTransformation,
-            )
-        bg = opts.get("backgroundColor")
-        if bg or fmt == "jpeg":
-            canvas = QImage(image.size(), QImage.Format.Format_RGB32)
-            canvas.fill(QColor(bg) if bg else QColor(T("color.bg.base")))
-            painter = QPainter(canvas)
-            painter.drawImage(0, 0, image)
-            painter.end()
-            image = canvas
-        buf = QBuffer()
-        buf.open(QIODevice.OpenModeFlag.WriteOnly)
-        ok = image.save(buf, fmt.upper())
-        buf.close()
-        if not ok:
-            return ""
-        payload = bytes(buf.data().toBase64()).decode("ascii")
-        mime = "image/jpeg" if fmt == "jpeg" else "image/png"
-        return f"data:{mime};base64,{payload}"
+        return self._exporter.data_url(opts)
 
     def zoomStep(self, factor: float) -> bool:
         """按倍数步进缩放（``<1`` 放大 / ``>1`` 缩小），围绕当前窗口中心。
@@ -2779,103 +2739,7 @@ class ElaChartWidget(QWidget):
         矢量图元 + 位图符号内嵌）；其余走 PNG。返回实际保存路径，未保存返回 ``""``。
         """
         target = path
-        want_svg = str(format or "").lower() == "svg" or (
-            bool(target) and str(target).lower().endswith(".svg")
-        )
-        if not target:
-            try:
-                if QGuiApplication.platformName() == "offscreen":
-                    return ""
-                filt = (
-                    "SVG 矢量图 (*.svg)" if want_svg else "PNG 图片 (*.png)"
-                )
-                default = "chart.svg" if want_svg else "chart.png"
-                target, _ = QFileDialog.getSaveFileName(self, "保存图表", default, filt)
-            except Exception:
-                target = None
-        if not target:
-            return ""
-        if want_svg:
-            return self._save_svg(str(target))
-        try:
-            if self._grab_without_toolbox().save(target, "PNG"):
-                return str(target)
-        except Exception:
-            pass
-        return ""
-
-    def _save_svg(self, target: str) -> str:
-        """用 ``QSvgGenerator`` 走同一条绘制链导出矢量图。"""
-        try:
-            from PyQt6.QtSvg import QSvgGenerator
-        except ImportError:  # 可选依赖（QtSvg）
-            return ""
-        try:
-            width, height = max(1, self.width()), max(1, self.height())
-            generator = QSvgGenerator()
-            generator.setFileName(target)
-            generator.setSize(QSize(width, height))
-            generator.setViewBox(QRect(0, 0, width, height))
-            generator.setTitle("ElaChartWidget")
-            painter = QPainter(generator)
-            try:
-                painter.fillRect(
-                    QRect(0, 0, width, height), QColor(T("color.bg.base"))
-                )
-                self._paint_content(painter)
-            finally:
-                painter.end()
-            return target
-        except Exception:
-            return ""
-
-    # -- 生命周期 ----------------------------------------------------------
-    def _toolbox_widgets(self) -> list:
-        """工具条按钮子控件（导出时临时隐藏用）。"""
-        result = []
-        for comp in self._components:
-            if str(getattr(comp, "optionKey", "")) != "toolbox":
-                continue
-            widgets = getattr(comp, "_widgets", None)
-            if isinstance(widgets, dict):
-                result.extend(
-                    w for w in list(widgets.values()) if not is_deleted(w)
-                )
-        return result
-
-    def _grab_without_toolbox(self):
-        """``grab()`` 前隐藏工具条按钮：导出 / 截图要的是**图**，不是 UI。
-
-        工具条按钮是真实子控件（``ElaIconButton``），``grab()`` 会把它们一起
-        画进去，而 SVG 导出走 ``_paint_content``（不含子控件）—— 不统一的话
-        同一个图表导 PNG 带一排按钮、导 SVG 不带。
-        """
-        buttons = self._toolbox_widgets()
-        hidden = [b for b in buttons if b.isVisible()]
-        for button in hidden:
-            button.setVisible(False)
-        try:
-            return self.grab()
-        finally:
-            for button in hidden:
-                button.setVisible(True)
-
-    def _svg_data_url(self) -> str:
-        """矢量图 → ``data:image/svg+xml;base64,...``（``getDataURL({"type": "svg"})``）。"""
-        import base64
-        import tempfile
-
-        try:
-            with tempfile.TemporaryDirectory() as tmp:
-                target = str(pathlib.Path(tmp) / "chart.svg")
-                if not self._save_svg(target):
-                    return ""
-                data = pathlib.Path(target).read_bytes()
-        except Exception:
-            return ""
-        if not data:
-            return ""
-        return "data:image/svg+xml;base64," + base64.b64encode(data).decode("ascii")
+        return self._exporter.save_image(target, format=format)
 
     def dispose(self) -> None:
         """销毁实例（ECharts ``dispose``；停定时器 / 断主题 / deleteLater）。"""
@@ -4582,9 +4446,7 @@ class ElaChartWidget(QWidget):
             empty = self._emptyAreaHit(pos)
             if empty is not None:
                 color = QColor(T("color.text.secondary"))
-                self.tooltip.showAt(
-                    pos, self.tooltip.buildLines(empty, color, "")
-                )
+                self.tooltip.showAt(pos, self.tooltip.buildLines(empty, color, ""))
                 self.update()
                 return
         self.tooltip.hide()
