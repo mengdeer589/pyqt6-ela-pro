@@ -122,6 +122,10 @@ class ExamplePage(ElaThemeWidget):
         return row
 
     def _show_code(self, method):
+        self._build_code_dialog(method).exec()
+
+    def _build_code_dialog(self, method):
+        """构造「示例代码」对话框（尺寸走 ``_code_dialog_size``，不经 autoFit）。"""
         try:
             source = inspect.getsource(method)
         except (OSError, TypeError):
@@ -147,8 +151,8 @@ class ExamplePage(ElaThemeWidget):
         font.setStyleHint(QFont.StyleHint.Monospace)
         edit.setFont(font)
         edit.document().setDefaultFont(font)
-        # 逐 token 显式上色，**不依赖 Palette.Text**：ElaPlainTextEdit.paintEvent
-        # 发现 Text 不等于主题 BasicText 就会刷回去（:145-147）
+        # 逐 token 显式上色，**不依赖 Palette.Text**：主题切换会把 Text 刷回
+        # 主题 BasicText（themeModeChanged → onThemeChanged）
         _insert_colored_code(edit.document(), source)
         container = QWidget()
         container_layout = QVBoxLayout(container)
@@ -178,8 +182,29 @@ class ExamplePage(ElaThemeWidget):
         container_layout.addWidget(copy_btn)
         dlg._paramLay.setContentsMargins(15, 25, 15, 2)
         dlg.setParamWidget(container)
-        dlg.resize(900, 650)
-        dlg.exec()
+        # 关掉 autoFit 再定尺寸：它会在 showEvent 里把宽度夹到 620px、高度按内容
+        # 撑（代码框 sizeHint 很矮），resize() 写了也白写 —— 这正是原先「弹框太小」的根因。
+        dlg.setAutoFit(False)
+        dlg.resize(*self._code_dialog_size())
+        return dlg
+
+    def _code_dialog_size(self):
+        """代码对话框尺寸：跟随宿主窗口按比例放大，再夹到窗口与屏幕可用区内。
+
+        ``ElaContentDialog`` 的遮罩只覆盖宿主窗口、弹框居中其上，所以尺寸不能超过
+        窗口（会压到桌面上）；屏幕再小也只能取可用区。
+        """
+        owner = self.window()
+        screen = owner.screen() or QApplication.primaryScreen()
+        width = max(900, round(owner.width() * 0.86))
+        height = max(650, round(owner.height() * 0.86))
+        width = min(width, owner.width() - 32)
+        height = min(height, owner.height() - 32)
+        if screen is not None:
+            available = screen.availableGeometry()
+            width = min(width, available.width() - 80)
+            height = min(height, available.height() - 80)
+        return max(640, width), max(480, height)
 
 
 # ── 彩色代码插入到 QTextDocument ──────────────────────────────
@@ -370,9 +395,9 @@ def _insert_colored_line(cur, raw, style):
         if kind == "ident":
             fmt = _make_fmt(*style[_ident_type(i, matches, raw)])
         elif kind == "other":
-            # 空白也要**显式上色**：viewer 的 Palette.Text 会被
-            # ElaPlainTextEdit.paintEvent 每次重置回主题 BasicText
-            # （ElaPlainTextEdit.cpp:145-147），依赖它的话亮色主题下缩进会变成近黑
+            # 空白也要**显式上色**：主题切换会把 Palette.Text 刷回主题
+            # BasicText（themeModeChanged → onThemeChanged），依赖它的话
+            # 亮色主题下缩进会变成近黑
             cur.insertText(text, _make_fmt(*style["default"]))
             last = m.end()
             continue

@@ -56,7 +56,13 @@ tests/                     回归测试（按组件目录组织）
   排队 / 撤回 / 重新生成 / steer 插话、多话题与崩溃恢复日志、会话导出导入。
   详见 [docs/chat.md](docs/chat.md)。
 - **图表引擎**：`ElaChartWidget` 对齐 ECharts 的 `setOption`（21 种系列、tooltip / dataZoom /
-  日历热力 / 下钻），百万点级数据有系列层位图缓存与降采样。详见 [docs/charts.md](docs/charts.md)。
+  日历热力 / 下钻），百万点级数据有系列层位图缓存与降采样 —— 折线 / 散点 100 万点稳态帧
+  ~9ms、悬停 <1ms、进入新窗口 ~12ms；显式时间戳数据的**记录中断自动断开**（`addGaps`，
+  `connectNulls` 可关）；`tools/perf/bench_charts.py`（含 `zoom新窗口` / `缩回全景` 两列）
+  可复跑；**直角坐标图默认
+  滚轮缩放**；交互对齐 Plotly：双击复位、`setDragMode`（平移 / 框选缩放 / 框选 / **套索**）、
+  可配命中半径、空区坐标事件、图例悬停高亮、联合提示排序、`connectNulls`、**SVG 导出**；
+  工具条是真实 `ElaIconButton`。详见 [docs/charts.md](docs/charts.md)。
 - **内容渲染**：`ElaMarkdownViewer`（Typora 结构排版、4 套配色主题、GFM / Alert / 脚注 /
   公式 / Mermaid / 流式追加）与 `ElaTerminalView`（ANSI 颜色、跨分片转义、只读）。
   详见 [docs/markdown.md](docs/markdown.md)。
@@ -241,10 +247,10 @@ sys.exit(app.exec())
 | **ElaPlotWidget** | pyqtgraph 绘图控件（主题自适应，可选依赖） |
 | **ElaFigureCanvas** | Matplotlib 画布（主题感知，可选依赖） |
 | **ElaTimeline** | 时间线（时间戳/标题/内容/图标；垂直/水平） |
-| **ElaMarkdownViewer** | Markdown 查看器（主题自适应） |
+| **ElaMarkdownViewer** | Markdown 查看器（主题自适应；主字体缺字形时单族符号字体兜底，不改文本） |
 | **ElaChip** | 标签纸片（16 色，可关闭/可选择/胶囊/前置图标） |
 | **ElaInfoBadge** | 角标（Dot/Value/Icon 模式，5 种级别） |
-| **ElaTerminalView** | 终端输出（ANSI 色彩 / 行号 / 自动滚动 / 搜索过滤 / 选区复制 / 导出；`append` 吃 str 与 bytes） |
+| **ElaTerminalView** | 终端输出（ANSI 色彩 / 行号 / 自动滚动 / 搜索过滤 / 选区复制 / 导出；`append` 吃 str 与 bytes；缺字形单族符号字体兜底） |
 
 #### AI 对话
 
@@ -274,7 +280,7 @@ sys.exit(app.exec())
 | **ElaChatToolButton** | 工具栏图标按钮（`ElaIconButton` 子类，可选选中态；带文字的是 `ElaButton`） |
 | **ElaChatPermissionDock** | 输入区**上方**的审批 dock（等待回复时的交互卡；时间线上留的是折叠的记录卡，两者不是同一个 widget） |
 | **ElaChatTurnJournal** | 回合崩溃恢复日志（追加写事件流：`dumpsNewLines` 落盘、`fromLines` 重放并结算残留） |
-| **ElaChatSessionStats** | 会话级用量汇总（`view.sessionStats(limit)`：计数 / 上下文四路词元 / 使用率 / 累计成本） |
+| **ElaChatSessionStats** | 会话级用量汇总（`view.sessionStats(limit)`：计数 / 上下文四路词元 / 使用率 / 累计成本 / 工具调用统计（次数 / 轮数 / 按名计数 / 失败与在途）/ 思考耗时合计） |
 
 #### 划词助手
 
@@ -314,13 +320,18 @@ python -m pyside6_ela_pro.example
 每个组件标题旁有 `</> 代码` 按钮，弹出该演示方法自身的源码 ——
 语法高亮**按当前主题取亮 / 暗两套调色板**（均按 WCAG 4.5:1 校验）。
 
+主窗口同时演示 ElaWindow 的**应用外壳**：右侧停靠区（页面导航 / 运行日志 /
+说明，可拖拽、可合页）、工具栏、状态栏、AppBar 右键菜单、内容区顶栏的页面
+搜索、页脚节点（关于 / 设置）与关闭二次确认 —— 每一处都只是对 `ElaWindow`
+公开 API 的调用，可整段照抄。
+
 | 分组 | 页面 |
 |---|---|
 | 基础组件 | 输入与选择 / 下拉框全变体 / 容器与布局 / 视图与列表 / 按钮与菜单 / 进度与反馈 |
 | 数据与图表 | 表格（ElaDataTable / ElaParquetTable）/ 图表（ElaChartWidget / pyqtgraph / matplotlib / 仪表盘） |
 | 内容渲染 | Markdown（文本 / 代码 / 公式 / Mermaid / 流式）/ Office 文档预览 |
 | AI 对话 | 总览 / 输入区能力 / Agent 能力 / 会话管理 / 持久化与性能（预填 + 可重播） |
-| 窗口与应用外壳 | 应用框架 / 弹窗与提示 / 启动与托盘 |
+| 窗口与应用外壳 | ElaWindow 应用外壳（本页操作主窗口：导航栏模式、窗口按钮、背景绘制、内容堆栈、dock、新窗口打开、关闭链路）/ 弹窗与提示 / 启动与托盘 |
 | 系统交互与嵌入 | 窗口嵌入 / 浏览器嵌入 / 终端输出 / 划词助手 |
 | 动效与图形 | 动画与图标 / 蓝图节点编辑器 |
 | 参考文档 | 聊天组件 API 指南（用 `ElaMarkdownViewer` 渲染 `llm_test` 源码快照） |

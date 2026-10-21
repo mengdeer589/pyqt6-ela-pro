@@ -125,7 +125,7 @@ class TestTaskToggle:
     def test_click_toggles_source_and_signal(self):
         v = ElaMarkdownViewer()
         v.setMarkdown(self.SOURCE)
-        assert "☑" in v.document().toPlainText()
+        assert "■" in v.document().toPlainText()
 
         received = []
         v.taskToggled.connect(lambda index, checked: received.append((index, checked)))
@@ -133,7 +133,7 @@ class TestTaskToggle:
 
         assert received == [(1, False)]
         assert v.markdown() == "- [ ] 待办一\n- [ ] 已完成二"
-        assert "☑" not in v.document().toPlainText()
+        assert "■" not in v.document().toPlainText()
         v.deleteLater()
 
     def test_toggle_back(self):
@@ -155,7 +155,7 @@ class TestTaskToggle:
         """
         v = ElaMarkdownViewer()
         v.setMarkdown(self.SOURCE)
-        markers = [f for f in _fragments(v) if f.text().strip() in ("☑", "☐")]
+        markers = [f for f in _fragments(v) if f.text().strip() in ("■", "□")]
         assert markers
         for fragment in markers:
             assert (

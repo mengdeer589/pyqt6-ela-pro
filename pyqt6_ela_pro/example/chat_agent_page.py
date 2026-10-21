@@ -543,9 +543,12 @@ class ChatAgentPage(ExamplePage):
           opencode：``output`` 与 ``reasoning`` 同价、按输入侧总量选最大的
           满足档、最后除以 1e6；
         - 会话级汇总走 ``view.sessionStats(limit)``（``ElaChatSessionStats``）：
-          计数 / 当前上下文四路词元 / 使用率 / 累计成本，口径对齐 opencode
-          ``getSessionContext``（取**最后一条有 tokens 的助手消息的最后一步**）；
-          把它的 ``total_tokens`` / ``total_cost_usd`` 直接喂输入区圆环即可。
+          计数 / 当前上下文四路词元 / 使用率 / 累计成本 / **工具调用统计**
+          （``tool_calls`` 次数、``tool_rounds`` 轮数、``tool_counts`` 按名计数、
+          失败 / 中止 / 在途分档）/ ``reasoning_ms`` 思考耗时合计，口径对齐
+          opencode ``getSessionContext``（取**最后一条有 tokens 的助手消息的
+          最后一步**）；把它的 ``total_tokens`` / ``total_cost_usd`` 直接喂
+          输入区圆环即可。
         """
         view = self._chat.chatView()
         roundStats = ElaChatStats(
@@ -563,6 +566,9 @@ class ChatAgentPage(ExamplePage):
         view.beginText(messageId)
         view.appendText(messageId, "这一轮的用量与花费如下。")
         view.endText(messageId)
+        # 一次工具调用：会话统计里会数出「次数 / 轮数 / 按名计数」
+        readId = view.addToolCall(messageId, "read", '{"path": "src/app.py"}')
+        view.setToolCallResult(messageId, readId, "…文件内容…", ok=True)
         view.setStepStats(
             messageId,
             ElaChatStats(
@@ -584,6 +590,8 @@ class ChatAgentPage(ExamplePage):
         self._note(
             f"本轮 {roundCost} · 当前上下文 {session.total_tokens:,} 词元"
             f"（{session.usage_percent}%）· 会话累计花费 ${session.total_cost_usd:.4f}"
+            f" · 工具调用 {session.tool_calls} 次 / {session.tool_rounds} 轮"
+            f"（{session.tool_counts}）"
         )
 
     # ================================================================ 演示 6

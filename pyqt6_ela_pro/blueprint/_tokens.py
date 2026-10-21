@@ -54,7 +54,17 @@ def T(key):
 
 
 def theme_changed_slot(widget, slot) -> None:
-    """连接主题切换信号；widget 销毁时 Qt 自动断开（绑定方法语义）。"""
+    """连接主题切换信号；widget 销毁时 Qt 自动断开（绑定方法语义）。
+
+    **校验 ``slot`` 是 ``widget`` 的绑定方法**：lambda / 普通函数不会被 Qt
+    当作「接收方销毁即断连」处理，会在单例信号上静默残留（这里响亮失败，
+    而不是留一个永远断不掉的连接）。
+    """
+    if getattr(slot, "__self__", None) is not widget:
+        raise TypeError(
+            "theme_changed_slot 需要 widget 的绑定方法作为槽"
+            "（lambda / 普通函数不会随控件销毁自动断连）"
+        )
     eTheme.themeModeChanged.connect(slot)
 
 

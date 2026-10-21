@@ -7,9 +7,17 @@
 from __future__ import annotations
 
 from typing import Optional
+import warnings
 
 from PyQt6.QtCore import pyqtSignal, QPointF, QRect, QRectF, QSize
-from PyQt6.QtGui import QColor, QPainter, QLinearGradient, QPainterPath, QPaintEvent
+from PyQt6.QtGui import (
+    QColor,
+    QIcon,
+    QPainter,
+    QLinearGradient,
+    QPainterPath,
+    QPaintEvent,
+)
 from PyQt6.QtWidgets import QWidget
 
 from PyQt6ElaWidgetTools import (
@@ -21,6 +29,7 @@ from PyQt6ElaWidgetTools import (
 )
 
 from ._internal import _draw_button_content, _ThemeAwareMixin
+from ._styles import coerceElaIcon
 from .ela_button import _FACE_INSET
 
 
@@ -79,7 +88,8 @@ class ElaProgressButton(_ThemeAwareMixin, ElaPushButton):
         self.update()
 
     def setElaIcon(self, icon, iconSize: int = 16) -> None:
-        self._icon_name = icon
+        """设置 ElaAwesome 图标（``ElaIconType.IconName`` 或其整数值；``None`` 清除）。"""
+        self._icon_name = None if icon is None else coerceElaIcon(icon)
         self._icon_size = iconSize
         self.setIconSize(QSize(iconSize, iconSize))
         self.update()
@@ -95,8 +105,10 @@ class ElaProgressButton(_ThemeAwareMixin, ElaPushButton):
     def setProgress(self, percent: int) -> None:
         """设置进度百分比（0-100，越界会打警告并夹取）。"""
         if percent < 0 or percent > 100:
-            print(
-                f"Warning: ElaProgressButton.setProgress({percent}) out of range [0, 100]"
+            warnings.warn(
+                f"ElaProgressButton.setProgress({percent}) out of range [0, 100]，已夹取",
+                RuntimeWarning,
+                stacklevel=2,
             )
         percent = max(0, min(100, percent))
         self._progress = percent / 100.0
@@ -176,7 +188,13 @@ class ElaProgressButton(_ThemeAwareMixin, ElaPushButton):
 
         # Icon + text (same pattern as ElaThemeToolButton)
         def _icon_getter(icon_name, color):
-            return ElaIcon.getInstance().getElaIcon(icon_name, color)
+            # 绘制链兜底：取图失败只丢图标，绝不让异常穿出 paintEvent
+            try:
+                return ElaIcon.getInstance().getElaIcon(
+                    coerceElaIcon(icon_name), color
+                )
+            except Exception:
+                return QIcon()
 
         _draw_button_content(
             painter,

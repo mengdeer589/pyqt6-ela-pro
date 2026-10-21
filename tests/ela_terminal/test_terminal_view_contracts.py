@@ -146,6 +146,55 @@ class TestUnterminatedLastLine:
         assert "drop me" in view._edit.toPlainText()
 
 
+class TestFilteredTailLiveUpdate:
+    """F23 回归：过滤态下「当前行」也随 ``append`` 实时更新。
+
+    旧实现在 ``_filter`` 非空且无完整行时直接 return（不启动任何定时器）：
+    包含过滤词的未收口尾行要等下一条完整行（或过滤变更）才会出现，
+    ``\\r`` 进度条在过滤态下同样被冻在上一帧。
+    """
+
+    def test_matching_tail_appears_live(self, make, qapp):
+        view = make(ElaTerminalView)
+        view.append("keep me\n")
+        _drain(qapp)
+        view.setFilter("secret")
+        view.applyFilterNow()
+        _drain(qapp)
+
+        view.append("secret-code")  # 未收口，且包含过滤词
+        _drain(qapp)
+
+        assert "secret-code" in view._edit.toPlainText()
+
+    def test_non_matching_tail_stays_hidden(self, make, qapp):
+        view = make(ElaTerminalView)
+        view.setFilter("keep")
+        view.applyFilterNow()
+        _drain(qapp)
+
+        view.append("drop me")
+        _drain(qapp)
+
+        assert "drop me" not in view._edit.toPlainText()
+
+    def test_cr_redraw_under_filter_updates(self, make, qapp):
+        view = make(ElaTerminalView)
+        view.setFilter("progress")
+        view.applyFilterNow()
+        _drain(qapp)
+
+        view.append("\rprogress  10%")
+        _drain(qapp)
+        assert "progress  10%" in view._edit.toPlainText()
+
+        view.append("\rprogress  90%")
+        _drain(qapp)
+        assert "progress  90%" in view._edit.toPlainText()
+        assert "10%" not in view._edit.toPlainText()
+        assert view._edit.document().blockCount() == 1
+
+
 class TestTailRedrawDoesNotAccumulateBlocks:
     """``\\r`` 重画（进度条 / spinner）不得让文档块数无界增长。
 

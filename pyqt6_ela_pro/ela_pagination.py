@@ -105,7 +105,13 @@ class ElaPagination(ElaThemeWidget):
         return self._button_size
 
     def setPagerCount(self, n: int) -> None:
-        self._pager_count = n
+        """设置分页器最多显示的按钮数（**最小 7**——更小无法容纳省略号布局）。"""
+        try:
+            value = int(n)
+        except (TypeError, ValueError, OverflowError):
+            # OverflowError 必须显式列出：int(float("inf")) 抛的是它
+            value = self._pager_count
+        self._pager_count = max(7, value)
         self.update()
 
     def pagerCount(self) -> int:

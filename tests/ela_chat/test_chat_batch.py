@@ -115,8 +115,8 @@ class TestBatchRendering:
         assert _wait_until(qapp, lambda: bool(events))
         assert "标题" in chat.chatView().message(messageId).text
 
-    def test_batch_builds_skeleton_then_fills(self, qapp, make):
-        """批量加载：先建骨架，Markdown 由时间片渐进补齐（不钉墙钟）。"""
+    def test_batch_renders_latest_then_lazy_older(self, qapp, make):
+        """先渲染最新的一屏；更早的消息留给滚动懒加载（不阻塞首屏）。"""
         view = make(ElaChatView)
         view.resize(480, 320)
         view.show()
@@ -128,10 +128,22 @@ class TestBatchRendering:
         assert view.count() == count
         assert _wait_until(
             qapp,
-            lambda: all(not view.bubble(mid).hasPendingRender() for mid in ids),
-            timeout_ms=15000,
+            lambda: not view.bubble(ids[-1]).renderDeferred(),
+            timeout_ms=5000,
         )
-        assert view.message(ids[-1]).text == MD
+        # 最新的一定渲染完；最老的留在懒加载队列里（数据快照仍然完整）
+        assert view.bubble(ids[0]).renderDeferred() is True
+        assert view._lazy_ids, "应有未渲染的旧消息"
+        assert view.message(ids[0]).text == MD
+        assert view.message(ids[0]).parts != ()
+        # 手动排空懒加载页（等价于逐屏向上滚动）
+        for _ in range(count):
+            if not view._lazy_ids:
+                break
+            view._load_older_page()
+        assert not view._lazy_ids
+        assert all(not view.bubble(mid).renderDeferred() for mid in ids)
+        assert view.message(ids[0]).parts != ()
 
 
 class TestRestorePartsDeferredRendering:
@@ -162,16 +174,21 @@ class TestRestorePartsDeferredRendering:
         view.endBatch()
 
         assert len(ids) == count
-        # 骨架已建、Markdown 尚未渲染
-        assert view.bubble(ids[0]).renderDeferred() is True
-        assert "标题" not in view.bubble(ids[0]).markdownViewer().markdown()
-        # 快照当场可读（导出 / 读路径不能等渲染排空）
-        assert view.message(ids[0]).text == MD
+        # 最新的先渲染（首屏），更早的消息继续留在懒加载队列
         assert _wait_until(
             qapp,
-            lambda: all(not view.bubble(mid).hasPendingRender() for mid in ids),
-            timeout_ms=15000,
+            lambda: not view.bubble(ids[-1]).renderDeferred(),
+            timeout_ms=5000,
         )
+        assert view.bubble(ids[0]).renderDeferred() is True
+        # 快照当场可读（导出 / 读路径不能等渲染排空）
+        assert view.message(ids[0]).text == MD
+        # 排空懒加载页后所有查看器都补上
+        for _ in range(count):
+            if not view._lazy_ids:
+                break
+            view._load_older_page()
+        assert "标题" in view.bubble(ids[0]).markdownViewer().markdown()
         assert "标题" in view.bubble(ids[-1]).markdownViewer().markdown()
 
 

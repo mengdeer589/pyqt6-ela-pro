@@ -74,8 +74,13 @@ if pg is not None:
             """``addPlot`` 的别名。"""
             return self.addPlot(*args, **kwargs)
 
-        def setStyle(self, **kwargs) -> None:
-            """额外的 pyqtgraph 全局配置（转发 ``setConfigOptions``）。"""
+        def setStyleParams(self, **kwargs) -> None:
+            """额外的 pyqtgraph 全局配置（转发 ``setConfigOptions``）。
+
+            **进程级副作用**：改的是 pyqtgraph 的全局配置，影响宿主**所有**
+            pyqtgraph 图。名字刻意不叫 ``setStyle``（那会遮蔽
+            ``QWidget.setStyle(QStyle)``）。
+            """
             pg.setConfigOptions(**kwargs)
 
         # ── Internal ──────────────────────────────────────

@@ -22,32 +22,44 @@
 
 from __future__ import annotations
 
+import bisect
 import time
 from collections import Counter, deque
 from dataclasses import replace
 from datetime import datetime
 from typing import Optional
 
-from PyQt6.QtCore import QElapsedTimer, QEvent, QObject, QTimer, Qt, pyqtSignal
-from PyQt6.QtGui import QFont, QPalette
+from PyQt6.QtCore import (
+    QElapsedTimer,
+    QEvent,
+    QObject,
+    QRectF,
+    QSize,
+    QTimer,
+    Qt,
+    pyqtSignal,
+)
+from PyQt6.QtGui import QColor, QFont, QPainter, QPalette
 from PyQt6.QtWidgets import (
     QAbstractScrollArea,
     QFrame,
     QLabel,
+    QPushButton,
     QScrollBar,
     QSizePolicy,
     QVBoxLayout,
     QWidget,
 )
 from PyQt6ElaWidgetTools import (
-    ElaIconButton,
     ElaIconType,
     ElaScrollArea,
     ElaThemeType,
     eTheme,
 )
 
-from .._styles import setTextColor
+from .._internal import _ThemeAwareMixin, is_deleted
+from .._styles import elaIconPixmap, paintRoundedCard, setTextColor
+from .._theme import textOnAccent
 from ..ela_button import ElaButton
 from ..tooltips import ElaToolTipPositionType, set_tooltip
 from ..widget_base import ElaThemeWidget
@@ -64,11 +76,13 @@ from .blocks import (
 from .bubble import DISCLAIMER_TEXT, ElaChatBubble
 from .message import (
     ElaChatMessage,
+    ElaChatPartKindType,
     ElaChatPermission,
     ElaChatReasoningStyleType,
     ElaChatRoleType,
     ElaChatStats,
     ElaChatStatusType,
+    _as_int,
 )
 from .session import SESSION_SCHEMA_VERSION, ElaChatSessionInfo, ElaChatSessionStats
 
@@ -84,10 +98,24 @@ _CONTENT_MARGIN = (10, 12, 10, 12)
 _MESSAGE_SPACING = 20
 #: 浮动按钮距右下角边距
 _FLOAT_MARGIN = 16
+#: 「回到底部」浮动按钮尺寸（宽、高）与箭头字号
+_JUMP_BUTTON_WIDTH = 32
+_JUMP_BUTTON_HEIGHT = 28
+_JUMP_ICON_SIZE = 14
 #: 交互 resize 延迟重排：停手多久后统一 reflow（毫秒）
 _RESIZE_REFLOW_DELAY_MS = 120
 #: 交互 resize 延迟重排的最小消息数（小会话保持实时 reflow）
 _RESIZE_REFLOW_MIN_MESSAGES = 50
+#: 交互 resize 延迟重排的最小分段数（少消息但工具卡 / 正文很多的会话同样要延迟）
+_RESIZE_REFLOW_MIN_PARTS = 200
+#: 批量恢复超过该消息数时，连气泡壳一起延迟（小会话直接建壳更简单）
+_SHELL_VIRTUAL_MIN_MESSAGES = 80
+#: 超过该消息数时用「spacer + 可见气泡」虚拟列表（不再为每条消息建占位控件）
+_VIRTUAL_LIST_MIN_MESSAGES = 200
+#: 虚拟列表的物化余量（视口高度的倍数，上下各留）
+_VIRTUAL_WINDOW_MARGIN_RATIOS = 0.75
+#: 虚拟列表每帧最多物化的气泡数（单个约 7ms：建壳 + 查看器 + Markdown 渲染）
+_VIRTUAL_MATERIALIZE_BUDGET = 4
 #: 视口外查看器挂起的最小消息数
 _SUSPEND_MIN_MESSAGES = 80
 #: 挂起判定余量（视口高度的倍数，上下各留）
@@ -96,6 +124,16 @@ _SUSPEND_MARGIN_VIEWPORTS = 2.0
 _SUSPEND_INTERVAL_MS = 100
 #: 批量渐进渲染的时间片预算（毫秒）
 _BATCH_RENDER_BUDGET_MS = 8
+#: 批量加载时**先渲染**的最新消息条数（用户的视线通常停在底部）
+_BATCH_EAGER_COUNT = 12
+#: 首屏渲染的时间上限（毫秒）：超过就把剩余消息留给懒加载，先把画面放出来
+_BATCH_EAGER_BUDGET_MS = 48
+#: 懒加载一页渲染多少条更早的消息（滚到接近顶部时触发）。
+#: **1 条**：每条消息可能带几十个工具卡，一次物化 3 条实测卡顿 >200ms；
+#: 逐条物化把单次成本拆开，滚动手感更稳。
+_LAZY_PAGE_SIZE = 1
+#: 懒加载触发距离（距顶部不足该倍数的视口高度时预渲染更早的消息）
+_LAZY_TRIGGER_VIEWPORTS = 1.5
 #: 助手消息阅读宽度（像素，0 表示不限；宿主可 setContentMaxWidth 收紧）
 _CONTENT_MAX_WIDTH = 0
 
@@ -263,6 +301,113 @@ class _EmptyState(ElaThemeWidget):
         self._subtitle_label.setFont(subtitle_font)
 
 
+class _JumpToBottomButton(_ThemeAwareMixin, QPushButton):
+    """「回到底部」浮动按钮：实心强调色 + 对比色箭头。
+
+    透明底的裸图标（旧 ``ElaIconButton``）在消息区里不够醒目 —— 深色箭头本就
+    是高对比，换成彩色反而更弱。这里改成实心强调色块：底色随主题取
+    ``PrimaryNormal``（悬停 / 按下走 ``PrimaryHover`` / ``PrimaryPress``，
+    三个槽位都由 ``eTheme`` 维护，宿主换强调色时一并生效），箭头按底色亮度
+    取黑 / 白（``textOnAccent``）。
+    """
+
+    def __init__(self, parent: Optional[QWidget] = None) -> None:
+        super().__init__(parent)
+        self._theme_mode = eTheme.getThemeMode()
+        self.setFixedSize(_JUMP_BUTTON_WIDTH, _JUMP_BUTTON_HEIGHT)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.setAccessibleName("回到底部")
+
+    def _onThemeChanged(self, mode: ElaThemeType.ThemeMode) -> None:
+        super()._onThemeChanged(mode)
+        self._theme_mode = mode
+        self.update()
+
+    def _fill_color(self) -> QColor:
+        """当前状态的实心底色（强调色三档）。"""
+        mode = self._theme_mode
+        if self.isDown():
+            slot = ElaThemeType.ThemeColor.PrimaryPress
+        elif self.underMouse():
+            slot = ElaThemeType.ThemeColor.PrimaryHover
+        else:
+            slot = ElaThemeType.ThemeColor.PrimaryNormal
+        return QColor(eTheme.getThemeColor(mode, slot))
+
+    def enterEvent(self, event) -> None:  # noqa: N802 (Qt 命名)
+        self.update()
+        super().enterEvent(event)
+
+    def leaveEvent(self, event) -> None:  # noqa: N802 (Qt 命名)
+        self.update()
+        super().leaveEvent(event)
+
+    def paintEvent(self, _event) -> None:  # noqa: N802 (Qt 命名)
+        painter = QPainter(self)
+        try:
+            painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+            fill = self._fill_color()
+            paintRoundedCard(painter, QRectF(self.rect()), background=fill, radius=8)
+            pixmap = elaIconPixmap(
+                ElaIconType.IconName.ArrowDown,
+                textOnAccent(fill),
+                QSize(_JUMP_ICON_SIZE, _JUMP_ICON_SIZE),
+                self.devicePixelRatioF(),
+            )
+            if pixmap.isNull():
+                return
+            target = QRectF(
+                (self.width() - _JUMP_ICON_SIZE) / 2.0,
+                (self.height() - _JUMP_ICON_SIZE) / 2.0,
+                _JUMP_ICON_SIZE,
+                _JUMP_ICON_SIZE,
+            )
+            painter.drawPixmap(target, pixmap, QRectF(pixmap.rect()))
+        finally:
+            painter.end()
+
+
+class _DeferredPlaceholder(QWidget):
+    """未物化消息的轻量骨架（不建子控件，只画几条灰条）。"""
+
+    def paintEvent(self, event) -> None:  # noqa: N802 (Qt 命名)
+        painter = QPainter(self)
+        try:
+            painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+            color = QColor(self.palette().color(QPalette.ColorRole.WindowText))
+            color.setAlpha(26)
+            painter.setBrush(color)
+            painter.setPen(Qt.PenStyle.NoPen)
+            left = 16.0
+            width = max(40.0, self.width() - 32.0)
+            bar_height = 10.0
+            gap = 38.0
+            fractions = (0.55, 0.85, 0.7, 0.4)
+            # 从当前可见区域开始铺：占位可能有几千像素高，只画顶部几条
+            # 会让滚动到中段时看到纯空白。
+            top = 14.0 + max(
+                0, int((event.rect().top() - 14) // (bar_height + gap))
+            ) * (bar_height + gap)
+            index = int((top - 14) // (bar_height + gap))
+            bottom = min(float(self.height()), event.rect().bottom() + bar_height + gap)
+            while top < bottom:
+                painter.drawRoundedRect(
+                    QRectF(
+                        left,
+                        top,
+                        width * fractions[index % len(fractions)],
+                        bar_height,
+                    ),
+                    4.0,
+                    4.0,
+                )
+                index += 1
+                top += bar_height + gap
+        finally:
+            painter.end()
+
+
 class ElaChatView(ElaThemeWidget):
     """聊天消息列表视图（可独立使用，也可由 ``ElaChatWidget`` 组装）。
 
@@ -339,6 +484,16 @@ class ElaChatView(ElaThemeWidget):
     def __init__(self, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
         self._messages: list[ElaChatMessage] = []
+        #: id -> 快照（长历史下避免每次物化 / 查询都线性扫描）
+        self._message_index: dict = {}
+        #: id -> 在 ``_messages`` 中的下标（逐条更新时不重新扫描整个列表）
+        self._message_positions: dict = {}
+        #: id -> 高度估算用的轻量统计（parts 数 / 字符数 / 步数），避免反复遍历 parts
+        self._height_meta_cache: dict = {}
+        #: 壳虚拟化的前缀高度（messageId 顺序 / start 偏移），二分可见区间
+        self._virtual_order: list = []
+        self._virtual_prefix: list = []
+        self._virtual_prefix_dirty = True
         self._bubbles: dict = {}
         self._next_id = 1
         self._stick = True
@@ -381,10 +536,7 @@ class ElaChatView(ElaThemeWidget):
         self._scroll.setWidget(self._content)
         layout.addWidget(self._scroll)
 
-        self._jump_button = ElaIconButton(
-            ElaIconType.IconName.ArrowDown, 14, 32, 28, self
-        )
-        self._jump_button.setBorderRadius(8)
+        self._jump_button = _JumpToBottomButton(self)
         self._jump_button.setToolTip("回到底部")
         set_tooltip(self._jump_button, "回到底部", ElaToolTipPositionType.Top)
         self._jump_button.hide()
@@ -402,20 +554,53 @@ class ElaChatView(ElaThemeWidget):
         # -- 交互 resize 延迟重排（大消息量下拖动窗口不逐帧 reflow） --------
         self._resize_reflow_deferred = True
         self._resize_reflow_min = _RESIZE_REFLOW_MIN_MESSAGES
+        self._resize_reflow_min_parts = _RESIZE_REFLOW_MIN_PARTS
         self._resize_reflow_delay = _RESIZE_REFLOW_DELAY_MS
         self._resize_width = 0
         self._resize_frozen_width = 0
-        self._resize_old_width = 0
         self._resize_reflow_timer = QTimer(self)
         self._resize_reflow_timer.setSingleShot(True)
         self._resize_reflow_timer.timeout.connect(self._release_resize_reflow)
 
         # -- 批量渐进渲染（历史加载先建骨架，按时间片渲染 Markdown） --------
         self._batch_depth = 0
+        #: 批量加载时是否延迟建分段控件（True = 首屏外只存 parts 数据）
+        self._virtual_parts_enabled = True
+        #: 批量恢复大量消息时是否连气泡壳一起延迟（只留等高占位）
+        self._virtual_shells_enabled = True
+        self._virtual_shells_min = _SHELL_VIRTUAL_MIN_MESSAGES
+        self._virtual_list_enabled = True
+        self._virtual_list_min = _VIRTUAL_LIST_MIN_MESSAGES
+        self._virtual_list_mode = False
+        self._virtual_top_spacer: Optional[QWidget] = None
+        self._virtual_bottom_spacer: Optional[QWidget] = None
+        self._virtual_heights: dict = {}
+        self._virtual_bubble_ids: list = []
+        self._virtual_index: dict = {}
+        self._virtual_refreshing = False
+        self._virtual_pending_top: Optional[int] = None
+        self._virtual_window_timer = QTimer(self)
+        self._virtual_window_timer.setSingleShot(True)
+        self._virtual_window_timer.timeout.connect(self._refresh_virtual_window)
+        #: 只有占位、尚未建 bubble 的消息（messageId -> 占位控件）
+        self._shell_placeholders: dict = {}
+        #: 本次批量恢复是否启用了壳虚拟化（滚动时允许把远处气泡收回占位）
+        self._shell_recycling = False
         self._render_queue: deque = deque()
         self._render_timer = QTimer(self)
         self._render_timer.setSingleShot(True)
         self._render_timer.timeout.connect(self._process_render_queue)
+        #: 首屏预算内没渲染完、留给「滚上去再渲染」的消息 id（升序）
+        self._lazy_ids: list[int] = []
+        #: 首屏已经渲染的消息条数（判定 _BATCH_EAGER_COUNT 预算）
+        self._batch_eager_rendered = 0
+        #: 懒加载分页标志（防止补偿滚动触发的 valueChanged 递归）
+        self._loading_older = False
+        #: 懒加载后待补偿的滚动锚点 ``(top, old_max)``，等 rangeChanged 再应用
+        self._pending_anchor: Optional[tuple] = None
+        self._lazy_timer = QTimer(self)
+        self._lazy_timer.setSingleShot(True)
+        self._lazy_timer.timeout.connect(self._load_older_page)
 
         # -- 视口外查看器挂起（大消息量下省内存与文本 reflow） --------------
         self._suspension_enabled = True
@@ -443,14 +628,115 @@ class ElaChatView(ElaThemeWidget):
     def message(self, messageId: int) -> Optional[ElaChatMessage]:
         """按 id 查询消息快照（不存在返回 ``None``）。"""
         self._flush_pending_syncs()
-        for message in self._messages:
-            if message.id == messageId:
-                return message
-        return None
+        return self._message_index.get(messageId)
 
     def bubble(self, messageId: int) -> Optional[ElaChatBubble]:
         """按 id 获取消息气泡控件（不存在返回 ``None``）。"""
         return self._bubbles.get(messageId)
+
+    def setVirtualPartsEnabled(self, on: bool = True) -> None:
+        """批量加载时是否延迟建分段控件（默认开）。
+
+        关闭时会在下一次导入 / 恢复时立即建全部工具卡与查看器；已处于延迟
+        状态的消息会被当场物化。小会话或需要逐控件断言的测试可以关掉。
+        """
+        self._virtual_parts_enabled = bool(on)
+        if not self._virtual_parts_enabled:
+            for messageId in list(self._shell_placeholders):
+                self._materialize_shell(messageId)
+            for bubble in self._bubbles.values():
+                if bubble.partsDeferred():
+                    bubble.materializeParts()
+                if bubble.partsWindowed():
+                    bubble.expandParts()
+
+    def virtualPartsEnabled(self) -> bool:
+        """是否启用延迟分段物化。"""
+        return self._virtual_parts_enabled
+
+    def setShellVirtualizationEnabled(
+        self, on: bool = True, minMessages: Optional[int] = None
+    ) -> None:
+        """批量恢复大量消息时是否连气泡壳一起延迟（默认开，阈值 100 条）。
+
+        关闭后所有消息立即建 ``ElaChatBubble``；已延迟的占位消息会被当场
+        物化。小会话 / 需要 ``bubble(id)`` 始终可用的测试可以关掉。
+        """
+        self._virtual_shells_enabled = bool(on)
+        if minMessages is not None:
+            self._virtual_shells_min = max(0, int(minMessages))
+        if not self._virtual_shells_enabled:
+            if self._virtual_list_mode:
+                self._disable_virtual_list()
+            self._shell_recycling = False
+            for messageId in list(self._shell_placeholders):
+                self._materialize_shell(messageId)
+
+    def setVirtualListEnabled(
+        self, on: bool = True, minMessages: Optional[int] = None
+    ) -> None:
+        """超长历史是否启用 spacer 虚拟列表（默认 >200 条，非逐条占位）。
+
+        关闭后已进入虚拟列表的会话会当场物化全部消息（重会话会慢，属显式选择）。
+        """
+        self._virtual_list_enabled = bool(on)
+        if minMessages is not None:
+            self._virtual_list_min = max(0, int(minMessages))
+        if not self._virtual_list_enabled and self._virtual_list_mode:
+            self._disable_virtual_list()
+
+    def _disable_virtual_list(self) -> None:
+        """退出 spacer 模式：物化全部消息并移除上下占位。"""
+        for messageId in list(self._message_index):
+            if messageId not in self._bubbles:
+                self._materialize_virtual_bubble(messageId)
+        for spacer in (self._virtual_top_spacer, self._virtual_bottom_spacer):
+            if spacer is not None:
+                self._content_layout.removeWidget(spacer)
+                spacer.hide()
+                spacer.setParent(None)
+                spacer.deleteLater()
+        self._virtual_top_spacer = None
+        self._virtual_bottom_spacer = None
+        self._virtual_list_mode = False
+        self._virtual_window_timer.stop()
+        self._virtual_bubble_ids = list(self._message_index)
+        self._virtual_prefix_dirty = True
+
+    def shellVirtualizationEnabled(self) -> bool:
+        """是否启用气泡壳延迟物化。"""
+        return self._virtual_shells_enabled
+
+    def materializeMessage(self, messageId: int, flush: bool = True) -> bool:
+        """物化指定消息的分段控件（虚拟化 / 延迟加载的显式入口）。
+
+        :returns: 是否真的执行了物化或 Markdown 渲染
+        """
+        self._require_int_id(messageId, "materializeMessage")
+        bubble = self._bubbles.get(messageId)
+        if bubble is None:
+            bubble = self._materialize_shell(messageId)
+        if bubble is None:
+            if self._strict_ids:
+                raise KeyError(f"materializeMessage: 消息 {messageId} 不存在")
+            return False
+        changed = bubble.materializeParts()
+        if flush:
+            bubble.setRenderDeferred(False)
+            changed = bubble.flushRender() or changed
+        self._sync_parts(messageId)
+        self._flush_pending_syncs()
+        return changed
+
+    def scrollToMessage(self, messageId: int) -> bool:
+        """物化并滚动到指定消息；返回消息是否存在。"""
+        self._require_int_id(messageId, "scrollToMessage")
+        self.materializeMessage(messageId, flush=True)
+        bubble = self._bubbles.get(messageId)
+        if bubble is None:
+            return False
+        self._scroll.ensureWidgetVisible(bubble, 0, 0)
+        return True
 
     # -- 严格 id 模式 --------------------------------------------------------
 
@@ -479,17 +765,23 @@ class ElaChatView(ElaThemeWidget):
                 f"（{type(messageId).__name__}）"
             )
 
-    def _require_bubble(self, messageId: int, api: str = "") -> ElaChatBubble:
+    def _require_bubble(
+        self, messageId: int, api: str = "", materialize: bool = True
+    ) -> ElaChatBubble:
         """取气泡；非法 id **抛 TypeError**，严格模式下不存在抛 :class:`KeyError`。
 
         非严格模式下「id 不存在」等价于 ``self._bubbles.get(messageId)``。
+        壳被延迟物化的消息会先 ``_materialize_shell``（``materialize=False``
+        时留给调用方自行处理，如 ``removeMessage`` 不需要建壳）。
         """
         self._require_int_id(messageId, api)
         bubble = self._bubbles.get(messageId)
+        if bubble is None and materialize and messageId in self._shell_placeholders:
+            bubble = self._materialize_shell(messageId)
         if bubble is None and self._strict_ids:
             raise KeyError(
                 f"{api or '该操作'}：消息 id {messageId!r} 不存在"
-                f"（现有 id：{sorted(self._bubbles)[:20]}）"
+                f"（现有 id：{[m.id for m in self._messages][:20]}）"
             )
         return bubble
 
@@ -499,11 +791,13 @@ class ElaChatView(ElaThemeWidget):
         return self._messages[-1] if self._messages else None
 
     def sessionStats(self, limit: int = 0) -> ElaChatSessionStats:
-        """会话级用量汇总（计数 / 当前上下文四路词元 / 使用率 / 累计成本）。
+        """会话级用量汇总（计数 / 当前上下文四路词元 / 使用率 / 累计成本 /
+        工具调用统计 / 思考耗时合计）。
 
         口径对齐 opencode ``getSessionContext``：**「当前用量」取最后一条有
         tokens 的助手消息的最后一步**（多步工具轮里就是最近一次 LLM 调用），
-        ``total_tokens`` = 四路和；累计成本跨全部消息求和。
+        ``total_tokens`` = 四路和；累计成本跨全部消息求和。工具统计里的
+        ``tool_rounds`` 是「有工具调用的步骤数」（消息内按 ``step`` 去重）。
 
         这套数字可以直接喂输入区的上下文圆环::
 
@@ -595,20 +889,26 @@ class ElaChatView(ElaThemeWidget):
         self.messageAdded.emit(messageId, message.role)
         return messageId
 
-    def _validate_preserve_ids(self, rows) -> None:
+    def _validate_preserve_ids(self, rows, against_existing: bool = True) -> None:
         """校验 ``preserveIds=True`` 的整批 id（重复 / 与现有消息撞号即抛）。
 
         **只读校验**：调用方（``restoreMessages`` / ``importSession``）必须在
         写入前调用 —— 尤其是 ``importSession(clear=True)``，先清空再校验会让
         坏 bundle 把当前会话整个清掉后才抛异常。
+
+        ``against_existing=False``：只查**批内重复**。``importSession(clear=True)``
+        用这个口径 —— 它随后就 ``clear()``，与当前消息撞号本无害（``clear``
+        是验证过的语义：整会话替换），再拦会让「往仍有消息的视图里导入重叠
+        id 的 bundle」必须先手动 clear 才能成功。
         """
-        stored = [ElaChatMessage.fromDict(data).id for data in rows]
+        stored = [_as_int(data.get("id")) for data in rows if isinstance(data, dict)]
         stored = [messageId for messageId in stored if messageId > 0]
         counts = Counter(stored)
-        bad = sorted(
-            {messageId for messageId, count in counts.items() if count > 1}
-            | {messageId for messageId in counts if messageId in self._bubbles}
-        )
+        bad = {messageId for messageId, count in counts.items() if count > 1}
+        if against_existing:
+            existing = {message.id for message in self._messages}
+            bad |= {messageId for messageId in counts if messageId in existing}
+        bad = sorted(bad)
         if bad:
             raise ValueError(
                 f"restoreMessages: id {bad} 在本批或现有消息中重复 / 已被占用"
@@ -630,6 +930,18 @@ class ElaChatView(ElaThemeWidget):
         rows = list(items or ())
         if preserveIds:
             self._validate_preserve_ids(rows)
+        # 大批量恢复：连气泡壳一起延迟（只留等高占位）
+        shell_virtual = (
+            self._virtual_shells_enabled and len(rows) >= self._virtual_shells_min
+        )
+        virtual_list = (
+            shell_virtual
+            and self._virtual_list_enabled
+            and len(rows) >= self._virtual_list_min
+        )
+        if virtual_list:
+            self._virtual_list_mode = True
+        self._shell_recycling = False
         restored = []
         self.beginBatch()
         try:
@@ -643,15 +955,26 @@ class ElaChatView(ElaThemeWidget):
                     messageId=messageId,
                     hasParts=bool(message.parts),
                     emitAdded=False,
+                    snapshot=message,
+                    deferShell=shell_virtual,
                 )
+                if shell_virtual:
+                    # 壳还没建：快照本身就带全部字段 / 分段，直接发信号
+                    self.messageAdded.emit(messageId, message.role)
+                    restored.append(messageId)
+                    continue
                 if message.role == ElaChatRoleType.Assistant and message.parts:
-                    if not self._bubbles[messageId].setParts(message.parts):
-                        continue
-                    # 快照**当场结算**，只有 Markdown 渲染延迟（``setParts`` 在延迟
-                    # 模式下只把分段登记成待渲染）。反过来会把「parts 为空」这件事
-                    # 泄露给读路径：``messages()`` / ``exportSession`` 在渲染队列排空
-                    # 之前拿到的都是空消息，导出会静默丢内容。
-                    self._sync_parts(messageId)
+                    if self._batch_depth > 0 and self._virtual_parts_enabled:
+                        self._bubbles[messageId].setPartsDeferred(message.parts)
+                        self._sync_parts(messageId)
+                    else:
+                        if not self._bubbles[messageId].setParts(message.parts):
+                            continue
+                        # 快照**当场结算**，只有 Markdown 渲染延迟（``setParts`` 在延迟
+                        # 模式下只把分段登记成待渲染）。反过来会把「parts 为空」这件事
+                        # 泄露给读路径：``messages()`` / ``exportSession`` 在渲染队列排空
+                        # 之前拿到的都是空消息，导出会静默丢内容。
+                        self._sync_parts(messageId)
                 self._apply_message_fields(messageId, message)
                 self.messageAdded.emit(messageId, message.role)
                 restored.append(messageId)
@@ -749,9 +1072,10 @@ class ElaChatView(ElaThemeWidget):
     def importSession(self, bundle, clear: bool = True) -> int:
         """从 :meth:`exportSession` 的 bundle 恢复整会话，返回恢复的消息条数。
 
-        - ``clear=True``（默认）：先校验（id 冲突即抛、**一条都不落**）再清空当前
-          消息，**保留消息 id 与分段 id**（跨重启稳定）；``clear=False``：追加到
-          现有消息之后，id 重新分配。
+        - ``clear=True``（默认）：先校验（**批内 id 重复即抛、一条都不落**）再清空
+          当前消息，**保留消息 id 与分段 id**（跨重启稳定）；``clear=False``：
+          追加到现有消息之后，id 重新分配。与**当前仍在的消息**撞号**不算冲突**
+          —— clear 随后就把它们清掉了，所以可以「往仍有消息的视图里整会话替换」。
         - 视图外观选项在写入消息**之前**应用（思考形态决定分段控件建卡形态）；
           缺失 / 非法字段保持当前值不动。
         - 非 dict / ``messages`` 非列表抛 :class:`ValueError`；``messages`` 里
@@ -769,8 +1093,9 @@ class ElaChatView(ElaThemeWidget):
             raise ValueError("importSession: bundle['messages'] 必须是列表")
         rows = [row for row in rows if isinstance(row, dict)]
         if clear:
-            # 先校验后清空：坏 bundle（重复 id 等）不能把当前会话清掉再抛
-            self._validate_preserve_ids(rows)
+            # 先校验后清空：坏 bundle（批内重复 id）不能把当前会话清掉再抛。
+            # 不查「与现有消息撞号」—— clear 随后就清空它们，撞号无害。
+            self._validate_preserve_ids(rows, against_existing=False)
         self._apply_session_view(bundle.get("view"))
         if clear:
             self.clear()
@@ -806,6 +1131,8 @@ class ElaChatView(ElaThemeWidget):
         *,
         hasParts: bool = False,
         emitAdded: bool = True,
+        snapshot: Optional[ElaChatMessage] = None,
+        deferShell: bool = False,
     ) -> int:
         if role not in ElaChatRoleType.All:
             role = ElaChatRoleType.Assistant
@@ -818,11 +1145,17 @@ class ElaChatView(ElaThemeWidget):
                     f"messageId 必须是 int，收到 {messageId!r}"
                     f"（{type(messageId).__name__}）"
                 )
-            if messageId in self._bubbles:
+            if messageId in self._bubbles or messageId in self._shell_placeholders:
                 raise ValueError(f"消息 id {messageId} 已被占用")
             if messageId >= self._next_id:
                 # 外部 id 必须单调推进内部计数器，否则后续自动分配的 id 会撞车
                 self._next_id = messageId + 1
+        if snapshot is not None:
+            role = snapshot.role
+            text = "" if snapshot.parts else snapshot.text
+            hasParts = bool(snapshot.parts)
+            if snapshot.id != messageId:
+                snapshot = snapshot.withId(messageId)
         # **判据是「有没有正文可渲染」，不是「text 是不是空串」**：带 parts 的
         # 历史消息（``toDict`` / ``exportSession`` 产出的现代存档）正文在 parts
         # 里、``text`` 传的是空串，早先因此全部走了同步渲染 —— 批量加载几百条
@@ -833,6 +1166,78 @@ class ElaChatView(ElaThemeWidget):
             and bool(text or hasParts)
             and not streaming
         )
+        if (
+            deferShell
+            and self._batch_depth > 0
+            and self._virtual_shells_enabled
+            and not streaming
+        ):
+            # 大批量恢复：只落数据 + 等高占位，滚到附近才建 bubble
+            message = snapshot or ElaChatMessage(
+                id=messageId,
+                role=role,
+                text=text,
+                status=ElaChatStatusType.Done,
+                created_at=time.time(),
+            )
+            self._remember_message(message)
+            self._empty.setVisible(False)
+            if self._virtual_list_mode:
+                # 超长历史：不建任何占位，只记录等高数据，由 spacer 列表按视口物化
+                self._virtual_heights[message.id] = self._estimate_shell_height(message)
+                self._virtual_prefix_dirty = True
+                if emitAdded:
+                    self.messageAdded.emit(messageId, role)
+                return messageId
+            self._add_shell_placeholder(message)
+            self._render_queue.append(messageId)
+            if emitAdded:
+                self.messageAdded.emit(messageId, role)
+            return messageId
+
+        bubble = self._build_bubble(messageId, role, text, streaming, deferred)
+        self._empty.setVisible(False)
+        if snapshot is not None:
+            self._remember_message(snapshot)
+        else:
+            status = (
+                ElaChatStatusType.Streaming if streaming else ElaChatStatusType.Done
+            )
+            self._remember_message(
+                ElaChatMessage(
+                    id=messageId,
+                    role=role,
+                    text=text,
+                    status=status,
+                    created_at=time.time(),
+                    timestamp=bubble.timestamp(),
+                )
+            )
+        if deferred:
+            # 批量加载：先建骨架，Markdown 由渲染队列按时间片补齐
+            bubble.setRenderDeferred(True)
+            bubble.setText(text)
+            self._render_queue.append(messageId)
+        else:
+            self._sync_parts(messageId)
+        if emitAdded:
+            # 恢复路径（``addMessageFromDict`` / ``restoreMessages``）传
+            # ``emitAdded=False``：它们要在字段 / 分段全部还原完之后再发一次，
+            # 否则宿主在信号回调里读到的是「parts 为空、字段未恢复」的半成品。
+            self.messageAdded.emit(messageId, role)
+        self._follow_bottom()
+        return messageId
+
+    def _build_bubble(
+        self,
+        messageId: int,
+        role: str,
+        text: str,
+        streaming: bool,
+        deferred: bool,
+        insert_index: Optional[int] = None,
+    ) -> ElaChatBubble:
+        """建气泡并完成全部宿主信号接线（壳虚拟化物化时复用）。"""
         bubble = ElaChatBubble(role, "" if deferred else text, self._content)
         bubble.setAvatarVisible(self._avatar_visible)
         bubble.setAvatarShape(self._avatar_shape)
@@ -851,7 +1256,10 @@ class ElaChatView(ElaThemeWidget):
         bubble.setDisclaimer(self._disclaimer_text)
         bubble.setDisclaimerVisible(self._disclaimer_visible)
         bubble.setCopyNotificationEnabled(self._copy_notification_enabled)
-        if role == ElaChatRoleType.User and self._messages:
+        has_previous = bool(self._messages) and not (
+            len(self._messages) == 1 and self._messages[0].id == messageId
+        )
+        if role == ElaChatRoleType.User and has_previous:
             # turn 间隔：用户消息前额外留白（对齐 opencode 的 24px 节奏）
             bubble.setTopSpacing(10)
         for area in bubble.nestedScrollAreas():
@@ -904,33 +1312,458 @@ class ElaChatView(ElaThemeWidget):
         )
         bubble.toolToggled.connect(self._on_tool_toggled)
         self._bubbles[messageId] = bubble
-        self._content_layout.insertWidget(self._content_layout.count() - 1, bubble)
-        status = ElaChatStatusType.Streaming if streaming else ElaChatStatusType.Done
-        self._messages.append(
-            ElaChatMessage(
-                id=messageId,
-                role=role,
-                text=text,
-                status=status,
-                created_at=time.time(),
-                timestamp=bubble.timestamp(),
-            )
+        if insert_index is None:
+            insert_index = self._content_layout.count() - 1
+        insert_index = max(0, min(int(insert_index), self._content_layout.count() - 1))
+        self._content_layout.insertWidget(insert_index, bubble)
+        bubble.show()
+        return bubble
+
+    def _height_meta(self, message: ElaChatMessage) -> tuple:
+        """轻量高度统计（缓存）：避免每次估算 / resize 都遍历全部 parts。"""
+        cached = self._height_meta_cache.get(message.id)
+        if cached is not None:
+            return cached
+        steps = 0
+        tool = reasoning = text_parts = text_chars = 0
+        stats = compaction = permission = other = 0
+        for part in message.parts:
+            step = max(1, int(getattr(part, "step", 1) or 1))
+            if step > steps:
+                steps = step
+            kind = getattr(part, "kind", "")
+            if kind == ElaChatPartKindType.Tool:
+                tool += 1
+            elif kind == ElaChatPartKindType.Reasoning:
+                reasoning += 1
+            elif kind == ElaChatPartKindType.Text:
+                text_parts += 1
+                text_chars += len(getattr(part, "text", "") or "")
+            elif kind == ElaChatPartKindType.Stats:
+                stats += 1
+            elif kind == ElaChatPartKindType.Compaction:
+                compaction += 1
+            elif kind == ElaChatPartKindType.Permission:
+                permission += 1
+            else:
+                other += 1
+        if not message.parts and message.text:
+            text_parts = 1
+            text_chars = len(message.text)
+        meta = (
+            steps,
+            tool,
+            reasoning,
+            text_parts,
+            text_chars,
+            stats,
+            compaction,
+            permission,
+            other,
         )
-        self._empty.setVisible(False)
-        if deferred:
-            # 批量加载：先建骨架，Markdown 由渲染队列按时间片补齐
+        self._height_meta_cache[message.id] = meta
+        return meta
+
+    def _estimate_shell_height(self, message: ElaChatMessage) -> int:
+        """未建壳消息的占位高度（分段统计缓存 + O(1) 估算）。"""
+        width = self._content.width()
+        if width <= 0:
+            width = max(320, self.width() - 100)
+        (
+            steps,
+            tool,
+            reasoning,
+            text_parts,
+            text_chars,
+            stats,
+            compaction,
+            permission,
+            other,
+        ) = self._height_meta(message)
+        chars_per_line = max(24, width // 8)
+        lines = (text_chars + chars_per_line - 1) // chars_per_line if text_chars else 0
+        stats_height = 24 if self._stats_mode == "steps" else 0
+        total = (
+            steps * 28
+            + tool * 40
+            + reasoning * 36
+            + text_parts * 12
+            + lines * 22
+            + stats * stats_height
+            + compaction * 64
+            + permission * 96
+            + other * 40
+        )
+        return max(40, total + 110)
+
+    def _virtual_height(self, messageId: int) -> int:
+        """消息当前在布局中的高度（气泡实测 / 缓存估算）。"""
+        bubble = self._bubbles.get(messageId)
+        if bubble is not None:
+            height = bubble.height()
+            if height > 0:
+                return height
+        placeholder = self._shell_placeholders.get(messageId)
+        if placeholder is not None and not is_deleted(placeholder):
+            return placeholder.height()
+        height = self._virtual_heights.get(messageId)
+        if height is not None:
+            return height
+        message = self._message_index.get(messageId)
+        if message is None:
+            return 0
+        height = self._estimate_shell_height(message)
+        self._virtual_heights[messageId] = height
+        return height
+
+    def _ensure_virtual_prefix(self) -> None:
+        """重建「消息起点」前缀（含 20px 间距），供可见区间二分。"""
+        if not self._virtual_prefix_dirty and len(self._virtual_order) == len(
+            self._messages
+        ):
+            return
+        order = []
+        prefix = []
+        total = 0
+        for index, message in enumerate(self._messages):
+            if index:
+                total += _MESSAGE_SPACING
+            order.append(message.id)
+            prefix.append(total)
+            total += self._virtual_height(message.id)
+        prefix.append(total)
+        self._virtual_order = order
+        self._virtual_prefix = prefix
+        self._virtual_index = {
+            messageId: index for index, messageId in enumerate(order)
+        }
+        self._virtual_prefix_dirty = False
+
+    def _init_virtual_spacers(self) -> None:
+        """超长历史进入 spacer 虚拟列表：内容区只保留上下两个占位。"""
+        if self._virtual_top_spacer is not None:
+            return
+        top = _DeferredPlaceholder(self._content)
+        top.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+        top.setFixedHeight(0)
+        self._content_layout.insertWidget(0, top)
+        bottom = _DeferredPlaceholder(self._content)
+        bottom.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+        bottom.setFixedHeight(0)
+        self._content_layout.insertWidget(
+            max(0, self._content_layout.count() - 1), bottom
+        )
+        self._virtual_top_spacer = top
+        self._virtual_bottom_spacer = bottom
+
+    def _materialize_virtual_bubble(self, messageId: int) -> Optional[ElaChatBubble]:
+        """在 spacer 列表里物化一条消息（插到正确的可见顺序位置）。"""
+        message = self._message_index.get(messageId)
+        if message is None or messageId in self._bubbles:
+            return self._bubbles.get(messageId)
+        order_pos = self._virtual_index.get(messageId, 0)
+        position = 0
+        for existing in self._virtual_bubble_ids:
+            if self._virtual_index.get(existing, 0) > order_pos:
+                break
+            position += 1
+        deferred = message.role == ElaChatRoleType.Assistant and bool(
+            message.text or message.parts
+        )
+        bubble = self._build_bubble(
+            messageId,
+            message.role,
+            "" if message.parts else message.text,
+            False,
+            deferred,
+            insert_index=1 + position,
+        )
+        self._virtual_bubble_ids.insert(position, messageId)
+        if message.parts:
+            if self._virtual_parts_enabled:
+                bubble.setPartsDeferred(message.parts)
+            else:
+                bubble.setParts(message.parts)
+        elif deferred:
             bubble.setRenderDeferred(True)
-            bubble.setText(text)
-            self._render_queue.append(messageId)
-        else:
-            self._sync_parts(messageId)
-        if emitAdded:
-            # 恢复路径（``addMessageFromDict`` / ``restoreMessages``）传
-            # ``emitAdded=False``：它们要在字段 / 分段全部还原完之后再发一次，
-            # 否则宿主在信号回调里读到的是「parts 为空、字段未恢复」的半成品。
-            self.messageAdded.emit(messageId, role)
-        self._follow_bottom()
-        return messageId
+            bubble.setText(message.text)
+        self._apply_message_fields(messageId, message)
+        self._sync_parts(messageId)
+        bubble.materializeParts()
+        bubble.setRenderDeferred(False)
+        bubble.flushRender()
+        self._content_layout.activate()
+        height = bubble.height()
+        if height <= 0:
+            height = self._estimate_shell_height(message)
+        self._virtual_heights[messageId] = max(40, height)
+        self._virtual_prefix_dirty = True
+        return bubble
+
+    def _dematerialize_virtual_bubble(self, messageId: int) -> None:
+        """从 spacer 列表移除一条已物化消息（保留实测高度）。"""
+        bubble = self._bubbles.pop(messageId, None)
+        if bubble is None:
+            return
+        height = bubble.height()
+        if height > 0:
+            self._virtual_heights[messageId] = max(40, height)
+        if messageId in self._virtual_bubble_ids:
+            self._virtual_bubble_ids.remove(messageId)
+        bubble.hide()
+        self._content_layout.removeWidget(bubble)
+        bubble.setParent(None)
+        bubble.deleteLater()
+        self._dirty_syncs.discard(messageId)
+        self._suspended_ids.discard(messageId)
+        self._drop_message_guards(messageId)
+        self._virtual_prefix_dirty = True
+
+    def _scroll_to_virtual_message(self, messageId: int) -> bool:
+        """把 spacer 列表滚到指定消息，并按新视口物化。"""
+        if not self._virtual_list_mode:
+            return False
+        self._ensure_virtual_prefix()
+        index = self._virtual_index.get(messageId)
+        if index is None:
+            return False
+        viewport = max(1, self._scroll.viewport().height())
+        start = self._virtual_prefix[index]
+        self._stick = False
+        self._virtual_pending_top = max(0, start - viewport // 3)
+        self._scroll.verticalScrollBar().setValue(self._virtual_pending_top)
+        self._refresh_virtual_window()
+        # 目标消息必须本次物化：分帧预算可能把它排到下一帧，而
+        # 「scrollToMessage 之后 bubble(id) 立即可用」是公开契约。
+        if messageId not in self._bubbles:
+            self._materialize_virtual_bubble(messageId)
+        return True
+
+    def _refresh_virtual_window(self, at_bottom: bool = False) -> None:
+        """按视口重排 spacer 虚拟列表：只保留视口附近的消息气泡。"""
+        if not self._virtual_list_mode or self._virtual_refreshing:
+            return
+        if self._batch_depth > 0:
+            return
+        if not self._messages:
+            return
+        self._init_virtual_spacers()
+        if self._virtual_top_spacer is None or self._virtual_bottom_spacer is None:
+            return
+        self._virtual_refreshing = True
+        try:
+            for messageId in list(self._virtual_bubble_ids):
+                bubble = self._bubbles.get(messageId)
+                if bubble is not None and bubble.height() > 0:
+                    self._virtual_heights[messageId] = bubble.height()
+            self._virtual_prefix_dirty = True
+            self._ensure_virtual_prefix()
+            count = len(self._virtual_order)
+            if count <= 0:
+                return
+            viewport = max(1, self._scroll.viewport().height())
+            bar = self._scroll.verticalScrollBar()
+            total = self._virtual_prefix[-1]
+            if self._virtual_pending_top is not None:
+                top = self._virtual_pending_top
+            elif at_bottom or self._stick:
+                top = max(0, total - viewport)
+            else:
+                top = bar.value()
+            bottom = top + viewport
+            margin = viewport * _VIRTUAL_WINDOW_MARGIN_RATIOS
+            first = max(0, bisect.bisect_right(self._virtual_prefix, top - margin) - 1)
+            last = min(
+                count - 1,
+                bisect.bisect_right(self._virtual_prefix, bottom + margin) - 1,
+            )
+            if last < first:
+                first = last
+            offset = top - self._virtual_prefix[first]
+            core_first = max(
+                first, bisect.bisect_right(self._virtual_prefix, top) - 1
+            )
+            core_last = min(
+                last, bisect.bisect_right(self._virtual_prefix, bottom) - 1
+            )
+            if core_last < core_first:
+                core_first = core_last = first
+            wanted = set(self._virtual_order[first : last + 1])
+            for messageId in list(self._virtual_bubble_ids):
+                if messageId not in wanted:
+                    self._dematerialize_virtual_bubble(messageId)
+            # 物化段必须**连续**：spacer 列表没有逐条占位，中间留洞会让后面的
+            # 气泡整体上移（内容错位）。一次滚动步只铺 `_VIRTUAL_MATERIALIZE_BUDGET`
+            # 条（每条约 7ms：建壳 + 查看器 + Markdown 渲染），先把视口区间铺满，
+            # 再向余量窗口两侧交替扩；没铺完的下一帧继续（spacer 撑住高度，不跳）。
+            materialized = sorted(
+                index
+                for index in (
+                    self._virtual_index.get(messageId, -1)
+                    for messageId in self._virtual_bubble_ids
+                )
+                if index >= 0
+            )
+            if materialized:
+                mat_first, mat_last = materialized[0], materialized[-1]
+            else:
+                mat_first, mat_last = core_first, core_first - 1
+            if mat_last < core_first or mat_first > core_last:
+                # 与视口不相交（跳转）：整段重铺，避免把两段之间的洞留下
+                for messageId in list(self._virtual_bubble_ids):
+                    self._dematerialize_virtual_bubble(messageId)
+                mat_first, mat_last = core_first, core_first - 1
+            budget = _VIRTUAL_MATERIALIZE_BUDGET
+            while budget > 0 and mat_first > core_first:
+                candidate = mat_first - 1
+                bubble = self._materialize_virtual_bubble(
+                    self._virtual_order[candidate]
+                )
+                if bubble is None:
+                    break
+                mat_first = candidate
+                budget -= 1
+            while budget > 0 and mat_last < core_last:
+                candidate = mat_last + 1
+                bubble = self._materialize_virtual_bubble(
+                    self._virtual_order[candidate]
+                )
+                if bubble is None:
+                    break
+                mat_last = candidate
+                budget -= 1
+            while budget > 0 and (mat_first > first or mat_last < last):
+                if mat_first > first:
+                    candidate = mat_first - 1
+                    bubble = self._materialize_virtual_bubble(
+                        self._virtual_order[candidate]
+                    )
+                    if bubble is None:
+                        break
+                    mat_first = candidate
+                    budget -= 1
+                if budget > 0 and mat_last < last:
+                    candidate = mat_last + 1
+                    bubble = self._materialize_virtual_bubble(
+                        self._virtual_order[candidate]
+                    )
+                    if bubble is None:
+                        break
+                    mat_last = candidate
+                    budget -= 1
+            if budget <= 0 and (mat_first > first or mat_last < last):
+                # 预算用完但窗口还没铺满：下一帧继续（没铺满时不会连发，
+                # 避免物化失败时变成 0ms 空转）
+                self._virtual_window_timer.start(0)
+            for messageId in list(self._virtual_bubble_ids):
+                bubble = self._bubbles.get(messageId)
+                if bubble is not None and bubble.height() > 0:
+                    self._virtual_heights[messageId] = bubble.height()
+            self._virtual_prefix_dirty = True
+            self._ensure_virtual_prefix()
+            total = self._virtual_prefix[-1]
+            visible = [
+                self._virtual_order[i]
+                for i in range(mat_first, mat_last + 1)
+                if self._virtual_order[i] in self._bubbles
+            ]
+            visible_sum = sum(
+                self._virtual_heights.get(messageId, 0) for messageId in visible
+            )
+            top_height = (
+                max(0, self._virtual_prefix[mat_first] - _MESSAGE_SPACING)
+                if mat_first > 0
+                else 0
+            )
+            used = top_height
+            if visible:
+                used += (
+                    _MESSAGE_SPACING
+                    + visible_sum
+                    + _MESSAGE_SPACING * (len(visible) - 1)
+                    + _MESSAGE_SPACING
+                )
+            bottom_height = max(0, total - used)
+            self._virtual_top_spacer.setFixedHeight(top_height)
+            self._virtual_bottom_spacer.setFixedHeight(bottom_height)
+            self._content_layout.activate()
+            if self._virtual_pending_top is not None:
+                target = self._virtual_pending_top
+                self._virtual_pending_top = None
+                bar.setValue(max(0, min(target, max(0, total - viewport))))
+            elif self._stick or at_bottom:
+                self._scroll_to_bottom()
+            else:
+                new_top = self._virtual_prefix[first] + offset
+                bar.setValue(max(0, min(new_top, max(0, total - viewport))))
+        finally:
+            self._virtual_refreshing = False
+
+    def _add_shell_placeholder(self, message: ElaChatMessage) -> QWidget:
+        """为未建壳消息插一个等高占位控件。"""
+        placeholder = _DeferredPlaceholder(self._content)
+        placeholder.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+        placeholder.setFixedHeight(self._estimate_shell_height(message))
+        self._content_layout.insertWidget(self._content_layout.count() - 1, placeholder)
+        self._shell_placeholders[message.id] = placeholder
+        self._virtual_prefix_dirty = True
+        return placeholder
+
+    def _refresh_shell_heights(self) -> None:
+        """宽度变化后按新宽度重算占位高度。"""
+        if not self._shell_placeholders:
+            return
+        messages = self._message_index
+        for messageId, placeholder in self._shell_placeholders.items():
+            message = messages.get(messageId)
+            if message is None or is_deleted(placeholder):
+                continue
+            placeholder.setFixedHeight(self._estimate_shell_height(message))
+        self._virtual_prefix_dirty = True
+
+    def _materialize_shell(self, messageId: int) -> Optional[ElaChatBubble]:
+        """把占位消息换成真实气泡（分段仍可延迟物化）。"""
+        bubble = self._bubbles.get(messageId)
+        if bubble is not None:
+            return bubble
+        if self._virtual_list_mode:
+            self._scroll_to_virtual_message(messageId)
+            return self._bubbles.get(messageId)
+        placeholder = self._shell_placeholders.pop(messageId, None)
+        message = self._message_index.get(messageId)
+        if message is None:
+            return None
+        index = (
+            self._content_layout.indexOf(placeholder) if placeholder is not None else -1
+        )
+        deferred = message.role == ElaChatRoleType.Assistant and bool(
+            message.text or message.parts
+        )
+        bubble = self._build_bubble(
+            messageId,
+            message.role,
+            "" if message.parts else message.text,
+            False,
+            deferred,
+            insert_index=index,
+        )
+        if placeholder is not None:
+            self._content_layout.removeWidget(placeholder)
+            placeholder.deleteLater()
+        if message.parts:
+            if self._virtual_parts_enabled:
+                bubble.setPartsDeferred(message.parts)
+            else:
+                bubble.setParts(message.parts)
+        elif deferred:
+            bubble.setRenderDeferred(True)
+            bubble.setText(message.text)
+        self._apply_message_fields(messageId, message)
+        self._sync_parts(messageId)
+        self._virtual_prefix_dirty = True
+        if messageId in self._lazy_ids:
+            self._lazy_ids.remove(messageId)
+        return bubble
 
     # -- 批量渐进渲染 ------------------------------------------------------
 
@@ -938,21 +1771,31 @@ class ElaChatView(ElaThemeWidget):
         """进入批量加载模式（可嵌套）。
 
         批量内新增的助手文本消息先建骨架、跳过快照同步与贴底跟随，
-        Markdown 渲染进入队列；``endBatch`` 后按 ``_BATCH_RENDER_BUDGET_MS``
-        时间片渐进渲染，排空后发出 :attr:`batchRenderFinished`。
+        Markdown 渲染进入队列；``endBatch`` 后**先渲染最新的 ``_BATCH_EAGER_COUNT`` 条**
+        （受 ``_BATCH_EAGER_BUDGET_MS`` 时间上限约束），更早的消息留在懒加载队列，
+        滚到接近顶部时分页渲染（:meth:`_load_older_page`），队列排空后发出
+        :attr:`batchRenderFinished`。
         """
         self._batch_depth += 1
         if self._batch_depth == 1:
             self._scroll.viewport().setUpdatesEnabled(False)
 
     def endBatch(self) -> None:
-        """结束批量加载模式（嵌套深度归零时启动渲染队列）。"""
+        """结束批量加载：先渲染最新的一屏，其余留给滚动懒加载。"""
         if self._batch_depth <= 0:
             return
         self._batch_depth -= 1
         if self._batch_depth > 0:
             return
+        if self._virtual_list_mode:
+            self._init_virtual_spacers()
+            self._refresh_virtual_window(at_bottom=True)
+            self._finish_batch_render()
+            return
         if self._render_queue:
+            # 用户打开历史会话时停在底部：从最新一条往前渲染，首屏才有内容
+            self._render_queue = deque(reversed(self._render_queue))
+            self._batch_eager_rendered = 0
             self._render_timer.start(0)
         else:
             self._finish_batch_render()
@@ -962,24 +1805,40 @@ class ElaChatView(ElaThemeWidget):
         return self._batch_depth > 0
 
     def _process_render_queue(self) -> None:
-        """按时间片渲染队列中的消息（每片一个消息的待渲染查看器）。"""
+        """渲染队列中的消息（**从最新一条往前**，只渲染首屏附近的）。
+
+        历史会话打开时用户停在底部，先把最新的 ``_BATCH_EAGER_COUNT`` 条
+        （或 ``_BATCH_EAGER_BUDGET_MS`` 时间上限内能渲染的条数）渲染出来，
+        首屏立刻有内容；更早的消息留在 ``_lazy_ids`` 里，滚到接近顶部时
+        再分页渲染（:meth:`_load_older_page`）。
+        """
         if not self._render_queue:
             self._finish_batch_render()
             return
         timer = QElapsedTimer()
         timer.start()
-        while self._render_queue and timer.elapsed() < _BATCH_RENDER_BUDGET_MS:
+        while self._render_queue:
+            if (
+                self._batch_eager_rendered >= _BATCH_EAGER_COUNT
+                or timer.elapsed() >= _BATCH_EAGER_BUDGET_MS
+            ):
+                break
             messageId = self._render_queue.popleft()
-            bubble = self._bubbles.get(messageId)
+            bubble = self._materialize_shell(messageId)
             if bubble is None:
                 continue
+            bubble.materializeParts()
             bubble.setRenderDeferred(False)
             bubble.flushRender()
             self._sync_parts(messageId)
+            self._batch_eager_rendered += 1
         if self._render_queue:
-            self._render_timer.start(0)
-        else:
-            self._finish_batch_render()
+            # 剩下的都是更早的消息：保持升序交给懒加载（快照仍要标记同步）
+            self._lazy_ids.extend(reversed(self._render_queue))
+            for messageId in self._render_queue:
+                self._sync_parts(messageId)
+            self._render_queue.clear()
+        self._finish_batch_render()
 
     def _finish_batch_render(self) -> None:
         """批量渲染收尾：恢复刷新、激活布局、贴底并通知宿主。"""
@@ -989,6 +1848,67 @@ class ElaChatView(ElaThemeWidget):
         self._follow_bottom()
         self.batchRenderFinished.emit()
         self._schedule_suspension_update()
+        self._schedule_lazy_fill()
+        if self._virtual_list_mode:
+            # 首次 spacer 高度要等 QScrollArea 重新算完内容尺寸后再刷一次
+            self._virtual_window_timer.start(0)
+
+    # -- 更早消息的懒加载 --------------------------------------------------
+
+    def _schedule_lazy_fill(self) -> None:
+        """内容还填不满一屏时继续渲染更早的消息（否则没有滚动条可以上滚）。"""
+        if not self._lazy_ids or self._loading_older or self._batch_depth > 0:
+            return
+        bar = self._scroll.verticalScrollBar()
+        viewport = max(1, self._scroll.viewport().height())
+        if bar.maximum() <= viewport and not self._lazy_timer.isActive():
+            # 稍等一拍：批量收尾后的布局/滚动范围可能还没落地
+            self._lazy_timer.start(30)
+
+    def _maybe_request_older(self) -> None:
+        """滚到接近顶部时预渲染更早的一页消息（合并到 0ms 定时器）。"""
+        if not self._lazy_ids or self._loading_older or self._batch_depth > 0:
+            return
+        bar = self._scroll.verticalScrollBar()
+        viewport = max(1, self._scroll.viewport().height())
+        if bar.value() <= viewport * _LAZY_TRIGGER_VIEWPORTS:
+            if not self._lazy_timer.isActive():
+                self._lazy_timer.start(0)
+
+    def _load_older_page(self) -> None:
+        """渲染一页更早的懒加载消息，并保持当前阅读位置。"""
+        if not self._lazy_ids or self._loading_older or self._batch_depth > 0:
+            return
+        self._loading_older = True
+        try:
+            bar = self._scroll.verticalScrollBar()
+            rendered = 0
+            while self._lazy_ids and rendered < _LAZY_PAGE_SIZE:
+                messageId = self._lazy_ids.pop()
+                bubble = self._materialize_shell(messageId)
+                if bubble is None:
+                    continue
+                if not bubble.renderDeferred() and not bubble.partsDeferred():
+                    continue
+                bubble.materializeParts()
+                bubble.setRenderDeferred(False)
+                bubble.flushRender()
+                self._sync_parts(messageId)
+                rendered += 1
+            if not rendered:
+                return
+            if self._stick:
+                self._pending_anchor = None
+                self._content_layout.activate()
+                self._scroll_to_bottom()
+            else:
+                # 渲染后的高度要等本轮布局落地才可信：记下锚点，rangeChanged 时补偿
+                self._pending_anchor = (bar.value(), bar.maximum())
+                self._content_layout.activate()
+            self._schedule_suspension_update()
+        finally:
+            self._loading_older = False
+        self._schedule_lazy_fill()
 
     # -- 视口外查看器挂起 --------------------------------------------------
 
@@ -1026,6 +1946,8 @@ class ElaChatView(ElaThemeWidget):
 
     def _update_suspension(self) -> None:
         """按当前视口范围挂起 / 恢复消息查看器。"""
+        if self._virtual_list_mode:
+            return
         if (
             not self._suspension_enabled
             or self.count() < self._suspension_min
@@ -1055,8 +1977,13 @@ class ElaChatView(ElaThemeWidget):
             suspended = messageId in self._suspended_ids
             if in_range and suspended:
                 self._restore_message_viewers(messageId)
-            elif not in_range and not suspended:
-                self._suspend_message_viewers(messageId)
+            elif not in_range:
+                if self._shell_recycling and self._dematerialize_shell(messageId):
+                    continue
+                if not suspended:
+                    self._suspend_message_viewers(messageId)
+        if self._shell_placeholders:
+            self._materialize_visible_placeholder(top, bottom, margin)
 
     def _suspend_message_viewers(self, messageId: int) -> None:
         bubble = self._bubbles.get(messageId)
@@ -1067,6 +1994,121 @@ class ElaChatView(ElaThemeWidget):
             return
         self._suspended_ids.add(messageId)
         self._drop_message_guards(messageId)
+
+    def _dematerialize_shell(self, messageId: int) -> bool:
+        """把远处已物化消息收回等高占位（保留 parts 数据与消息快照）。"""
+        bubble = self._bubbles.get(messageId)
+        if bubble is None or bubble.isStreaming() or bubble.pendingPermissions():
+            return False
+        if bubble.hasExpandedSections():
+            return False
+        message = self._message_index.get(messageId)
+        height = bubble.height()
+        if height <= 0 and message is not None:
+            height = self._estimate_shell_height(message)
+        placeholder = _DeferredPlaceholder(self._content)
+        placeholder.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+        placeholder.setFixedHeight(max(40, height))
+        index = self._content_layout.indexOf(bubble)
+        if index >= 0:
+            self._content_layout.insertWidget(index, placeholder)
+        else:
+            self._content_layout.insertWidget(
+                self._content_layout.count() - 1, placeholder
+            )
+        self._content_layout.removeWidget(bubble)
+        bubble.hide()
+        bubble.setParent(None)
+        bubble.deleteLater()
+        self._bubbles.pop(messageId, None)
+        self._shell_placeholders[messageId] = placeholder
+        self._virtual_prefix_dirty = True
+        self._dirty_syncs.discard(messageId)
+        self._suspended_ids.discard(messageId)
+        self._drop_message_guards(messageId)
+        if messageId in self._lazy_ids:
+            self._lazy_ids.remove(messageId)
+        try:
+            self._render_queue.remove(messageId)
+        except ValueError:
+            pass
+        return True
+
+    def _materialize_visible_placeholder(
+        self, top: int, bottom: int, margin: float
+    ) -> None:
+        """每次挂起更新物化**一个**视口内的占位消息（时间片，避免成批建卡）。"""
+        if not self._shell_placeholders or self._batch_depth > 0:
+            return
+        if self._resize_frozen_width > 0:
+            return
+        self._ensure_virtual_prefix()
+        if not self._virtual_order:
+            return
+        start = top - margin
+        end = bottom + margin
+        lo = max(0, bisect.bisect_right(self._virtual_prefix, start) - 1)
+        hi = min(
+            len(self._virtual_order),
+            bisect.bisect_right(self._virtual_prefix, end),
+        )
+        deadline = time.perf_counter() + 0.006
+        materialized = 0
+        above = False
+        if not self._stick:
+            for index in range(lo, hi):
+                placeholder = self._shell_placeholders.get(self._virtual_order[index])
+                if (
+                    placeholder is not None
+                    and not is_deleted(placeholder)
+                    and placeholder.y() + placeholder.height() <= top
+                ):
+                    above = True
+                    break
+            if above:
+                bar = self._scroll.verticalScrollBar()
+                self._pending_anchor = (bar.value(), bar.maximum())
+        for index in range(lo, hi):
+            messageId = self._virtual_order[index]
+            placeholder = self._shell_placeholders.get(messageId)
+            if placeholder is None or is_deleted(placeholder):
+                continue
+            y = placeholder.y()
+            height = placeholder.height()
+            if not ((y + height >= top - margin) and (y <= bottom + margin)):
+                continue
+            bubble = self._materialize_shell(messageId)
+            if bubble is None:
+                continue
+            bubble.materializeParts()
+            bubble.setRenderDeferred(False)
+            bubble.flushRender()
+            self._sync_parts(messageId)
+            self._content_layout.activate()
+            materialized += 1
+            if time.perf_counter() >= deadline:
+                break
+        if not materialized:
+            # 前缀估算与真实几何偏差时的兜底：只扫到第一个命中的占位
+            for messageId, placeholder in self._shell_placeholders.items():
+                if is_deleted(placeholder):
+                    continue
+                y = placeholder.y()
+                height = placeholder.height()
+                if not ((y + height >= top - margin) and (y <= bottom + margin)):
+                    continue
+                bubble = self._materialize_shell(messageId)
+                if bubble is not None:
+                    bubble.materializeParts()
+                    bubble.setRenderDeferred(False)
+                    bubble.flushRender()
+                    self._sync_parts(messageId)
+                    self._content_layout.activate()
+                    materialized = 1
+                break
+        if materialized and self._shell_placeholders:
+            # 填满视口：16ms 后再补下一批，避免滚动事件被 0ms 定时器持续抢占
+            self._suspension_timer.start(16)
 
     def _restore_message_viewers(self, messageId: int) -> None:
         bubble = self._bubbles.get(messageId)
@@ -1145,12 +2187,25 @@ class ElaChatView(ElaThemeWidget):
         # 删消息前必须先作废未答复审批：交互卡在 dock 上，气泡删了卡还活着，
         # 用户点一下就会走进已销毁对象（0xC0000409）。widget.removeMessage
         # 早已这么做，这里补上让 view 层直接调用同样安全。
-        bubble = self._require_bubble(messageId, "removeMessage")
-        if bubble is None:
+        self._require_int_id(messageId, "removeMessage")
+        bubble = self._bubbles.get(messageId)
+        virtual_exists = self._virtual_list_mode and messageId in self._message_index
+        if (
+            bubble is None
+            and messageId not in self._shell_placeholders
+            and not virtual_exists
+        ):
+            if self._strict_ids:
+                raise KeyError(f"removeMessage：消息 id {messageId!r} 不存在")
             return
-        bubble.cancelPendingPermissions()
-        self._detach_message(messageId)
+        if bubble is not None:
+            bubble.cancelPendingPermissions()
+        if not self._detach_message(messageId):
+            return
         self._messages = [m for m in self._messages if m.id != messageId]
+        self._reindex_messages()
+        self._height_meta_cache.pop(messageId, None)
+        self._virtual_prefix_dirty = True
         if not self._messages:
             self._empty.setVisible(True)
         self.messageRemoved.emit(messageId)
@@ -1179,6 +2234,10 @@ class ElaChatView(ElaThemeWidget):
         for mid in removed:
             self._detach_message(mid)
         self._messages = [m for m in self._messages if m.id not in removed_set]
+        self._reindex_messages()
+        for mid in removed:
+            self._height_meta_cache.pop(mid, None)
+        self._virtual_prefix_dirty = True
         if not self._messages:
             self._empty.setVisible(True)
         self._update_jump_button()
@@ -1194,10 +2253,40 @@ class ElaChatView(ElaThemeWidget):
         for bubble in bubbles:
             bubble.cancelPendingPermissions()
         for bubble in bubbles:
+            bubble.hide()
             bubble.setParent(None)
             bubble.deleteLater()
+        for placeholder in self._shell_placeholders.values():
+            self._content_layout.removeWidget(placeholder)
+            placeholder.hide()
+            placeholder.setParent(None)
+            placeholder.deleteLater()
+        self._shell_placeholders.clear()
+        self._shell_recycling = False
+        if self._virtual_top_spacer is not None:
+            self._content_layout.removeWidget(self._virtual_top_spacer)
+            self._virtual_top_spacer.hide()
+            self._virtual_top_spacer.setParent(None)
+            self._virtual_top_spacer.deleteLater()
+            self._virtual_top_spacer = None
+        if self._virtual_bottom_spacer is not None:
+            self._content_layout.removeWidget(self._virtual_bottom_spacer)
+            self._virtual_bottom_spacer.hide()
+            self._virtual_bottom_spacer.setParent(None)
+            self._virtual_bottom_spacer.deleteLater()
+            self._virtual_bottom_spacer = None
+        self._virtual_list_mode = False
+        self._virtual_window_timer.stop()
+        self._virtual_heights.clear()
+        self._virtual_bubble_ids.clear()
         self._bubbles.clear()
         self._messages.clear()
+        self._message_index.clear()
+        self._message_positions.clear()
+        self._height_meta_cache.clear()
+        self._virtual_order.clear()
+        self._virtual_prefix.clear()
+        self._virtual_prefix_dirty = True
         self._dirty_syncs.clear()
         self._render_queue.clear()
         self._render_timer.stop()
@@ -1212,6 +2301,11 @@ class ElaChatView(ElaThemeWidget):
             self._content_layout.activate()
         self._suspended_ids.clear()
         self._suspension_timer.stop()
+        self._lazy_ids.clear()
+        self._lazy_timer.stop()
+        self._loading_older = False
+        self._pending_anchor = None
+        self._batch_eager_rendered = 0
         for guards in self._guards_by_message.values():
             for guard in guards:
                 try:
@@ -1223,14 +2317,37 @@ class ElaChatView(ElaThemeWidget):
         self._update_jump_button()
 
     def _detach_message(self, messageId: int) -> bool:
-        """摘除单条消息的气泡与相关引用；返回消息是否存在。"""
+        """摘除单条消息的气泡 / 占位与相关引用；返回消息是否存在。"""
+        placeholder = self._shell_placeholders.pop(messageId, None)
         bubble = self._bubbles.pop(messageId, None)
-        if bubble is None:
+        virtual_exists = self._virtual_list_mode and messageId in self._message_index
+        if bubble is None and placeholder is None and not virtual_exists:
             return False
-        bubble.setParent(None)
-        bubble.deleteLater()
+        if placeholder is not None:
+            self._content_layout.removeWidget(placeholder)
+            placeholder.hide()
+            placeholder.setParent(None)
+            placeholder.deleteLater()
+        if bubble is not None:
+            self._content_layout.removeWidget(bubble)
+            bubble.hide()
+            bubble.setParent(None)
+            bubble.deleteLater()
+        if self._virtual_list_mode:
+            if messageId in self._virtual_bubble_ids:
+                self._virtual_bubble_ids.remove(messageId)
+            self._virtual_heights.pop(messageId, None)
+            self._virtual_prefix_dirty = True
+            if not self._virtual_window_timer.isActive():
+                self._virtual_window_timer.start(0)
         self._dirty_syncs.discard(messageId)
         self._suspended_ids.discard(messageId)
+        if messageId in self._lazy_ids:
+            self._lazy_ids.remove(messageId)
+        try:
+            self._render_queue.remove(messageId)
+        except ValueError:
+            pass
         for guard in self._guards_by_message.pop(messageId, ()):
             try:
                 self._scroll_guards.remove(guard)
@@ -1771,11 +2888,42 @@ class ElaChatView(ElaThemeWidget):
 
     # -- 内部状态 ----------------------------------------------------------
 
+    def _remember_message(self, message: ElaChatMessage) -> None:
+        """追加快照并维护 id 索引 / 高度缓存失效。"""
+        self._messages.append(message)
+        self._message_positions[message.id] = len(self._messages) - 1
+        self._message_index[message.id] = message
+        self._height_meta_cache.pop(message.id, None)
+        self._virtual_prefix_dirty = True
+
+    def _reindex_messages(self) -> None:
+        """重建 id → 下标 / 快照索引（列表结构变化后调用）。
+
+        只在追加 / 删除后各跑一次 O(n)，把「逐条更新快照」的线性扫描摊薄：
+        ``restoreMessages`` 与批量删除都是「一次结构调整 + 多次按 id 更新」。
+        """
+        self._message_positions = {
+            message.id: index for index, message in enumerate(self._messages)
+        }
+        self._message_index = {message.id: message for message in self._messages}
+
     def _update_snapshot(self, messageId: int, updater) -> None:
-        for index, message in enumerate(self._messages):
-            if message.id == messageId:
-                self._messages[index] = updater(message)
+        position = self._message_positions.get(messageId)
+        if (
+            position is None
+            or position >= len(self._messages)
+            or self._messages[position].id != messageId
+        ):
+            # 索引缺失 / 漂移（外部直接动过列表）：重建一次再取
+            self._reindex_messages()
+            position = self._message_positions.get(messageId)
+            if position is None:
                 return
+        updated = updater(self._messages[position])
+        self._messages[position] = updated
+        self._message_index[messageId] = updated
+        self._height_meta_cache.pop(messageId, None)
+        self._virtual_prefix_dirty = True
 
     def _sync_parts(self, messageId: int) -> None:
         """标记助手消息的分段快照待同步（读取时统一结算）。
@@ -1792,17 +2940,26 @@ class ElaChatView(ElaThemeWidget):
         self._dirty_syncs.add(messageId)
 
     def _flush_pending_syncs(self) -> None:
-        """结算全部待同步的分段快照。"""
+        """结算全部待同步的分段快照。
+
+        **单趟遍历**：逐条 ``_update_snapshot`` 会各扫一遍列表，批量恢复 /
+        多消息同时脏时是 O(脏条数 × 总条数)。
+        """
         if not self._dirty_syncs:
             return
         dirty = self._dirty_syncs
         self._dirty_syncs = set()
-        for messageId in dirty:
-            bubble = self._bubbles.get(messageId)
+        for index, message in enumerate(self._messages):
+            if message.id not in dirty:
+                continue
+            bubble = self._bubbles.get(message.id)
             if bubble is None or bubble.role() != ElaChatRoleType.Assistant:
                 continue
-            parts = bubble.parts()
-            self._update_snapshot(messageId, lambda m, value=parts: m.withParts(value))
+            updated = message.withParts(bubble.parts())
+            self._messages[index] = updated
+            self._message_index[message.id] = updated
+            self._height_meta_cache.pop(message.id, None)
+            self._virtual_prefix_dirty = True
 
     def _on_bubble_stream_finished(self, messageId: int) -> None:
         bubble = self._bubbles.get(messageId)
@@ -1832,7 +2989,22 @@ class ElaChatView(ElaThemeWidget):
     def _on_scrolled(self, _value: int) -> None:
         self._stick = self._atBottom()
         self._update_jump_button()
+        if self._virtual_list_mode:
+            if not self._virtual_window_timer.isActive():
+                self._virtual_window_timer.start(0)
+            return
+        if self._shell_placeholders:
+            # 滚动到占位区域时立刻填充，不等 100ms 的查看器挂起周期
+            self._suspension_timer.start(0)
         self._schedule_suspension_update()
+        if self._shell_placeholders and not self._suspension_enabled:
+            bar = self._scroll.verticalScrollBar()
+            top = bar.value()
+            viewport = self._scroll.viewport().height()
+            self._materialize_visible_placeholder(
+                top, top + viewport, viewport * _SUSPEND_MARGIN_VIEWPORTS
+            )
+        self._maybe_request_older()
 
     def _on_jump_clicked(self) -> None:
         self.scrollToBottom()
@@ -1871,16 +3043,19 @@ class ElaChatView(ElaThemeWidget):
         )
 
     def resizeEvent(self, event) -> None:  # noqa: N802 (Qt 命名)
-        # 冻结值要用「resize 前的内容宽」：super().resizeEvent() 之后布局已把内容拉到
-        # 新视口宽（super() 之前读 viewport()/_content 同样是新宽），只有事件自带的旧
-        # 控件宽可用于推算（减去框架 / 滚动条占位）。
-        self._resize_old_width = event.oldSize().width()
+        # resizeEvent 投递时布局链通常已经把内容排到新宽度（super() 前后读
+        # viewport()/_content 都是新宽），所以冻结优先用「当前内容宽」；只有布局
+        # 还没跟上时才退回 oldSize 推算。拿 oldSize 无条件冻结会把已经排好的
+        # 内容拉回旧宽，多出两趟重排 + 一段旧宽闪现。
+        self._freeze_before_resize(event)
         super().resizeEvent(event)
         self._position_jump_button()
         self._on_view_resized(event.size().width())
 
     def showEvent(self, event) -> None:  # noqa: N802 (Qt 命名)
         super().showEvent(event)
+        if self._virtual_list_mode:
+            self._virtual_window_timer.start(0)
         self._schedule_suspension_update()
 
     # -- 交互 resize 延迟重排 ----------------------------------------------
@@ -1890,6 +3065,7 @@ class ElaChatView(ElaThemeWidget):
         on: bool = True,
         minMessages: Optional[int] = None,
         delayMs: Optional[int] = None,
+        minParts: Optional[int] = None,
     ) -> None:
         """设置交互 resize 是否延迟重排（默认开启）。
 
@@ -1900,10 +3076,14 @@ class ElaChatView(ElaThemeWidget):
         :param on: 是否启用
         :param minMessages: 触发延迟重排的最小消息数（缺省 50，小会话实时重排）
         :param delayMs: 停手后统一重排的延迟（毫秒，缺省 120）
+        :param minParts: 触发延迟重排的最小分段数（缺省 200；工具卡 / 正文多
+            但消息少的历史会话同样需要延迟）
         """
         self._resize_reflow_deferred = bool(on)
         if minMessages is not None:
             self._resize_reflow_min = max(0, int(minMessages))
+        if minParts is not None:
+            self._resize_reflow_min_parts = max(0, int(minParts))
         if delayMs is not None:
             self._resize_reflow_delay = max(0, int(delayMs))
         if not self._resize_reflow_deferred:
@@ -1914,21 +3094,54 @@ class ElaChatView(ElaThemeWidget):
         """是否启用交互 resize 延迟重排。"""
         return self._resize_reflow_deferred
 
+    def _should_defer_resize(self) -> bool:
+        """内容量是否达到延迟重排阈值（消息数**或**分段数）。"""
+        if self.count() >= self._resize_reflow_min:
+            return True
+        if self._resize_reflow_min_parts <= 0:
+            return False
+        parts = sum(len(message.parts) for message in self._messages)
+        return parts >= self._resize_reflow_min_parts
+
+    def _freeze_before_resize(self, event) -> None:
+        """在 ``QScrollArea`` 处理 resize 之前冻结内容宽（避免逐帧重排）。
+
+        resize 事件到达时布局链**通常已经**按新宽排过内容（Qt 在投递事件前
+        完成父布局激活）。此时若还按 ``oldSize`` 推算冻结值，会把内容从新宽
+        拉回旧宽（一次多余重排 + 一帧旧宽），解冻时再拉回来（第二次）。
+        所以优先钉住当前内容宽；只有布局没跟上时才用旧控件宽推算。
+        """
+        if not self._resize_reflow_deferred or self._resize_frozen_width > 0:
+            return
+        if event.size().width() == event.oldSize().width():
+            return  # 仅高度变化
+        if not self._should_defer_resize():
+            return
+        viewport_width = self._scroll.viewport().width()
+        current = self._content.width()
+        if current > 0 and current == viewport_width:
+            frozen = current
+        else:
+            old_width = event.oldSize().width()
+            if old_width <= 0:
+                return
+            chrome = self.width() - viewport_width
+            frozen = old_width - max(0, chrome)
+        if frozen > 0:
+            self._resize_frozen_width = frozen
+            self._content.setFixedWidth(frozen)
+
     def _on_view_resized(self, width: int) -> None:
         """视图尺寸变化：拖动期间冻结内容宽度，停手后统一重排。"""
         if not self._resize_reflow_deferred:
             return
-        if self.count() < self._resize_reflow_min or width <= 0:
+        if width <= 0 or not self._should_defer_resize():
             return
         if width == self._resize_width and not self._resize_reflow_timer.isActive():
             return  # 仅高度变化，无需 reflow
-        if not self._resize_reflow_timer.isActive():
-            chrome = self.width() - self._scroll.viewport().width()
-            frozen = (
-                self._resize_old_width - max(0, chrome)
-                if self._resize_old_width > 0
-                else self._content.width()
-            )
+        if self._resize_frozen_width <= 0:
+            # 首帧旧宽不可用（如 show 前）时的兜底：按当前内容宽冻结
+            frozen = self._content.width()
             if frozen > 0:
                 self._resize_frozen_width = frozen
                 self._content.setFixedWidth(frozen)
@@ -1939,19 +3152,37 @@ class ElaChatView(ElaThemeWidget):
         """解除宽度冻结并按新宽度一次性重排。"""
         if self._resize_frozen_width <= 0:
             return
-        self._resize_frozen_width = 0
-        self._content.setMinimumWidth(0)
-        self._content.setMaximumWidth(16777215)
-        self._content.updateGeometry()
-        self._content_layout.activate()
-        # 冻结期间内容宽度可能已与视口脱节（ElaScrollBar 占 10px，出现/消失会改变视口
-        # 宽度），而 setWidgetResizable 只在滚动区自身 resize 时才重算 —— 不显式拉回，
-        # 内容会溢出视口被右侧裁掉。
-        self._sync_content_width()
-        if self._stick:
-            self._scroll_to_bottom()
-        self._update_jump_button()
-        self._schedule_suspension_update()
+        viewport = self._scroll.viewport()
+        viewport.setUpdatesEnabled(False)
+        try:
+            self._resize_frozen_width = 0
+            self._content.setMinimumWidth(0)
+            self._content.setMaximumWidth(16777215)
+            self._content.updateGeometry()
+            if not self._stick:
+                bar = self._scroll.verticalScrollBar()
+                self._pending_anchor = (bar.value(), bar.maximum())
+            self._refresh_shell_heights()
+            self._content_layout.activate()
+            # 冻结期间内容宽度可能已与视口脱节（ElaScrollBar 占 10px，出现/消失会改变视口
+            # 宽度），而 setWidgetResizable 只在滚动区自身 resize 时才重算 —— 不显式拉回，
+            # 内容会溢出视口被右侧裁掉。
+            self._sync_content_width()
+            if self._virtual_list_mode:
+                for messageId, message in self._message_index.items():
+                    if messageId not in self._bubbles:
+                        self._virtual_heights[messageId] = self._estimate_shell_height(
+                            message
+                        )
+                self._virtual_prefix_dirty = True
+                self._refresh_virtual_window()
+            if self._stick:
+                self._scroll_to_bottom()
+            self._update_jump_button()
+            self._schedule_suspension_update()
+        finally:
+            viewport.setUpdatesEnabled(True)
+            viewport.update()
 
     def _sync_content_width(self) -> None:
         """把内容宽度对齐视口（滚动区自身不 resize 时需要显式调用）。"""
@@ -1972,15 +3203,28 @@ class ElaChatView(ElaThemeWidget):
             return
         self._scroll_to_bottom()
 
-    def _on_range_changed(self, _minimum: int, _maximum: int) -> None:
+    def _on_range_changed(self, _minimum: int, maximum: int) -> None:
         """滚动范围变化（Markdown / 工具卡展开等异步重排）时保持贴底。
 
         正在展开 / 收起工具卡时消费本次变化并延长暂停窗口（视口不动，避免跳动）；
         其余情况（流式输出、异步渲染）贴底时只对齐一次，不轮询。
+        懒加载插入更早消息后，按记下的锚点补偿滚动位置（保持阅读位置稳定）。
         """
         if self._follow_hold:
             self._hold_timer.start(_FOLLOW_HOLD_MS)
             return
+        pending = self._pending_anchor
+        if pending is not None and not self._stick:
+            self._pending_anchor = None
+            top, old_max = pending
+            delta = maximum - old_max
+            if delta:
+                # 物化可能让内容变高（懒加载插入）也可能变矮（超长消息窗口化），
+                # 两个方向都要按锚点补偿，否则滚动位置会跳。
+                self._scroll.verticalScrollBar().setValue(max(0, top + delta))
+            self._schedule_suspension_update()
+            return
+        self._pending_anchor = None
         if self._stick:
             self._scroll_to_bottom()
         self._schedule_suspension_update()

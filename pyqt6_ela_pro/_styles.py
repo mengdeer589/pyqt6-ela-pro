@@ -182,6 +182,11 @@ def setTextBaseColor(widget: QWidget, color=None) -> None:  # noqa: N802 (Qt 命
     - 给定颜色：用该色作**不透明** ``Base`` 并打开视口自动填充。外观与「透明 + 同色
       父背景」逐像素一致，但走不透明重绘快路径 —— 透明视口在部分平台（Win7）上会
       触发慢速 paint 路径（滚动重绘 ×8，见 bugs #14）。
+
+    **Base 必须同时写到 viewport 上**：``QAbstractScrollArea`` 的视口带自己的显式
+    palette（``WA_SetPalette``），**不跟随**控件的 ``setPalette`` —— 只设控件时，
+    视口 ``autoFillBackground`` 填充用的仍是首次解析出的旧色（换主题后聊天里的
+    查看器留浅色横条就是这个：控件 palette 已是新色、视口没跟上）。
     """
     palette = widget.palette()
     viewport = widget.viewport() if hasattr(widget, "viewport") else None
@@ -189,11 +194,19 @@ def setTextBaseColor(widget: QWidget, color=None) -> None:  # noqa: N802 (Qt 命
         palette.setColor(QPalette.ColorRole.Base, Qt.GlobalColor.transparent)
         widget.setPalette(palette)
         if viewport is not None:
+            viewport_palette = viewport.palette()
+            viewport_palette.setColor(
+                QPalette.ColorRole.Base, Qt.GlobalColor.transparent
+            )
+            viewport.setPalette(viewport_palette)
             viewport.setAutoFillBackground(False)
     else:
         palette.setColor(QPalette.ColorRole.Base, QColor(color))
         widget.setPalette(palette)
         if viewport is not None:
+            viewport_palette = viewport.palette()
+            viewport_palette.setColor(QPalette.ColorRole.Base, QColor(color))
+            viewport.setPalette(viewport_palette)
             viewport.setAutoFillBackground(True)
     widget.update()
 
@@ -370,6 +383,11 @@ def paintOverlayShadow(
 
 # ── 禁 QSS 原语：控件 ────────────────────────────────────────────────────
 
+#: ``ColorText`` 尺寸查询缓存条数（每个控件；文本 / 宽度 / 字体任一变化都换 key）
+_COLOR_TEXT_SIZE_CACHE_MAX = 6
+#: 缓存未命中哨兵
+_SIZE_CACHE_MISS = object()
+
 
 class ColorText(ElaText):
     """``ElaText`` 的「显式文字色」版本（禁 QSS 后的上色正路）。
@@ -380,6 +398,11 @@ class ColorText(ElaText):
 
     **每个实例都必须显式 ``setTextPixelSize``** —— 不设就是 ``ElaText`` 的默认字号
     （实测 28px），比组件的 11~14px 标尺大一大截，且不报错只是「大」。
+
+    **尺寸查询带缓存**：``QLabel.heightForWidth`` 每次都要重新折行整段文字
+    （18KB 文本 ~5-15ms），而一次展开 / 尺寸变化会被布局链反复询问十几次
+    （实测聊天里 18KB 思考块展开 343ms）。键 = 文本摘要 + 宽度 + 字体 + 外观，
+    不持有全文引用；文本 / 宽度 / 字体任一变化自然换键，缓存条数有上限。
     """
 
     def __init__(self, *args) -> None:
@@ -387,6 +410,74 @@ class ColorText(ElaText):
         # 这里原样透传，别自己解释参数。
         super().__init__(*args)
         self._text_color: Optional[QColor] = None
+        #: ``(kind, width, 文本摘要, 外观签名)`` → 尺寸结果
+        self._size_cache: dict = {}
+
+    def setText(self, text) -> None:  # noqa: N802 (Qt 命名)
+        cache = getattr(self, "_size_cache", None)
+        if cache is not None:
+            cache.clear()
+        super().setText(text)
+
+    def setFont(self, font) -> None:  # noqa: N802 (Qt 命名)
+        cache = getattr(self, "_size_cache", None)
+        if cache is not None:
+            cache.clear()
+        super().setFont(font)
+
+    def setTextFormat(self, fmt) -> None:  # noqa: N802 (Qt 命名)
+        cache = getattr(self, "_size_cache", None)
+        if cache is not None:
+            cache.clear()
+        super().setTextFormat(fmt)
+
+    def _size_cache_key(self, kind: str, width: int) -> tuple:
+        """尺寸查询键（不含全文引用：只留长度 + 哈希）。"""
+        text = self.text()
+        text_format = self.textFormat()
+        return (
+            kind,
+            int(width),
+            len(text),
+            hash(text),
+            int(getattr(text_format, "value", text_format)),
+            bool(self.wordWrap()),
+            int(self.indent()),
+            int(self.margin()),
+            self.font().toString(),
+        )
+
+    def _compute_size_metric(self, kind: str, width: int):
+        """真正走 Qt 计算（测试可覆写此方法统计重算次数）。"""
+        if kind == "h":
+            return super(ColorText, self).heightForWidth(width)
+        if kind == "s":
+            return super(ColorText, self).sizeHint()
+        return super(ColorText, self).minimumSizeHint()
+
+    def _size_metric(self, kind: str, width: int):
+        """带缓存的尺寸查询；Qt 虚函数里**绝不允许**异常穿出。"""
+        try:
+            key = self._size_cache_key(kind, width)
+            cached = self._size_cache.get(key, _SIZE_CACHE_MISS)
+            if cached is not _SIZE_CACHE_MISS:
+                return cached
+            value = self._compute_size_metric(kind, width)
+            if len(self._size_cache) >= _COLOR_TEXT_SIZE_CACHE_MAX:
+                self._size_cache.clear()
+            self._size_cache[key] = value
+            return value
+        except Exception:  # noqa: BLE001 —— 异常穿出 Qt 回调 = 进程终止
+            return 0 if kind == "h" else QSize()
+
+    def heightForWidth(self, width: int) -> int:  # noqa: N802 (Qt 命名)
+        return self._size_metric("h", int(width))
+
+    def sizeHint(self) -> QSize:  # noqa: N802 (Qt 命名)
+        return self._size_metric("s", -1)
+
+    def minimumSizeHint(self) -> QSize:  # noqa: N802 (Qt 命名)
+        return self._size_metric("m", -1)
 
     def setTextColor(self, color) -> None:  # noqa: N802 (Qt 命名)
         """设置文字色；``None`` 还原为 ``ElaText`` 的主题色行为。"""
@@ -421,9 +512,10 @@ class ColorText(ElaText):
         self.setPalette(palette)
 
     def paintEvent(self, event) -> None:  # noqa: N802 (Qt 命名)
-        # ``getElaIcon()`` ? PyQt6 ???**????**?``IconName.None_`` ???
-        # int 0?????????? 0 ?? ????????????????????
-        # ?????????
+        # ``getElaIcon()`` 在 PyQt6 里返回的是**枚举成员**：无图标时也给
+        # ``IconName.None_``（成员恒为真值），直接当布尔用会让下面的自愈
+        # 永不执行、显式色被静默丢掉。所以取 ``value`` 判 0；
+        # ``getattr(..., "value", ...)`` 兜住「上游改回裸 int」的形态。
         icon = self.getElaIcon()
         if (
             self._text_color is None

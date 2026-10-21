@@ -168,6 +168,34 @@ class TestInteractionSwitches:
         assert dz.end < 100.0
         chart.deleteLater()
 
+    def test_master_switch_on_resets_features(self):
+        """总开关**打开 = 全开**：逐功能开关的覆盖被清空（不是保留上轮关掉的）。"""
+
+        chart = _make_chart(_interact_option())
+        chart.setInteractionEnabled("tooltip", False)
+        chart.setInteractionEnabled("dataZoom", False)
+        assert chart.isInteractionEnabled("tooltip") is False
+
+        chart.setInteractive(False)
+        chart.setInteractive(True)
+        assert chart.isInteractionEnabled("tooltip") is True, "总开关打开应恢复全开"
+        assert chart.isInteractionEnabled("dataZoom") is True
+
+        # 行为也要真的回来（不只是标志位）
+        plot = chart.primaryCoord().plot
+        _wheel(chart, plot.center())
+        assert _component(chart, "dataZoom").end < 100.0
+        chart.deleteLater()
+
+    def test_master_switch_off_keeps_feature_flags(self):
+        """总开关关闭期间逐功能覆盖保留（重新打开时由「全开」统一复位）。"""
+
+        chart = _make_chart(_interact_option())
+        chart.setInteractionEnabled("legend", False)
+        chart.setInteractive(False)
+        assert chart.isInteractionEnabled("legend") is False
+        chart.deleteLater()
+
     def test_timeline_feature_blocks_play_button(self):
         option = _interact_option()
         option.pop("dataZoom", None)
@@ -189,14 +217,17 @@ class TestInteractionSwitches:
         option.pop("timeline", None)
         chart = _make_chart(option)
         toolbox = _component(chart, "toolbox")
-        button = next(rect for name, rect in toolbox._buttons if name == "dataZoom")
+        button = toolbox.buttonWidget("dataZoom")
+        assert button is not None
 
         chart.setInteractionEnabled("toolbox", False)
-        _press(chart, button.center())
+        assert button.isEnabled() is False, "工具条开关关闭后按钮应禁用"
+        button.click()
         assert getattr(chart, "_dataZoomEnabled", True) is True
 
         chart.setInteractionEnabled("toolbox", True)
-        _press(chart, button.center())
+        assert button.isEnabled() is True
+        button.click()
         assert chart._dataZoomEnabled is False
         chart.deleteLater()
 

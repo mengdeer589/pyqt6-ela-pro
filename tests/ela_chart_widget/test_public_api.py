@@ -6,6 +6,7 @@ import pytest
 from PyQt6.QtCore import QEvent, QPoint, QPointF, Qt
 from PyQt6.QtGui import QColor, QMouseEvent, QWheelEvent
 from PyQt6.QtWidgets import QApplication
+from PyQt6ElaWidgetTools import ElaIconButton
 
 from pyqt6_ela_pro import ElaFigureCanvas
 from pyqt6_ela_pro.charts import (
@@ -151,7 +152,10 @@ class TestSignals:
         chart.itemClicked.connect(received.append)
         point = chart.primaryCoord().mapPoint(1.0, 1.0)
         assert chart.hitItem(point) is not None
+        # 默认内置「滚轮缩放 + 拖拽平移」会占用按下事件：点击判定在**松开**时做
+        # （位移 ≤4px 视为点击），所以这里要按下 + 原地松开。
         _press(chart, point)
+        _release(chart, point)
         assert received and received[0]["seriesName"] == "S"
         assert received[0]["componentType"] == "series"
         assert received[0]["seriesIndex"] == 0
@@ -172,8 +176,11 @@ class TestSignals:
         received = []
         chart.toolboxTriggered.connect(received.append)
         toolbox = _component(chart, "toolbox")
-        button = next(rect for name, rect in toolbox._buttons if name == "restore")
-        _press(chart, button.center())
+        # 工具条按钮是真实 ElaIconButton 子控件：点击走控件自己的 clicked
+        button = toolbox.buttonWidget("restore")
+        assert isinstance(button, ElaIconButton)
+        button.click()
+        QApplication.processEvents()
         assert received == ["restore"]
         chart.deleteLater()
 
@@ -354,7 +361,9 @@ class TestExtensionLayer:
     def test_figure_canvas_style_api(self):
         pytest.importorskip("matplotlib")
 
-        assert hasattr(ElaFigureCanvas, "setStyle")
+        # setStyleParams（不是 setStyle —— 别遮蔽 QWidget.setStyle(QStyle)）
+        assert hasattr(ElaFigureCanvas, "setStyleParams")
+        assert not hasattr(ElaFigureCanvas, "setStyle")
 
 
 class TestEChartsInstanceApi:

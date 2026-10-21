@@ -127,7 +127,8 @@ class TestMarkdownCodeButtonInvalidation:
 
     旧实现靠 ``_flush_stream`` 开头的 ``_rebuild_code_buttons([])`` 兜底；现在
     稳定段按钮按表身份增量复用（流式每次 flush 全量重建是卡顿根源），失效表
-    改由 ``_sync_code_buttons`` 过滤 + 几何访问（``_code_table_in_view``）判存活。
+    改由 ``_sync_code_buttons`` 按 ``is_deleted`` 过滤；按钮定位走
+    ``_code_table_index_range`` + 逐表 ``is_deleted`` 判存活。
     """
 
     @staticmethod
@@ -148,13 +149,6 @@ class TestMarkdownCodeButtonInvalidation:
         assert "is_deleted" in self._method_body("_sync_code_buttons"), (
             "增量同步必须按 is_deleted 过滤已随文档析构的表"
         )
-
-    def test_geometry_paths_guard_table_liveness(self):
-        assert "is_deleted" in self._method_body("_code_table_in_view"), (
-            "按钮定位 / 代码卡自绘的粗筛必须先判表存活"
-        )
-        assert "_code_table_in_view" in self._method_body("_position_code_buttons")
-        assert "_code_table_in_view" in self._method_body("_paint_code_card_chrome")
 
     def test_resync_is_immediate(self):
         body = self._method_body("_flush_stream")

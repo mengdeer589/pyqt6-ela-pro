@@ -370,6 +370,28 @@ class TestToolGroupPanel:
         assert panel.isBusy() is False
         assert panel._busy.getIsBusying() is False
 
+    def test_collapsed_title_summarizes_calls(self, qapp, make):
+        """折叠态不能只写「工具调用 (N)」：要能一眼看到调用了什么。"""
+        bubble = make(ElaChatBubble, ElaChatRoleType.Assistant)
+        bubble.resize(800, 400)
+        bubble.show()
+        qapp.processEvents()
+        first = bubble.addToolCall("read", '{"path": "a.py"}')
+        panel = bubble.toolPanel()
+        text = panel.summary()
+        assert "read" in text
+        assert "a.py" in text
+
+        bubble.setToolCallResult(first, "内容")
+        assert panel.title() == "工具调用 (1)"
+        assert 'style="color:' in panel._title_label.text()
+        second = bubble.addToolCall("shell", '{"command": "ls"}')
+        bubble.setToolCallResult(second, "ok")
+        text = panel.summary()
+        assert "read" in text
+        assert "shell" in text
+        assert panel.title() == "工具调用 (2)"
+
     def test_cards_inside_panel(self, qapp, make):
         bubble = make(ElaChatBubble, ElaChatRoleType.Assistant)
         first = bubble.addToolCall("read", '{"path": "a.py"}')
@@ -518,11 +540,14 @@ class TestBubbleMetaAndHover:
     def test_actions_hover_reveal(self, qapp, make):
         bubble = make(ElaChatBubble, ElaChatRoleType.User, "hi")
         assert bubble.actionsHoverReveal() is True
-        # 占位保留（仅改透明度），避免悬浮时消息区跳动
-        assert bubble.actions().isHidden() is False
+        # 占位保留（RetainSizeWhenHidden），避免悬浮时消息区跳动；
+        # 隐藏态连绘制一起停掉（QGraphicsOpacityEffect(0) 仍会离屏渲染）。
+        assert bubble.actions().isHidden() is True
         assert bubble._actions_effect.opacity() == 0.0
+        assert bubble.actions().sizePolicy().retainSizeWhenHidden() is True
         bubble.setActionsHoverReveal(False)
         assert bubble._actions_effect.opacity() == 1.0
+        assert bubble.actions().isHidden() is False
 
     def test_action_tooltips_bound(self, qapp, make):
 

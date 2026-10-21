@@ -223,24 +223,26 @@ class TestCacheGovernance:
 
 
 class TestCodeFontFamilyCache:
-    """``_default_code_font_family()`` ????????
+    """``_default_code_font_family()`` 的结果必须**进程级缓存**。
 
-    ``QFontDatabase().families()`` ?????????? ~1.7ms??????????
-    ???????viewer ??????? / ?????????????????
+    ``QFontDatabase().families()`` 实测单次 ~1.7ms，而它会被每个 viewer 的
+    构造 / 重渲染路径反复问到 —— 只在首次查一次，其余全部命中缓存。
     """
 
     def test_families_queried_once(self, monkeypatch):
         calls = {"n": 0}
 
         class _FakeFontDatabase:
-            # ??????? ``QFontDatabase.families()``?PyQt6 ? QFontDatabase
-            # ??????????????????**??** families?
+            # 只需要 ``QFontDatabase.families()``：PyQt6 的 QFontDatabase
+            # 是纯静态类，这里按调用次数计数，验证 **只查一次** families。
             @staticmethod
             def families():
                 calls["n"] += 1
                 return ["Consolas"]
 
         monkeypatch.setattr(viewer_module, "QFontDatabase", _FakeFontDatabase)
+        # 强制走非 CJK 分支：中文系统不查全量字体族（见 test_md_cjk_fonts.py）
+        monkeypatch.setattr(viewer_module, "system_cjk_font_family", lambda: None)
         monkeypatch.setattr(viewer_module, "_DEFAULT_CODE_FONT_FAMILY", None)
 
         first = viewer_module._default_code_font_family()
@@ -288,6 +290,30 @@ class TestLexerInstanceCache:
 class TestCodeGeometryCulling:
     """离屏代码块不参与昂贵的 cursorRect 几何 —— 重绘 / 滚动成本与全文档
     代码块总数解耦（原先每帧为全部表算一遍，代码块一多就掉帧）。"""
+
+    class _PainterStub:
+        """只满足代码卡自绘调用的替身（不关心画出来的像素）。"""
+
+        def setRenderHint(self, *_args):
+            pass
+
+        def setPen(self, *_args):
+            pass
+
+        def setBrush(self, *_args):
+            pass
+
+        def save(self):
+            pass
+
+        def restore(self):
+            pass
+
+        def setClipRect(self, *_args):
+            pass
+
+        def drawPath(self, *_args):
+            pass
 
     @staticmethod
     def _many_code_doc(blocks: int = 60) -> str:
@@ -351,11 +377,67 @@ class TestCodeGeometryCulling:
         qapp.processEvents()
         v.setMarkdown("```py\na = 1\n```")
         qapp.processEvents()
-        assert set(v._code_buttons) == v._code_button_widgets
+        assert {b for b in v._code_buttons if b is not None} == v._code_button_widgets
         v.setMarkdown("```js\nlet a = 1;\n```")
         qapp.processEvents()
-        assert set(v._code_buttons) == v._code_button_widgets, "换文档后旧按钮没被回收"
-        assert all(not b.isVisible() for b in v._code_buttons)
+        assert {b for b in v._code_buttons if b is not None} == v._code_button_widgets, (
+            "换文档后旧按钮没被回收"
+        )
+        assert all(b is None or not b.isVisible() for b in v._code_buttons)
+        v.close()
+        v.deleteLater()
+        qapp.processEvents()
+
+    def test_buttons_created_only_for_visible_band(self, qapp):
+        """按钮按需创建：几百个代码块的全量渲染不再一次建几百个控件。"""
+        v = ElaMarkdownViewer()
+        v.resize(520, 400)
+        v.show()
+        qapp.processEvents()
+        v.setMarkdown(self._many_code_doc(60))
+        for _ in range(10):
+            qapp.processEvents()
+        total = len(v._code_buttons_tables)
+        assert total >= 60
+        assert len(v._code_buttons) == total, "按钮列表仍按下标与表对齐（离屏项为 None）"
+        created = sum(1 for button in v._code_buttons if button is not None)
+        assert 0 < created < 12, f"离屏代码块也建了按钮：{created}/{total}"
+
+        # 滚到底：末几条进入可见带 -> 按需创建，离屏的旧按钮被回收
+        bar = v._text_browser.verticalScrollBar()
+        bar.setValue(bar.maximum())
+        v._position_code_buttons()
+        assert v._code_buttons[-1] is not None
+        assert v._code_buttons[0] is None
+        created_after = sum(1 for button in v._code_buttons if button is not None)
+        assert created_after < 12
+        v.close()
+        v.deleteLater()
+        qapp.processEvents()
+
+    def test_code_card_chrome_uses_position_bisect(self, qapp):
+        """代码卡绘制不再逐表 ``frameBoundingRect``（二分定位可见表）。"""
+        v = ElaMarkdownViewer()
+        v.resize(520, 400)
+        v.show()
+        qapp.processEvents()
+        v.setMarkdown(self._many_code_doc(60))
+        for _ in range(10):
+            qapp.processEvents()
+
+        calls = []
+        real = v._code_table_viewport_rect
+
+        def counting(table):
+            calls.append(table)
+            return real(table)
+
+        v._code_table_viewport_rect = counting
+        try:
+            v._paint_code_card_chrome(v._text_browser, self._PainterStub(), 0, 400)
+        finally:
+            del v._code_table_viewport_rect
+        assert 0 < len(calls) < 10, f"离屏代码卡也算了几何：{len(calls)}"
         v.close()
         v.deleteLater()
         qapp.processEvents()

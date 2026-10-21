@@ -98,6 +98,54 @@ class TestThemeLazyRender:
         assert viewer._needs_render is False
 
 
+class TestOffscreenThemeLazyRender:
+    """滚出视口的消息仍然 ``isVisible()``：主题重渲染不能按它判断。"""
+
+    def _chat_like(self, qapp, make, count=6):
+        from PyQt6.QtWidgets import QScrollArea
+
+        content = make(QWidget)
+        layout = QVBoxLayout(content)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(8)
+        viewers = []
+        for _ in range(count):
+            viewer = make(ElaMarkdownViewer, content)
+            viewer.setEmbeddedMode(True)
+            viewer.setMarkdown(BIG_MD)
+            layout.addWidget(viewer)
+            viewers.append(viewer)
+        area = make(QScrollArea)
+        area.resize(480, 320)
+        area.setWidget(content)
+        area.setWidgetResizable(True)
+        area.show()
+        for _ in range(10):
+            qapp.processEvents()
+        return area, viewers
+
+    def test_offscreen_viewers_defer_until_painted(self, qapp, make):
+        area, viewers = self._chat_like(qapp, make)
+        calls = [_spy_render(viewer) for viewer in viewers]
+        first = viewers[0]
+        last = viewers[-1]
+        assert first._is_on_screen() is True
+        assert last._is_on_screen() is False, "滚出视口的消息不该算「在屏幕上」"
+
+        _switch(qapp, _other_mode(eTheme.getThemeMode()))
+
+        assert calls[0]["n"] >= 1
+        assert calls[-1]["n"] == 0
+        assert last._needs_render is True
+
+        # 滚到底：最后一条进入视口、被绘制后自动补齐
+        area.verticalScrollBar().setValue(area.verticalScrollBar().maximum())
+        for _ in range(20):
+            qapp.processEvents()
+        assert last._needs_render is False
+        assert calls[-1]["n"] == 1
+
+
 class TestHighlightCacheAcrossThemes:
     def test_switch_back_hits_cache(self, qapp, make, monkeypatch):
         """dark → light → dark：回到已渲染过的主题不再重新 lex（缓存 key 含主题）。"""

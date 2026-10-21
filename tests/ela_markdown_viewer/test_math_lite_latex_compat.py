@@ -116,6 +116,10 @@ CORPUS = [
     r"\def\E{\mathbb{E}} \E[X]",
     r"\newcommand{\norm}[1]{\left\|#1\right\|} \norm{v}",
     r"\DeclareMathOperator*{\argmax}{arg\,max} \argmax_x f(x)",
+    # 公式编号
+    r"a = b \tag{1}",
+    r"a = b \tag {2}",
+    r"a = b \tag*{A}",
     # 多行（无环境）
     r"a = b \\ c = d",
 ]
@@ -363,6 +367,128 @@ class TestAtomGlyphs:
     def test_text_escapes_unescaped(self):
         node = _Parser(r"\text{50\%}").parse()
         assert "".join(_atom_text(item) for item in node.items) == "50%"
+
+    def test_text_space_runs_collapse(self):
+        node = _Parser(r"\text{token   ids}").parse()
+        assert "".join(_atom_text(item) for item in node.items) == "token ids"
+
+
+class TestControlWordWhitespace:
+    """控制词与参数花括号之间的空白（TeX 里是词尾分隔符）。"""
+
+    @pytest.mark.parametrize(
+        "latex",
+        [
+            r"\text { x }",
+            r"\mathrm {x}",
+            r"\mathbf {x}",
+            r"\mathbb {R}",
+            r"\operatorname {argmax}",
+            r"\operatorname *{argmax}",
+            r"\sqrt [3] {x}",
+            r"\textcolor {red} {x}",
+            r"\color {blue} x",
+            r"\begin {matrix} a & b \\ c & d \end {matrix}",
+            r"\genfrac {(} {)} {0} {} {a} {b}",
+        ],
+    )
+    def test_space_before_group(self, latex):
+        assert render_formula(latex, COLOR, 14.0) is not None
+
+    def test_sqrt_optional_index_ignores_space(self):
+        plain = render_formula(r"\sqrt[3]{x}", COLOR, 14.0)
+        spaced = render_formula(r"\sqrt [3] {x}", COLOR, 14.0)
+        assert plain is not None and spaced is not None
+        assert spaced.size() == plain.size()
+
+    def test_operatorname_star_ignores_space(self):
+        plain = render_formula(r"\operatorname*{argmax}", COLOR, 14.0)
+        spaced = render_formula(r"\operatorname *{argmax}", COLOR, 14.0)
+        assert plain is not None and spaced is not None
+        assert spaced.size() == plain.size()
+
+    def test_mineru_spaced_text_formulas(self):
+        """MinerU 转写的 ``\\text { token   ids }`` 曾整条渲染失败。"""
+        for latex in MINERU_SPACED_FORMULAS:
+            report = {}
+            image = render_formula(latex, COLOR, 14.0, True, report=report)
+            assert image is not None, latex
+            assert report["degraded"] is False
+
+    def test_viewer_renders_mineru_spaced_formulas(self, qapp):
+        source = "\n\n".join(f"$$\n{latex}\n$$" for latex in MINERU_SPACED_FORMULAS)
+        v = ElaMarkdownViewer()
+        v.setMarkdown(source)
+
+        assert v.renderIssues() == []
+        assert len(_images(v)) == len(MINERU_SPACED_FORMULAS)
+        text = v.document().toPlainText()
+        assert "\\text" not in text and "\\mathrm" not in text
+        v.deleteLater()
+
+
+MINERU_SPACED_FORMULAS = [
+    r"\text { token   ids } (W) = \{w _ {v _ {1}}, w _ {v _ {2}}, "
+    r"\dots , w _ {v _ {n}} \}",
+    r"\text { positional   ids } (B) = \{b _ {1}, b _ {2}, \dots , b _ {n} \}",
+    r"\text { segment   ids } (G) = \{g _ {s e g _ {1}}, g _ {s e g _ {2}}, "
+    r"\dots , g _ {s e g _ {n}} \}",
+    r"\text { column   ids } (C) = \{c _ {c o l _ {1}}, c _ {c o l _ {2}}, "
+    r"\dots , c _ {c o l _ {n}} \}",
+    r"\mathrm{rowids} (R) = \{r _ {r o w _ {1}}, r _ {r o w _ {2}}, "
+    r"\dots , r _ {r o w _ {n}} \}",
+    r"\mathrm{rankids} (Z) = \left\{z _ {r a n k _ {1}}, z _ {r a n k _ {2}}, "
+    r"\dots , z _ {r a n k _ {n}} \right\}",
+]
+
+
+class TestEquationTags:
+    """``\\tag`` / ``\\tag*``：公式编号右对齐在公式末尾。"""
+
+    def test_tag_not_degraded(self):
+        report = {}
+        image = render_formula(r"a = b \tag{1}", COLOR, 14.0, True, report=report)
+        assert image is not None
+        assert report["degraded"] is False
+
+    def test_tag_widens_formula(self):
+        plain = render_formula(r"a = b", COLOR, 14.0, True)
+        tagged = render_formula(r"a = b \tag{1}", COLOR, 14.0, True)
+        assert plain is not None and tagged is not None
+        assert tagged.width() > plain.width() + 20
+
+    def test_tag_star_omits_parentheses(self):
+        starred = render_formula(r"a = b \tag*{A}", COLOR, 14.0, True)
+        plain = render_formula(r"a = b \tag{A}", COLOR, 14.0, True)
+        assert starred is not None and plain is not None
+        assert starred.width() < plain.width()
+
+    def test_tag_survives_space_before_group(self):
+        report = {}
+        image = render_formula(r"a = b \tag {1}", COLOR, 14.0, True, report=report)
+        assert image is not None
+        assert report["degraded"] is False
+
+    def test_viewer_tag_not_left_as_source(self, qapp):
+        v = ElaMarkdownViewer()
+        v.setMarkdown("$$\nQ = H W ^ {Q}\tag{1}\n$$")
+
+        assert v.renderIssues() == []
+        assert len(_images(v)) == 1
+        assert "\\tag" not in v.document().toPlainText()
+        v.deleteLater()
+
+    def test_viewer_mineru_tagged_formula(self, qapp):
+        latex = (
+            r"\operatorname{Attn} (H) = \operatorname{softmax} "
+            r"(\frac {Q K ^ {\top}}{\sqrt {d _ {K}}}) V\tag{2}"
+        )
+        v = ElaMarkdownViewer()
+        v.setMarkdown(f"$$\n{latex}\n$$")
+
+        assert v.renderIssues() == []
+        assert len(_images(v)) == 1
+        v.deleteLater()
 
 
 class TestViewerCompat:

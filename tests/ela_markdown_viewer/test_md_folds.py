@@ -38,7 +38,7 @@ class TestReasoningFold:
         v.setMarkdown(self.SOURCE)
 
         text = _plain(v)
-        assert "▸ 思考过程" in text
+        assert "+ 思考过程" in text
         assert "内部推理" not in text
         assert "前置" in text and "后置" in text
         assert "elafold" not in text
@@ -50,7 +50,7 @@ class TestReasoningFold:
 
         v._toggle_fold_expanded("0")
         text = _plain(v)
-        assert "▾ 思考过程" in text
+        assert "− 思考过程" in text
         assert "内部推理" in text
 
         v._toggle_fold_expanded("0")
@@ -69,7 +69,7 @@ class TestReasoningFold:
         v = ElaMarkdownViewer()
         v.setReasoningLabel("推理链")
         v.setMarkdown(self.SOURCE)
-        assert "▸ 推理链" in _plain(v)
+        assert "+ 推理链" in _plain(v)
         assert v.reasoningLabel() == "推理链"
         v.deleteLater()
 
@@ -105,19 +105,19 @@ class TestDetailsFold:
         v.setMarkdown(self.SOURCE)
 
         text = _plain(v)
-        assert "▸ 更多信息" in text
+        assert "+ 更多信息" in text
         assert "隐藏内容" not in text
 
         v._toggle_fold_expanded("0")
         text = _plain(v)
-        assert "▾ 更多信息" in text
+        assert "− 更多信息" in text
         assert "隐藏内容" in text
         v.deleteLater()
 
     def test_default_summary_label(self):
         v = ElaMarkdownViewer()
         v.setMarkdown("<details>\n无摘要内容\n</details>")
-        assert "▸ 详情" in _plain(v)
+        assert "+ 详情" in _plain(v)
         v.deleteLater()
 
 

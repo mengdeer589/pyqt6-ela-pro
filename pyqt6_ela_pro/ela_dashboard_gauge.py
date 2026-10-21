@@ -28,6 +28,7 @@ from PyQt6.QtWidgets import QWidget
 from PyQt6ElaWidgetTools import eTheme, ElaThemeType
 
 from ._motion import start_transition_timer
+from ._theme import ElaStatusRoleType, statusColor
 from .widget_base import ElaThemeWidget
 
 
@@ -49,6 +50,9 @@ class ElaDashboardGauge(ElaThemeWidget):
         self._maximum = 100.0
         self._value = 0.0
         self._animated_value = 0.0
+        #: 值动画的插值两端（setValue 时赋值；量程变更会被一并重夹）
+        self._anim_start = 0.0
+        self._anim_target = 0.0
         self._major_tick_count = 10
         self._minor_tick_count = 5
         self._start_angle = 225
@@ -81,6 +85,7 @@ class ElaDashboardGauge(ElaThemeWidget):
         self._animated_value = max(
             self._minimum, min(self._animated_value, self._maximum)
         )
+        self._clamp_anim_bounds()
         self.update()
 
     def minimum(self) -> float:
@@ -92,10 +97,21 @@ class ElaDashboardGauge(ElaThemeWidget):
         self._animated_value = max(
             self._minimum, min(self._animated_value, self._maximum)
         )
+        self._clamp_anim_bounds()
         self.update()
 
     def maximum(self) -> float:
         return self._maximum
+
+    def _clamp_anim_bounds(self) -> None:
+        """量程变更后重夹插值两端。
+
+        不重夹的话：先 ``setValue(100)``（动画中）再 ``setMaximum(50)``，后续
+        tick 会把 ``_animated_value`` 插回 100 —— 指针与数值文本短暂超出新量程
+        （实测），直到动画落地。
+        """
+        self._anim_start = max(self._minimum, min(self._anim_start, self._maximum))
+        self._anim_target = max(self._minimum, min(self._anim_target, self._maximum))
 
     def setValue(self, value: float) -> None:
         """设置当前值（带动画过渡）。"""
@@ -264,7 +280,7 @@ class ElaDashboardGauge(ElaThemeWidget):
                 self._theme_mode, ElaThemeType.ThemeColor.StatusDanger
             )
         if percent >= self._warning_percent:
-            return QColor(0xF7, 0x94, 0x0B)
+            return statusColor(self._theme_mode, ElaStatusRoleType.Warning)
         return eTheme.getThemeColor(
             self._theme_mode, ElaThemeType.ThemeColor.PrimaryNormal
         )
@@ -275,7 +291,7 @@ class ElaDashboardGauge(ElaThemeWidget):
                 self._theme_mode, ElaThemeType.ThemeColor.StatusDanger
             )
         if percent >= self._tick_warning_percent:
-            return QColor(0xF7, 0x94, 0x0B)
+            return statusColor(self._theme_mode, ElaStatusRoleType.Warning)
         return eTheme.getThemeColor(self._theme_mode, ElaThemeType.ThemeColor.BasicText)
 
     # ── Paint ─────────────────────────────────────────────

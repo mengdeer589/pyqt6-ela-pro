@@ -456,3 +456,20 @@ def test_blacklist_timers_still_exist():
         symbols = _file_symbols(_PKG / relpath)
         for timer in timers:
             assert timer in symbols, f"{relpath} 的 {timer} 已消失，请更新黑名单"
+
+
+# ── 4. 系统动效探测（SPI 常量守卫）────────────────────────────
+
+
+def test_spi_getclientareaanimation_is_read_only_constant():
+    """``SPI_GETCLIENTAREAANIMATION`` 必须是只读项 ``0x1042``。
+
+    ``0x0049`` 是 ``SPI_SETANIMATION``（写操作，期望 ``ANIMATIONINFO``）、
+    ``0x004B`` 是另一个 SET 项：拿 SET 常量当 GET 调用会让探测恒假
+    （「跟随系统关闭动画」的无障碍默认失效），且参数一旦恰好满足校验就会
+    改写用户的系统设置。常量写错时本用例立刻失败 —— 比真机验证便宜。
+    """
+    from pyqt6_ela_pro._motion import _SPI_GETCLIENTAREAANIMATION
+
+    assert _SPI_GETCLIENTAREAANIMATION == 0x1042
+    assert _SPI_GETCLIENTAREAANIMATION not in (0x0049, 0x004B)

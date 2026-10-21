@@ -147,9 +147,15 @@ class TestNoOrphanWheelFilter:
 
 class TestDroppingDataZoomUnhooks:
     def test_not_merge_removal_unhooks_filter(self, make):
-        """``notMerge=True`` 把 dataZoom 整块删掉时也要解挂。"""
+        """``notMerge=True`` 把 dataZoom 整块删掉时**旧实例必须解挂**。
+
+        删掉之后会有「默认滚轮缩放」（``ElaChartWidget`` 为直角坐标图自动挂的
+        inside 组件）接手 —— 所以判据不是「没有 dataZoom」，而是「旧实例不再
+        驱动坐标轴 / 过滤器登记指向新实例」。
+        """
         chart = _chart(make, [{"type": "inside"}])
-        assert getattr(chart, "_datazoom_filter", None) is not None
+        old = _comp(chart)
+        assert old is not None and getattr(chart, "_datazoom_filter", None) is old
 
         chart.setOption(
             {
@@ -161,14 +167,17 @@ class TestDroppingDataZoomUnhooks:
         )
         QApplication.processEvents()
 
-        assert _comp(chart) is None, "notMerge 后不该还有 dataZoom 组件"
-        assert getattr(chart, "_datazoom_filter", None) is None, (
-            "组件被删后过滤器登记必须清掉，否则滚轮会驱动一个不存在的组件"
+        live = _comp(chart)
+        assert live is not None and live is not old, "应换成全新实例（默认滚轮缩放）"
+        assert getattr(chart, "_datazoom_filter", None) is live, (
+            "过滤器登记必须指向活实例，否则滚轮会驱动一个已废弃的组件"
         )
 
+        old_before = _window(old)
         events = _zoom_events(chart)
         _wheel(chart)
-        assert events == [], f"dataZoom 已删除却仍发出 {events}"
+        assert _window(old) == old_before, "旧实例不该再被滚轮驱动"
+        assert events, "默认滚轮缩放应接手这次滚轮"
 
 
 class TestZoomEmittedOnce:

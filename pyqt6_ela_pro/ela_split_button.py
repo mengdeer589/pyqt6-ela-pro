@@ -37,6 +37,7 @@ from PyQt6.QtWidgets import QWidget
 from PyQt6ElaWidgetTools import ElaThemeType, ElaIconType, ElaMenu
 
 from ._colors import state_tint
+from ._internal import is_deleted
 from ._styles import iconGlyph
 from ._theme import blend, border, surface, text, textDisabled
 from .widget_base import ElaThemeWidget
@@ -109,8 +110,8 @@ class ElaSplitButton(ElaThemeWidget):
     def borderRadius(self) -> int:
         return self._border_radius
 
-    def setMenu(self, menu: ElaMenu) -> None:
-        """点击右侧箭头时弹出。"""
+    def setMenu(self, menu: Optional[ElaMenu]) -> None:
+        """点击右侧箭头时弹出；传 ``None`` 清空（此时箭头点击无动作）。"""
         self._menu = menu
 
     def menu(self) -> Optional[ElaMenu]:
@@ -175,7 +176,10 @@ class ElaSplitButton(ElaThemeWidget):
             if self._is_left_pressed and event.position().toPoint().x() < split_x:
                 self.clicked.emit()
             elif self._is_right_pressed and event.position().toPoint().x() >= split_x:
-                if self._menu:
+                # **必须判存活**：宿主动态重建菜单时会先删旧菜单，而
+                # ``bool(已删除包装器)`` 仍是 True —— 不判存活就对死对象调
+                # ``popup()`` 抛 RuntimeError，穿出 Qt 回调 = 0xC0000409（实测）
+                if self._menu is not None and not is_deleted(self._menu):
                     pos = self.mapToGlobal(QPoint(0, self.height()))
                     self._menu.popup(pos)
             self._is_left_pressed = False

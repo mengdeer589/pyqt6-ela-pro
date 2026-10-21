@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import copy
 import math
+import pathlib
 import time
 from collections import defaultdict
 from typing import Optional
@@ -35,7 +36,9 @@ from PyQt6.QtCore import (
     QIODevice,
     QObject,
     QPointF,
+    QRect,
     QRectF,
+    QSize,
     Qt,
     QTimer,
     QVariantAnimation,
@@ -981,6 +984,34 @@ class SeriesRenderer:
         """tooltip axis 触发：返回 {"name","value","series","color"} 或 None。"""
         return None
 
+    def _sampling_params(self):
+        """``sampling`` option 解析（折线 / 散点等大系列共用）。
+
+        ECharts 语义：``sampling`` 可为 False / 字符串（``minmax`` / ``m4`` /
+        ``lttb`` / ``minmaxLTTB``）/ dict
+        {``algorithm``, ``threshold``, ``pointsPerPixel``}；返回
+        ``(enabled, threshold, pointsPerPixel, algorithm)``。
+
+        **这里只表达用户意图**（是否抽稀）——能不能抽由调用方的三层兜底决定
+        （tsdownsample → numpy 按桶 min/max → 纯 Python 等距）。
+        """
+        sopt = self.opt.get("sampling", True)
+        enabled = bool(sopt)
+        threshold = 2000.0
+        ppb = 2.0
+        algo = "minmax"
+        if isinstance(sopt, str):
+            name = sopt.strip().lower()
+            if name in ("false", "none", "off"):
+                enabled = False
+            elif name:
+                algo = name
+        elif isinstance(sopt, dict):
+            threshold = _to_float(sopt.get("threshold"), threshold)
+            ppb = _to_float(sopt.get("pointsPerPixel"), ppb)
+            algo = str(sopt.get("algorithm") or algo)
+        return enabled, max(2.0, threshold), max(0.5, ppb), algo
+
     def _full_index(self, index):
         """tooltip 局部下标 → 全量数据下标（dataZoom category 窗口偏移换算）。"""
         if not isinstance(index, int):
@@ -1388,6 +1419,9 @@ class Legend:
                 if enabled
                 else T("color.text.disabled")
             )
+            # 悬停高亮：该条目文字转强调色（对齐 Plotly 图例 hover）
+            if enabled and self.chart._legend_hover == name:
+                text_c = QColor(T("color.primary"))
             # 色块（圆角小方块）
             p.setPen(Qt.PenStyle.NoPen)
             p.setBrush(swatch)
@@ -1746,6 +1780,14 @@ class ElaChartWidget(QWidget):
         #: 生命周期 / ECharts 事件
         self._disposed = False
         self._event_handlers: dict = {}
+        #: 双击复位视图（Plotly ``doubleClick: 'reset'`` 语义，默认开）
+        self._double_click_reset = True
+        #: 图例悬停高亮的系列名（None = 无）
+        self._legend_hover = None
+        #: 本次按下的 (位置, 是否被拖拽组件吞掉)——松开时判「点击 vs 拖拽」
+        self._press_ctx = None
+        #: 直角坐标图默认内置缩放平移（无 dataZoom 时自动挂 inside 组件）
+        self._wheel_zoom_enabled = bool(self.WHEEL_ZOOM_DEFAULT)
         #: lazyUpdate 延迟重建标记
         self._lazy_pending = False
         #: 宿主经 ``addComponent`` 注入的组件（跨 ``setOption`` 存活，见该方法）
@@ -2658,9 +2700,11 @@ class ElaChartWidget(QWidget):
         """
         opts = dict(opts or {})
         fmt = str(opts.get("type") or "png").lower()
+        if fmt == "svg":
+            return self._svg_data_url()
         fmt = "jpeg" if fmt in ("jpeg", "jpg") else "png"
         try:
-            image = self.grab().toImage()
+            image = self._grab_without_toolbox().toImage()
         except Exception:
             return ""
         if image.isNull():
@@ -2694,28 +2738,145 @@ class ElaChartWidget(QWidget):
         mime = "image/jpeg" if fmt == "jpeg" else "image/png"
         return f"data:{mime};base64,{payload}"
 
-    def saveImage(self, path: str = None) -> str:
-        """保存当前图表为 PNG（文件版扩展；``path=None`` 弹保存对话框）。"""
+    def zoomStep(self, factor: float) -> bool:
+        """按倍数步进缩放（``<1`` 放大 / ``>1`` 缩小），围绕当前窗口中心。
+
+        工具条 ``zoomIn`` / ``zoomOut`` 与宿主快捷键都用它；无 dataZoom 组件时
+        返回 ``False``（没有可缩放的窗口）。窗口最小 0.5%、最大 100%（全量）。
+        """
+        comp = self._component("dataZoom")
+        if comp is None:
+            return False
+        try:
+            start = float(getattr(comp, "start", 0.0))
+            end = float(getattr(comp, "end", 100.0))
+            factor = float(factor)
+        except (TypeError, ValueError, OverflowError):
+            return False
+        if not math.isfinite(factor) or factor <= 0:
+            return False
+        span = max(0.5, end - start)
+        new_span = min(100.0, max(0.5, span * factor))
+        center = (start + end) / 2.0
+        new_start = center - new_span / 2.0
+        new_end = center + new_span / 2.0
+        if new_start < 0.0:
+            new_end -= new_start
+            new_start = 0.0
+        if new_end > 100.0:
+            new_start -= new_end - 100.0
+            new_end = 100.0
+        return bool(
+            self.dispatchAction(
+                {"type": "dataZoom", "start": max(0.0, new_start), "end": new_end}
+            )
+        )
+
+    def saveImage(self, path: str = None, *, format: str = None) -> str:
+        """保存当前图表（``path=None`` 弹保存对话框）。
+
+        格式按 ``format`` 或扩展名判定：``svg`` → 矢量导出（``QSvgGenerator``，
+        矢量图元 + 位图符号内嵌）；其余走 PNG。返回实际保存路径，未保存返回 ``""``。
+        """
         target = path
+        want_svg = str(format or "").lower() == "svg" or (
+            bool(target) and str(target).lower().endswith(".svg")
+        )
         if not target:
             try:
                 if QGuiApplication.platformName() == "offscreen":
                     return ""
-                target, _ = QFileDialog.getSaveFileName(
-                    self, "保存图表", "chart.png", "PNG 图片 (*.png)"
+                filt = (
+                    "SVG 矢量图 (*.svg)" if want_svg else "PNG 图片 (*.png)"
                 )
+                default = "chart.svg" if want_svg else "chart.png"
+                target, _ = QFileDialog.getSaveFileName(self, "保存图表", default, filt)
             except Exception:
                 target = None
         if not target:
             return ""
+        if want_svg:
+            return self._save_svg(str(target))
         try:
-            if self.grab().save(target, "PNG"):
+            if self._grab_without_toolbox().save(target, "PNG"):
                 return str(target)
         except Exception:
             pass
         return ""
 
+    def _save_svg(self, target: str) -> str:
+        """用 ``QSvgGenerator`` 走同一条绘制链导出矢量图。"""
+        try:
+            from PyQt6.QtSvg import QSvgGenerator
+        except ImportError:  # 可选依赖（QtSvg）
+            return ""
+        try:
+            width, height = max(1, self.width()), max(1, self.height())
+            generator = QSvgGenerator()
+            generator.setFileName(target)
+            generator.setSize(QSize(width, height))
+            generator.setViewBox(QRect(0, 0, width, height))
+            generator.setTitle("ElaChartWidget")
+            painter = QPainter(generator)
+            try:
+                painter.fillRect(
+                    QRect(0, 0, width, height), QColor(T("color.bg.base"))
+                )
+                self._paint_content(painter)
+            finally:
+                painter.end()
+            return target
+        except Exception:
+            return ""
+
     # -- 生命周期 ----------------------------------------------------------
+    def _toolbox_widgets(self) -> list:
+        """工具条按钮子控件（导出时临时隐藏用）。"""
+        result = []
+        for comp in self._components:
+            if str(getattr(comp, "optionKey", "")) != "toolbox":
+                continue
+            widgets = getattr(comp, "_widgets", None)
+            if isinstance(widgets, dict):
+                result.extend(
+                    w for w in list(widgets.values()) if not is_deleted(w)
+                )
+        return result
+
+    def _grab_without_toolbox(self):
+        """``grab()`` 前隐藏工具条按钮：导出 / 截图要的是**图**，不是 UI。
+
+        工具条按钮是真实子控件（``ElaIconButton``），``grab()`` 会把它们一起
+        画进去，而 SVG 导出走 ``_paint_content``（不含子控件）—— 不统一的话
+        同一个图表导 PNG 带一排按钮、导 SVG 不带。
+        """
+        buttons = self._toolbox_widgets()
+        hidden = [b for b in buttons if b.isVisible()]
+        for button in hidden:
+            button.setVisible(False)
+        try:
+            return self.grab()
+        finally:
+            for button in hidden:
+                button.setVisible(True)
+
+    def _svg_data_url(self) -> str:
+        """矢量图 → ``data:image/svg+xml;base64,...``（``getDataURL({"type": "svg"})``）。"""
+        import base64
+        import tempfile
+
+        try:
+            with tempfile.TemporaryDirectory() as tmp:
+                target = str(pathlib.Path(tmp) / "chart.svg")
+                if not self._save_svg(target):
+                    return ""
+                data = pathlib.Path(target).read_bytes()
+        except Exception:
+            return ""
+        if not data:
+            return ""
+        return "data:image/svg+xml;base64," + base64.b64encode(data).decode("ascii")
+
     def dispose(self) -> None:
         """销毁实例（ECharts ``dispose``；停定时器 / 断主题 / deleteLater）。"""
         if self._disposed:
@@ -3136,12 +3297,21 @@ class ElaChartWidget(QWidget):
         """交互总开关：关闭后所有鼠标交互失效（提示框 / 图例 / 缩放 / 刷选 /
         时间轴 / 工具箱），绘制与数据不变。
 
+        **打开 = 全开**：置 ``True`` 时会**清空逐功能开关**（``setInteractionEnabled``
+        设过的覆盖）—— 语义是「把交互恢复成完整状态」。宿主用总开关做「交互: 开/关」
+        按钮时，用户期望点开就是全开，而不是保留上轮单独关掉的那几项。
+
         :param enabled: ``False`` 变为静态图（动画与程序化 API 不受影响）
         """
         self._interactive = bool(enabled)
         if not self._interactive:
             self.tooltip.hide()
             self._hover = None
+        else:
+            self._feature_flags.clear()
+        # 总开关也影响工具条按钮的启用态（子控件不会跟 chart 重绘走）
+        self._notify_interaction_changed()
+        self.invalidateLayout()
         self.update()
 
     def interactiveEnabled(self) -> bool:
@@ -3162,6 +3332,230 @@ class ElaChartWidget(QWidget):
         if not enabled and key == "tooltip":
             self.tooltip.hide()
             self._hover = None
+        # 工具条按钮是真实子控件（启用态在 ``layout()`` 里同步）：
+        # 这里既要让它当场变灰 / 恢复，也要让下一次布局重算位置与状态
+        self._notify_interaction_changed()
+        self.invalidateLayout()
+        self.update()
+
+    def _notify_interaction_changed(self) -> None:
+        """交互开关变化 → 让组件立刻刷新「子控件级」的状态（工具条按钮启用态）。"""
+        for comp in self._components:
+            hook = getattr(comp, "onInteractionChanged", None)
+            if not callable(hook):
+                continue
+            try:
+                hook()
+            except Exception:
+                continue
+
+    def hitRadius(self) -> float:
+        """命中半径（px）：``tooltip.hitRadius`` / Plotly 风格的 ``hoverdistance``。
+
+        默认 10px（库内原值）。曲线 / 散点的 ``hitTest`` 都走它，宿主可按
+        数据密度调小（避免密集点「抢命中」）或调大（触摸场景）。
+        """
+        tooltip_opt = self._option.get("tooltip")
+        raw = None
+        if isinstance(tooltip_opt, dict):
+            raw = tooltip_opt.get("hitRadius", tooltip_opt.get("hoverdistance"))
+        radius = 10.0
+        if raw is not None:
+            try:
+                radius = float(raw)
+            except (TypeError, ValueError, OverflowError):
+                radius = 10.0
+        if not math.isfinite(radius) or radius <= 0:
+            return 10.0
+        return min(200.0, radius)
+
+    #: 拖拽模式（对齐 Plotly ``dragmode``）：平移 / 框选缩放 / 框选 / 套索
+    DRAG_MODES = ("pan", "zoom", "select", "lasso")
+
+    #: 直角坐标图是否默认内置滚轮缩放（``setWheelZoomEnabled`` 可改）
+    WHEEL_ZOOM_DEFAULT = True
+
+    def setWheelZoomEnabled(self, enabled: bool) -> None:
+        """内置滚轮缩放开关（**默认开**：曲线 / 柱状等直角坐标图开箱即用）。
+
+        与 ``dataZoom`` 选项的关系：
+
+        * option 里自己配了 ``dataZoom`` → 完全听用户的，本开关不再插手
+          （``setWheelZoomEnabled(False)`` 也不会删掉用户配置的组件）；
+        * 没配 → 打开时自动挂一个 ``inside`` 组件（``zoomOnMouseWheel`` /
+          ``moveOnMouseMove`` 均为 True，对齐 ECharts 默认值）：**滚轮缩放 +
+          按住拖动平移**；``setDragMode("zoom"/"select"/"lasso")`` 会把拖拽让给
+          刷选，``setWheelZoomEnabled(False)`` 直接移除它。
+        """
+        enabled = bool(enabled)
+        self._wheel_zoom_enabled = enabled
+        if not enabled:
+            auto = self._auto_wheel_zoom()
+            if auto is not None:
+                self._drop_component(auto)
+            return
+        self._ensure_wheel_zoom()
+
+    def wheelZoomEnabled(self) -> bool:
+        """内置滚轮缩放开关状态。"""
+        return bool(self._wheel_zoom_enabled)
+
+    def _auto_wheel_zoom(self):
+        """取出自动创建的滚轮缩放组件（宿主自己配的不算）。"""
+        for comp in self._host_components:
+            if getattr(comp, "_wheel_zoom_auto", False):
+                return comp
+        return None
+
+    def _drop_component(self, comp) -> None:
+        """把一个组件从 chart 上摘干净（解挂事件过滤器 + 移出两个列表）。"""
+        dispose = getattr(comp, "dispose", None)
+        if callable(dispose):
+            try:
+                dispose()
+            except Exception:
+                pass
+        for bucket in (self._components, self._host_components):
+            while comp in bucket:
+                bucket.remove(comp)
+        self.invalidateLayout()
+        self.update()
+
+    def _ensure_wheel_zoom(self) -> None:
+        """无 ``dataZoom`` 的直角坐标图自动挂 ``inside`` 组件（滚轮缩放 + 拖拽平移）。
+
+        语义对齐 ECharts ``inside`` 的默认值：``zoomOnMouseWheel`` 与
+        ``moveOnMouseMove`` 都是 True —— 滚轮缩放、按住拖动平移。
+        框选 / 套索模式（``setDragMode``）会把平移关掉、把拖拽让给刷选；
+        点击（按下→原地松开 ≤4px）仍走 ``_press_ctx`` 补发的 ``itemClicked``。
+        """
+        if not self._wheel_zoom_enabled or self._auto_wheel_zoom() is not None:
+            return
+        if self._component("dataZoom") is not None:
+            return
+        if not any(isinstance(coord, GridCoord) for coord in self._coords):
+            return
+        cls = COMPONENT_REGISTRY.get("dataZoom")
+        if cls is None:  # pragma: no cover - 注册表恒有 dataZoom
+            return
+        try:
+            comp = cls(
+                self,
+                [
+                    {
+                        "type": "inside",
+                        "zoomOnMouseWheel": True,
+                        "moveOnMouseMove": True,
+                    }
+                ],
+            )
+        except Exception as exc:
+            warn_once(
+                warn_key("wheel-zoom-ctor", type(exc).__name__),
+                f"默认滚轮缩放组件构造失败: {exc!r}",
+            )
+            return
+        comp._wheel_zoom_auto = True
+        # 走 ``_host_components``：跨 setOption 存活，且不会被 _rebuild 重复创建
+        self._host_components.append(comp)
+        self._components.append(comp)
+
+    def setDragMode(self, mode: str) -> None:
+        """切换拖拽模式（Plotly ``dragmode`` 语义）。
+
+        * ``"pan"`` —— 拖拽平移 + 滚轮缩放（ECharts ``inside`` 默认行为）；
+        * ``"zoom"`` —— 拖拽**框选即缩放**（松手把 x 范围缩到选框）；
+        * ``"select"`` —— 矩形框选（结果走 ``brushChanged``，不缩放）；
+        * ``"lasso"`` —— 套索选择（同上，任意多边形）。
+
+        实现方式：dataZoom ``inside`` 的拖拽平移与 brush 的拖拽接管互斥，
+        按模式开关两者；``zoom`` 复用 brush 的选框几何。
+        """
+        key = str(mode or "").strip().lower()
+        if key not in self.DRAG_MODES:
+            raise ValueError(
+                f"未知拖拽模式：{mode!r}（可选：{', '.join(self.DRAG_MODES)}）"
+            )
+        self._drag_mode = key
+        data_zoom = self._component("dataZoom")
+        if data_zoom is not None:
+            # 缩放 / 选择模式：拖拽交给 brush（否则两者抢同一个拖拽手势）
+            data_zoom.moveOnMouseMove = key == "pan"
+            if hasattr(data_zoom, "zoomOnMouseWheel"):
+                data_zoom.zoomOnMouseWheel = True
+        brush = self._ensure_brush_component()
+        if brush is not None:
+            brush.enabled = key in ("zoom", "select", "lasso")
+            brush.opt["type"] = "lasso" if key == "lasso" else "rect"
+        self.update()
+
+    def _ensure_brush_component(self):
+        """取 brush 组件；option 里没配就按需建一个（``setDragMode`` 用）。
+
+        宿主没写 ``brush`` 选项时也要能用 ``dragmode``（Plotly 模式条的框选 /
+        套索按钮就是这么工作的）。建出来的实例挂进 ``_host_components``，
+        跨 ``setOption`` 存活。
+        """
+        brush = self._component("brush")
+        if brush is not None:
+            return brush
+        cls = COMPONENT_REGISTRY.get("brush")
+        if cls is None:
+            return None
+        try:
+            brush = cls(self, {"type": "rect"})
+        except Exception as exc:
+            warn_once("brush-ctor", f"brush 组件构造失败: {exc!r}")
+            return None
+        self._host_components.append(brush)
+        self._components.append(brush)
+        return brush
+
+    def dragMode(self) -> str:
+        """当前拖拽模式（未设置过时按 dataZoom ``inside`` 的默认行为报 ``"pan"``）。"""
+        return str(getattr(self, "_drag_mode", "") or "pan")
+
+    def brushComponent(self):
+        """brush 组件句柄（宿主可读 ``selected_items`` / 接 ``selected`` 信号）。"""
+        return self._component("brush")
+
+    def setDoubleClickReset(self, enabled: bool) -> None:
+        """双击是否复位视图（默认 **开**，对齐 Plotly ``doubleClick: 'reset'``）。"""
+        self._double_click_reset = bool(enabled)
+
+    def doubleClickReset(self) -> bool:
+        """双击复位是否开启。"""
+        return bool(self._double_click_reset)
+
+    def resetView(self) -> None:
+        """把视图还原到初始状态：全部 dataZoom 窗口回到 ``0..100`` +
+        各协调器的漫游 / 缩放复位 + 提示框与悬停态清空。
+
+        等价于 Plotly 模式条的「reset axes」；双击默认走这里
+        （``setDoubleClickReset(False)`` 可关）。只影响视图，不动数据 / 图例显隐
+        （图例请用 ``toolbox`` 的 restore 或 ``dispatchAction(legendAllSelect)``）。
+        """
+        comp = self._component("dataZoom")
+        if comp is not None and hasattr(comp, "reset_window"):
+            comp.reset_window()
+        for coord in list(self.coords):
+            hook = getattr(coord, "resetView", None)
+            if callable(hook):
+                try:
+                    hook()
+                except Exception:
+                    continue
+        for renderer in self._series:
+            hook = getattr(renderer, "resetView", None)
+            if callable(hook):
+                try:
+                    hook()
+                except Exception:
+                    continue
+        self.tooltip.hide()
+        self._hover = None
+        self._legend_hover = None
+        self.invalidateLayout()
         self.update()
 
     def isInteractionEnabled(self, feature: str) -> bool:
@@ -3298,6 +3692,24 @@ class ElaChartWidget(QWidget):
                 self._coords.insert(0, grid)
         for c in self._coords:
             c.setSeries(series_opts)
+        # 坐标轴的自然范围刚由 setSeries 重算：**跨 setOption 存活的 dataZoom**
+        # （默认滚轮缩放是 host 组件）必须在这里重捕全量范围，否则它一直拿旧数据的
+        # 范围当全量（空数据起步 → 钉在 0~1，30 万点到了也只画得出 2 个点）。
+        for comp in self._components:
+            capture = getattr(comp, "captureExtent", None)
+            if not callable(capture):
+                continue
+            try:
+                capture()
+            except Exception as exc:
+                warn_once(
+                    warn_key(
+                        "capture-extent",
+                        comp.__class__.__name__,
+                        type(exc).__name__,
+                    ),
+                    f"重捕轴范围失败（{comp.__class__.__name__}）: {exc!r}",
+                )
 
         # 系列渲染器
         self._series = []
@@ -3337,6 +3749,8 @@ class ElaChartWidget(QWidget):
                 cls, opt, optionKey, series_opts
             ):
                 self._spawn_component(cls, value, series_opt)
+        # 直角坐标图默认滚轮缩放（用户配了 dataZoom 就完全听用户的）
+        self._ensure_wheel_zoom()
 
         # 图例条目
         items = []
@@ -3546,6 +3960,25 @@ class ElaChartWidget(QWidget):
             )
             cursor -= size
 
+        # dataZoom 窗口必须先写回坐标轴，再排系列：系列按**当前轴窗口**做
+        # 「窗口裁剪 + 采样」，顺序反了就是「新轴 + 旧采样」的错配，且帧末布局
+        # 缓存键（含窗口值）已命中 → 下一次布局 early-return，错配永久留下
+        # （症状：缩放 / 平移后曲线变稀）。``apply()`` 本身幂等。
+        for comp in self._components:
+            apply_window = getattr(comp, "applyWindow", None)
+            if not callable(apply_window):
+                continue
+            try:
+                apply_window()
+            except Exception as exc:
+                warn_once(
+                    warn_key(
+                        "apply-window",
+                        comp.__class__.__name__,
+                        type(exc).__name__,
+                    ),
+                    f"窗口写回坐标轴失败（{comp.__class__.__name__}）: {exc!r}",
+                )
         for c in self._coords:
             c.layout(coord_content)
         for r in self._series:
@@ -3650,6 +4083,8 @@ class ElaChartWidget(QWidget):
             self._series_layer_key_zoom(),
             tuple((id(r), r.visible) for r in self._series),
             hover,
+            # 图例悬停高亮会改系列不透明度 → 必须进键，否则贴回旧外观
+            self._legend_hover,
         )
 
     def _series_layer_key_zoom(self):
@@ -3705,13 +4140,20 @@ class ElaChartWidget(QWidget):
         p.drawImage(0, 0, img)
 
     def _paint_series(self, p: QPainter, t: float) -> None:
-        """逐系列绘制（单系列异常不影响整图，且至少可见一次）。"""
+        """逐系列绘制（单系列异常不影响整图，且至少可见一次）。
+
+        图例悬停高亮（``_legend_hover``）：命中系列正常绘制，其余降到 35%
+        不透明度 —— 对齐 Plotly「悬停图例条目高亮对应 trace」的行为。
+        """
+        highlight = self._legend_hover
         for r in self._series:
             if not r.visible:
                 continue
             try:
                 # 记下本次进度：命中分发可能发生在下一帧 paint 之前
                 r._anim_t = r.animProgress(t)
+                if highlight is not None:
+                    p.setOpacity(1.0 if r.name == highlight else 0.35)
                 r.paint(p, r._anim_t)
             except Exception as exc:
                 warn_once(
@@ -3720,6 +4162,9 @@ class ElaChartWidget(QWidget):
                     ),
                     f"系列绘制异常（{r.name}）: {exc!r}",
                 )
+            finally:
+                if highlight is not None:
+                    p.setOpacity(1.0)
 
     def invalidateSeriesLayer(self) -> None:
         """使系列层位图缓存失效（数据 / 主题 / 尺寸变化时调用）。"""
@@ -3791,7 +4236,13 @@ class ElaChartWidget(QWidget):
         if self._loading:
             return
         pos = event.position()
-        if self._dispatch_hook("onMousePress", pos):
+        consumed = self._dispatch_hook("onMousePress", pos)
+        # 记下这次按下：拖拽类组件（dataZoom ``inside`` / brush）会「吞掉」按下事件
+        # （它们只能在这一刻起手），但**按下 → 原地松开**是一次点击，不该被吞 ——
+        # 否则配了 dataZoom inside 的图表点数据点 / 点空区全都不发 ``itemClicked``
+        # （ECharts 的 click 也是在松开时判定的）。
+        self._press_ctx = (QPointF(pos), bool(consumed))
+        if consumed:
             super().mousePressEvent(event)
             return
         if self.legend.shown and self.isInteractionEnabled("legend"):
@@ -3800,14 +4251,27 @@ class ElaChartWidget(QWidget):
                 self.legend.toggle(name)
                 super().mousePressEvent(event)
                 return
-        if self._interactive:
-            found = self._hitItemWithSeries(pos)
-            if found is not None:
-                renderer, hit = found
-                self.itemClicked.emit(
-                    self._make_item_params(renderer, hit, "click", event, pos)
-                )
+        self._emit_click_at(pos, event)
         super().mousePressEvent(event)
+
+    def _emit_click_at(self, pos: QPointF, event=None) -> None:
+        """命中数据点 → ``itemClicked``；空区且开 ``clickanywhere`` → 数据坐标载荷。"""
+        if not self._interactive:
+            return
+        found = self._hitItemWithSeries(pos)
+        if found is not None:
+            renderer, hit = found
+            self.itemClicked.emit(
+                self._make_item_params(renderer, hit, "click", event, pos)
+            )
+            return
+        if self._emptyAreaEnabled("clickanywhere"):
+            # Plotly ``clickanywhere``：空区点击也发事件，载荷带光标的数据坐标
+            empty = self._emptyAreaHit(pos)
+            if empty is not None:
+                empty["type"] = "click"
+                empty["event"] = event
+                self.itemClicked.emit(empty)
 
     def _make_item_params(
         self, renderer, hit: dict, event_type: str, event=None, pos=None
@@ -3896,7 +4360,22 @@ class ElaChartWidget(QWidget):
         pos = event.position()
         consumed = self._dispatch_hook("onMouseMove", pos)
         if not consumed:
-            if self.isInteractionEnabled("tooltip"):
+            # 图例悬停高亮优先于提示框：指针在图例上时不出 tooltip，只高亮系列
+            legend_hover = (
+                self.legend.hitTest(pos)
+                if self.legend.shown and self.isInteractionEnabled("legend")
+                else None
+            )
+            if legend_hover != self._legend_hover:
+                self._legend_hover = legend_hover
+                self.update()
+            if legend_hover is not None:
+                if self.tooltip.active:
+                    self.tooltip.hide()
+                if self._hover is not None:
+                    self._hover = None
+                    self.update()
+            elif self.isInteractionEnabled("tooltip"):
                 self._update_tooltip(pos)
             elif self.tooltip.active:
                 self.tooltip.hide()
@@ -3906,13 +4385,34 @@ class ElaChartWidget(QWidget):
     def mouseReleaseEvent(self, event) -> None:
         if self._loading:
             return
-        self._dispatch_hook("onMouseRelease", event.position())
-        super().mouseReleaseEvent(event)
+        pos = event.position()
+        self._dispatch_hook("onMouseRelease", pos)
+        ctx = getattr(self, "_press_ctx", None)
+        self._press_ctx = None
+        if ctx is not None:
+            start, consumed = ctx
+            # 位移 ≤ 4px 视作点击：把被拖拽组件吞掉的这次按下还给「点击」语义
+            dragged = math.hypot(pos.x() - start.x(), pos.y() - start.y()) > 4.0
+            if consumed and not dragged:
+                over_legend = False
+                if self.legend.shown:
+                    over_legend = self.legend.hitTest(start) is not None
+                if not over_legend:
+                    self._emit_click_at(pos, event)
 
     def mouseDoubleClickEvent(self, event) -> None:
         if self._loading:
             return
-        self._dispatch_hook("onMouseDoubleClick", event.position())
+        # 交互组件（如 roam / dataZoom）先接：被消费就不做默认复位。
+        if self._dispatch_hook("onMouseDoubleClick", event.position()):
+            super().mouseDoubleClickEvent(event)
+            return
+        # 双击复位（Plotly ``doubleClick: 'reset'`` 语义）：把缩放 / 平移 / 缩放窗口
+        # 还原到初始状态。可用 ``setDoubleClickReset(False)`` 关掉。
+        if self._double_click_reset:
+            self.resetView()
+            event.accept()
+            return
         super().mouseDoubleClickEvent(event)
 
     def wheelEvent(self, event) -> None:
@@ -3935,6 +4435,8 @@ class ElaChartWidget(QWidget):
         self.tooltip.hide()
         if self._hover is not None:
             self._hover = None
+        if self._legend_hover is not None:
+            self._legend_hover = None
         self.update()
         super().leaveEvent(event)
 
@@ -4020,6 +4522,44 @@ class ElaChartWidget(QWidget):
             self._tooltip_item(pos)
         self.update()
 
+    def _emptyAreaHit(self, pos: QPointF) -> Optional[dict]:
+        """空区命中：把像素反查成数据坐标（``hoveranywhere`` / ``clickanywhere``）。
+
+        Plotly 语义：光标不在任何 trace 上时，事件 / 提示仍带**光标的数据坐标**。
+        坐标系不支持反查（polar / calendar 等）时返回 ``None``。
+        """
+        coord = self.primaryCoord()
+        if coord is None:
+            return None
+        try:
+            x, y = coord.invertPoint(pos)
+        except Exception:
+            return None
+        if x is None or y is None:
+            return None
+        if isinstance(x, (int, float)) and not math.isfinite(x):
+            return None
+        if isinstance(y, (int, float)) and not math.isfinite(y):
+            return None
+        return {
+            "componentType": "grid",
+            "series": "",
+            "name": "",
+            "value": [x, y],
+            "x": x,
+            "y": y,
+        }
+
+    def _emptyAreaEnabled(self, key: str) -> bool:
+        """读取 ``hoveranywhere`` / ``clickanywhere``（默认关，对齐 Plotly）。"""
+        opt = self._option.get(key)
+        if isinstance(opt, bool):
+            return opt
+        tooltip_opt = self._option.get("tooltip")
+        if key == "hoveranywhere" and isinstance(tooltip_opt, dict):
+            return bool(tooltip_opt.get("hoverAnywhere", False))
+        return False
+
     def _tooltip_item(self, pos: QPointF) -> None:
         found = self._hitItemWithSeries(pos)
         if found is not None:
@@ -4038,6 +4578,15 @@ class ElaChartWidget(QWidget):
             return
         if self._hover is not None:
             self._hover = None
+        if self._emptyAreaEnabled("hoveranywhere"):
+            empty = self._emptyAreaHit(pos)
+            if empty is not None:
+                color = QColor(T("color.text.secondary"))
+                self.tooltip.showAt(
+                    pos, self.tooltip.buildLines(empty, color, "")
+                )
+                self.update()
+                return
         self.tooltip.hide()
 
     def _tooltip_axis(self, pos: QPointF) -> None:
@@ -4074,6 +4623,7 @@ class ElaChartWidget(QWidget):
                             r.color(),
                             str(info.get("series") or r.name),
                             formatValue(info.get("value")),
+                            info.get("value"),
                         )
                     )
                     if marker is None and info.get("pos") is not None:
@@ -4086,11 +4636,27 @@ class ElaChartWidget(QWidget):
             # 退化：尝试 item 命中
             self._tooltip_item(pos)
             return
+        # unified 排序：ECharts ``tooltip.order``（``valueAsc`` / ``valueDesc``）
+        # 或 Plotly 风格的 ``hoversort``（``value ascending`` / ``value descending``）
+        order = ""
+        tooltip_opt = self._option.get("tooltip")
+        if isinstance(tooltip_opt, dict):
+            order = (
+                str(tooltip_opt.get("order") or tooltip_opt.get("hoversort") or "")
+                .strip()
+                .lower()
+            )
+        if order in ("valueasc", "value ascending", "ascending"):
+            lines.sort(key=lambda row: _sort_value(row[3]))
+        elif order in ("valuedesc", "value descending", "descending"):
+            lines.sort(key=lambda row: _sort_value(row[3]), reverse=True)
         title = None
         if isinstance(coord, GridCoord) and coord.x_axis.type == "category":
             cats = coord.x_axis.categories
             if isinstance(idx, int) and 0 <= idx < len(cats):
                 title = cats[idx]
+        # 交给 tooltip 的行统一为 (color, name, value_str)（第 4 项仅供排序）
+        lines = [(color, name, value) for color, name, value, *_rest in lines]
         if title:
             lines.insert(0, (None, "", title))
         self.tooltip.showAt(pos, lines, marker_pos=marker or pos)
@@ -4098,6 +4664,17 @@ class ElaChartWidget(QWidget):
 
 # ---------------------------------------------------------------------------
 # 内置自检用简易 line 系列
+def _sort_value(value) -> float:
+    """unified 排序键：数值原样，非数值一律 +inf（正序落尾、倒序落头）。"""
+    if isinstance(value, bool) or value is None:
+        return math.inf
+    try:
+        number = float(value)
+    except (TypeError, ValueError, OverflowError):
+        return math.inf
+    return number if math.isfinite(number) else math.inf
+
+
 # ---------------------------------------------------------------------------
 
 
@@ -4203,7 +4780,7 @@ class SimpleLineSeriesRenderer(SeriesRenderer):
 
     def hitTest(self, pos: QPointF):
         best = None
-        best_d = 10.0  # 命中半径 px
+        best_d = self.chart.hitRadius()  # 命中半径 px（tooltip.hitRadius）
         for i, pt in enumerate(self._points):
             if pt is None:
                 continue

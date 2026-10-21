@@ -216,7 +216,7 @@ class TestFromDictTolerance:
             "id": 1,
             "role": "外星角色",
             "status": "外星状态",
-            "parts": [{"id": "a", "kind": "text", "text": "t", "status": "???"}],
+            "parts": [{"id": "a", "kind": "text", "text": "t", "status": "外星状态"}],
         }
         message = ElaChatMessage.fromDict(data)
         assert message.role == ElaChatRoleType.Assistant

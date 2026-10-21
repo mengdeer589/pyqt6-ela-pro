@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
-from PyQt6.QtCore import Qt, QStringListModel, QModelIndex
-from PyQt6.QtWidgets import QWidget
+from unittest.mock import MagicMock
+
+from PyQt6.QtCore import Qt, QPoint, QRect, QStringListModel, QModelIndex
+from PyQt6.QtWidgets import QApplication, QWidget
+from PyQt6ElaWidgetTools import ElaComboBox
 
 import pytest
 from _qthelpers import wait_until as _wait_until
@@ -167,11 +170,25 @@ class TestElaSearchMultiBox:
         assert box._pinyin_cache == {}
         box.deleteLater()
 
-    def test_set_current_selection_rejects_string(self):
-        """Test setCurrentSelection with string iterates chars (expected list)."""
+    def test_set_current_selection_accepts_str(self):
+        """F10：``str`` 归一为单元素（旧实现 ``list(str)`` 会拆成单字符）。"""
         box = ElaSearchMultiBox()
-        box.setCurrentSelection(["single"])
+        box.addItems(["single", "other"])
+
+        box.setCurrentSelection("single")
+
         assert box._currentSelection == ["single"]
+        assert box.currentSelection() == ["single"]
+        box.deleteLater()
+
+    def test_set_current_selection_none_clears(self):
+        box = ElaSearchMultiBox()
+        box.addItems(["a"])
+        box.setCurrentSelection(["a"])
+
+        box.setCurrentSelection(None)
+
+        assert box.currentSelection() == []
         box.deleteLater()
 
     def test_pinyin_cache_cleared_on_clear(self):
@@ -458,3 +475,149 @@ class TestElaSearchBox:
         assert box._searchWidget is None
         box.hidePopup()
         qapp.processEvents()
+
+
+class TestComboPopupGeometry:
+    """回归：动画期 view 几何必须等于动画结束后的布局终值。
+
+    C++ ``showPopup`` 在 400ms 动画结束才 ``layout->addWidget(view())``；此前
+    手工 resize 的宽度若与布局终值不一致，最后一帧滚动条会横跳、底部阴影线会
+    抖（2026-10 实测 250→248）。搜索框 / 底栏的高度则通过动态属性提前让出。
+    """
+
+    _ROWS = 18
+
+    @staticmethod
+    def _make_box(make, parent, cls, title_first: bool):
+        box = make(cls, "", parent) if title_first else make(cls, parent)
+        box.setFixedWidth(250)
+        box.addItems([f"Item {i}" for i in range(TestComboPopupGeometry._ROWS)])
+        box.setMaxVisibleItems(5)
+        box.show()
+        QApplication.processEvents()
+        return box
+
+    @staticmethod
+    def _container(box):
+        container = box.findChild(QWidget, "ElaComboBoxContainer")
+        assert container is not None
+        return container
+
+    @staticmethod
+    def _expected_rect(box, container, top_extra: int):
+        layout = container.layout()
+        margins = layout.contentsMargins()
+        contents = container.contentsRect()
+        rows = min(box.count(), box.maxVisibleItems())
+        return (
+            contents.x() + margins.left(),
+            contents.y() + margins.top() + top_extra,
+            contents.width() - margins.left() - margins.right(),
+            rows * 35,
+        )
+
+    @staticmethod
+    def _view_rect(box):
+        view = box.view()
+        return (view.x(), view.y(), view.width(), view.height())
+
+    @pytest.mark.parametrize(
+        ("cls", "top_extra", "title_first"),
+        [
+            (ElaComboBox, 0, False),
+            (ElaSearchBox, 40, False),
+            (ElaSearchMultiBox, 40, False),
+            (ElaTagBox, 0, True),
+            (ElaTagMultiBox, 0, True),
+            (ElaTagSearchBox, 40, True),
+            (ElaTagSearchMultiBox, 40, True),
+        ],
+        ids=[
+            "combo",
+            "search",
+            "search-multi",
+            "tag",
+            "tag-multi",
+            "tag-search",
+            "tag-search-multi",
+        ],
+    )
+    def test_view_geometry_matches_final_layout(
+        self, qapp, make, window_widget, cls, top_extra, title_first
+    ):
+        box = self._make_box(make, window_widget, cls, title_first)
+        box.showPopup()
+        # 动画起点必须在 processEvents 之前取（之后动画已经往前走了）。
+        start_y = box.view().y()
+        qapp.processEvents()
+
+        container = self._container(box)
+        expected_x, expected_y, expected_w, expected_h = self._expected_rect(
+            box, container, top_extra
+        )
+        view = box.view()
+        # 动画起点：C++ 用 listHeight - 8 作为滑动高度，y 从终值上方滑下来。
+        assert start_y == expected_y - expected_h, (
+            "动画起点应是布局终值上方一个 view 高度"
+        )
+        assert (view.x(), view.width()) == (expected_x, expected_w), (
+            "动画起点宽度 / 横坐标就应是布局终值"
+        )
+        assert view.height() == max(expected_h, view.minimumHeight())
+
+        final_height = expected_h + 8 + top_extra
+        assert _wait_until(
+            qapp,
+            lambda: container.height() == final_height,
+            timeout_ms=2000,
+            use_qwait=True,
+        ), "容器高度应包含搜索框等附件的高度"
+        assert (view.x(), view.y(), view.width()) == (
+            expected_x,
+            expected_y,
+            expected_w,
+        ), "动画结束放回布局后不得跳变"
+        assert view.height() == max(expected_h, view.minimumHeight())
+
+        box.hidePopup()
+        _wait_until(
+            qapp,
+            lambda: not container.isVisible(),
+            timeout_ms=2000,
+            use_qwait=True,
+        )
+
+
+class TestComboboxPopupBothSidesTight:
+    """F3 回归：上下都放不下时压到**下方**可用空间。
+
+    旧实现 `max_h <= 50` 时什么都不做：容器按默认（下方）位置渲染、超出屏幕
+    底部被裁，列表尾部不可达。
+    """
+
+    def test_clamps_to_below_space_when_above_is_tight(self, qapp, make, monkeypatch):
+        from pyqt6_ela_pro import _internal
+
+        container = make(QWidget)
+        container.show()  # isVisible 必须为真才会进入定位逻辑
+        combo = MagicMock()
+        combo.findChild.return_value = container
+        combo.mapToGlobal.return_value = QPoint(100, 40)  # combo_top = 40
+        combo.height.return_value = 30  # combo_bottom = 70
+        view = MagicMock()
+        view.sizeHintForRow.return_value = 35
+        combo.view.return_value = view
+        combo.count.return_value = 50
+        combo.maxVisibleItems.return_value = 10
+
+        screen = MagicMock()
+        # QRect(0,0,800,430).bottom() == 429：上方空间 37（≤50，压不了）、
+        # 下方 = 429-70-3 = 356（< final 358）→ 压到 356
+        screen.availableGeometry.return_value = QRect(0, 0, 800, 430)
+        monkeypatch.setattr(
+            QApplication, "screenAt", staticmethod(lambda pos: screen)
+        )
+
+        _internal._adjust_combobox_popup(combo)
+
+        assert container.minimumHeight() == container.maximumHeight() == 356

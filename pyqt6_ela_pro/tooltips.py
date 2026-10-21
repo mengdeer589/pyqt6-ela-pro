@@ -28,7 +28,7 @@ from PyQt6.QtCore import (
     QRectF,
 )
 
-from ._internal import single_shot_on
+from ._internal import is_deleted, single_shot_on
 from ._motion import Duration, start_idle_loop, start_transition
 from ._styles import setTextColor
 from .widget_base import ElaThemeWidget
@@ -118,14 +118,16 @@ class ElaToolTip(QWidget):
         self._max_width = 0
         #: 自定义内容控件（非 None 时隐藏文本标签、尺寸跟随它）
         self._content_widget: Optional[QWidget] = None
+        #: 窗口标志延迟到首次显示 / 查询时再设：构造期 setWindowFlags 会创建
+        #: 原生 top-level 窗口，滚动时批量物化消息会连续闪出小 Qt 窗口。
+        self._flags_ready = False
 
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
-        self.setWindowFlags(
-            Qt.WindowType.Tool  # type: ignore[arg-type]
-            | Qt.WindowType.FramelessWindowHint  # type: ignore[arg-type]
-            | Qt.WindowType.WindowStaysOnTopHint  # type: ignore[arg-type]
-        )
+        # 父窗口尚未 show 时创建的子控件会随父窗口一起显示：本组件此时还没
+        # showAt 定位，不显式隐藏就会被画在父窗口左上角（宿主在窗口 show 之前
+        # 建聊天页 / 工具栏时必中）。
+        self.hide()
 
         self._label = QLabel(text, self)
         self._label.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
@@ -139,6 +141,27 @@ class ElaToolTip(QWidget):
         eTheme.themeModeChanged.connect(self._onThemeChanged)
 
         self._updateSize()
+
+    def _ensureWindowFlags(self) -> None:
+        """首次显示 / 查询时再设 Tool 窗口标志（避免构造期创建原生窗口）。"""
+        if self._flags_ready:
+            return
+        self._flags_ready = True
+        self.setWindowFlags(
+            Qt.WindowType.Tool  # type: ignore[arg-type]
+            | Qt.WindowType.FramelessWindowHint  # type: ignore[arg-type]
+            | Qt.WindowType.WindowStaysOnTopHint  # type: ignore[arg-type]
+        )
+
+    def windowFlags(self):
+        """读取窗口标志时补设（测试 / 宿主查询不改变「延迟到显示」的语义）。"""
+        self._ensureWindowFlags()
+        return super().windowFlags()
+
+    def show(self) -> None:
+        """显示前补设窗口标志。"""
+        self._ensureWindowFlags()
+        super().show()
 
     def _apply_text_color(self) -> None:
         """按当前主题设置标签文字颜色（否则深色背景下文字不可见）。"""
@@ -262,9 +285,12 @@ class ElaToolTip(QWidget):
         )
 
     def showAt(
-        self, widget: QWidget, position: ElaToolTipPositionType = ElaToolTipPositionType.Top
+        self,
+        widget: QWidget,
+        position: ElaToolTipPositionType = ElaToolTipPositionType.Top,
     ) -> None:
         """在指定 widget 附近按 *position* 显示（最后会收敛进屏幕工作区）。"""
+        self._ensureWindowFlags()
         if not self.isWindow():
             self.setParent(None)
 
@@ -344,10 +370,17 @@ class _TooltipEventFilter(QObject):
     """事件过滤器，监听目标 widget 的进入 / 离开以显示或隐藏提示框。"""
 
     def __init__(
-        self, tooltip: ElaToolTip, position: ElaToolTipPositionType, target_widget: QWidget
+        self,
+        tooltip: ElaToolTip,
+        position: ElaToolTipPositionType,
+        target_widget: QWidget,
     ) -> None:
         super().__init__(target_widget)
         self._tooltip: weakref.ref[ElaToolTip] = weakref.ref(tooltip)
+        self._position = position
+
+    def setPosition(self, position: ElaToolTipPositionType) -> None:
+        """更新显示位置（同一 widget 重新绑定时复用提示框）。"""
         self._position = position
 
     def eventFilter(self, a0: Optional[QObject], a1: Optional[QEvent]) -> bool:
@@ -390,7 +423,10 @@ def set_tooltip(
 ) -> None:
     """为 widget 绑定悬浮提示。
 
-    装上事件过滤器，鼠标进入显示、离开隐藏；同一 widget 重复调用会先移除旧的。
+    装上事件过滤器，鼠标进入显示、离开隐藏。同一 widget 重复调用**复用**已有
+    提示框（只更新文本 / 折行配置 / 位置）：``ElaToolTip`` 构造要排一次文本，
+    批量物化时每次 remove + new 是纯浪费（聊天一次恢复实测 4609 次创建）。
+    从自定义内容退回纯文本时没有清空 API，才重建。
     绑定后会吞掉 ``QEvent.Type.ToolTip``（原生 ``QToolTip`` 与自定义提示会同时弹出）。
 
     ``maxWidth`` / ``wordWrap`` 用于长文本：默认单行（宽度=文本宽度），超长
@@ -400,7 +436,28 @@ def set_tooltip(
     :meth:`ElaToolTip.setContentWidget`，此时忽略 ``text`` / ``maxWidth`` /
     ``wordWrap`` 的展示，控件所有权归提示框）。
     """
-    if widget in _tooltip_dict:
+    existing = _tooltip_dict.get(widget)
+    if existing is not None and not is_deleted(existing):
+        if contentWidget is None and existing.contentWidget() is None:
+            # 复用：只改配置与文本。每次 remove + new 会重建 QWidget，并在
+            # Win7 上重排一次提示文本（聊天里 4609 次/会话，bug #17）。
+            existing.setWordWrap(bool(wordWrap))
+            existing.setMaxWidth(maxWidth if maxWidth else 0)
+            existing.setText(text)
+            filter_instance = _filter_dict.get(widget)
+            if filter_instance is not None:
+                filter_instance.setPosition(position)
+            return
+        if contentWidget is not None:
+            existing.setContentWidget(contentWidget)
+            filter_instance = _filter_dict.get(widget)
+            if filter_instance is not None:
+                filter_instance.setPosition(position)
+            return
+        # 从自定义内容退回纯文本：ElaToolTip 没有「清空内容控件」的 API
+        remove_tooltip(widget)
+    elif existing is not None:
+        # 字典里是已销毁的包装器：先清干净再重建。
         remove_tooltip(widget)
 
     tooltip = ElaToolTip(text, widget.window())
@@ -417,12 +474,20 @@ def set_tooltip(
     widget.installEventFilter(filter_instance)
 
     def _auto_remove() -> None:
+        # 注意：这里在 ``destroyed`` 里对（已失效的）wrapper 做 WeakKeyDictionary
+        # 哈希 —— 与 ``animation.py`` 注释里「对已失效 wrapper 取哈希必崩 6/6」
+        # 的说法相反；2026-10 实测本文件该路径 5 种销毁场景全部安全（含
+        # deleteLater / sip.delete / 父窗口级联 / tooltip 显示中 / 对已销毁
+        # 控件 remove）。两处结论并存，改这里前先跑 tests/regression 的销毁用例。
         try:
             remove_tooltip_from_dict(widget)
         except RuntimeError:
             pass
 
-    widget.destroyed.connect(_auto_remove)
+    # 只连一次：复用路径不再重复叠 destroyed 连接（长会话里曾叠到数千个）。
+    if not getattr(widget, "_ela_tooltip_autoremove", False):
+        widget._ela_tooltip_autoremove = True
+        widget.destroyed.connect(_auto_remove)
 
 
 def remove_tooltip(widget: QWidget) -> None:

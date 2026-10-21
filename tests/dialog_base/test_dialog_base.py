@@ -40,7 +40,8 @@ class TestElaDialogBase:
         from PyQt6ElaWidgetTools import ElaThemeType, eTheme
 
         parent = QWidget()
-        # PyQt6 ? setThemeColor ?? None?void????? getThemeColor ??
+        # 先写一个哨兵色：PyQt6 的 setThemeColor 返回 None（void），
+        # 构造对话框后再用 getThemeColor 读回，验证确实被组件改成浅灰白。
         eTheme.setThemeColor(
             ElaThemeType.ThemeMode.Light,
             ElaThemeType.ThemeColor.DialogBase,

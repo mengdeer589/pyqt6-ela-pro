@@ -7,6 +7,8 @@
 「容器与布局」管的是能装东西的 —— 这条线用户能记住。
 """
 
+import os
+
 from PyQt6.QtWidgets import QHBoxLayout, QVBoxLayout, QWidget
 from PyQt6ElaWidgetTools import (
     ElaAcrylicUrlCard,
@@ -25,7 +27,7 @@ from PyQt6ElaWidgetTools import (
     ElaReminderCard,
 )
 from .base_page import ExamplePage, _res
-from PyQt6.QtGui import QImage, QPixmap
+from PyQt6.QtGui import QColor, QLinearGradient, QPainter, QPixmap, QRadialGradient
 from pyqt6_ela_pro import (
     ElaChip,
     ElaInfoBadge,
@@ -34,6 +36,38 @@ from pyqt6_ela_pro import (
     ElaSteps,
     ElaTimeline,
 )
+
+
+def _placeholder_card_pixmap(width: int = 640, height: int = 420) -> QPixmap:
+    """示例图片缺失时的占位封面：深色渐变，白字在深浅主题下都可读。"""
+    pixmap = QPixmap(width, height)
+    pixmap.fill(QColor("#12151b"))
+    painter = QPainter(pixmap)
+    painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+    base = QLinearGradient(0.0, 0.0, float(width), float(height))
+    base.setColorAt(0.0, QColor("#3a4152"))
+    base.setColorAt(1.0, QColor("#151920"))
+    painter.fillRect(pixmap.rect(), base)
+    glow = QRadialGradient(width * 0.72, height * 0.28, width * 0.6)
+    glow.setColorAt(0.0, QColor(110, 150, 255, 110))
+    glow.setColorAt(1.0, QColor(110, 150, 255, 0))
+    painter.fillRect(pixmap.rect(), glow)
+    glow = QRadialGradient(width * 0.2, height * 0.85, width * 0.55)
+    glow.setColorAt(0.0, QColor(80, 200, 170, 70))
+    glow.setColorAt(1.0, QColor(80, 200, 170, 0))
+    painter.fillRect(pixmap.rect(), glow)
+    painter.end()
+    return pixmap
+
+
+def _card_pixmap(filename: str) -> QPixmap:
+    """加载示例封面；资源缺失或损坏时回退为占位图。"""
+    path = _res(filename)
+    if os.path.exists(path):
+        pixmap = QPixmap(path)
+        if not pixmap.isNull():
+            return pixmap
+    return _placeholder_card_pixmap()
 
 
 class ProgressFeedbackPage(ExamplePage):
@@ -165,9 +199,7 @@ class ProgressFeedbackPage(ExamplePage):
         parent_layout.addSpacing(30)
 
     def _setCardImage(self, card, filename):
-        pixmap = QPixmap(_res(filename))
-        if not pixmap.isNull():
-            card.setCardImage(QImage(pixmap.toImage()))
+        card.setCardImage(_card_pixmap(filename).toImage())
 
     def _demoImageCard(self, parent_layout):
         parent_layout.addLayout(
@@ -176,6 +208,11 @@ class ProgressFeedbackPage(ExamplePage):
             )
         )
         self._addInfoText("带图片的卡片组件", parent_layout)
+        if not os.path.exists(_res("miku.png")):
+            self._addInfoText(
+                "本地未放置示例图片 resource/images/miku.png，以下卡片封面使用程序生成的占位图",
+                parent_layout,
+            )
         parent_layout.addSpacing(10)
         card = ElaImageCard(self)
         card.setFixedSize(240, 180)
@@ -185,9 +222,7 @@ class ProgressFeedbackPage(ExamplePage):
         parent_layout.addSpacing(30)
 
     def _setCardPixmap(self, card, filename):
-        pixmap = QPixmap(_res(filename))
-        if not pixmap.isNull():
-            card.setCardPixmap(pixmap)
+        card.setCardPixmap(_card_pixmap(filename))
 
     def _demoInteractiveCard(self, parent_layout):
         parent_layout.addLayout(

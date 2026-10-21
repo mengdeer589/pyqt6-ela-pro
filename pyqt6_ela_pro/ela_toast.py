@@ -29,13 +29,14 @@ from PyQt6.QtCore import (
     QAbstractAnimation,
 )
 from ._internal import is_deleted
-from PyQt6.QtGui import QPainter, QPainterPath, QFont, QFontMetrics, QColor, QPaintEvent
+from PyQt6.QtGui import QPainter, QPainterPath, QFont, QFontMetrics, QPaintEvent
 from PyQt6.QtWidgets import QWidget, QApplication
 
 from PyQt6ElaWidgetTools import eTheme, ElaThemeType, ElaIconType
 
 from ._motion import Duration, Easing, start_transition
 from ._styles import SHADOW_MARGIN, iconGlyph, paintOverlayShadow
+from ._theme import ElaStatusRoleType, statusColor
 from .widget_base import ElaThemeWidget
 
 #: 同一锚点（父控件，None 表示屏幕）下当前存活的 toast，按创建顺序排列。
@@ -229,7 +230,6 @@ class ElaToast(ElaThemeWidget):
     # ── Internal ──────────────────────────────────────────
 
     def _run_animation(self) -> None:
-        self._opacity = 0.0
         self._fade_in = QPropertyAnimation(self, b"windowOpacity")
         self._fade_in.setStartValue(0.0)
         self._fade_in.setEndValue(1.0)
@@ -285,7 +285,8 @@ class ElaToast(ElaThemeWidget):
         painter.drawRoundedRect(fg, br, br)
 
         if self._toast_type == ElaToastType.Success:
-            ind_color = QColor(0x0F, 0x7B, 0x0F)
+            # 语义色统一走 `_theme.statusColor`（分深浅两档），别写死浅色档 hex
+            ind_color = statusColor(mode, ElaStatusRoleType.Success)
             icon_enum = ElaIconType.IconName.Check
         elif self._toast_type == ElaToastType.Info:
             ind_color = eTheme.getThemeColor(
@@ -293,7 +294,7 @@ class ElaToast(ElaThemeWidget):
             )
             icon_enum = ElaIconType.IconName.CircleInfo
         elif self._toast_type == ElaToastType.Warning:
-            ind_color = QColor(0xF7, 0x93, 0x0E)
+            ind_color = statusColor(mode, ElaStatusRoleType.Warning)
             icon_enum = ElaIconType.IconName.CircleExclamation
         else:
             ind_color = eTheme.getThemeColor(mode, ElaThemeType.ThemeColor.StatusDanger)

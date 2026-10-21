@@ -6,6 +6,7 @@ Splitter 分割器组件
 
 from __future__ import annotations
 
+import warnings
 from typing import Optional
 
 from PyQt6.QtCore import Qt, QRectF, QEvent
@@ -170,6 +171,17 @@ def create_ela_splitter(
                 layout.addWidget(splitter)
         else:
             layout.addWidget(splitter)
+    elif parent is not None:
+        # parent 有值但没有布局：splitter 无处安放，而下面的 addWidget 已经把
+        # 传入的 widgets reparent 进它 —— 结果返回一个不可见的 splitter、
+        # 原控件从界面上消失。显式提示，调用方需自行把返回值挂进布局。
+        warnings.warn(
+            "create_ela_splitter: parent 没有布局，splitter 不会被挂载"
+            "（传入的 widgets 已 reparent 进去，界面上会消失）——"
+            "请自行把返回的 splitter 加入布局，或传 parent=None 后手动挂载。",
+            RuntimeWarning,
+            stacklevel=2,
+        )
 
     for widget in widgets:
         splitter.addWidget(widget)

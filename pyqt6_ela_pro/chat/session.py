@@ -11,7 +11,8 @@
 - :class:`ElaChatSessionInfo`：话题元数据快照（``id`` / 标题 / 创建时间 /
   消息条数 / 工作目录），成对 ``toDict()`` / ``fromDict()`` 可直接落库；
 - :class:`ElaChatSessionStats`：会话级用量汇总（计数 / 当前上下文四路词元 /
-  使用率 / 累计成本 / 最后活动），由 ``ElaChatView.sessionStats(limit)`` 聚合；
+  使用率 / 累计成本 / 最后活动 / 工具调用统计 / 思考耗时合计），由
+  ``ElaChatView.sessionStats(limit)`` 聚合；
 - 整会话（元数据 + 消息 + 视图外观）的导出 / 导入见
   ``ElaChatView.exportSession()`` / ``importSession()`` —— 归档 / 恢复话题
   就是「导出 bundle → 销毁页面；重建页面 → 导入 bundle」。
@@ -19,10 +20,17 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from typing import Optional
 
-from .message import ElaChatPartKindType, ElaChatRoleType, _as_float, _as_int, _as_str
+from .message import (
+    ElaChatPartKindType,
+    ElaChatRoleType,
+    ElaChatToolStatusType,
+    _as_float,
+    _as_int,
+    _as_str,
+)
 
 #: 会话 bundle 格式版本（与消息的 ``SCHEMA_VERSION`` 独立演进）
 SESSION_SCHEMA_VERSION = 1
@@ -139,7 +147,15 @@ class ElaChatSessionStats:
       并夹在 ``0..100``；没给 / 无数据为 ``None``（**不谎报 0%**）；
     - ``total_cost_usd``：全会话累计（各消息 ``stats.cost_usd`` 求和）；
     - ``last_activity``：那条「最后有 tokens 的助手消息」的 ``created_at``
-      （对齐 opencode 的 lastActivity）。
+      （对齐 opencode 的 lastActivity）；
+    - 工具统计（同一次遍历产出）：``tool_calls`` / ``tool_rounds`` —— 调用总
+      次数与**轮数**（有工具调用的步骤数合计，消息内按 ``step`` 去重：一个
+      step 并行多个调用算一轮，与 UI「工具面板每步一个」同口径）；
+      ``tool_errors`` / ``tool_aborted`` / ``tool_unsettled`` —— 按
+      :class:`ElaChatToolStatusType` 分档（``unsettled`` = pending + running；
+      ``done`` 可由 ``calls - errors - aborted - unsettled`` 推得）；
+      ``tool_counts`` —— 工具名（小写归一）-> 次数（全部状态都计、空名字不计）；
+    - ``reasoning_ms``：全会话思考段 ``duration_ms`` 合计。
 
     会话标题 / 提供商 / 模型 / 创建时间属于**宿主会话元数据**
     （:class:`ElaChatSessionInfo` 或宿主自己的存储），库不推断。
@@ -169,6 +185,20 @@ class ElaChatSessionStats:
     total_cost_usd: float = 0.0
     #: 最后活动时间（最后一条有 tokens 的助手消息的 ``created_at``）
     last_activity: float = 0.0
+    #: 工具调用总次数（全部状态合计）
+    tool_calls: int = 0
+    #: 工具调用轮数：有工具调用的步骤数合计（消息内按 ``step`` 去重）
+    tool_rounds: int = 0
+    #: 失败的工具调用数（``status == Error``）
+    tool_errors: int = 0
+    #: 被中止的工具调用数（``status == Aborted``）
+    tool_aborted: int = 0
+    #: 未落定的工具调用数（``Pending`` + ``Running``）
+    tool_unsettled: int = 0
+    #: 工具名（小写归一）-> 调用次数（全部状态都计；空名字不计入）
+    tool_counts: dict = field(default_factory=dict)
+    #: 全会话思考耗时合计（毫秒；各消息思考段 ``duration_ms`` 求和）
+    reasoning_ms: float = 0.0
 
     @classmethod
     def fromMessages(cls, messages, limit: int = 0) -> "ElaChatSessionStats":
@@ -177,6 +207,13 @@ class ElaChatSessionStats:
         user_messages = 0
         assistant_messages = 0
         total_cost = 0.0
+        tool_calls = 0
+        tool_rounds = 0
+        tool_errors = 0
+        tool_aborted = 0
+        tool_unsettled = 0
+        tool_counts: dict = {}
+        reasoning_ms = 0.0
         for item in items:
             role = getattr(item, "role", "")
             if role == ElaChatRoleType.User:
@@ -184,6 +221,32 @@ class ElaChatSessionStats:
             elif role == ElaChatRoleType.Assistant:
                 assistant_messages += 1
             total_cost += _message_cost(item)
+            steps_with_tools: set = set()
+            for part in getattr(item, "parts", ()) or ():
+                kind = getattr(part, "kind", "")
+                if kind == ElaChatPartKindType.Reasoning:
+                    reasoning_ms += _as_float(getattr(part, "duration_ms", 0.0))
+                elif kind == ElaChatPartKindType.Tool:
+                    call = getattr(part, "tool_call", None)
+                    if call is None:
+                        # 坏数据（存储里缺 tool_call）：不是一次能数的调用，跳过
+                        continue
+                    tool_calls += 1
+                    steps_with_tools.add(max(1, _as_int(getattr(part, "step", 1), 1)))
+                    name = _as_str(getattr(call, "name", "")).lower()
+                    if name:
+                        tool_counts[name] = tool_counts.get(name, 0) + 1
+                    status = getattr(call, "status", "")
+                    if status == ElaChatToolStatusType.Error:
+                        tool_errors += 1
+                    elif status == ElaChatToolStatusType.Aborted:
+                        tool_aborted += 1
+                    elif status in (
+                        ElaChatToolStatusType.Pending,
+                        ElaChatToolStatusType.Running,
+                    ):
+                        tool_unsettled += 1
+            tool_rounds += len(steps_with_tools)
 
         latest = None
         latest_message = None
@@ -215,4 +278,11 @@ class ElaChatSessionStats:
             usage_percent=percent,
             total_cost_usd=total_cost,
             last_activity=_as_float(getattr(latest_message, "created_at", 0.0)),
+            tool_calls=tool_calls,
+            tool_rounds=tool_rounds,
+            tool_errors=tool_errors,
+            tool_aborted=tool_aborted,
+            tool_unsettled=tool_unsettled,
+            tool_counts=tool_counts,
+            reasoning_ms=reasoning_ms,
         )

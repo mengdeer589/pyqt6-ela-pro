@@ -14,7 +14,7 @@
 内容渲染                Markdown 渲染 / Office 文档预览
 AI 对话                  聊天组件总览 / 输入区能力 / Agent 能力 / 会话管理 /
                         持久化与性能
-窗口与应用外壳          应用框架 / 弹窗与提示 / 启动与托盘
+窗口与应用外壳          ElaWindow 应用外壳 / 弹窗与提示 / 启动与托盘
 系统交互与嵌入          外部内容嵌入 / 终端输出 / 划词助手
 动效与图形              动画与图标 / 节点图编辑器
 参考文档                聊天组件 API 指南
@@ -28,7 +28,6 @@ AI 对话                  聊天组件总览 / 输入区能力 / Agent 能力 /
 """
 
 from .animation_icon_page import AnimationIconPage
-from .application_page import ApplicationComponentsPage
 from .app_shell_page import AppShellPage
 from .base_page import ExamplePage
 from .blueprint_page import BlueprintPage
@@ -52,6 +51,7 @@ from .progress_feedback_page import ProgressFeedbackPage
 from .selection_page import SelectionAssistantPage
 from .terminal_page import TerminalPage
 from .views_list_page import ViewsListPage
+from .window_shell_page import WindowShellPage
 
 __all__ = [
     "ExamplePage",
@@ -75,7 +75,7 @@ __all__ = [
     "ChatSessionPage",
     "ChatPersistPage",
     # 窗口与应用外壳
-    "ApplicationComponentsPage",
+    "WindowShellPage",
     "DrawerTooltipPage",
     "AppShellPage",
     # 系统交互与嵌入

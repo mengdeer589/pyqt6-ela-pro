@@ -66,6 +66,8 @@ class TestRestoreSettlesStreamingStatus:
         restored.importSession(bundle)
         assert restored.message(mid).status == ElaChatStatusType.Stopped
         assert restored.bubble(mid).isStreaming() is False
+        # 批量恢复默认延迟物化：底部行在物化后才出现
+        restored.materializeMessage(mid)
         assert restored.bubble(mid)._footer.isHidden() is False
 
     def test_settled_statuses_roundtrip_unchanged(self, qapp, make):

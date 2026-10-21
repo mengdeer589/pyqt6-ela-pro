@@ -20,25 +20,25 @@ from pyqt6_ela_pro import (
 from pyqt6_ela_pro.example.base_page import ExamplePage
 
 SAMPLE_ANSI = (
-    "\x1b[32m✓\x1b[0m 编译 128 个文件        \x1b[2m2.31s\x1b[0m\n"
-    "\x1b[32m✓\x1b[0m 链接 ela_pro.dll        \x1b[2m0.84s\x1b[0m\n"
+    "\x1b[32m√\x1b[0m 编译 128 个文件        \x1b[2m2.31s\x1b[0m\n"
+    "\x1b[32m√\x1b[0m 链接 ela_pro.dll        \x1b[2m0.84s\x1b[0m\n"
     "\x1b[33m!\x1b[0m 3 个警告：未使用的变量\n"
     "\x1b[31m✗\x1b[0m 1 个错误：expected ';' before '}'\n"
     "\n"
-    "\x1b[36m▸\x1b[0m 基础色："
+    "\x1b[36m+\x1b[0m 基础色："
     "\x1b[30m黑\x1b[0m \x1b[31m红\x1b[0m \x1b[32m绿\x1b[0m \x1b[33m黄\x1b[0m "
     "\x1b[34m蓝\x1b[0m \x1b[35m品红\x1b[0m \x1b[36m青\x1b[0m \x1b[37m白\x1b[0m\n"
-    "\x1b[36m▸\x1b[0m 亮色："
+    "\x1b[36m+\x1b[0m 亮色："
     "\x1b[90m黑\x1b[0m \x1b[91m红\x1b[0m \x1b[92m绿\x1b[0m \x1b[93m黄\x1b[0m "
     "\x1b[94m蓝\x1b[0m \x1b[95m品红\x1b[0m \x1b[96m青\x1b[0m \x1b[97m白\x1b[0m\n"
-    "\x1b[36m▸\x1b[0m 256 色：\x1b[38;5;208m橙\x1b[0m "
+    "\x1b[36m+\x1b[0m 256 色：\x1b[38;5;208m橙\x1b[0m "
     "\x1b[38;5;45m青绿\x1b[0m \x1b[38;5;129m紫\x1b[0m \x1b[38;5;196m玫红\x1b[0m "
     "\x1b[38;5;244m灰\x1b[0m\n"
-    "\x1b[36m▸\x1b[0m 真彩：\x1b[38;2;255;160;60m橙\x1b[0m "
+    "\x1b[36m+\x1b[0m 真彩：\x1b[38;2;255;160;60m橙\x1b[0m "
     "\x1b[38;2;90;200;220m天蓝\x1b[0m \x1b[38;2;200;120;220m藕紫\x1b[0m\n"
-    "\x1b[36m▸\x1b[0m 样式：\x1b[1m加粗\x1b[0m \x1b[2m暗淡\x1b[0m \x1b[3m斜体\x1b[0m "
+    "\x1b[36m+\x1b[0m 样式：\x1b[1m加粗\x1b[0m \x1b[2m暗淡\x1b[0m \x1b[3m斜体\x1b[0m "
     "\x1b[4m下划线\x1b[0m \x1b[7m反显\x1b[0m \x1b[9m删除线\x1b[0m\n"
-    "\x1b[36m▸\x1b[0m 背景：\x1b[41m  红色底  \x1b[0m\x1b[42m  绿色底  \x1b[0m"
+    "\x1b[36m+\x1b[0m 背景：\x1b[41m  红色底  \x1b[0m\x1b[42m  绿色底  \x1b[0m"
     "\x1b[44m  蓝色底  \x1b[0m\x1b[47m  白色底  \x1b[0m\n"
     "\n"
     "\x1b[2m被丢弃的序列：OSC 设标题 ESC ]0;t BEL、"
@@ -181,7 +181,7 @@ class TerminalPage(ExamplePage):
             view.append(f"\r\x1b[36m{bar}\x1b[0m {percent:3d}%")
             if percent >= 100:
                 stop_timers()
-                view.append("\n\x1b[32m✓\x1b[0m 下载完成\n")
+                view.append("\n\x1b[32m√\x1b[0m 下载完成\n")
 
         def tick_stream():
             kind, text = STREAM_SCRIPT[stream_state["index"] % len(STREAM_SCRIPT)]

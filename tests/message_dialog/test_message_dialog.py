@@ -61,3 +61,16 @@ class TestElaMessageDialog:
         assert dlg._paramLay.indexOf(dlg._message_widget) != -1
         dlg.deleteLater()
         parent.deleteLater()
+
+    def test_instance_show_returns_none(self, qapp):
+        """实例路径与 ``QDialog.show`` 一致返回 None（曾返回 0，恰好是「左按钮」值）。"""
+
+        parent = QWidget()
+        dlg = ElaMessageDialog(parent=parent)
+
+        result = dlg.show()
+
+        assert result is None
+        dlg.hide()
+        dlg.deleteLater()
+        parent.deleteLater()

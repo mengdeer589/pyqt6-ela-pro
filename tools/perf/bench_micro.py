@@ -54,8 +54,8 @@ def run_once() -> int:
             return QtCore.QSize(60, 20)
 
         def paintEvent(self, _event):
-            # ????????????? Python ????? painter???????????
-            # painter ???? ?? ?? end() ???????????????
+            # 最小 Python 覆写绘制：只创建 QPainter 并立刻 end()。
+            # 不画任何图元 —— 测的是「进出一次绘制链」的固定开销。
             QtGui.QPainter(self).end()
 
         def resizeEvent(self, event):
@@ -85,7 +85,7 @@ def run_once() -> int:
     probe.setParent(host)
     probe.resize(120, 30)
     probe.show()
-    app.processEvents()  # ????? polish?????????? app ???????
+    app.processEvents()  # 先把 polish / 布局跑完，别把首帧开销算进基准
 
     # ② C++ → Python 虚调用（覆写在 Python 里）
     bench("sizeHint() [Py覆写]", lambda: probe.sizeHint(), 20000)

@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import pytest
+from PyQt6 import sip
 from PyQt6.QtCore import QEvent, QPoint, Qt, QPointF
 from PyQt6.QtGui import QMouseEvent
-from PyQt6.QtWidgets import QWidget
+from PyQt6.QtWidgets import QApplication, QWidget
 from PyQt6ElaWidgetTools import ElaIconType, ElaMenu, ElaThemeType
 
 from pyqt6_ela_pro._theme import textDisabled
@@ -173,3 +174,59 @@ class TestElaDropDownButtonAppearance:
 class TestElaDropDownButtonDeleteLater:
     def test_delete_later_cleans_up(self, btn):
         btn.deleteLater()
+
+
+class TestElaDropDownButtonMenuLifetime:
+    """F13 回归：菜单生命周期边界（宿主先删菜单 / 显式清空）。
+
+    原实现 `if self._menu: popup(...)` 对**已删除的 sip 包装器**调方法抛
+    ``RuntimeError``，穿出 Qt 回调 = 0xC0000409 崩进程（子进程探针实测）。
+    """
+
+    @staticmethod
+    def _release_at(widget, x: int, y: int) -> None:
+        QApplication.sendEvent(
+            widget,
+            QMouseEvent(
+                QEvent.Type.MouseButtonRelease,
+                QPointF(QPoint(x, y)),
+                Qt.MouseButton.LeftButton,
+                Qt.MouseButton.LeftButton,
+                Qt.KeyboardModifier.NoModifier,
+            ),
+        )
+
+    def test_release_with_deleted_menu_is_safe(self, make):
+        btn = make(ElaDropDownButton)
+        btn.resize(120, 30)
+        menu = make(ElaMenu, btn)
+        btn.setMenu(menu)
+        sip.delete(menu)
+        assert sip.isdeleted(menu)
+
+        self._release_at(btn, 5, 5)  # 守卫放行（不再 popup），不得崩
+
+        assert btn._is_pressed is False
+
+    def test_release_with_live_menu_still_pops_up(self, make):
+        btn = make(ElaDropDownButton)
+        btn.resize(120, 30)
+        menu = make(ElaMenu, btn)
+        calls: list = []
+        menu.popup = lambda *args: calls.append(args)  # type: ignore[method-assign]
+        btn.setMenu(menu)
+
+        self._release_at(btn, 5, 5)
+
+        assert calls, "存活菜单必须照常弹出（守卫不能误伤）"
+
+    def test_set_menu_none_clears_and_release_is_safe(self, make):
+        btn = make(ElaDropDownButton)
+        btn.resize(120, 30)
+        menu = make(ElaMenu, btn)
+        btn.setMenu(menu)
+
+        btn.setMenu(None)
+
+        assert btn.menu() is None
+        self._release_at(btn, 5, 5)  # 无菜单点击 = 空操作，不崩

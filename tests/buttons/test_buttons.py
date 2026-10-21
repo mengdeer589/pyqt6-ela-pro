@@ -5,6 +5,7 @@ from __future__ import annotations
 import pytest
 from _pixels import skip_if_no_pixels
 from PyQt6.QtGui import QColor
+from PyQt6ElaWidgetTools import ElaIconType
 
 from pyqt6_ela_pro.ela_long_press_button import ElaLongPressButton as ElaLongPressBtn
 from pyqt6_ela_pro.ela_progress_button import ElaProgressButton
@@ -95,6 +96,34 @@ class TestElaProgressButton:
     def test_delete_later_disconnects_theme(self, make):
         """析构要断开主题信号。"""
         make(ElaProgressButton).deleteLater()
+
+
+class TestIconIntContract:
+    """F12 回归：图标契约允许传整数值（原实现传 int 首帧 paint 崩进程）。
+
+    子进程探针实测（修复前）：两组件 ``setElaIcon(3)`` + show + processEvents
+    都返回 exit 3221226505（0xC0000409）。修复后入口归一，绘制期不再抛。
+    """
+
+    def test_long_press_accepts_int_icon(self, make, qapp):
+        btn = make(ElaLongPressBtn)
+        btn.setElaIcon(int(ElaIconType.IconName.Pencil.value))
+
+        assert btn._icon_name == ElaIconType.IconName.Pencil
+        btn.resize(80, 30)
+        btn.show()
+        qapp.processEvents()
+        btn.grab()  # 触发 paint，不得崩
+
+    def test_progress_accepts_int_icon(self, make, qapp):
+        btn = make(ElaProgressButton, text="下载")
+        btn.setElaIcon(int(ElaIconType.IconName.Pencil.value))
+
+        assert btn._icon_name == ElaIconType.IconName.Pencil
+        btn.resize(80, 30)
+        btn.show()
+        qapp.processEvents()
+        btn.grab()  # 触发 paint（含 _icon_getter），不得崩
 
 
 class TestButtonGeometryAlignment:

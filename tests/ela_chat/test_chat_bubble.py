@@ -5,12 +5,13 @@ from __future__ import annotations
 import pytest
 from _qthelpers import wait_for_clipboard as _wait_for_clipboard
 from _qthelpers import wait_until as _wait_until
-from PyQt6.QtCore import Qt
-from PyQt6.QtGui import QPalette
-from PyQt6.QtWidgets import QWidget
-from PyQt6ElaWidgetTools import ElaThemeType
+from PyQt6.QtCore import QPoint, Qt
+from PyQt6.QtGui import QContextMenuEvent, QPalette
+from PyQt6.QtWidgets import QApplication, QWidget
+from PyQt6ElaWidgetTools import ElaMenu, ElaThemeType
 
-from pyqt6_ela_pro.chat._theme import muted_color
+from pyqt6_ela_pro._internal import system_cjk_font_family
+from pyqt6_ela_pro.chat._theme import base_color, muted_color
 
 from pyqt6_ela_pro.chat import (
     DISCLAIMER_TEXT,
@@ -83,6 +84,50 @@ class TestUserBubble:
         assert copied == [1]
         # Windows 上这次写可能被静默丢弃（实测读回空串、只轮询等不来）：必须重发才落盘
         assert _wait_for_clipboard(qapp, "复制我", copy_button.click) == "复制我"
+
+    def test_context_menu_uses_ela_menu(self, qapp, make):
+        """用户消息右键菜单是 ElaMenu（QLabel 原生菜单是 Qt 外观）。"""
+        bubble = make(ElaChatBubble, ElaChatRoleType.User, "选中这段")
+        menu = bubble._label._build_context_menu()
+        assert isinstance(menu, ElaMenu)
+        assert [action.text() for action in menu.actions()] == ["复制", "全选"]
+        # 没有选区时「复制」禁用，「全选」可用
+        assert menu.actions()[0].isEnabled() is False
+        menu.actions()[1].trigger()
+        assert bubble._label.selectedText() == "选中这段"
+        # 有选区后重建菜单，「复制」可用
+        menu = bubble._label._build_context_menu()
+        assert menu.actions()[0].isEnabled() is True
+
+        # 全选按 UTF-16 码元计算（emoji 占 2 个，不能漏掉后半）
+        bubble = make(ElaChatBubble, ElaChatRoleType.User, "好😀")
+        bubble._label._select_all()
+        assert bubble._label.selectedText() == "好😀"
+
+    def test_context_menu_event_builds_ela_menu(self, qapp, make, monkeypatch):
+        """右键事件走自建 ElaMenu（不再落到 QLabel 的 Qt 原生菜单）。"""
+        bubble = make(ElaChatBubble, ElaChatRoleType.User, "abc")
+        seen = []
+        monkeypatch.setattr(
+            "pyqt6_ela_pro.chat.bubble.execElaMenu",
+            lambda menu, pos: seen.append((menu, pos)),
+        )
+        event = QContextMenuEvent(
+            QContextMenuEvent.Reason.Mouse, QPoint(4, 4), QPoint(4, 4)
+        )
+        QApplication.sendEvent(bubble._label, event)
+        assert len(seen) == 1
+        assert isinstance(seen[0][0], ElaMenu)
+        assert [action.text() for action in seen[0][0].actions()] == ["复制", "全选"]
+
+    def test_context_menu_copies_selection(self, qapp, requires_clipboard, make):
+        """右键菜单的「复制」写入选区文本。"""
+        bubble = make(ElaChatBubble, ElaChatRoleType.User, "复制选区")
+        bubble._label.setSelection(0, 2)
+        menu = bubble._label._build_context_menu()
+        copy = menu.actions()[0]
+        assert copy.isEnabled() is True
+        assert _wait_for_clipboard(qapp, "复制", copy.trigger) == "复制"
 
     def test_undo_action_signal(self, qapp, make):
         bubble = make(ElaChatBubble, ElaChatRoleType.User, "hi")
@@ -322,14 +367,53 @@ class TestAssistantBubble:
         assert bubble.actions().keys() == ["copy", "regenerate"]
 
     def test_header_title_font_stack(self, qapp, make):
-        """标题字体走 ``QFont`` 字体栈（拉丁 Segoe UI、中文逐字形回退），不用 QSS。"""
+        """标题字体走 ``QFont`` 字体栈（不用 QSS）：**中文系统单族雅黑**、
+        其它系统「拉丁 Segoe UI + 中文逐字形回退雅黑」（两分支的确定性覆盖见
+        ``test_chat_cjk_fonts.py``）。"""
         bubble = make(ElaChatBubble, ElaChatRoleType.Assistant)
         label = bubble.header()._title_label
-        assert list(label.font().families())[:2] == ["Segoe UI", "Microsoft YaHei UI"]
+        families = list(label.font().families())
+        cjk_family = system_cjk_font_family()
+        if cjk_family:
+            assert families == [cjk_family]
+        else:
+            assert families[:2] == ["Segoe UI", "Microsoft YaHei UI"]
         assert label.font().pixelSize() == 13
         # ElaText 自带一条透明底规则（C++ 构造里设的），这里只断言我们没再写字体 / 颜色 QSS
         assert "font-family" not in label.styleSheet()
         assert "font-size" not in label.styleSheet()
+
+    def test_avatar_custom_image_scale_cached(self, qapp, make):
+        """自定义头像按 (宽, 高, DPR) 缓存缩放结果：paintEvent 不再每帧重采样。"""
+        from PyQt6.QtGui import QColor, QPixmap
+
+        from pyqt6_ela_pro.chat.blocks import AVATAR_SIZE, _AvatarBadge
+
+        badge = make(_AvatarBadge, ElaChatRoleType.User)
+        badge.resize(AVATAR_SIZE, AVATAR_SIZE)
+        source = QPixmap(120, 120)
+        source.fill(QColor("red"))
+        badge.setImage(source)
+        badge.grab()
+        first = badge._scaled_custom
+        assert first is not None
+        badge.grab()
+        assert badge._scaled_custom is first
+        badge.setImage(source)
+        assert badge._scaled_custom is None
+
+    def test_avatar_icon_pixmap_cached(self, qapp):
+        """同参数的头像图标位图命中进程级缓存（切主题时几十条消息不重复光栅化）。"""
+        from PyQt6.QtGui import QColor
+
+        from PyQt6ElaWidgetTools import ElaIconType
+
+        from pyqt6_ela_pro.chat.blocks import avatarPixmap
+
+        first = avatarPixmap(ElaIconType.IconName.Robot, 18, QColor("black"))
+        second = avatarPixmap(ElaIconType.IconName.Robot, 18, QColor("black"))
+        assert not first.isNull()
+        assert first.cacheKey() == second.cacheKey()
 
     def test_avatar_icon_offset_aligns_to_device_pixels(self, qapp):
         """头像位图落点要对齐设备像素网格（高 DPI 下发虚 / 偏移的根因）。"""
@@ -404,6 +488,10 @@ class TestAssistantBubble:
 
         bubble.endStream()
         assert bubble.footer().isHidden() is False
+        # 操作栏默认悬停显现：显示前 isVisibleTo 为 False（不再用 opacity=0 假装可见）
+        for key in ("copy", "regenerate"):
+            assert bubble.actions().toolButton(key).isVisibleTo(bubble) is False
+        bubble._set_actions_revealed(True)
         for key in ("copy", "regenerate"):
             assert bubble.actions().toolButton(key).isVisibleTo(bubble) is True
 
@@ -414,6 +502,7 @@ class TestAssistantBubble:
             bubble.beginStream()
             bubble.endStream(status)
             assert bubble.footer().isHidden() is False
+            bubble._set_actions_revealed(True)
             assert bubble.actions().toolButton("regenerate").isVisibleTo(bubble) is True
             bubble.deleteLater()
 
@@ -550,3 +639,54 @@ class TestPermissionGuards:
         assert len(ids) == 2
         assert len(set(ids)) == 2
         assert bubble.text() == "AB"
+
+
+class TestAssistantViewerBackground:
+    """嵌入查看器用不透明底色 = 消息区 ``BasicPress``（bug 报告 §4）。
+
+    嵌入查看器默认透明，Win7 上会走慢速重绘路径；气泡把自己的底色传进去，
+    外观与「透明 + 同色父背景」一致但走快路径。
+    """
+
+    def _viewer(self, make):
+        bubble = make(ElaChatBubble, ElaChatRoleType.Assistant)
+        bubble.beginText()
+        bubble.appendText("正文")
+        bubble.endText()
+        viewer = bubble.markdownViewer()
+        assert viewer is not None
+        return bubble, viewer
+
+    def test_viewer_uses_opaque_surface(self, qapp, make):
+        bubble, viewer = self._viewer(make)
+        expected = base_color(bubble._theme_mode)
+        got = viewer.viewportBackground()
+        assert got is not None
+        assert got.name() == expected.name()
+        palette = viewer.textBrowser().palette()
+        assert palette.color(palette.ColorRole.Base).alpha() == 255
+
+    def test_theme_switch_updates_viewer_base(self, qapp, make):
+        bubble, viewer = self._viewer(make)
+        bubble._onThemeChanged(ElaThemeType.ThemeMode.Dark)
+        expected = base_color(ElaThemeType.ThemeMode.Dark)
+        got = viewer.viewportBackground()
+        assert got is not None
+        assert got.name() == expected.name()
+        # 视口自己的 palette 也要跟上（它带 WA_SetPalette、不跟随控件 setPalette，
+        # 只设控件时深色下会留浅色横条）
+        viewport = viewer.textBrowser().viewport()
+        assert (
+            viewport.palette().color(QPalette.ColorRole.Base).name() == expected.name()
+        )
+
+    def test_inline_reasoning_viewer_uses_opaque_surface(self, qapp, make):
+        bubble = make(ElaChatBubble, ElaChatRoleType.Assistant)
+        bubble.setReasoningStyle(ElaChatReasoningStyleType.Inline)
+        bubble.beginReasoning()
+        bubble.appendReasoning("思考内容")
+        bubble.endReasoning()
+        viewer = bubble.inlineReasoningViewer()
+        got = viewer.viewportBackground()
+        assert got is not None
+        assert got.name() == base_color(bubble._theme_mode).name()

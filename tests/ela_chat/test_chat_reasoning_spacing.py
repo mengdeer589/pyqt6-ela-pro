@@ -19,6 +19,7 @@ from pyqt6_ela_pro.chat import (
     ElaChatView,
     ReasoningBlock,
 )
+from pyqt6_ela_pro.chat.blocks import REASONING_FLUSH_INTERVAL_MS
 
 #: 故意带内部空行：验证「只裁尾部、段间距保留」
 BODY = "第一句思考。\n\n第二句思考，长到需要在卡片里折一次行才看得出现在是不是同一行。\n\n第三句思考。"
@@ -154,5 +155,36 @@ class TestViewLevelGap:
         """整体设置（恢复历史 / ``setReasoning``）同样只裁显示。"""
         bubble = make(ElaChatBubble, ElaChatRoleType.Assistant)
         bubble.setReasoning(BODY + "\n\n\n\n", 900.0)
-        assert bubble.reasoningBlock().label().text() == BODY
-        assert bubble.reasoningBlock().text() == BODY + "\n\n\n\n"
+        block = bubble.reasoningBlock()
+        # 折叠态不把全文塞进标签（bug #17）；数据仍保真
+        assert block.label().text() == ""
+        assert block.text() == BODY + "\n\n\n\n"
+        block.setOpened(True)
+        assert block.label().text() == BODY
+
+
+class TestReasoningFlushThrottle:
+    """流式思考的正文刷新按 40ms 合并 —— 读取接口不受影响。"""
+
+    def test_append_uses_interval(self, make):
+        block = make(ReasoningBlock)
+        block.appendText("思考分片")
+        assert block._flush_timer.isActive()
+        assert block._flush_timer.interval() == REASONING_FLUSH_INTERVAL_MS
+
+    def test_label_waits_for_tick_but_read_flushes(self, make):
+        block = make(ReasoningBlock)
+        block.setOpened(True)  # 折叠态不灌标签（bug #17）
+        block.setText("旧")
+        block.appendText("新分片")
+        # 定时器未到点：标签还是旧内容（不逐片重排全文）
+        assert block.label().text() == "旧"
+        # 读取接口强制落定（导出 / 快照语义不变）
+        assert block.text() == "旧新分片"
+
+    def test_end_flushes_immediately(self, make):
+        block = make(ReasoningBlock)
+        block.setOpened(True)
+        block.appendText("最后一片")
+        block.end(120.0)
+        assert block.label().text() == "最后一片"

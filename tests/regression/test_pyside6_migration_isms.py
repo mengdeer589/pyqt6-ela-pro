@@ -96,7 +96,7 @@ def _iter_py_files():
 
 
 def _is_enum_truthiness(node: ast.expr) -> bool:
-    """??????????????????PyQt6 ?????"""
+    """节点是否是「拿枚举成员当布尔」的调用（PyQt6 下这类写法必错）。"""
     return (
         isinstance(node, ast.Call)
         and isinstance(node.func, ast.Attribute)
@@ -128,12 +128,12 @@ def _scan_tree(tree: ast.Module, label: str) -> list[str]:
             )
         elif isinstance(node, (ast.If, ast.While)) and _is_enum_truthiness(node.test):
             found.append(
-                f"{label}:{node.lineno}: {ast.unparse(node.test)} ?? ???????"
-                "??????example: `int(getattr(x, \"value\", x)) != 0`?"
+                f"{label}:{node.lineno}: {ast.unparse(node.test)} 不能拿枚举成员当布尔"
+                "（它恒为真值；判 0 应写，example: `int(getattr(x, \"value\", x)) != 0`）"
             )
         elif isinstance(node, ast.UnaryOp) and isinstance(node.op, ast.Not) and _is_enum_truthiness(node.operand):
             found.append(
-                f"{label}:{node.lineno}: not {ast.unparse(node.operand)} ?? ??????"
+                f"{label}:{node.lineno}: not {ast.unparse(node.operand)} 不能用于枚举真值判断"
             )
         elif isinstance(node, ast.ImportFrom):
             if (node.module or "").split(".")[0] in _BANNED_MODULES:

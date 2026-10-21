@@ -25,13 +25,15 @@
 
 from __future__ import annotations
 
+import html
+import itertools
 import math
 import re
 from dataclasses import replace
 from pathlib import Path
 from typing import Optional, Union
 
-from .._internal import is_deleted
+from .._internal import is_deleted, system_cjk_font_family
 from PyQt6.QtCore import QPointF, QRectF, QSize, Qt, QTimer, pyqtSignal
 from PyQt6.QtGui import (
     QColor,
@@ -70,7 +72,7 @@ from .._theme import ElaStatusRoleType, statusColor
 from ..ela_button import ElaButton
 from ..ela_chip import ElaChip
 from ..svg_icon import svg_to_pixmap
-from ..tooltips import ElaToolTipPositionType, set_tooltip
+from ..tooltips import ElaToolTipPositionType, remove_tooltip, set_tooltip
 from ..widget_base import ElaThemeWidget
 from . import _json
 from ._question import (
@@ -194,6 +196,10 @@ PREVIEW_MAX_CHARS = 72
 DETAIL_COLLAPSED_LINES = 8
 #: 单行超过这么多字符就截断（minified 文件 / 一整行 base64 都能炸）
 DETAIL_MAX_LINE_CHARS = 400
+#: 思考正文的合并刷新间隔（ms）。正文是整段 PlainText 标签，每次刷新都要重新折行
+#: 全文；逐事件轮次刷新时 300 个分片（7.2KB）实测 9.6s，合并到每 5 片一次只要
+#: 1.8s。40ms 对阅读几乎无感（约 25fps），但把重排次数砍掉一个量级。
+REASONING_FLUSH_INTERVAL_MS = 40
 #: 卡片上下内边距
 CARD_V_PADDING = 9
 #: 卡片纵向布局项之间的间距
@@ -308,13 +314,33 @@ def _deletionOnly(data: dict) -> bool:
     return False
 
 
+#: 头像图标位图缓存：``(图标值, 尺寸, ARGB)`` → QPixmap。同一主题下助手头像
+#: 完全同参，切主题时几十条消息不再各 rasterize 一次（Win7 上字体图标光栅化更贵）。
+_AVATAR_PIXMAP_CACHE: dict = {}
+_AVATAR_PIXMAP_CACHE_MAX = 64
+
+
 def avatarPixmap(iconName, size: int, color: QColor) -> QPixmap:
     """按颜色渲染 Ela 图标位图（失败时返回空位图）。"""
+    key = (
+        int(getattr(iconName, "value", iconName)),
+        int(size),
+        QColor(color).rgba(),
+    )
+    cached = _AVATAR_PIXMAP_CACHE.get(key)
+    if cached is not None:
+        # 返回值可能是共享 pixmap：调用方只画不就地改，但仍给独立包装器，
+        # 避免 ``cacheKey`` 相同的缓存对象被宿主改掉（同 ``svg_to_pixmap`` 的教训）。
+        return QPixmap(cached)
     try:
         icon = ElaIcon.getInstance().getElaIcon(iconName, QColor(color))
-        return icon.pixmap(QSize(size, size))
+        pixmap = icon.pixmap(QSize(size, size))
     except Exception:
         return QPixmap()
+    if len(_AVATAR_PIXMAP_CACHE) >= _AVATAR_PIXMAP_CACHE_MAX:
+        _AVATAR_PIXMAP_CACHE.clear()
+    _AVATAR_PIXMAP_CACHE[key] = QPixmap(pixmap)
+    return pixmap
 
 
 def normalizeAvatarShape(shape) -> str:
@@ -396,12 +422,22 @@ def toolSubtitle(name: str, arguments) -> str:
 #: 参数摘要里大容器的预览条数（只为看一眼「是什么形状」，不用看全）
 _PREVIEW_ITEMS = 8
 
+#: 头部省略的源串上限：``QFontMetrics.elidedText`` 成本随源串长度线性增长，
+#: 而展示区最多几十字符。本 bundle 实测 613/1428 个工具副标题 >200 字
+#: （最大 4124，shell command 全量）—— 不截源就每次 resize 都整串测量。
+_ELIDE_SOURCE_MAX = 160
+
 
 def _preview_value(value) -> str:
-    """有界地序列化一个参数值（大容器只序列化前 ``_PREVIEW_ITEMS`` 项）。"""
+    """有界地序列化一个参数值（大容器只序列化前 ``_PREVIEW_ITEMS`` 项）。
+
+    dict 分支走 ``itertools.islice``：``list(value.items())`` 会把**全部**
+    键值对先物化一遍，docstring 承诺的「有界」就打了折（万级键的 dict 白付
+    一次列表构造）。
+    """
     if isinstance(value, dict):
         total = len(value)
-        head = dict(list(value.items())[:_PREVIEW_ITEMS])
+        head = dict(itertools.islice(value.items(), _PREVIEW_ITEMS))
         suffix = f"…(+{total - len(head)} 键)" if total > len(head) else ""
     elif isinstance(value, (list, tuple)):
         total = len(value)
@@ -619,6 +655,10 @@ class _AvatarBadge(QWidget):
         self._border = QColor()
         self._icon: Optional[QPixmap] = None
         self._custom: Optional[QPixmap] = None
+        #: 自定义头像按 (宽, 高, DPR) 缩放后的缓存：paintEvent 每帧都做
+        #: SmoothTransformation 很贵，而固定尺寸下缩放结果是不变量。
+        self._scaled_custom: Optional[QPixmap] = None
+        self._scaled_custom_key: Optional[tuple] = None
         self._shape = AVATAR_DEFAULT_SHAPE
         self._theme_mode = eTheme.getThemeMode()
         self.setFixedSize(AVATAR_SIZE, AVATAR_SIZE)
@@ -661,6 +701,8 @@ class _AvatarBadge(QWidget):
         ``QPixmap`` / ``QImage`` / ``QIcon``。
         """
         self._custom = _load_avatar_pixmap(source, AVATAR_SIZE * 2)
+        self._scaled_custom = None
+        self._scaled_custom_key = None
         self.update()
 
     def image(self) -> Optional[QPixmap]:
@@ -728,16 +770,21 @@ class _AvatarBadge(QWidget):
         if custom is not None and not custom.isNull():
             painter.setClipPath(clip)
             dpr = self.devicePixelRatioF() or 1.0
-            target = QSize(
-                max(1, int(self.width() * dpr)),
-                max(1, int(self.height() * dpr)),
-            )
-            scaled = custom.scaled(
-                target,
-                Qt.AspectRatioMode.KeepAspectRatioByExpanding,
-                Qt.TransformationMode.SmoothTransformation,
-            )
-            scaled.setDevicePixelRatio(dpr)
+            key = (self.width(), self.height(), dpr)
+            if self._scaled_custom_key != key or self._scaled_custom is None:
+                target = QSize(
+                    max(1, int(self.width() * dpr)),
+                    max(1, int(self.height() * dpr)),
+                )
+                scaled = custom.scaled(
+                    target,
+                    Qt.AspectRatioMode.KeepAspectRatioByExpanding,
+                    Qt.TransformationMode.SmoothTransformation,
+                )
+                scaled.setDevicePixelRatio(dpr)
+                self._scaled_custom = scaled
+                self._scaled_custom_key = key
+            scaled = self._scaled_custom
             offset = self._device_aligned_offset(
                 scaled.width() / dpr, scaled.height() / dpr, dpr
             )
@@ -1021,9 +1068,16 @@ class MessageHeader(ElaThemeWidget):
         mode = self._theme_mode
         muted = muted_color(mode, 0.5).name()
         # 标题不用 QSS：颜色即主题 BasicText（ElaText 默认色），字体按要求走 QFont。
-        # 字体栈：拉丁字形走 Segoe UI（比雅黑的拉丁小字锐），中文由 Qt 逐字形回退到雅黑。
+        # 名称 / 模型名可能是中文：中文系统收成单族雅黑 —— 多族列表 + Segoe UI
+        # 缺 CJK 字形在 Win7 上都是慢 shaping 路径且进程级毒化（见「下游项目反馈
+        # bug.md」§3）；非中文系统保持「拉丁走 Segoe UI、中文逐字形回退雅黑」。
         title_font = QFont(self._title_label.font())
-        title_font.setFamilies(["Segoe UI", "Microsoft YaHei UI", "Microsoft YaHei"])
+        cjk_family = system_cjk_font_family()
+        title_font.setFamilies(
+            [cjk_family]
+            if cjk_family
+            else ["Segoe UI", "Microsoft YaHei UI", "Microsoft YaHei"]
+        )
         title_font.setPixelSize(13)
         title_font.setWeight(QFont.Weight.DemiBold)
         self._title_label.setFont(title_font)
@@ -1140,14 +1194,11 @@ class _CollapsibleBlock(_ThemeAwareMixin, ElaScrollPageArea):
         self._title_label.setWordWrap(False)
         # 折叠块标题含外部数据（工具名 / 审批 action）—— 一律纯文本渲染
         self._title_label.setTextFormat(Qt.TextFormat.PlainText)
-        self._busy = ElaProgressRing(self)
-        self._busy.setFixedSize(14, 14)
-        self._busy.setIsTransparent(True)
-        self._busy.setBusyingWidth(2)
-        self._busy.hide()
+        #: 运行指示按需创建：历史消息里 99% 的折叠块从没运行过，构造期就建
+        #: ``ElaProgressRing``（含两套 QPropertyAnimation）是纯浪费。
+        self._busy: Optional[ElaProgressRing] = None
         self._busy_on = False
         self._header_layout.addWidget(self._chevron)
-        self._header_layout.addWidget(self._busy)
         self._header_layout.addWidget(self._title_label)
         self._header_layout.addStretch(1)
 
@@ -1181,6 +1232,21 @@ class _CollapsibleBlock(_ThemeAwareMixin, ElaScrollPageArea):
             return
         self._header.setChecked(bool(opened))
 
+    def setOpenedSilently(self, opened: bool) -> None:
+        """设置展开态但**不触发** toggled / 祖先布局链（恢复历史用）。
+
+        恢复时每块都 ``setOpened(True)`` → ``setOpened(False)`` 会触发
+        ``_relayoutAncestors``（最多 32 层）与 ``toggled`` 信号；几千个块累计
+        上万次布局激活，纯属浪费。最终态由 ``setParts`` 收尾统一激活一次。
+        """
+        self._header.blockSignals(True)
+        try:
+            self._header.setChecked(bool(opened))
+        finally:
+            self._header.blockSignals(False)
+        self._body.setVisible(bool(opened))
+        self._sync_chevron()
+
     def isOpened(self) -> bool:
         """内容区是否展开。"""
         return self._header.isChecked()
@@ -1206,12 +1272,25 @@ class _CollapsibleBlock(_ThemeAwareMixin, ElaScrollPageArea):
 
         关闭时必须 ``setIsBusying(False)``：``ElaProgressRing`` 的动画由
         ``IsBusying`` 驱动，仅隐藏控件会留下两个 QPropertyAnimation 永久
-        空转（每个已完成的工具卡都会泄漏）。
+        空转（每个已完成的工具卡都会泄漏）。控件本身按需创建。
         """
         on = bool(on)
         self._busy_on = on
-        self._busy.setIsBusying(on)
-        self._busy.setVisible(on)
+        if on:
+            if self._busy is None:
+                ring = ElaProgressRing(self)
+                ring.setFixedSize(14, 14)
+                ring.setIsTransparent(True)
+                ring.setBusyingWidth(2)
+                ring.hide()
+                self._busy = ring
+                self._header_layout.insertWidget(1, ring)
+            self._busy.setIsBusying(True)
+            self._busy.show()
+            return
+        if self._busy is not None:
+            self._busy.setIsBusying(False)
+            self._busy.hide()
 
     def isBusy(self) -> bool:
         """是否处于运行中状态（与父链可见性无关）。"""
@@ -1350,6 +1429,20 @@ class ReasoningBlock(_CollapsibleBlock):
             self.setTitle("思考完成")
         self.setOpened(False)
 
+    def finishSilently(self, durationMs: Optional[float] = None) -> None:
+        """恢复历史时的收尾：直接落成「已完成 + 收起」，不触发 toggled / 布局链。"""
+        self._flush_chunks()
+        self.setBusy(False)
+        try:
+            millis = float(durationMs) if durationMs else 0.0
+        except (TypeError, ValueError, OverflowError):
+            millis = 0.0
+        if millis > 0:
+            self.setTitle(f"思考完成 ({millis / 1000:.1f}s)")
+        else:
+            self.setTitle("思考完成")
+        self.setOpenedSilently(False)
+
     # -- 文本 --------------------------------------------------------------
 
     def text(self) -> str:
@@ -1362,7 +1455,11 @@ class ReasoningBlock(_CollapsibleBlock):
         self._flush_timer.stop()
         self._chunks.clear()
         self._text = text or ""
-        self._label.setText(self._displayText())
+        # 折叠态不把全文塞进 word-wrap 标签：QLabel 的首次 sizeHint /
+        # heightForWidth 要整段折行（51KB 实测 12~45ms/次），958 个历史思考块
+        # 全量物化就是秒级纯浪费（bug #17）。展开时再灌。
+        if self.isOpened():
+            self._sync_label_text()
 
     def appendText(self, chunk: str) -> None:
         """追加思考文本（流式；标签刷新按事件循环轮次合并）。"""
@@ -1370,7 +1467,7 @@ class ReasoningBlock(_CollapsibleBlock):
             return
         self._chunks.append(chunk)
         if not self._flush_timer.isActive():
-            self._flush_timer.start(0)
+            self._flush_timer.start(REASONING_FLUSH_INTERVAL_MS)
 
     def _flush_chunks(self) -> None:
         """把缓冲分片并入文本并刷新标签（定时器 / 读取前调用）。"""
@@ -1378,7 +1475,28 @@ class ReasoningBlock(_CollapsibleBlock):
             return
         self._text += "".join(self._chunks)
         self._chunks.clear()
-        self._label.setText(self._displayText())
+        if self.isOpened():
+            self._sync_label_text()
+
+    def _sync_label_text(self) -> None:
+        """把当前文本灌进标签（文本没变时不动，保住 ColorText 尺寸缓存）。"""
+        text = self._displayText()
+        if self._label.text() != text:
+            self._label.setText(text)
+
+    def _on_toggled(self, checked: bool) -> None:
+        # 先把全文灌进标签再交给基类：基类会触发祖先布局激活，空标签先量一遍
+        # 会把同一 (类别, 宽度) 算两次（ColorText 缓存按文本分键）。
+        if checked and getattr(self, "_label", None) is not None:
+            self._flush_chunks()
+            self._sync_label_text()
+        super()._on_toggled(checked)
+
+    def setOpenedSilently(self, opened: bool) -> None:
+        if opened and getattr(self, "_label", None) is not None:
+            self._flush_chunks()
+            self._sync_label_text()
+        super().setOpenedSilently(opened)
 
     def _displayText(self) -> str:
         """喂给标签的文本：裁掉尾部空白（``self._text`` 保持原样）。
@@ -1545,6 +1663,8 @@ class ToolCallCard(_CollapsibleBlock):
         self._title_text = f"工具调用：{call.name}"
         self._subtitle_text = ""
         self._args_text = ""
+        #: ``(cap, len, hash, font)`` → 省略结果；resize / 主题切换会反复问
+        self._elide_cache: dict = {}
         insert_at = self.headerLayout().count() - 1
         self.insertHeaderWidget(insert_at, self._subtitle_label)
         self.insertHeaderWidget(insert_at + 1, self._args_label)
@@ -1808,10 +1928,22 @@ class ToolCallCard(_CollapsibleBlock):
             if not text:
                 label.setText("")
                 continue
-            elided = label.fontMetrics().elidedText(
-                text, Qt.TextElideMode.ElideRight, max(0, cap)
+            # 先截源再测量：elidedText 的展示结果由 cap 决定，源串再长也不会
+            # 多显示一个字符；而 Win7 上 4KB 串的逐字形测量很贵（bug #17）。
+            source = (
+                text if len(text) <= _ELIDE_SOURCE_MAX else text[:_ELIDE_SOURCE_MAX]
             )
-            label.setText(elided)
+            key = (cap, len(source), hash(source), label.font().toString())
+            elided = self._elide_cache.get(key)
+            if elided is None:
+                elided = label.fontMetrics().elidedText(
+                    source, Qt.TextElideMode.ElideRight, max(0, cap)
+                )
+                if len(self._elide_cache) >= 12:
+                    self._elide_cache.clear()
+                self._elide_cache[key] = elided
+            if label.text() != elided:
+                label.setText(elided)
 
     def resizeEvent(self, event) -> None:  # noqa: N802 (Qt 命名)
         super().resizeEvent(event)
@@ -2030,11 +2162,17 @@ class ToolGroupPanel(_CollapsibleBlock):
         self.setCardMargins(0, 0, 0, 0)
         self._counts = (0, 0)
         self._running = False
+        self._summary = ""
+        self._summary_key = None
+        self._title_key = None
         self._body_container = QWidget(self)
         self._tool_layout = QVBoxLayout(self._body_container)
         self._tool_layout.setContentsMargins(0, 0, 0, 0)
         self._tool_layout.setSpacing(2)
         self.bodyLayout().addWidget(self._body_container)
+        # 标题 + 浅灰摘要共用一个 QLabel：富文本片段只用于颜色，外部文本全部转义。
+        # 不额外建控件（历史会话满量物化时 1000+ 面板，每个多一个 label 都是净开销）。
+        self._title_label.setTextFormat(Qt.TextFormat.RichText)
         self.hide()
 
     # -- 内容 --------------------------------------------------------------
@@ -2047,14 +2185,27 @@ class ToolGroupPanel(_CollapsibleBlock):
         """获取工具卡片容器。"""
         return self._body_container
 
-    def setCounts(self, done: int, total: int, running: Optional[bool] = None) -> None:
-        """更新标题计数（``running`` 为空时按 ``done < total`` 推断）。"""
+    def setCounts(
+        self,
+        done: int,
+        total: int,
+        running: Optional[bool] = None,
+        summary: Optional[str] = None,
+    ) -> None:
+        """更新标题计数与折叠摘要（``running`` 为空时按 ``done < total`` 推断）。"""
         done = max(0, int(done))
         total = max(0, int(total))
         if running is None:
             running = done < total
         self._counts = (done, total)
         self._running = bool(running)
+        if summary is not None:
+            self._summary = str(summary or "")
+        self._sync_title()
+
+    def setSummary(self, summary: str) -> None:
+        """设置折叠态的一行工具摘要（``shell · git status``）。"""
+        self._summary = str(summary or "")
         self._sync_title()
 
     def counts(self) -> tuple:
@@ -2065,13 +2216,48 @@ class ToolGroupPanel(_CollapsibleBlock):
         """是否有工具仍在运行。"""
         return self._running
 
+    def summary(self) -> str:
+        """获取折叠态摘要文本（不含标题前缀）。"""
+        return self._summary
+
     def _sync_title(self) -> None:
-        done, total = self._counts
-        if self._running:
-            self.setTitle(f"工具调用 ({done}/{total})")
+        done, total = getattr(self, "_counts", (0, 0))
+        summary = " ".join(str(getattr(self, "_summary", "") or "").split())
+        running = getattr(self, "_running", False)
+        if running:
+            base = f"工具调用 ({done}/{total})"
         else:
-            self.setTitle(f"工具调用 ({total})")
-        self.setBusy(self._running)
+            base = f"工具调用 ({total})"
+        self._title = base
+        key = (self.width(), base, summary, self._theme_mode)
+        if key == getattr(self, "_title_key", None):
+            self.setBusy(running)
+            return
+        self._title_key = key
+        if not summary:
+            text = html.escape(base)
+            tip = ""
+        else:
+            title_width = self._title_label.fontMetrics().horizontalAdvance(base)
+            available = max(60, self.width() - title_width - 70)
+            elided = self._title_label.fontMetrics().elidedText(
+                summary, Qt.TextElideMode.ElideRight, available
+            )
+            color = muted_color(self._theme_mode, 0.6).name()
+            text = (
+                f"{html.escape(base)} "
+                f'<span style="color:{color}">{html.escape(elided)}</span>'
+            )
+            tip = summary if elided != summary else ""
+        if self._title_label.text() != text:
+            self._title_label.setText(text)
+        if self._title_label.toolTip() != tip:
+            self._title_label.setToolTip(tip)
+        self.setBusy(running)
+
+    def resizeEvent(self, event) -> None:  # noqa: N802 (Qt 命名)
+        super().resizeEvent(event)
+        self._sync_title()
 
     def _apply_theme(self) -> None:
         super()._apply_theme()
@@ -2086,6 +2272,7 @@ class ToolGroupPanel(_CollapsibleBlock):
         self._title_label.setTextColor(text_color(mode))
         self._title_label.setTextPixelSize(13)
         self._title_label.setTextWeight(QFont.Weight.DemiBold)
+        self._sync_title()
 
 
 class _ImageAttachmentCard(QWidget):
@@ -2429,6 +2616,8 @@ class StatsBadge(ElaThemeWidget):
         super().__init__(parent)
         self._stats: Optional[ElaChatStats] = None
         self._message_duration_ms = 0.0
+        self._tooltip_text = ""
+        self._tooltip_bound_text = ""
         layout = QHBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(4)
@@ -2445,6 +2634,7 @@ class StatsBadge(ElaThemeWidget):
         if stats is None or not (
             stats.total_tokens or stats.prompt_tokens or stats.completion_tokens
         ):
+            self._apply_tooltip()
             self.hide()
             return
         parts = [
@@ -2468,16 +2658,35 @@ class StatsBadge(ElaThemeWidget):
         self._apply_tooltip()
 
     def _apply_tooltip(self) -> None:
-        """刷新悬浮提示：``首字 X ms · 端到端/耗时 Y · 词元/s · 缓存读写``。"""
+        """刷新悬浮提示（库内 ``ElaToolTip``）：首字 / 端到端耗时 / 词元速率 / 缓存。"""
         stats = self._stats
-        if stats is None:
-            self._label.setToolTip("")
-            return
         durationLabel = "耗时"
-        if self._message_duration_ms:
+        if stats is not None and self._message_duration_ms:
             stats = replace(stats, duration_ms=self._message_duration_ms)
             durationLabel = "端到端"
-        self._label.setToolTip(stats.tooltip(durationLabel))
+        text = stats.tooltip(durationLabel) if stats is not None else ""
+        if text == self._tooltip_text:
+            return
+        self._tooltip_text = text
+        self._label.setToolTip(text)
+        # 隐藏徽标不建 ElaToolTip：footer 模式下大部分步骤徽标永远不显示，
+        # 每个都建一个提示框纯浪费（bug #17）。显示时 showEvent 补建。
+        if self.isVisible():
+            self._bind_tooltip()
+
+    def _bind_tooltip(self) -> None:
+        """按当前文本绑定 / 更新提示框（只在可见时调用）。"""
+        text = self._tooltip_text
+        if text:
+            set_tooltip(self._label, text, ElaToolTipPositionType.Top)
+        else:
+            remove_tooltip(self._label)
+        self._tooltip_bound_text = text
+
+    def showEvent(self, event) -> None:  # noqa: N802 (Qt 命名)
+        super().showEvent(event)
+        if self._tooltip_bound_text != self._tooltip_text:
+            self._bind_tooltip()
 
     def stats(self) -> Optional[ElaChatStats]:
         """获取当前用量统计。"""

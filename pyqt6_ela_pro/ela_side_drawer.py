@@ -7,6 +7,7 @@ ElaDrawer SiliconUI 风格侧边抽屉组件。
 
 from __future__ import annotations
 
+import logging
 from enum import IntEnum
 from typing import Optional
 
@@ -19,6 +20,8 @@ from PyQt6ElaWidgetTools import eTheme, ElaThemeType
 from ._motion import Duration, Easing, start_transition
 from ._ownership import ContentSlot, ElaWidgetOwnershipType
 from .widget_base import ElaThemeWidget
+
+logger = logging.getLogger(__name__)
 
 
 class ElaDrawerPositionType(IntEnum):
@@ -323,7 +326,16 @@ class ElaDrawer(ElaThemeWidget):
             self._dim_anim.setEndValue(1)
             start_transition(self._dim_anim, self._animation_duration)
         except Exception as e:
-            print(e)
+            # **异常必须回滚到「关闭态」**：此前只 ``print`` 后 return，
+            # 而 ``_is_opened`` 保持 False —— 面板 / 遮罩已 show()，closeDrawer()
+            # 首行守卫却直接返回，抽屉关不掉、isOpened() 还与视觉相反（实测）。
+            # 残留的半截动画也要停掉，否则它可能继续把视觉推到打开态。
+            self._show_anim.stop()
+            self._dim_anim.stop()
+            self._drawer_widget.hide()
+            self._dim_widget.hide()
+            self.hide()
+            logger.warning("showDrawer 失败，已回滚到关闭态: %s", e)
             return
 
         self._is_closing = False

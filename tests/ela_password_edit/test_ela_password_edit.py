@@ -24,7 +24,7 @@ class TestElaPasswordEditInit:
 
 class TestElaPasswordEditVisibility:
     def test_is_password_visible_default(self, pwd):
-        assert pwd.is_password_visible() is False
+        assert pwd.isPasswordVisible() is False
 
     @pytest.mark.parametrize(
         ("pre_visible", "visible", "echo_mode"),
@@ -34,17 +34,17 @@ class TestElaPasswordEditVisibility:
         ],
         ids=["show", "hide-again"],
     )
-    def test_set_is_password_visible(self, pwd, pre_visible, visible, echo_mode):
-        pwd.set_is_password_visible(pre_visible)
-        pwd.set_is_password_visible(visible)
-        assert pwd.is_password_visible() is visible
+    def test_set_password_visible(self, pwd, pre_visible, visible, echo_mode):
+        pwd.setPasswordVisible(pre_visible)
+        pwd.setPasswordVisible(visible)
+        assert pwd.isPasswordVisible() is visible
         assert pwd.echoMode() == echo_mode
 
     def test_toggle_visibility(self, pwd):
         pwd._on_toggle_visibility()
-        assert pwd.is_password_visible() is True
+        assert pwd.isPasswordVisible() is True
         pwd._on_toggle_visibility()
-        assert pwd.is_password_visible() is False
+        assert pwd.isPasswordVisible() is False
 
 
 class TestElaPasswordEditIcon:
@@ -53,7 +53,7 @@ class TestElaPasswordEditIcon:
 
     def test_eye_icon_changes_on_toggle(self, pwd):
         icon_before = pwd._toggle_action.icon()
-        pwd.set_is_password_visible(True)
+        pwd.setPasswordVisible(True)
         icon_after = pwd._toggle_action.icon()
         assert icon_before != icon_after
 

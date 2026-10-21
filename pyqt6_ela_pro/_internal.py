@@ -8,12 +8,22 @@ from __future__ import annotations
 
 import sys
 import traceback
+import unicodedata
 from functools import wraps
 from typing import Any, Callable, Optional, Protocol, TypeVar, runtime_checkable
 
 from PyQt6 import sip
-from PyQt6.QtCore import QObject, QPoint, QRect, QSize, Qt, QTimer
-from PyQt6.QtGui import QColor, QPainter
+from PyQt6.QtCore import QLocale, QObject, QPoint, QRect, QSize, Qt, QTimer
+from PyQt6.QtGui import (
+    QColor,
+    QFont,
+    QFontDatabase,
+    QPainter,
+    QRawFont,
+    QTextCharFormat,
+    QTextCursor,
+    QTextDocument,
+)
 from PyQt6.QtWidgets import (
     QApplication,
     QComboBox,
@@ -34,8 +44,28 @@ __all__ = [
     "is_deleted",
     "load_lazy_pinyin",
     "safe_call",
+    "system_cjk_font_family",
     "to_logical_pos",
+    "applyMissingGlyphFonts",
+    "glyphCovers",
+    "missingGlyphFont",
 ]
+
+#: 缺字形兜底候选字体（单族；顺序即优先级）。
+#: Segoe UI Symbol 是 Win7 自带的符号字体；Cambria Math 补组合重音；
+#: Segoe UI Emoji 只在 Win8+ 存在（缺失时自动跳过）。
+MISSING_GLYPH_FONT_CANDIDATES = (
+    "Segoe UI Symbol",
+    "Cambria Math",
+    "Segoe UI Emoji",
+)
+
+_glyph_raw_fonts: dict[str, Optional[QRawFont]] = {}
+_glyph_coverage: dict[tuple[str, str], bool] = {}
+_glyph_fallback: dict[str, Optional[str]] = {}
+_font_family_set: Optional[set] = None
+#: 覆盖缓存上限（超大 / 多语言文档防无界增长；清空后重算即可）
+_GLYPH_COVERAGE_MAX = 20000
 
 F = TypeVar("F", bound=Callable[..., Any])
 
@@ -75,6 +105,189 @@ def load_lazy_pinyin():
             impl = None
         _lazy_pinyin = impl
     return _lazy_pinyin
+
+
+_cjk_ui_font_family = None
+_cjk_ui_font_probed = False
+
+
+def system_cjk_font_family():
+    """中文系统下可用的 CJK UI 字体族（其它系统 / 字体缺失返回 ``None``，进程级缓存）。
+
+    Win7 上非 CJK 主字体渲染 CJK 内容走逐字形 fallback shaping（~3ms/行），且
+    只要走过一次就进程级毒化其后一切文本绘制（10~250×，见「下游项目反馈bug.md」
+    §2/§3），默认字体收成**单族** CJK 字体是库侧可控的**方向之一**。只认准
+    「中文系统 + Microsoft YaHei」—— 唯一实测验证过的组合；其它 CJK 语言与
+    字体不做推断。
+
+    **第二个方向：主字体是 CJK、但文本含它 cmap 里没有的符号**（LLM 输出常带
+    ↔ / ⇒ / □ / √ 等）同样走逐字形 fallback 并进程级毒化。雅黑对这些符号的
+    覆盖并不完整（U+2610/2611 勾选框、U+25B8/25BE 折叠箭头都不在），所以
+    **库自产并写进 QTextDocument 的标记必须选雅黑已有的字形** —— 任务列表用
+    U+25A1/U+25A0（□/■），折叠标记用 ``+``/``−``。任意用户内容仍可能带缺字
+    符号：查看器默认用 :func:`applyMissingGlyphFonts` 给缺字片段套**单族**符号
+    字体（不改文本、复制保真，可经 ``setMissingGlyphFallbackEnabled`` 关闭）；
+    终端等其它 QTextDocument 也可复用该工具（见 bug #20）。
+
+    ``QFontDatabase.families()`` 慢且进程内不变，结果必须进程级缓存；调用点
+    都在 QApplication 之后（控件构造路径），**禁止**在 import 期调用（无
+    QGuiApplication 时查询字体会进程级 abort）。
+    """
+    global _cjk_ui_font_family, _cjk_ui_font_probed
+    if not _cjk_ui_font_probed:
+        _cjk_ui_font_probed = True
+        try:
+            if QLocale.system().language() == QLocale.Language.Chinese:
+                if "Microsoft YaHei" in QFontDatabase.families():
+                    _cjk_ui_font_family = "Microsoft YaHei"
+        except Exception:
+            _cjk_ui_font_family = None
+    return _cjk_ui_font_family
+
+
+def _fontFamilySet() -> set:
+    """可用字体族集合（进程级缓存；字体安装变化不重扫）。"""
+    global _font_family_set
+    if _font_family_set is None:
+        try:
+            _font_family_set = set(QFontDatabase.families())
+        except Exception:  # noqa: BLE001 —— 无 GUI 时查询字体不能把调用方带崩
+            _font_family_set = set()
+    return _font_family_set
+
+
+def _glyphRawFont(family: str) -> Optional[QRawFont]:
+    """字体族 → 原始字体（进程级缓存；字体不存在返回 ``None``）。"""
+    if family in _glyph_raw_fonts:
+        return _glyph_raw_fonts[family]
+    raw: Optional[QRawFont] = None
+    try:
+        if family and family in _fontFamilySet():
+            candidate = QRawFont.fromFont(QFont(family))
+            if candidate is not None and candidate.isValid():
+                raw = candidate
+    except Exception:  # noqa: BLE001
+        raw = None
+    _glyph_raw_fonts[family] = raw
+    return raw
+
+
+def glyphCovers(family: str, char: str) -> bool:
+    """``family`` 的 cmap 是否真含 ``char``（按 (族, 字符) 进程级缓存）。
+
+    用 ``QRawFont.supportsCharacter`` 而不是 ``QFontMetrics.inFont``：后者在
+    有字体回退时对缺字形字符也返回 ``True``（实测雅黑 + U+2610），判不出
+    fallback。
+    """
+    key = (family, char)
+    cached = _glyph_coverage.get(key)
+    if cached is not None:
+        return cached
+    raw = _glyphRawFont(family)
+    ok = False
+    if raw is not None:
+        try:
+            ok = bool(raw.supportsCharacter(ord(char)))
+        except Exception:  # noqa: BLE001
+            ok = False
+    _glyph_coverage[key] = ok
+    if len(_glyph_coverage) >= _GLYPH_COVERAGE_MAX:
+        _glyph_coverage.clear()
+        _glyph_coverage[key] = ok
+    return ok
+
+
+def missingGlyphFont(char: str) -> Optional[str]:
+    """给缺字形字符挑一个覆盖它的单族字体（无候选返回 ``None``）。"""
+    if char in _glyph_fallback:
+        return _glyph_fallback[char]
+    chosen: Optional[str] = None
+    for candidate in MISSING_GLYPH_FONT_CANDIDATES:
+        if glyphCovers(candidate, char):
+            chosen = candidate
+            break
+    _glyph_fallback[char] = chosen
+    return chosen
+
+
+def applyMissingGlyphFonts(
+    document: QTextDocument, primaryFamily: str, start: int = 0
+) -> int:
+    """给 ``document`` 里主字体缺字形的字符套单族符号字体（**不改文本**）。
+
+    用于 Win7 中文系统：主字体（雅黑）缺符号字形时会走逐字形 fallback 并
+    进程级毒化。这里只给缺字字符的 ``QTextCharFormat`` 指定一个确实覆盖它的
+    单族字体（:data:`MISSING_GLYPH_FONT_CANDIDATES`），文本 / 复制 / 导出
+    全部保真；没有候选覆盖的字符保持原样。
+
+    :param start: 只处理该文档位置之后的内容（增量渲染用；边界片段整段重扫，
+        重复套同一字体的幂等操作）。传 0 处理全文。
+    :return: 处理到的文档末尾位置（可作为下一次 ``start``）。
+    """
+    if document is None or not primaryFamily:
+        return 0
+    count = document.characterCount()
+    if count <= 1:
+        return count
+    start = max(0, int(start))
+    if start >= count:
+        return count
+    missing: set[str] = set()
+    block = document.findBlock(start)
+    while block.isValid():
+        iterator = block.begin()
+        while not iterator.atEnd():
+            fragment = iterator.fragment()
+            if fragment.isValid():
+                # 片段完全在 start 之前就跳过。边界片段**整段**扫：按 UTF-16
+                # 位置切 Python 串在非 BMP 字符上会错位，而重复套字体是幂等的。
+                if fragment.position() + fragment.length() <= start:
+                    iterator += 1
+                    continue
+                for char in set(fragment.text()):
+                    if char in missing or char in ("\n", "\r", "\t"):
+                        continue
+                    codepoint = ord(char)
+                    # 变体选择符（emoji 的 U+FE0F 等）本身不需要字形
+                    if 0xFE00 <= codepoint <= 0xFE0F or 0xE0100 <= codepoint <= 0xE01EF:
+                        continue
+                    # 格式控制符 / 私用区不需要字形
+                    if unicodedata.category(char) in ("Cc", "Cf", "Cs", "Co"):
+                        continue
+                    if glyphCovers(primaryFamily, char):
+                        continue
+                    missing.add(char)
+            iterator += 1
+        block = block.next()
+    if not missing:
+        return count
+    applied = 0
+    edit = QTextCursor(document)
+    edit.beginEditBlock()
+    try:
+        for char in missing:
+            family = missingGlyphFont(char)
+            if family is None:
+                continue
+            char_format = QTextCharFormat()
+            char_format.setFontFamilies([family])
+            cursor = QTextCursor(document)
+            cursor.setPosition(min(start, count - 1))
+            while True:
+                found = document.find(char, cursor)
+                if found.isNull():
+                    break
+                next_position = found.selectionEnd()
+                found.mergeCharFormat(char_format)
+                cursor.setPosition(
+                    min(next_position, document.characterCount() - 1)
+                )
+                if next_position >= document.characterCount() - 1:
+                    break
+            applied += 1
+    finally:
+        edit.endEditBlock()
+    return document.characterCount()
 
 
 @runtime_checkable
@@ -390,22 +603,28 @@ class _ThemeAwareMixin:
 POPUP_FOOTER_OBJECT_NAME = "ElaGhostPopupFooter"
 
 
-def _popup_extra_height(container: QWidget, object_name: str, fallback: int) -> int:
-    """弹层内附加控件（搜索框 / 底部固定区）占用的高度；不存在或已隐藏按 0 计。"""
-    widget = container.findChild(QWidget, object_name)
-    if widget is None or widget.isHidden():
-        return 0
-    return widget.height() or widget.sizeHint().height() or fallback
+def _prepare_combobox_popup(
+    combo_box, top_extra: int = 0, bottom_extra: int = 0
+) -> None:
+    """在 ``super().showPopup()`` **之前**调用，把弹层附件高度交给 C++。
+
+    C++ 的 showPopup 会按 ``_elaPopupTopExtraHeight`` / ``_elaPopupBottomExtraHeight``
+    计算容器高度与 view 的动画终值，保证动画结束 ``addWidget(view())`` 时几何不再
+    跳变。同时在这里复位上一次因屏幕空间不足而设置的固定高度（放在 showPopup 之后
+    会打断正在跑的高度动画）。
+    """
+    combo_box.setProperty("_elaPopupTopExtraHeight", int(top_extra))
+    combo_box.setProperty("_elaPopupBottomExtraHeight", int(bottom_extra))
+    container = combo_box.findChild(QWidget, "ElaComboBoxContainer")
+    if container is not None:
+        container.setFixedHeight(WIDGET_SIZE_MAX)
 
 
 def _adjust_combobox_popup(combo_box) -> None:
-    """在 super().showPopup() 之后调用。用最终弹窗高度判断是否需要移到上方。"""
+    """在 ``super().showPopup()`` 之后调用。用最终弹窗高度判断是否需要移到上方。"""
     container = combo_box.findChild(QWidget, "ElaComboBoxContainer")
     if not container or not container.isVisible():
         return
-
-    # 复位上次压缩的固定高度，避免后续弹窗持续偏小
-    container.setFixedHeight(WIDGET_SIZE_MAX)
 
     combo_global = combo_box.mapToGlobal(QPoint(0, 0))
     combo_top = combo_global.y()
@@ -422,9 +641,11 @@ def _adjust_combobox_popup(combo_box) -> None:
     n = combo_box.maxVisibleItems()
     if combo_box.count() < n:
         n = combo_box.count()
-    extra_height = _popup_extra_height(container, "SearchWidget", 40)
-    extra_height += _popup_extra_height(container, POPUP_FOOTER_OBJECT_NAME, 36)
-    # 与 C++ showPopup 的 count() * 35 + 8 同一套算式，额外加上弹层附件
+    # 与 C++ showPopup 的 count() * 35 + 8 同一套算式，额外加上弹层附件。
+    # 附件高度以 _prepare_combobox_popup 写进动态属性的值为准（底栏在展开动画
+    # 期间是隐藏的，按控件可见性扫描会漏算）。
+    extra_height = int(combo_box.property("_elaPopupTopExtraHeight") or 0)
+    extra_height += int(combo_box.property("_elaPopupBottomExtraHeight") or 0)
     final_height = n * item_h + 8 + extra_height
 
     needed_below = combo_bottom + 3 + final_height
@@ -439,3 +660,10 @@ def _adjust_combobox_popup(combo_box) -> None:
             if max_h > 50:
                 container.setFixedHeight(int(max_h))
                 container.move(container.x(), screen_geo.top())
+            else:
+                # 上下都放不下（上方 ≤ 50px）：改为压到**下方**可用空间 ——
+                # 什么都不做的话容器按默认（下方）位置渲染、超出屏幕底部被裁，
+                # 列表尾部不可达。view 自带滚动条，压矮后仍能滚到最后一项。
+                below_h = screen_geo.bottom() - combo_bottom - 3
+                if below_h > 0:
+                    container.setFixedHeight(int(min(final_height, below_h)))

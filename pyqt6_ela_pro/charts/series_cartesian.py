@@ -22,9 +22,11 @@ core 兜底版）。
 
 from __future__ import annotations
 
+import bisect
 import math
+from collections import OrderedDict
 
-from PyQt6.QtCore import QPointF, QRectF, Qt, QTimer
+from PyQt6.QtCore import QLineF, QPointF, QRectF, Qt, QTimer
 from PyQt6.QtGui import (
     QColor,
     QFontMetricsF,
@@ -38,7 +40,7 @@ from PyQt6.QtGui import (
 from .._motion import start_idle_loop
 from ._tokens import T
 from . import _downsample as _ds
-from ._symbol import drawSymbol
+from ._symbol import drawSymbol, symbolPixmap
 from ._utils import dist_point_segment
 from ._utils import clamp as _clamp
 from ._utils import to_float as _to_float
@@ -67,6 +69,29 @@ __all__ = [
 
 def _lerp(a, b, t):
     return a + (b - a) * t
+
+
+#: 采样结果缓存槽位（含「全景视图」常驻槽）：缩放往返 / 全景 ↔ 局部切换不重算
+_SAMPLE_CACHE_MAX = 6
+
+#: 记录中断的屏幕可见阈值 px：小于它的空洞照常连线（亚像素断点反而闪）
+_GAP_MIN_PIXELS = 4.0
+
+
+def _win_span(win, data_len: int):
+    """窗口 ``(first, last, size)``。
+
+    ``win`` 为 ``None``（全量）/ ``(start, stop)`` 连续段 / 下标 ``ndarray``。
+    """
+    if win is None:
+        return 0, data_len - 1, data_len
+    if isinstance(win, tuple):
+        start, stop = win
+        return start, stop - 1, max(0, stop - start)
+    size = int(win.size)
+    if size == 0:
+        return -1, -1, 0
+    return int(win[0]), int(win[-1]), size
 
 
 def _ramp_color(colors, t):
@@ -808,6 +833,10 @@ class LineSeriesRenderer(SeriesRenderer):
         self._prev_points = []  # 上一次布局的点（全量路径兜底插值）
         self._prev_pts_map = None  # {orig_index: QPointF}（采样路径动画）
         self._sampled = False  # 本次布局是否降采样
+        self._symbol_items = []  # [(orig_index, QPointF)]：布局期算好的符号清单
+        self._py_x_sorted = False  # 兜底路径的 x 是否单调（窗口裁剪用 bisect）
+        self._py_window_key = None  # 兜底路径窗口缓存键（数据身份 + 轴范围）
+        self._py_window_cache = None  # 缓存值：range | list[int] | None
         self._data_len = 0
         # numpy 快速路径（仅当数据可数值化且 tsdownsample 可用）
         self._np_x = None  # [x, y] 数据形式时非空
@@ -824,8 +853,20 @@ class LineSeriesRenderer(SeriesRenderer):
         # 既保证 id 有效，也让 `data is self._data_ref` 成为精确的身份判据。
         self._data_ref = None
         self._cached_len = -1  # ``_data_ref`` 生效时的长度（检测原地增长）
-        self._sample_cache_key = None  # (数据身份, n, n_out, algo, threshold, lo, hi)
-        self._sample_indices = None  # 采样点全局下标（np 数组或 list）
+        # 采样结果 LRU（键 = 数据身份 + 窗口首尾 + 预算 + 算法）+ 「全景视图」
+        # 常驻槽 —— 全景最贵、且是缩放往返的必经点，淘汰时跳过它。
+        self._sample_lru: OrderedDict = OrderedDict()
+        self._full_sample_key = None
+        # 乱序 x 的窗口缓存（单调 x 走 searchsorted，无需缓存）；数据身份变更
+        # （``_load_data`` 刷新）时整体作废。
+        self._win_cache_key = None
+        self._win_cache = None
+        # x 时间基一次性分析（见 ``_downsample.analyze_x``）：
+        self._np_x_monotone = False  # 非降且全有限 → searchsorted 窗口 / 切片视图
+        self._np_x_strict = False  # 严格递增 → tsdownsample / 记录中断检测可用
+        self._np_step = 0.0  # 正差中位数（中断判定的基准步长）
+        self._np_gap_pos = None  # 记录中断位置（int64 ndarray）
+        self._np_gap_dur = None  # 记录中断时长（float64 ndarray）
 
     # -- 数据解析 ---------------------------------------------------------
     def _stacked_data(self):
@@ -937,17 +978,67 @@ class LineSeriesRenderer(SeriesRenderer):
             self._np_x = self._np_y = None
             self._y_vals = []
             self._x_vals = []
+            pure_index = False
             x_arr, y_arr = self._to_arrays(data)
             if y_arr is not None and x_arr is None:
                 # 纯数值数据：x = 下标（供窗口过滤 / 采样使用）
                 x_arr = _ds.np.arange(len(data), dtype=_ds.np.float64)
+                pure_index = True
+            if y_arr is not None and _ds.available():
+                # tsdownsample 的 Rust 侧只吃 C 连续数组：2D [x, y] 输入取出的
+                # **列视图**（arr[:, 0]）会被静默拒绝、每次都掉进 numpy 兜底
+                # （实测 1M 降采样 0.5ms → 12ms）。按数据身份一次性转出连续
+                # 副本，只付一次；未装 tsdownsample 时不需要，省一份内存。
+                if not x_arr.flags["C_CONTIGUOUS"]:
+                    x_arr = _ds.np.ascontiguousarray(x_arr)
+                if not y_arr.flags["C_CONTIGUOUS"]:
+                    y_arr = _ds.np.ascontiguousarray(y_arr)
             self._np_x, self._np_y = x_arr, y_arr
+            # x 时间基一次性分析（单调性 / 步长 / 记录中断位置）：替代原先
+            # **每次布局**都跑的 ``is_sorted``（1M≈1.4ms、5M≈7ms），并供
+            # searchsorted 窗口（连续段走切片视图）与 gap 插入使用。
+            # 纯数值数据（x = 下标）无需扫描：恒单调、无中断。
+            self._np_x_monotone = self._np_x_strict = False
+            self._np_step = 0.0
+            self._np_gap_pos = None
+            self._np_gap_dur = None
+            if y_arr is not None and x_arr is not None:
+                if pure_index:
+                    self._np_x_monotone = self._np_x_strict = True
+                    self._np_step = 1.0
+                else:
+                    (
+                        self._np_x_monotone,
+                        self._np_x_strict,
+                        self._np_step,
+                        self._np_gap_pos,
+                        self._np_gap_dur,
+                    ) = _ds.analyze_x(x_arr)
             if self._np_y is None:
                 # 回退：逐项解析（数据量通常较小）
                 for i, item in enumerate(data):
                     x, y = parseDataPoint(item, i)
                     self._x_vals.append(x)
                     self._y_vals.append(y)
+                # x 单调不减？（纯 Python 兜底路径的窗口裁剪走 bisect 快路径；
+                # 只要全部是数值且有序，取窗口就是 O(log n)）
+                prev = None
+                ordered = True
+                for x in self._x_vals:
+                    if not isinstance(x, (int, float)) or isinstance(x, bool):
+                        ordered = False
+                        break
+                    if prev is not None and x < prev:
+                        ordered = False
+                        break
+                    prev = x
+                self._py_x_sorted = ordered
+            self._py_window_key = None
+            self._py_window_cache = None
+            self._win_cache_key = None
+            self._win_cache = None
+            self._sample_lru.clear()
+            self._full_sample_key = None
             self._np_cache_key = (id(data), len(data))
             self._data_ref = data
             self._cached_len = self._data_len
@@ -974,40 +1065,201 @@ class LineSeriesRenderer(SeriesRenderer):
         return self._x_vals[i]
 
     # -- 采样参数 ---------------------------------------------------------
-    def _sampling_params(self):
-        """``sampling``：ECharts 字符串（``lttb`` / ``average`` / ``min`` /
-        ``max`` / ``minmax`` / ``sum``）或扩展 dict
-        {``algorithm``, ``threshold``, ``pointsPerPixel``}；False 关闭。"""
-        sopt = self.opt.get("sampling", True)
-        enabled = bool(sopt) and _ds.available()
-        threshold = 2000.0
-        ppb = 2.0
-        algo = "minmax"
-        if isinstance(sopt, str):
-            name = sopt.strip().lower()
-            if name in ("false", "none", "off"):
-                enabled = False
-            elif name:
-                algo = name
-        elif isinstance(sopt, dict):
-            threshold = _to_float(sopt.get("threshold"), threshold)
-            ppb = _to_float(sopt.get("pointsPerPixel"), ppb)
-            algo = str(sopt.get("algorithm") or algo)
-        return enabled, max(2.0, threshold), max(0.5, ppb), algo
+    def _plot_pixel_width(self, coord) -> float:
+        """「每像素目标点数」用的像素宽度（非 grid 坐标退化为画布宽度）。"""
+        if isinstance(coord, GridCoord):
+            width = float(coord.plot.width())
+            if width > 0:
+                return width
+        return float(max(1, self.chart.width()))
 
-    def _window_indices(self, coord, x_arr):
-        """当前绘图范围（x 数值轴窗口）内的原始下标数组。
+    def _window(self, coord):
+        """当前可见窗口：``None``（全量）/ ``(start, stop)`` 连续段 / 下标数组。
 
-        仅 grid 直角坐标 + value 型 x 轴支持范围裁剪；其余返回全量下标。
+        - **单调 x 或 category 轴**：连续段 ``(start, stop)`` —— 下游用切片
+          视图，免掩码、免拷贝（``searchsorted`` 取边界，10M 点 ≈ 0.01ms，
+          对比全量布尔掩码 7ms + 40MB 下标数组）；
+        - **乱序 value 轴**：``flatnonzero`` 掩码下标（按数据身份 + 范围缓存，
+          同窗口的 y 缩放 / 重排不重算）；
+        - **全量窗口返回 ``None``**（既不裁剪也不分配）。
         """
-        if (
-            x_arr is None
-            or not isinstance(coord, GridCoord)
-            or coord.x_axis.type != "value"
-        ):
+        if not isinstance(coord, GridCoord) or _ds.np is None:
             return None
-        lo, hi = coord.x_axis.vmin, coord.x_axis.vmax
-        return _ds.np.flatnonzero((x_arr >= lo) & (x_arr <= hi))
+        axis = coord.x_axis
+        if axis.type == "category":
+            count = len(getattr(axis, "categories", ()) or ())
+            if count <= 0:
+                return None
+            window_offset = getattr(axis, "windowOffset", None)
+            offset = int(window_offset()) if callable(window_offset) else 0
+            offset = max(0, min(offset, self._data_len))
+            stop = min(self._data_len, offset + count)
+            if offset <= 0 and stop >= self._data_len:
+                return None
+            return (offset, stop)
+        if axis.type != "value" or self._np_x is None:
+            return None
+        lo, hi = float(axis.vmin), float(axis.vmax)
+        if not (lo <= hi):
+            return (0, 0)  # 反向区间 = 空窗口（与掩码语义一致）
+        x = self._np_x
+        if self._np_x_monotone:
+            np_ = _ds.np
+            i0 = int(np_.searchsorted(x, lo, side="left"))
+            i1 = int(np_.searchsorted(x, hi, side="right"))
+            if i0 <= 0 and i1 >= x.size:
+                return None
+            return (i0, i1)
+        key = (self._np_cache_key, self._data_len, lo, hi)
+        if self._win_cache_key == key:
+            return self._win_cache
+        idx = _ds.np.flatnonzero((x >= lo) & (x <= hi))
+        if idx.size >= self._data_len:
+            idx = None  # 全量窗口 = 不做裁剪（保持老行为与性能）
+        self._win_cache_key = key
+        self._win_cache = idx
+        return idx
+
+    def _win_abs(self, window, local):
+        """窗口内局部下标 → 全局下标（``local`` 来自 ``_decimate``）。"""
+        if isinstance(window, tuple):
+            return local + window[0]
+        if window is None:
+            return local
+        return window[local]
+
+    def _py_window(self, axis):
+        """纯 Python 兜底路径的可见窗口下标（``None`` = 不做裁剪）。
+
+        **为什么必须有**：没有 numpy 快路径的数据（dict 项 / 混合类型 / 含 None）
+        此前完全没有窗口裁剪 —— stride 抽稀跑在全量数据上，缩放 / 平移后绘制只
+        覆盖窗口的一小段（实测覆盖度 195% / 2000% / 7399%，视觉上「越缩放越稀、
+        平移后曲线跑到屏幕外」）。
+
+        返回 ``range``（有序 / category：惰性、O(log n)）或 ``list[int]``
+        （无序：一次线性扫描），按「数据身份 + 轴范围」缓存 —— 换窗口才重算，
+        不在每帧付扫描成本。
+        """
+        n = self._data_len
+        if axis is None or n <= 0:
+            return None
+        if axis.type == "category":
+            count = len(getattr(axis, "categories", ()) or ())
+            if count <= 0 or count >= n:
+                return None
+            window_offset = getattr(axis, "windowOffset", None)
+            offset = int(window_offset()) if callable(window_offset) else 0
+            offset = max(0, min(offset, n))
+            return range(offset, min(n, offset + count))
+        if axis.type != "value":
+            return None
+        lo, hi = float(axis.vmin), float(axis.vmax)
+        key = (self._np_cache_key, self._data_len, round(lo, 6), round(hi, 6))
+        if self._py_window_key == key:
+            return self._py_window_cache
+        xs = self._x_vals
+        result = None
+        if xs:
+            if self._py_x_sorted:
+                i0 = bisect.bisect_left(xs, lo)
+                i1 = bisect.bisect_right(xs, hi)
+                result = range(i0, max(i0, i1))
+            else:
+                picked = [i for i, x in enumerate(xs) if lo <= x <= hi]
+                result = picked
+            if result is not None and len(result) >= n:
+                result = None  # 全量窗口 = 不做裁剪（保持老行为与性能）
+        self._py_window_key = key
+        self._py_window_cache = result
+        return result
+
+    def _decimate(self, y, x, n_out: int, algo: str, assume_sorted: bool = False):
+        """按算法抽稀，返回**局部**下标数组；不可行时返回 ``None``。
+
+        三层兜底：
+        1. tsdownsample（要求 x 严格递增、n_out 满足算法下界）；
+        2. numpy 按桶 min/max（``bucket_minmax_indices``，不要求 x 有序）；
+        3. 都没有（纯 Python 宿主）由调用方走等距抽稀。
+
+        ``assume_sorted``：调用方已按数据身份验过 x 严格递增（``analyze_x``），
+        免去每次 O(n) 重扫。
+        """
+        if _ds.np is None or y is None or y.size == 0:
+            return None
+        if x is not None:
+            local = _ds.downsample_indices(
+                x, y, n_out, algo, assume_sorted=assume_sorted
+            )
+            if local is not None:
+                return local
+        return _ds.bucket_minmax_indices(y, n_out)
+
+    # -- 采样缓存（LRU + 全景常驻槽）-------------------------------------
+    def _sample_cache_get(self, key):
+        """查 LRU；命中即刷新新旧顺序。"""
+        hit = self._sample_lru.get(key)
+        if hit is not None:
+            self._sample_lru.move_to_end(key)
+        return hit
+
+    def _sample_cache_put(self, key, sel, *, full: bool):
+        """写 LRU。全景视图最贵、又是缩放往返的必经点 —— 淘汰时跳过它。"""
+        self._sample_lru[key] = sel
+        self._sample_lru.move_to_end(key)
+        if full:
+            self._full_sample_key = key
+        while len(self._sample_lru) > _SAMPLE_CACHE_MAX:
+            victim = next(iter(self._sample_lru))
+            if victim == self._full_sample_key:
+                others = [k for k in self._sample_lru if k != victim]
+                if not others:
+                    break
+                victim = others[0]
+            del self._sample_lru[victim]
+
+    def _apply_gap_breaks(self, coord, plot_w: float) -> None:
+        """按预计算的记录中断位置在采样点之间插入 None 断点。
+
+        两段式规则（见 ``_downsample.analyze_x``）：
+
+        - 数据侧：相邻时间差 > 4.1 × 步长的位置 = 记录中断（一次性预计算）；
+        - 屏幕侧：中断在当前窗口的像素宽度 ≥ ``_GAP_MIN_PIXELS``（4px）才
+          断开 —— 亚像素空洞照常连线（断开反而闪，且桥接亚像素空洞不误导）。
+
+        ``addGaps: false`` / ``connectNulls: true`` 关闭；仅数值 x 轴生效。
+        """
+        if not bool(self.opt.get("addGaps", True)):
+            return
+        if bool(self.opt.get("connectNulls", False)):
+            return
+        gap_pos = self._np_gap_pos
+        if gap_pos is None or gap_pos.size == 0:
+            return
+        if not isinstance(coord, GridCoord) or coord.x_axis.type != "value":
+            return
+        if len(self._point_idx) < 2:
+            return
+        span = float(coord.x_axis.vmax) - float(coord.x_axis.vmin)
+        if not (span > 0.0):
+            return
+        np_ = _ds.np
+        arr = np_.asarray(self._point_idx, dtype=np_.int64)
+        # 采样点原始下标严格升序（连续窗口 / 抽稀输出均如此）：二分找中断
+        # 右侧的第一个采样点，断点插在它前面。
+        js = np_.searchsorted(arr, gap_pos, side="right")
+        keep = (js > 0) & (js < arr.size)
+        if not keep.any():
+            return
+        js = js[keep]
+        px = self._np_gap_dur[keep] / span * plot_w
+        js = js[px >= _GAP_MIN_PIXELS]
+        if js.size == 0:
+            return
+        points = self._points
+        idxs = self._point_idx
+        for j in sorted(np_.unique(js).tolist(), reverse=True):
+            points.insert(j, None)
+            idxs.insert(j, -1)  # 与 None 点平行的占位（消费者先跳过 None）
 
     # -- 布局 -------------------------------------------------------------
     def layout(self, rect: QRectF) -> None:
@@ -1020,77 +1272,233 @@ class LineSeriesRenderer(SeriesRenderer):
         self._load_data()
         single = getattr(coord, "kind", "") == "singleAxis"
 
-        # 采样决策：grid value-x + numpy 数据 + 启用 + 超阈值
+        # 采样决策：**所有轴类型统一抽稀**（此前只对 grid value-x + numpy 生效，
+        # category / polar / 非 numpy 数据全量映射 —— 1M 点会画出上万段线，
+        # 单帧能到 9.5s）。三层兜底：tsdownsample → numpy 按桶 min/max →
+        # 纯 Python 等距抽稀。
         enabled, threshold, ppb, algo = self._sampling_params()
-        plot_w = coord.plot.width() if isinstance(coord, GridCoord) else 0.0
-        window_idx = (
-            self._window_indices(coord, self._np_x) if self._np_x is not None else None
-        )
+        plot_w = self._plot_pixel_width(coord)
+        n_out = max(_ds.min_out_for(algo), int(plot_w * ppb))
+        # ``sel``：None = 全量｜(start, stop) 连续窗口｜ndarray 绝对下标
+        sel = None
+        window = None
 
-        if window_idx is not None:
-            n_win = len(window_idx)
-            # 下界按算法取（``_ds.min_out_for``）：``max(2, ...)`` 造出的
-            # ``n_out == 2`` 会让 minmax / m4 / lttb 全部 Rust panic。
-            n_out = max(_ds.min_out_for(algo), int(plot_w * ppb))
-            # 缓存键必须包含两项身份信息：
-            # ① **数据身份** —— 否则「换成等长的另一份数据」会得到完全相同的键
-            #    而跳过重算，用旧数据的采样下标去画新数据（尖峰错位 / 漏点）。
-            #    这里用 ``_load_data`` 刚刷新过的 ``_np_cache_key``（含 id+len）。
-            # ② **窗口范围** —— 缩放 / 平移后窗口内点数可能不变（n_win 相同），
-            #    但采样点集必须按新窗口重新计算。
-            lo, hi = coord.x_axis.vmin, coord.x_axis.vmax
-            cache_key = (
-                self._np_cache_key,
-                self._data_len,
-                n_out,
-                algo,
-                threshold,
-                lo,
-                hi,
-            )
-            if self._sample_cache_key != cache_key:
-                yf = self._np_y[window_idx]
-                if enabled and n_win > threshold:
-                    idx_local = _ds.downsample_indices(
-                        self._np_x[window_idx], yf, n_out, algo
-                    )
-                    if idx_local is not None:
-                        self._sample_indices = window_idx[idx_local]
+        if self._np_y is not None and _ds.np is not None:
+            window = self._window(coord)
+            first, last, n_win = _win_span(window, self._data_len)
+            sampled = None
+            if enabled and n_win > threshold and n_win > 0:
+                # 缓存键必须包含两项身份信息：
+                # ① **数据身份** —— 否则「换成等长的另一份数据」会得到完全相同的键
+                #    而跳过重算，用旧数据的采样下标去画新数据（尖峰错位 / 漏点）。
+                #    这里用 ``_load_data`` 刚刷新过的 ``_np_cache_key``（含 id+len）。
+                # ② **窗口范围** —— 缩放 / 平移后窗口内点数可能不变（n_win 相同），
+                #    但采样点集必须按新窗口重新计算。用窗口首尾下标表达（value 轴与
+                #    category 轴通用；category 轴没有 vmin/vmax 可比）。
+                cache_key = (
+                    self._np_cache_key,
+                    self._data_len,
+                    n_out,
+                    algo,
+                    threshold,
+                    first,
+                    last,
+                    n_win,
+                )
+                sampled = self._sample_cache_get(cache_key)
+                if sampled is None:
+                    if window is None:
+                        x_win, y_win = self._np_x, self._np_y
+                    elif isinstance(window, tuple):
+                        start, stop = window
+                        x_win = self._np_x[start:stop]
+                        y_win = self._np_y[start:stop]
                     else:
-                        self._sample_indices = window_idx
-                else:
-                    self._sample_indices = window_idx
-                self._sample_cache_key = cache_key
-            sel = self._sample_indices
-            if sel is not None:
-                sel = sel.tolist()
-            self._sampled = (enabled and n_win > threshold and sel is not None) and len(
-                sel
-            ) < n_win
-        else:
-            # 无范围裁剪（category / polar / singleAxis / 非数值数据）：
-            # 数据量=类别数的场景不采样，全量映射
-            sel = None
+                        x_win = self._np_x[window]
+                        y_win = self._np_y[window]
+                    local = self._decimate(
+                        y_win, x_win, n_out, algo, assume_sorted=self._np_x_strict
+                    )
+                    if local is not None:
+                        sampled = self._win_abs(window, local)
+                        self._sample_cache_put(
+                            cache_key, sampled, full=(n_win == self._data_len)
+                        )
+                self._sampled = sampled is not None and sampled.size < n_win
+            sel = sampled if sampled is not None else window
+        elif enabled and self._data_len > threshold:
+            # 纯 Python 兜底路径（数据不是纯数值：dict 项 / 混合类型 / 含 None）：
+            # **先按窗口裁剪**（``_py_window``），再在窗口内等距抽稀到
+            # 「每像素约 ppb 点」。不裁剪的话 stride 会跑在全量上 —— 缩放后
+            # 曲线只能覆盖窗口的一小段（越缩放越稀）。
+            axis = coord.x_axis if isinstance(coord, GridCoord) else None
+            window = self._py_window(axis)
+            base = range(self._data_len) if window is None else window
+            span = len(base)
+            stride = max(1, int(span / max(2.0, plot_w * ppb)))
+            if stride > 1:
+                sel = [base[i] for i in range(0, span, stride)]
+                self._sampled = True
+            elif window is not None:
+                # 窗口内点数已不多：全画窗口（仍要裁掉窗口外的点）
+                sel = list(base)
 
-        if sel is None:
+        if sel is None and self._np_y is None:
             sel = list(range(self._data_len))
 
-        for orig in sel:
-            yi = self._y_at(orig)
-            if yi is None:
-                self._points.append(None)
+        # 向量化快路径：一次算完窗口内所有点的屏幕坐标（逐点 mapPoint 每点
+        # ~6µs，1M 点就是 2.4s）。仅在 numpy 路径 + grid 直角坐标下可用；
+        # 连续窗口 / 全量走**切片视图**（免物化整段下标数组与 y 拷贝）。
+        px = py = None
+        abs_idx = None
+        base = 0
+        if _ds.np is not None and self._np_y is not None:
+            try:
+                np_ = _ds.np
+                if isinstance(sel, tuple):
+                    start, stop = sel
+                    xs_arr = self._np_x[start:stop]
+                    ys_arr = self._np_y[start:stop]
+                    base = start
+                elif sel is None:
+                    xs_arr = self._np_x
+                    ys_arr = self._np_y
+                else:
+                    abs_idx = np_.asarray(sel, dtype=np_.int64)
+                    xs_arr = self._np_x[abs_idx]
+                    ys_arr = self._np_y[abs_idx]
+                mapped = coord.mapArrays(xs_arr, ys_arr)
+                if mapped is not None:
+                    px, py = mapped
+            except Exception:
+                px = py = None
+                abs_idx = None
+                base = 0
+
+        if px is not None and py is not None:
+            np_ = _ds.np
+            # 非有限（NaN / inf）→ None 断点，与逐点路径的 ``_y_at`` 语义一致
+            ok = np_.isfinite(px) & np_.isfinite(py)
+            px_list = px.tolist()
+            py_list = py.tolist()
+            ok_list = ok.tolist()
+            points = self._points
+            point_idx = self._point_idx
+            append_point = points.append
+            append_idx = point_idx.append
+            if abs_idx is None:
+                # 连续段 / 全量：原始下标 = base + i（不物化下标数组）
+                for i in range(len(px_list)):
+                    if ok_list[i]:
+                        append_point(QPointF(px_list[i], py_list[i]))
+                    else:
+                        append_point(None)
+                    append_idx(base + i)
+            else:
+                idx_list = abs_idx.tolist()
+                for i in range(len(px_list)):
+                    if ok_list[i]:
+                        append_point(QPointF(px_list[i], py_list[i]))
+                    else:
+                        append_point(None)
+                    append_idx(idx_list[i])
+        else:
+            if isinstance(sel, tuple):
+                iterable = range(sel[0], sel[1])
+            elif sel is None:
+                iterable = range(self._data_len)
+            elif isinstance(sel, list):
+                iterable = sel  # 纯 Python 兜底路径的下标本就是 list
+            else:
+                iterable = sel.tolist()
+            for orig in iterable:
+                yi = self._y_at(orig)
+                if yi is None:
+                    self._points.append(None)
+                    self._point_idx.append(orig)
+                    continue
+                try:
+                    if single:
+                        self._points.append(coord.mapPoint(yi))
+                    else:
+                        self._points.append(coord.mapPoint(self._x_at(orig), yi))
+                except Exception:
+                    self._points.append(None)
                 self._point_idx.append(orig)
+
+        self._apply_gap_breaks(coord, plot_w)
+
+        # 数据点符号的屏幕坐标**在布局期算一次**（原先每次 paint 都重映射，
+        # 实测 1M 采样态每帧 ~11ms 花在这里）。点数量再按像素密度抽稀：
+        # 相邻符号至少隔 ~10px，否则密集点互相叠成一坨、纯属浪费。
+        self._symbol_items = self._build_symbol_items(coord, single, plot_w)
+        self._build_prev_map(coord, single, ppb, algo, threshold)
+
+    def _build_symbol_items(self, coord, single: bool, plot_w: float):
+        """符号绘制清单 ``[(原始下标, QPointF), ...]``（``plot()`` 用）。"""
+        if str(self.opt.get("symbol") or "emptyCircle") == "none":
+            return []
+        if not bool(self.opt.get("showSymbol", True)):
+            return []
+        length = self._data_len
+        if length <= 0:
+            return []
+        desired = max(8.0, float(plot_w) / 10.0)
+        interval = max(1, int(length / desired)) if length > desired else 1
+        indices = list(range(0, length, interval))
+        if not indices:
+            return []
+        # 向量化映射（与折线点同一条快路径）：逐点 ``mapPoint`` 在 category 轴上
+        # 每点 ~6µs 起（大类别数时更贵），几十上百个符号也要毫秒级
+        np_ = _ds.np
+        if not single and np_ is not None and self._np_y is not None:
+            try:
+                idx_arr = np_.asarray(indices, dtype=np_.int64)
+                xs_arr = (
+                    self._np_x[idx_arr]
+                    if self._np_x is not None
+                    else idx_arr.astype(np_.float64)
+                )
+                ys_arr = self._np_y[idx_arr]
+                mapped = coord.mapArrays(xs_arr, ys_arr)
+            except Exception:
+                mapped = None
+            if mapped is not None:
+                px_arr, py_arr = mapped
+                ok_arr = np_.isfinite(px_arr) & np_.isfinite(py_arr)
+                lo = hi = None
+                if isinstance(coord, GridCoord) and coord.x_axis.type == "value":
+                    lo, hi = coord.x_axis.vmin, coord.x_axis.vmax
+                px_list = px_arr.tolist()
+                py_list = py_arr.tolist()
+                ok_list = ok_arr.tolist()
+                xs_list = xs_arr.tolist()
+                items = []
+                for slot, i in enumerate(indices):
+                    if not ok_list[slot]:
+                        continue
+                    if lo is not None and not (lo <= xs_list[slot] <= hi):
+                        continue
+                    items.append((i, QPointF(px_list[slot], py_list[slot])))
+                return items
+        items = []
+        for i in indices:
+            yi = self._y_at(i)
+            if yi is None:
+                continue
+            xi = self._x_at(i)
+            if (
+                isinstance(coord, GridCoord)
+                and coord.x_axis.type == "value"
+                and not (coord.x_axis.vmin <= xi <= coord.x_axis.vmax)
+            ):
                 continue
             try:
-                if single:
-                    self._points.append(coord.mapPoint(yi))
-                else:
-                    self._points.append(coord.mapPoint(self._x_at(orig), yi))
+                pt = coord.mapPoint(yi) if single else coord.mapPoint(xi, yi)
             except Exception:
-                self._points.append(None)
-            self._point_idx.append(orig)
-
-        self._build_prev_map(coord, single, ppb, algo, threshold)
+                continue
+            items.append((i, pt))
+        return items
 
     def _build_prev_map(self, coord, single, ppb, algo, threshold):
         """采样路径动画：按原始下标对齐旧数据采样点（过渡动画用）。"""
@@ -1178,7 +1586,18 @@ class LineSeriesRenderer(SeriesRenderer):
 
     # -- 路径构建 ---------------------------------------------------------
     def _line_path(self, seg):
-        """按 smooth / step 构建一段折线路径。seg: [QPointF]（≥1）。"""
+        """按 smooth / step 构建一段折线几何。
+
+        返回值 ``(path, pts)``：
+
+        * ``path is None`` —— 纯折线（直线段 / step），调用方**批量**
+          ``drawPolyline(QPolygonF(pts))``（实测比逐段 ``drawLine`` 快 8 倍量级，
+          陡峭数据也不吃亏）；
+        * ``path`` 非空 —— 只在 ``smooth``（贝塞尔）时出现，必须走
+          ``QPainterPath``。
+
+        seg: [QPointF]（≥1）。
+        """
         step = str(self.opt.get("step") or "")
         smooth = self.opt.get("smooth", False)
         if step in ("start", "middle", "end") and len(seg) >= 2:
@@ -1192,10 +1611,7 @@ class LineSeriesRenderer(SeriesRenderer):
                     pts.append(QPointF((a.x() + b.x()) / 2, a.y()))
                     pts.append(QPointF((a.x() + b.x()) / 2, b.y()))
                 pts.append(b)
-            path = QPainterPath(pts[0])
-            for pt in pts[1:]:
-                path.lineTo(pt)
-            return path, pts
+            return None, pts
         if smooth and len(seg) >= 2:
             k = (
                 smooth
@@ -1203,10 +1619,7 @@ class LineSeriesRenderer(SeriesRenderer):
                 else 0.5
             )
             return _smooth_path(seg, k), seg
-        path = QPainterPath(seg[0])
-        for pt in seg[1:]:
-            path.lineTo(pt)
-        return path, seg
+        return None, seg
 
     def _baseline_y(self, coord):
         """面积填充基线（grid：0 值线收敛到 plot 内）。"""
@@ -1252,8 +1665,13 @@ class LineSeriesRenderer(SeriesRenderer):
         segs = []
         seg = []
         seg_base = []
+        # ``connectNulls``（ECharts）：断点（None / NaN）**不切开**线段，直接连到
+        # 下一个有效点；默认 False 时按断点分段（Plotly 的 ``connectgaps`` 反向）。
+        connect_nulls = bool(self.opt.get("connectNulls", False))
         for pos, pt in enumerate(pts):
             if pt is None:
+                if connect_nulls:
+                    continue
                 if seg:
                     segs.append((seg, seg_base))
                     seg, seg_base = [], []
@@ -1277,33 +1695,28 @@ class LineSeriesRenderer(SeriesRenderer):
             for seg_pts, seg_bases in segs:
                 if len(seg_pts) < 2:
                     continue
-                if heavy:
-                    # 逐段直线构成的多边形填充
-                    fill = QPainterPath(seg_pts[0])
-                    for pt in seg_pts[1:]:
-                        fill.lineTo(pt)
-                else:
-                    fill = QPainterPath(self._line_path(seg_pts)[0])
+                # 几何点直接来自 ``_line_path``（纯折线时 path 为 None）：
+                # 填充走 QPolygonF + drawPolygon（单次 C++ 调用），不再逐点 lineTo。
+                _path, geom_pts = self._line_path(seg_pts)
+                fill = QPolygonF(list(geom_pts))
                 if polar:
-                    fill.lineTo(coord.center)
-                    fill.closeSubpath()
+                    fill.append(QPointF(coord.center))
                     p.setPen(Qt.PenStyle.NoPen)
                     p.setBrush(with_alpha(color, 255 * opacity))
-                    p.drawPath(fill)
+                    p.drawPolygon(fill)
                     continue
                 if seg_bases and all(b is not None for b in seg_bases):
                     # stack：沿基线曲线回填（ECharts 堆叠面积语义）
-                    fill.lineTo(seg_bases[-1])
+                    fill.append(QPointF(seg_bases[-1]))
                     for base_pt in reversed(seg_bases[:-1]):
-                        fill.lineTo(base_pt)
+                        fill.append(QPointF(base_pt))
                     bottom = max(pt.y() for pt in seg_bases)
                 elif base_y is not None:
-                    fill.lineTo(QPointF(seg_pts[-1].x(), base_y))
-                    fill.lineTo(QPointF(seg_pts[0].x(), base_y))
+                    fill.append(QPointF(seg_pts[-1].x(), base_y))
+                    fill.append(QPointF(seg_pts[0].x(), base_y))
                     bottom = base_y
                 else:
                     continue
-                fill.closeSubpath()
                 top = min(pt.y() for pt in seg_pts)
                 raw_area_color = area.get("color") if isinstance(area, dict) else None
                 if isinstance(raw_area_color, dict):
@@ -1326,18 +1739,23 @@ class LineSeriesRenderer(SeriesRenderer):
                     brush = grad
                 p.setPen(Qt.PenStyle.NoPen)
                 p.setBrush(brush)
-                p.drawPath(fill)
+                p.drawPolygon(fill)
 
         # 折线本体
         pen = QPen(color, width)
         if heavy:
-            # 大数据逐段 drawLine：RoundCap 每段圆头光栅化慢 5 倍，
-            # 密集线段下不可见，改用默认 FlatCap / BevelJoin
+            # 大数据：RoundCap 每段圆头光栅化慢 5 倍，密集线段下不可见，
+            # 改用默认 FlatCap / BevelJoin
             pen.setCapStyle(Qt.PenCapStyle.FlatCap)
             pen.setJoinStyle(Qt.PenJoinStyle.BevelJoin)
         else:
             pen.setCapStyle(Qt.PenCapStyle.RoundCap)
             pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
+        # 宽笔（>1px）在 **自重叠折线** 上会踩 Qt stroker 的爆炸路径，实测
+        # （2px + AA + 1856 段竖笔）：``drawPolyline`` 5034ms、``QPainterPath``
+        # 5097ms，而 ``drawLines`` 批量 20ms；10 万段时 polyline 184s。
+        # 细笔（≤1px）三者都在 10ms 量级，用更省的 drawPolyline。
+        wide_pen = float(pen.widthF()) > 1.0 + 1e-6
         lt = str(ls.get("type") or "solid")
         if lt in ("dashed", "dash"):
             pen.setStyle(Qt.PenStyle.DashLine)
@@ -1348,17 +1766,25 @@ class LineSeriesRenderer(SeriesRenderer):
         for seg_pts, _seg_bases in segs:
             if len(seg_pts) < 2:
                 continue
-            if heavy:
-                for a, b in zip(seg_pts, seg_pts[1:]):
-                    p.drawLine(a, b)
-            else:
-                path, _ = self._line_path(seg_pts)
+            path, geom_pts = self._line_path(seg_pts)
+            # smooth 的贝塞尔同样是「宽笔 + 稠密自重叠」的高危几何：点太多时
+            # 退化成直线段（ECharts 大数据下 smooth 同样退化）。
+            if path is not None and not (wide_pen and len(geom_pts) > 2000):
                 if polar:
                     path.closeSubpath()
                 p.drawPath(path)
+                continue
+            points = list(geom_pts)
+            if polar:
+                points.append(points[0])
+            if wide_pen and len(points) >= 32:
+                # 批量单次调用，逐段走 Qt 的快速光栅路径（不经过 stroker 求并）
+                p.drawLines([QLineF(a, b) for a, b in zip(points, points[1:])])
+            else:
+                p.drawPolyline(QPolygonF(points))
 
-        # 数据点符号：小数据全画；大数据（超阈值）时隔点绘制形状，
-        # 避免逐点椭圆开销（ECharts 大数据下同样会退化符号绘制）。
+        # 数据点符号：小数据全画；大数据用**布局期算好**的像素密度抽稀清单
+        # （相邻符号至少 ~10px，否则叠成一坨还费光栅化）。
         # ECharts 语义：``circle`` 为实心、``emptyCircle``（默认）为空心。
         symbol_name = str(self.opt.get("symbol") or "emptyCircle")
         if symbol_name != "none" and bool(self.opt.get("showSymbol", True)):
@@ -1376,11 +1802,7 @@ class LineSeriesRenderer(SeriesRenderer):
                 p.setFont(font)
                 fm = QFontMetricsF(font)
             if heavy:
-                interval = 500
-                single = getattr(coord, "kind", "") == "singleAxis"
-                sym_items = [
-                    (None, pt) for pt in self._symbol_points(coord, single, interval)
-                ]
+                sym_items = self._symbol_items
             else:
                 sym_items = [
                     (orig, pt)
@@ -1394,6 +1816,34 @@ class LineSeriesRenderer(SeriesRenderer):
             uni_color = (
                 (uni["color"] or self.chart.colorForSeries(self)) if uni else None
             )
+            # 统一外观 + 无 hover 强调 + 无标签：位图贴图（实测 5.5k 点
+            # 3.5ms，而逐点 drawEllipse 14.7ms、合并 QPainterPath 204ms）
+            if uni is not None and hovered is None and not show_label and r > 0:
+                alpha = uni["opacity"]
+                border_color, border_w = uni["borderColor"], uni["borderWidth"]
+                if hollow:
+                    sprite = symbolPixmap(
+                        "circle",
+                        r * 2,
+                        QColor(T("color.bg.elevated")),
+                        border_color or with_alpha(QColor(uni_color), int(235 * alpha)),
+                        border_w or 1.5,
+                        self.chart.getDevicePixelRatio(),
+                    )
+                else:
+                    sprite = symbolPixmap(
+                        kind,
+                        r * 2,
+                        with_alpha(QColor(uni_color), int(235 * alpha)),
+                        border_color or with_alpha(QColor(uni_color), int(235 * alpha)),
+                        border_w or 1.0,
+                        self.chart.getDevicePixelRatio(),
+                    )
+                half = r + 1.0
+                for _orig, pt in sym_items:
+                    p.drawPixmap(QPointF(pt.x() - half, pt.y() - half), sprite)
+                p.restore()
+                return
             for orig, pt in sym_items:
                 if uni is not None:
                     item_color = QColor(uni_color)
@@ -1472,7 +1922,7 @@ class LineSeriesRenderer(SeriesRenderer):
     # -- 交互 -------------------------------------------------------------
     def hitTest(self, pos: QPointF):
         best = None
-        best_d = 10.0  # 命中半径 px
+        best_d = self.chart.hitRadius()  # 命中半径 px（tooltip.hitRadius）
         # 动画期用「画出来的那份」折线点（与 ``paint`` 同一份插值），
         # 否则会命中动画终点位置上的点 —— 视觉上完全对不上。
         pts = (
@@ -1504,12 +1954,17 @@ class LineSeriesRenderer(SeriesRenderer):
         if y is None:
             return None
         # 命中点坐标：精确下标优先，否则取采样集中最近的原始下标
+        # （gap 断点的占位下标为 -1，不参与最近点比较）
         pos = None
         if self._point_idx:
             try:
                 best_i = min(
                     range(len(self._point_idx)),
-                    key=lambda k: abs(self._point_idx[k] - idx),
+                    key=lambda k: (
+                        abs(self._point_idx[k] - idx)
+                        if self._point_idx[k] >= 0
+                        else float("inf")
+                    ),
                 )
                 pos = self._points[best_i]
             except Exception:
@@ -1550,12 +2005,78 @@ class ScatterSeriesRenderer(SeriesRenderer):
             return
         single = getattr(coord, "kind", "") == "singleAxis"
         fixed = _to_float(self.opt.get("symbolSize"), None)
-        thirds = [self._third_dim(it) for it in self.data()]
-        known = [t for t in thirds if t is not None]
+        plot_w = (
+            float(self.chart.width())
+            if not isinstance(coord, GridCoord)
+            else max(1.0, coord.plot.width())
+        )
+        # 候选下标：窗口裁剪 + 像素密度抽稀（numpy 不可用 / 小数据 → None 走全量）
+        candidates = self._candidate_indices(coord, plot_w)
+        data = self.data()
+        indices = range(len(data)) if candidates is None else candidates.tolist()
+        # 第三维（尺寸映射）只对候选点求值：原先全量列表推导在 1M 点上要 300ms+
+        thirds = {i: self._third_dim(data[i]) for i in indices}
+        known = [v for v in thirds.values() if v is not None]
         zmin = min(known) if known else 0.0
         zmax = max(known) if known else 1.0
-        for i, item in enumerate(self.data()):
-            x, y = parseDataPoint(item, i)
+        span = zmax - zmin
+        append = self._dots.append
+
+        # 向量化映射（与折线同一快路径）：per-point mapPoint 每点 ~5µs，
+        # 5 万点就是 0.25s。
+        mapped = None
+        if not single and candidates is not None:
+            np_ = _ds.np
+            try:
+                arr = np_.asarray(data, dtype=np_.float64)
+                index_array = np_.asarray(indices, dtype=np_.int64)
+                if arr.ndim == 1:
+                    xs_arr = index_array.astype(np_.float64)
+                    ys_arr = arr[index_array]
+                elif arr.ndim == 2 and arr.shape[1] >= 2:
+                    xs_arr = arr[index_array, 0]
+                    ys_arr = arr[index_array, 1]
+                else:
+                    xs_arr = ys_arr = None
+                if xs_arr is not None:
+                    mapped = coord.mapArrays(xs_arr, ys_arr)
+            except Exception:
+                mapped = None
+        if mapped is not None:
+            np_ = _ds.np
+            px_arr, py_arr = mapped
+            ok_arr = np_.isfinite(px_arr) & np_.isfinite(py_arr)
+            px_list = px_arr.tolist()
+            py_list = py_arr.tolist()
+            ok_list = ok_arr.tolist()
+            y_list = ys_arr.tolist()
+            x_list = (
+                xs_arr.tolist() if xs_arr is not None else [float(i) for i in indices]
+            )
+            for slot, i in enumerate(indices):
+                if not ok_list[slot]:
+                    continue
+                y = y_list[slot]
+                if fixed is not None:
+                    r = max(1.0, fixed / 2)
+                elif thirds[i] is not None:
+                    f = 0.5 if span == 0 else (thirds[i] - zmin) / span
+                    r = _lerp(6.0, 24.0, f) / 2
+                else:
+                    r = 4.0
+                append(
+                    {
+                        "pt": QPointF(px_list[slot], py_list[slot]),
+                        "r": r,
+                        "value": y,
+                        "index": i,
+                        "x": x_list[slot],
+                    }
+                )
+            return
+
+        for i in indices:
+            x, y = parseDataPoint(data[i], i)
             if y is None:
                 continue
             try:
@@ -1565,14 +2086,66 @@ class ScatterSeriesRenderer(SeriesRenderer):
             if fixed is not None:
                 r = max(1.0, fixed / 2)
             elif thirds[i] is not None:
-                span = zmax - zmin
                 f = 0.5 if span == 0 else (thirds[i] - zmin) / span
                 r = _lerp(6.0, 24.0, f) / 2
             else:
                 r = 4.0
-            self._dots.append({"pt": pt, "r": r, "value": y, "index": i, "x": x})
+            append({"pt": pt, "r": r, "value": y, "index": i, "x": x})
 
     # -- 绘制 -------------------------------------------------------------
+    #: 散点抽稀的下限（点数低于它不做抽稀：小数据要全画）
+    _LOD_MIN_POINTS = 4000
+    #: 抽稀后「每像素列保留几个点」（视觉密度与真实分布都够看）
+    #: 2 点/像素列 = 每个像素列两点：散点直径 4px 时已经看不出稀疏，
+    #: 而窗口重建（缩放 / 平移）的成本与点数成正比 —— 之前 4 点/列在
+    #: 5 万点窗口里要建 1 万个 dict，缩放一步 110ms。
+    _LOD_POINTS_PER_PX = 2.0
+
+    def _candidate_indices(self, coord, plot_w: float):
+        """散点绘制候选下标（numpy 可用时）：窗口裁剪 + 像素密度抽稀。
+
+        返回 ``ndarray`` 或 ``None``（``None`` = 走原来的全量循环）。散点此前
+        **完全没有窗口与抽稀**：50k 点要建 50k 个 dict 再逐个 drawEllipse
+        （实测 layout 133ms + paint 125ms），1M 点直接不可用。
+        """
+        np_ = _ds.np
+        data = self.data()
+        length = len(data)
+        if np_ is None or length <= self._LOD_MIN_POINTS:
+            return None
+        enabled, threshold, _ppb, _algo = self._sampling_params()
+        if not enabled or length <= threshold:
+            return None
+        try:
+            arr = np_.asarray(data, dtype=np_.float64)
+        except (TypeError, ValueError, OverflowError):
+            return None
+        if arr.ndim == 1:
+            xs = np_.arange(length, dtype=np_.float64)
+        elif arr.ndim == 2 and arr.shape[1] >= 2:
+            xs = arr[:, 0]
+        else:
+            return None
+
+        idx = None
+        if isinstance(coord, GridCoord):
+            axis = coord.x_axis
+            if axis.type == "category":
+                count = len(getattr(axis, "categories", ()) or ())
+                if count > 0:
+                    window_offset = getattr(axis, "windowOffset", None)
+                    offset = int(window_offset()) if callable(window_offset) else 0
+                    idx = np_.arange(offset, min(length, offset + count))
+            elif axis.type == "value":
+                idx = np_.flatnonzero((xs >= axis.vmin) & (xs <= axis.vmax))
+        if idx is None:
+            idx = np_.arange(length)
+        target = max(64.0, float(plot_w) * self._LOD_POINTS_PER_PX)
+        if idx.size > target:
+            step = max(1, int(idx.size / target))
+            idx = idx[::step]
+        return idx
+
     def paint(self, p: QPainter, anim_t: float) -> None:
         if not self._dots:
             return
@@ -1597,6 +2170,29 @@ class ScatterSeriesRenderer(SeriesRenderer):
         # 循环外解析一次统一外观（None = 存在 per-item itemStyle，走逐项查找）
         uni = self.uniformItemStyleResolved()
         uni_color = (uni["color"] or self.chart.colorForSeries(self)) if uni else None
+        # 统一外观 + 无 hover 强调 + 无标签 + 尺寸一致：**所有点合并成一条
+        # QPainterPath 一次 drawPath**（逐点 drawSymbol 在 5 万点上要 ~100ms）
+        if uni is not None and hovered is None and not show_label:
+            radii = {round(d["r"] * scale, 1) for d in self._dots}
+            if len(radii) == 1:
+                r = next(iter(radii))
+                if r > 0:
+                    alpha = uni["opacity"]
+                    border_color, border_w = uni["borderColor"], uni["borderWidth"]
+                    sprite = symbolPixmap(
+                        kind,
+                        r * 2,
+                        with_alpha(QColor(uni_color), int(190 * alpha)),
+                        border_color or with_alpha(QColor(uni_color), int(230 * alpha)),
+                        border_w or 1,
+                        self.chart.getDevicePixelRatio(),
+                    )
+                    half = r + 1.0
+                    for d in self._dots:
+                        pt = d["pt"]
+                        p.drawPixmap(QPointF(pt.x() - half, pt.y() - half), sprite)
+                    p.restore()
+                    return
         for d in self._dots:
             index = d["index"]
             r = d["r"] * scale
@@ -1649,7 +2245,9 @@ class ScatterSeriesRenderer(SeriesRenderer):
         scale = max(0.0, self._anim_t)
         for d in self._dots:
             dist = math.hypot(d["pt"].x() - pos.x(), d["pt"].y() - pos.y())
-            if dist <= max(d["r"] * scale, 4.0) + 3 and dist < best_d:
+            # 命中上限：不小于「点半径 + 3」，再放开到可配的 ``tooltip.hitRadius``
+            limit = max(self.chart.hitRadius(), d["r"] * scale + 3.0)
+            if dist <= limit and dist < best_d:
                 best_d = dist
                 best = d
         if best is None:

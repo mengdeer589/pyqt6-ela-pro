@@ -18,6 +18,8 @@ from pyqt6_ela_pro.chat import (
     ElaChatRoleType,
     ElaChatSessionStats,
     ElaChatStats,
+    ElaChatToolCall,
+    ElaChatToolStatusType,
     ElaChatWidget,
 )
 
@@ -35,6 +37,26 @@ def _assistant(mid, parts=(), created_at=0.0, stats=None):
 def _step(step, stats):
     return ElaChatPart(
         id=f"p{step}", kind=ElaChatPartKindType.Stats, stats=stats, step=step
+    )
+
+
+def _tool(step, name="read", status=ElaChatToolStatusType.Done, with_call=True, mid=0):
+    call = (
+        ElaChatToolCall(id=f"t{mid}-{step}-{name}", name=name, status=status)
+        if with_call
+        else None
+    )
+    return ElaChatPart(
+        id=f"tool-{mid}-{step}-{name}",
+        kind=ElaChatPartKindType.Tool,
+        tool_call=call,
+        step=step,
+    )
+
+
+def _reasoning(mid, ms):
+    return ElaChatPart(
+        id=f"r{mid}", kind=ElaChatPartKindType.Reasoning, duration_ms=ms, step=1
     )
 
 
@@ -182,6 +204,108 @@ class TestFromMessages:
         assert pyqt6_ela_pro.ElaChatSessionStats is ElaChatSessionStats
 
 
+class TestToolStats:
+    def test_defaults_when_no_tools(self):
+        stats = ElaChatSessionStats.fromMessages([])
+        assert (stats.tool_calls, stats.tool_rounds) == (0, 0)
+        assert (stats.tool_errors, stats.tool_aborted, stats.tool_unsettled) == (
+            0,
+            0,
+            0,
+        )
+        assert stats.tool_counts == {}
+        assert stats.reasoning_ms == 0.0
+
+    def test_calls_statuses_and_name_counts(self):
+        message = _assistant(
+            1,
+            [
+                _tool(1, "read"),
+                _tool(1, "Read"),  # 名字大小写归一后并入同一键
+                _tool(1, "grep", status=ElaChatToolStatusType.Error),
+                _tool(2, "edit", status=ElaChatToolStatusType.Aborted),
+                _tool(2, "shell", status=ElaChatToolStatusType.Running),
+                _tool(2, "shell", status=ElaChatToolStatusType.Pending),
+            ],
+        )
+        stats = ElaChatSessionStats.fromMessages([message])
+        assert stats.tool_calls == 6
+        assert stats.tool_errors == 1
+        assert stats.tool_aborted == 1
+        assert stats.tool_unsettled == 2
+        assert stats.tool_counts == {"read": 2, "grep": 1, "edit": 1, "shell": 2}
+        # done 可由差额推得：6 - 1 - 1 - 2
+        assert stats.tool_calls - (
+            stats.tool_errors + stats.tool_aborted + stats.tool_unsettled
+        ) == 2
+
+    def test_rounds_dedup_by_step_across_messages(self):
+        """轮数 = 有工具调用的**步骤数**：同 step 并行多个算一轮、消息内去重。"""
+        first = _assistant(1, [_tool(1, "read"), _tool(1, "grep"), _tool(2, "edit")])
+        second = _assistant(2, [_tool(1, "read")])
+        stats = ElaChatSessionStats.fromMessages([first, second])
+        assert stats.tool_calls == 4
+        assert stats.tool_rounds == 3  # 2 + 1（两条消息的 step 各自从 1 起）
+
+    def test_unknown_status_and_empty_name(self):
+        """未知状态仍计总数；空名字不进分组表（分组表以名为键，空键无意义）。"""
+        message = _assistant(
+            1,
+            [
+                _tool(1, "read", status="weird"),
+                _tool(1, "", status=ElaChatToolStatusType.Done),
+            ],
+        )
+        stats = ElaChatSessionStats.fromMessages([message])
+        assert stats.tool_calls == 2
+        assert (stats.tool_errors, stats.tool_aborted, stats.tool_unsettled) == (
+            0,
+            0,
+            0,
+        )
+        assert stats.tool_counts == {"read": 1}
+
+    def test_tool_part_without_call_is_skipped(self):
+        """坏数据（工具段缺 ``tool_call``）：不计数、也不占轮数。"""
+        message = _assistant(1, [_tool(1, "read", with_call=False), _tool(2, "grep")])
+        stats = ElaChatSessionStats.fromMessages([message])
+        assert stats.tool_calls == 1
+        assert stats.tool_rounds == 1
+        assert stats.tool_counts == {"grep": 1}
+
+    def test_reasoning_ms_sums_all_messages(self):
+        messages = [
+            _assistant(1, [_reasoning(1, 250.0), _step(1, ElaChatStats())]),
+            _assistant(2, [_reasoning(2, 125.5)]),
+        ]
+        stats = ElaChatSessionStats.fromMessages(messages)
+        assert stats.reasoning_ms == pytest.approx(375.5)
+
+    def test_reasoning_ms_guards_non_finite(self):
+        """``inf`` 时长按未知处理（``_as_float`` 归零），不能污染合计。"""
+        message = _assistant(1, [_reasoning(1, math.inf), _reasoning(1, 10.0)])
+        stats = ElaChatSessionStats.fromMessages([message])
+        assert stats.reasoning_ms == pytest.approx(10.0)
+
+    def test_tool_fields_do_not_disturb_usage_aggregation(self):
+        """新字段与旧口径互不干扰：tokens / 成本 / last_activity 不变。"""
+        message = _assistant(
+            1,
+            [
+                _tool(1, "read"),
+                _step(
+                    1,
+                    ElaChatStats(prompt_tokens=100, completion_tokens=10, total_tokens=110),
+                ),
+            ],
+            created_at=5.0,
+        )
+        stats = ElaChatSessionStats.fromMessages([message])
+        assert stats.total_tokens == 110
+        assert stats.last_activity == 5.0
+        assert stats.tool_calls == 1
+
+
 class TestViewIntegration:
     def test_view_session_stats_and_ring_feed(self, qapp, make):
         """``view.sessionStats()`` 接真实消息 API；同一份口径可直接喂输入区圆环。"""
@@ -209,3 +333,23 @@ class TestViewIntegration:
             stats.total_tokens, 1_000_000, stats.total_cost_usd
         )
         assert chat.chatInput().contextUsagePercent() == 90
+
+    def test_view_session_stats_counts_real_tool_calls(self, qapp, make):
+        """真实 API 路径：``addToolCall`` / ``setToolCallResult`` 后工具统计到位。"""
+        chat = make(ElaChatWidget)
+        view = chat.chatView()
+        view.addMessage(ElaChatRoleType.User, "查一下")
+        messageId = view.addMessage(ElaChatRoleType.Assistant, "")
+        view.beginStep(messageId)
+        readId = view.addToolCall(messageId, "read", '{"path": "a.txt"}')
+        view.setToolCallResult(messageId, readId, "ok", ok=True)
+        grepId = view.addToolCall(messageId, "grep", '{"pattern": "x"}')
+        view.setToolCallResult(messageId, grepId, "boom", ok=False)
+
+        stats = view.sessionStats()
+        assert stats.tool_calls == 2
+        # 同一 step 里并发两个调用算一轮
+        assert stats.tool_rounds == 1
+        assert stats.tool_counts == {"read": 1, "grep": 1}
+        assert stats.tool_errors == 1
+        assert stats.tool_unsettled == 0

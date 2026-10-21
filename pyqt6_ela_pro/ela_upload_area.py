@@ -187,14 +187,17 @@ class ElaUploadArea(ElaThemeWidget):
             else:
                 self.fileRejected.emit(p, reason)
         if added:
-            self.filesSelected.emit(self._file_paths)
+            # 发**副本**：内部列表直接被槽持有，槽 append 一下就绕过了
+            # _validateFile 的数量 / 后缀校验（与 acceptedSuffixes() 返回
+            # 副本的纪律一致）
+            self.filesSelected.emit(list(self._file_paths))
             self.update()
 
     def _removeFile(self, index: int) -> None:
         if 0 <= index < len(self._file_paths):
             removed = self._file_paths.pop(index)
             self.fileRemoved.emit(removed)
-            self.filesSelected.emit(self._file_paths)
+            self.filesSelected.emit(list(self._file_paths))
             self.update()
 
     def _openFileDialog(self) -> None:

@@ -6,34 +6,6 @@ Extension components based on PyQt6ElaWidgetTools with custom styling.
 
 from ._version import __version__
 
-# ── Windows 7 DirectWrite 兼容补丁 ───────────────────────────────────────────
-# Qt 5 on Windows 7 has a known bug where DirectWrite's CreateFontFaceFromHDC()
-# fails for fonts like ElaAwesome / Microsoft YaHei / SimSun, spamming stderr
-# with "尚未实现" warnings. Filter them out at the Qt message handler level.
-import sys as _sys
-
-if _sys.platform == "win32":
-    try:
-        _win_ver = _sys.getwindowsversion()
-        _is_win7 = _win_ver.major == 6 and _win_ver.minor == 1
-    except Exception:
-        _is_win7 = False
-
-    if _is_win7:
-        from PyQt6.QtCore import qInstallMessageHandler  # noqa: E402
-
-        _saved_handler = qInstallMessageHandler(None)
-
-        def _directwrite_filter(msg_type, context, message):
-            if "CreateFontFaceFromHDC() failed" in message:
-                return
-            if _saved_handler:
-                _saved_handler(msg_type, context, message)
-            else:
-                _sys.stderr.write(message + "\n")
-
-        qInstallMessageHandler(_directwrite_filter)
-
 # ── Functions ────────────────────────────────────────────────────────────────
 
 from .tooltips import (

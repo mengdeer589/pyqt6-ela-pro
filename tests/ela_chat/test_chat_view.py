@@ -3,15 +3,18 @@
 from __future__ import annotations
 
 from _qthelpers import wait_until as _wait_until
-from PyQt6.QtCore import QPoint, QPointF, Qt
+from PyQt6.QtCore import QEvent, QObject, QPoint, QPointF, Qt
 from PyQt6.QtGui import QMouseEvent, QPalette, QWheelEvent
 from PyQt6.QtTest import QTest
 from PyQt6.QtWidgets import QTextEdit
-from PyQt6ElaWidgetTools import ElaThemeType
+from PyQt6ElaWidgetTools import ElaThemeType, eTheme
 
 from pyqt6_ela_pro.chat import (
     ElaChatReasoningStyleType,
     DISCLAIMER_TEXT,
+    ElaChatMessage,
+    ElaChatPart,
+    ElaChatPartKindType,
     ElaChatRoleType,
     ElaChatStats,
     ElaChatStatusType,
@@ -164,6 +167,57 @@ class TestStickToBottom:
         # 关掉贴底后不得再跟随：等 follow 定时器确定没被武装，视口应停在原处
         assert _wait_until(qapp, lambda: not view._follow_timer.isActive())
         assert bar.value() < bar.maximum() - 6
+
+
+class TestJumpButtonAppearance:
+    """「回到底部」浮动按钮用**实心强调色**（旧版透明底裸图标不够醒目）。"""
+
+    def _token(self, mode, slot):
+        return eTheme.getThemeColor(mode, slot).name()
+
+    def test_fill_uses_accent_and_state_slots(self, qapp, make):
+        view = make(ElaChatView)
+        button = view._jump_button
+        mode = eTheme.getThemeMode()
+
+        assert button._fill_color().name() == self._token(
+            mode, ElaThemeType.ThemeColor.PrimaryNormal
+        )
+
+        button.setDown(True)
+        assert button._fill_color().name() == self._token(
+            mode, ElaThemeType.ThemeColor.PrimaryPress
+        )
+        button.setDown(False)
+
+        # ``underMouse()`` 读的就是 WA_UnderMouse —— 离屏用例里直接置位即可
+        button.setAttribute(Qt.WidgetAttribute.WA_UnderMouse, True)
+        try:
+            assert button._fill_color().name() == self._token(
+                mode, ElaThemeType.ThemeColor.PrimaryHover
+            )
+        finally:
+            button.setAttribute(Qt.WidgetAttribute.WA_UnderMouse, False)
+
+    def test_theme_switch_uses_dark_accent(self, qapp, make):
+        view = make(ElaChatView)
+        button = view._jump_button
+
+        button._onThemeChanged(ElaThemeType.ThemeMode.Dark)
+
+        assert button._theme_mode == ElaThemeType.ThemeMode.Dark
+        assert button._fill_color().name() == self._token(
+            ElaThemeType.ThemeMode.Dark, ElaThemeType.ThemeColor.PrimaryNormal
+        )
+
+    def test_button_keeps_geometry_and_focus_policy(self, qapp, make):
+        view = make(ElaChatView)
+        button = view._jump_button
+
+        assert (button.width(), button.height()) == (32, 28)
+        # 浮动按钮不抢键盘焦点（Tab 归宿主）
+        assert button.focusPolicy() == Qt.FocusPolicy.NoFocus
+        assert button.accessibleName() == "回到底部"
 
 
 class TestAppearancePropagation:
@@ -325,6 +379,9 @@ class TestMessageActions:
 
         view.endMessage(messageId)
         assert bubble.footer().isHidden() is False
+        # 操作栏悬停显现：只有悬停（或显式 reveal）后才真正可见
+        assert bubble.actions().toolButton("regenerate").isVisibleTo(bubble) is False
+        bubble._set_actions_revealed(True)
         assert bubble.actions().toolButton("regenerate").isVisibleTo(bubble) is True
 
     def test_disclaimer_applies_to_existing_and_new_messages(self, qapp, make):
@@ -472,6 +529,56 @@ class TestBatchRemoveAndSync:
 
         assert messageId not in view._guards_by_message
         assert guards[0] not in view._scroll_guards
+
+    def test_snapshot_index_survives_removal(self, qapp, make):
+        """删消息后按下标索引仍命中正确快照（删除后索引必须重建）。"""
+        view = make(ElaChatView)
+        ids = [
+            view.addMessage(ElaChatRoleType.Assistant, f"回答 {index}")
+            for index in range(5)
+        ]
+        view.removeMessage(ids[1])
+        view.updateMessage(ids[3], "替换后的内容")
+
+        assert view.message(ids[3]).text == "替换后的内容"
+        assert [message.id for message in view.messages()] == [
+            ids[0],
+            ids[2],
+            ids[3],
+            ids[4],
+        ]
+        assert view._message_positions == {
+            message.id: index for index, message in enumerate(view.messages())
+        }
+
+    def test_bulk_snapshot_sync_after_deferred_restore(self, qapp, make):
+        """批量恢复：待同步快照单趟结算，正文与顺序都正确。"""
+        view = make(ElaChatView)
+        view.resize(640, 480)
+        view.show()
+        qapp.processEvents()
+        rows = []
+        for index in range(40):
+            message = ElaChatMessage(
+                id=index + 1, role=ElaChatRoleType.Assistant, status="done"
+            ).withParts(
+                [
+                    ElaChatPart(
+                        id=f"part-{index}",
+                        kind=ElaChatPartKindType.Text,
+                        text=f"回答 {index}",
+                        status=ElaChatStatusType.Done,
+                    )
+                ]
+            )
+            rows.append(message.toDict())
+
+        view.restoreMessages(rows, preserveIds=True)
+        snapshot = view.messages()
+        assert [message.text for message in snapshot] == [
+            f"回答 {index}" for index in range(40)
+        ]
+        assert [message.id for message in snapshot] == list(range(1, 41))
 
 
 class TestScrollBehavior:
@@ -764,6 +871,36 @@ class TestResizeReflowDeferred:
             assert view._content.minimumWidth() == frozen  # 拖动期间保持首帧宽度
         assert view._resize_frozen_width > 0
         assert _wait_until(qapp, lambda: view._resize_frozen_width == 0)
+
+    def test_freeze_keeps_current_width_instead_of_old(self, qapp, make):
+        """回归 #18：布局已按新宽排好时，冻结不得把内容拉回旧宽。
+
+        旧实现无条件 ``old_width - chrome``：内容先被布局链排到新宽，又被冻结
+        回旧宽（多一趟重排 + 一段旧宽闪现），解冻再排回来。这里直接盯内容
+        resize 序列：不允许出现「新宽 → 旧宽」的回缩。
+        """
+        view = self._view_with_messages(qapp, make)
+        view.setResizeReflowDeferred(True, minMessages=2, delayMs=30)
+
+        widths: list = []
+
+        class _Counter(QObject):
+            def eventFilter(self, obj, event):  # noqa: N802 (Qt 命名)
+                if obj is view._content and event.type() == QEvent.Type.Resize:
+                    widths.append((event.oldSize().width(), event.size().width()))
+                return False
+
+        counter = _Counter()
+        view._content.installEventFilter(counter)
+        view.resize(460, 260)
+        qapp.processEvents()
+
+        final_viewport = view._scroll.viewport().width()
+        assert widths, "resize 没有投递到内容控件"
+        # 旧实现会把内容拉回 old_width - chrome（本例 410，小于最终视口 450）
+        assert all(new >= final_viewport for _old, new in widths), widths
+        assert _wait_until(qapp, lambda: view._resize_frozen_width == 0)
+        assert view._content.width() == view._scroll.viewport().width()
 
     def test_below_threshold_not_frozen(self, qapp, make):
         view = self._view_with_messages(qapp, make)

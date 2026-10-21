@@ -495,3 +495,35 @@ class TestCookieJarExpiry:
         )
         assert embedder.get_cookie_header() == "k=v"
         embedder.deleteLater()
+
+
+class TestEmbedHwndFailureSignals:
+    """F24 回归：``_tryEmbedOnce`` 失败时宿主必须收到对外信号。
+
+    ``_tryEmbedOnce`` 失败（窗口在轮询与嵌入之间消失 / 容器创建失败）只记
+    ``logger.warning``、不发信号也不重启轮询 —— 不补发的话，只听
+    ``embedCompleted/embedError/embedTimeout`` 的宿主会**永久等待**。
+    """
+
+    def test_try_embed_failure_emits_error_and_completed(self, qapp):
+        embedder = _make_embedder()
+        try:
+            with patch.multiple(
+                "pyqt6_ela_pro.browser_embedder",
+                win32gui=MagicMock(),
+                win32con=MagicMock(),
+                win32process=MagicMock(),
+            ):
+                # 不真的尝试窗口，直接让单次嵌入失败（失败路径不发信号的原点）
+                embedder._tryEmbedOnce = lambda hwnd: False  # type: ignore[method-assign]
+                errors: list = []
+                completed: list = []
+                embedder.embedError.connect(errors.append)
+                embedder.embedCompleted.connect(completed.append)
+
+                embedder._embedHwnd(0x1234)
+        finally:
+            embedder.deleteLater()
+
+        assert errors and "嵌入浏览器窗口失败" in errors[0]
+        assert completed == [False]

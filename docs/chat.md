@@ -112,6 +112,10 @@
 - **会话统计（`view.sessionStats(limit=0)` → `ElaChatSessionStats`）** —
   计数（总 / 用户 / 助手）、当前上下文的四路词元（输入 / 输出 / 推理 /
   缓存读 + 写）与合计、使用率（给了 `limit` 时）、会话累计成本、最后活动时间；
+  以及**工具调用统计**：`tool_calls`（总次数）、`tool_rounds`（轮数 = 有工具
+  调用的步骤数，消息内按 `step` 去重）、`tool_errors` / `tool_aborted` /
+  `tool_unsettled`（按状态分档，`unsettled` = pending + running）、
+  `tool_counts`（工具名小写归一 -> 次数）、`reasoning_ms`（思考耗时合计）。
   口径对齐 opencode `getSessionContext`（取**最后一条有 tokens 的助手消息的
   最后一步**，不是全会话求和）。省事可以直接把 `total_tokens` /
   `total_cost_usd` 喂给上面的上下文圆环
@@ -125,7 +129,9 @@
   隐藏滚动条 / 高度贴合内容（文末空白不计入高度），公式 / Mermaid /
   代码高亮能力一致）、
   系统消息居中弱化；
-  贴底自动跟随（10px 判定）+ 上滚暂停 + 离底 >400px 才显示「回到底部」；
+  贴底自动跟随（10px 判定）+ 上滚暂停 + 离底 >400px 才显示「回到底部」
+  （浮动按钮为**实心强调色**底 + 对比色箭头，悬停 / 按下走 `PrimaryHover` /
+  `PrimaryPress` 槽位，跟随 `eTheme` 强调色与深浅主题）；
   展开 / 收起工具卡时暂停跟随（`holdFollow`），视口保持不动不跳动；
   嵌套滚动区（Markdown / 工具输出）防脱离；turn 间隔节奏；空态标题 /
   副标题 / 建议按钮列表；多步骤流式 API（`beginStep` / `beginText` /
@@ -173,7 +179,9 @@
    都不并入 `message.text`**：插话是旁注、摘要是历史的替代物，并进去等于算两遍）、思考段
   （`ReasoningBlock` 折叠块，或 `setReasoningStyle("inline")` 内联
   + `ThinkingRow` 思考行，逐段跟随位置）、每步工具面板（外层
-  `ToolGroupPanel`「工具调用 (N)」，运行中显示 `(已完成/总数)`；
+  `ToolGroupPanel`「工具调用 (N)」，运行中显示 `(已完成/总数)`；**折叠态
+  标题带一行摘要**：单调用「工具调用：工具名 · 关键参数」，多调用
+  「工具调用 (N) · 名称计数」，过长按宽度省略、悬停看全文；
   内部 `ToolCallCard` 默认折叠、pending 锁定、参数摘要、失败转错误卡；
   `ContextToolGroupCard` 自动归并 read/glob/grep/list 并显示计数）、
   步骤用量（`setStepStats` 追加 `StatsBadge`）、附件条
@@ -244,12 +252,28 @@
   orjson**（`pip install pyside6-ela-pro[all]`），否则标准库 json，两套后端
   同为紧凑 UTF-8、`allow_nan=False` 语义一致；读回
   `view.addMessageFromDict()`（保留 id）或 `view.restoreMessages(items,
-  preserveIds=True)`（批量渐进渲染，重号先校验后写入）；整会话
+  preserveIds=True)`（批量渐进渲染：先渲染最新的一屏，更早的消息在滚动到顶部时
+  分页补齐；`batchRenderFinished` 在首批排空时发出，未渲染消息的
+  `renderDeferred()` 仍为 True，数据用 `message()` 快照读）；整会话
   `view.exportSession(session, extra)` / `view.importSession(bundle,
   clear=True)`（bundle = session 元数据 + messages + 外观选项，clear 时保留
   原 id）；`ElaChatSessionInfo` 提供会话元数据快照 + `toDict/fromDict`；
   回合中途崩溃用 `ElaChatTurnJournal` 追加写事件流恢复（示例见
   `chat/__init__.py` docstring）
+- **历史会话虚拟化** — 批量恢复时首屏之外的消息只保存 `parts` 数据、
+  不建工具卡 / 思考块 / 查看器（`bubble.partsDeferred()` 为 True）；滚动到
+  附近时按页物化，也可显式 `view.materializeMessage(id)` /
+  `view.scrollToMessage(id)`。超过 24 步的超长消息只物化末尾 12 步，其余
+  折叠成「展开全部」按钮（`bubble.partsWindowed()` / `expandParts()`）；
+  完整 `parts` / `messages()` / 导出始终是全量数据。批量超过 80 条时连
+  **气泡壳**也延迟（只留等高占位，`bubble(id)` 对未物化消息返回 `None`），
+  滚远后已物化的消息会收回占位（`setShellVirtualizationEnabled` 可控）；
+  **超过 200 条改用 spacer 虚拟列表**（上下两个 spacer + 只保留视口附近的
+  气泡，不再逐条建占位，`setVirtualListEnabled` 可控）。物化按帧进行
+  （每帧最多 4 条、离视口最近的先建、窗口始终保持连续），跳转时优先铺满
+  视口；未物化区域画轻量骨架条（不建子控件），滚动时不会出现纯空白。
+  `view.setVirtualPartsEnabled(False)` 可关闭分段延迟物化（小会话 / 测试
+  需要逐控件断言时使用）
 - **多话题（架构 B）** — 组件是单话题视图，多话题按「一话题一 widget」放大：
   `ElaTabBar` 做话题列表 + `QStackedWidget` 切页（完整参考实现见
   `example/chat_session_page.py`：懒建页面 / 切页不中止生成 / 归档恢复 /

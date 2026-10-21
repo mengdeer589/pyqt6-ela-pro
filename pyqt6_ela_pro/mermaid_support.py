@@ -24,7 +24,7 @@ from __future__ import annotations
 
 import math
 import re
-import sys
+import warnings
 import weakref
 from collections import OrderedDict
 from typing import Callable, Optional
@@ -410,6 +410,11 @@ class ElaMermaidRenderer(QObject):
         # 线程同步阻塞到当前渲染结束 —— mermaidx 是进程内QuickJS 跑真实
         # mermaid.js，大图渲染是秒级到十秒级，不是「卡一下」。
         # 改成独立对象 + ``_cleanup`` 显式收，走「有上限的等待」而不是无限等。
+        #
+        # 已知取舍：宿主走 C++ 父链销毁（``deleteChildren`` 把渲染器带走）时，
+        # Python 包装器被回收的瞬间 ``~QThreadPool`` 仍会等到在途渲染结束才
+        # 返回（弱引用只保证收尾不碰死对象，缩短不了那一次渲染）。要彻底避免
+        # 得把池提升为进程级；常规路径用 ``deleteLater()`` 已是有界等待。
         self._pool = QThreadPool()
         self._pool.setMaxThreadCount(2)
         self._renderedInternal.connect(self._on_rendered)
@@ -620,10 +625,12 @@ class ElaMermaidRenderer(QObject):
         self._last_error = error or None
         if error and error not in self._logged_errors:
             self._logged_errors.add(error)
-            print(
-                f"[ElaMermaidRenderer] Mermaid 渲染失败：{error}",
-                file=sys.stderr,
-                flush=True,
+            # 库内告警走 warnings（宿主管不了 stdout/stderr；测试 / 无控制台
+            # 环境下也看不到），同一错误只提示一次
+            warnings.warn(
+                f"Mermaid 渲染失败：{error}",
+                RuntimeWarning,
+                stacklevel=2,
             )
         if self._cache_cap > 0:
             self._cache[key] = image if image is not None else _FAILED

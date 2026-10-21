@@ -71,8 +71,8 @@ class TestElaMarkdownViewerTaskList:
         v.setMarkdown("- [ ] todo\n- [x] done\n- [X] upper")
 
         text = v.document().toPlainText()
-        assert "☐" in text
-        assert text.count("☑") == 2
+        assert "□" in text
+        assert text.count("■") == 2
         v.deleteLater()
 
     def test_task_marker_inside_code_fence_untouched(self):
@@ -81,7 +81,7 @@ class TestElaMarkdownViewerTaskList:
 
         code = "".join(f.text() for f in _fragments(v) if f.charFormat().fontFamilies())
         assert "[x] not a task" in code
-        assert "☑" not in v.document().toPlainText()
+        assert "■" not in v.document().toPlainText()
         v.deleteLater()
 
 
@@ -345,11 +345,11 @@ class TestExampleSamples:
         v.setMarkdown(_MARKDOWN_ALL)
 
         text = v.document().toPlainText()
-        assert "☑" in text and "☐" in text  # 任务列表
+        assert "■" in text and "□" in text  # 任务列表
         for label in ("提示", "技巧", "重要", "警告", "注意"):  # 五种 Callout
             assert label in text
         assert "[^design]" not in text and "脚注定义行" in text  # 脚注
-        assert "▸ 展开其余" in text  # 超长代码折叠
+        assert "+ 展开其余" in text  # 超长代码折叠
         assert "[图片]" in text  # 远程图片拦截占位
         assert "Mermaid 渲染中…" not in text  # 禁用后回退代码卡片
 

@@ -14,10 +14,14 @@ AGENTS.md 已经禁掉了用 PowerShell 的 ``Get-Content`` / ``Set-Content`` �
 - 但仓库的注释密度极高（AGENTS.md 本身就是一整面中文），一个词中间突然冒出三个替换
   字符，读者根本看不出原文写的是什么，也就无从判断这段话还成不成立。
 
-所以值得钉住。判据就两条，都不依赖任何库：
+所以值得钉住。判据三条，都不依赖任何库：
 
 1. 文件必须是**合法 UTF-8**（``bytes.decode("utf-8")`` 不抛）；
-2. 解码后的文本里**不含 U+FFFD**（替换字符只可能来自写坏，不是源码里真有的字符）。
+2. 解码后的文本里**不含 U+FFFD**（替换字符只可能来自写坏，不是源码里真有的字符）；
+3. 不存在**连续 ≥2 个 ASCII 问号**（丢失型损坏的典型形态）——「写入侧把非 ASCII
+   丢成 ``?``」这种损坏仍是合法 UTF-8，前两条扫不到（2026-10 实测：9 个文件 23 行
+   注释 / 断言消息的中文被逐字替换，全量测试全绿）。确属正常用法（例如文案里真
+   要写两个问号）在该行加 ``# noqa: encoding-guard`` 豁免。
 
 另外单独盯一个写坏时最容易造成**静默失效**的变体：ASCII 标识符里的字符被改掉。
 本会话实测 ``PyQt6ElaWidgetTools`` 被写成 ``Pyqt5ElaWidgetTools`` —— 大小写一换，
@@ -32,11 +36,17 @@ import pathlib
 
 import pytest
 
-ROOTS = ("pyqt6_ela_pro", "tests", "example")
+ROOTS = ("pyqt6_ela_pro", "tests", "example", "tools", "llm_test")
 SKIP_DIRS = {"__pycache__", ".venv", "build", "dist", ".git"}
+
+#: 「丢失型损坏」的豁免标记（写在行尾）
+NOQA_MARK = "noqa: encoding-guard"
 
 #: 替换字符。**本文件不能出现它的字面量**（否则守卫先把自己拦下来）。
 REPLACEMENT = chr(0xFFFD)
+
+#: 「丢失型损坏」的连续问号形态（运行时构造，避免本文件自扫自）。
+LOST_RUN = "?" * 2
 
 
 def _python_files() -> list:
@@ -80,3 +90,10 @@ def test_source_is_clean_utf8(path: pathlib.Path):
             f"{path.name} 含替换字符 U+FFFD（第 {index} 个字符处）——写入时被写坏了："
             f"{ascii(text[max(0, index - 40) : index + 20])}"
         )
+    for number, line in enumerate(text.splitlines(), start=1):
+        if LOST_RUN in line and NOQA_MARK not in line:
+            pytest.fail(
+                f"{path.name}:{number} 含连续问号（疑似非 ASCII 被替换成 '?' 的"
+                f"丢失型损坏，合法 UTF-8 也扫不出来）：{ascii(line.strip()[:90])}\n"
+                f"确属正常用法请在该行行尾加 `# {NOQA_MARK}`。"
+            )

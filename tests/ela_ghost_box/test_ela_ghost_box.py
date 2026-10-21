@@ -387,3 +387,64 @@ class TestElaGhostBoxLifecycle:
         box.hidePopup()
         box.deleteLater()
         qapp.processEvents()
+
+
+class TestElaGhostBoxPopupGeometry:
+    """底栏在 C++ 动画结束后插入，且不得把 view 压扁 / 让列表跳一下。"""
+
+    def test_footer_does_not_move_view(self, qapp, box):
+        box.setFixedWidth(250)
+        box.addGroup("Anthropic")
+        box.addItems(["Claude 3.7 Sonnet", "Claude 3.5 Haiku"])
+        box.addGroup("OpenAI")
+        box.addItems(["GPT-4o", "o3", "GPT-4.1"])
+        box.addPopupFooterButton("管理模型", key="manage")
+        box.setMaxVisibleItems(10)
+        box.show()
+        qapp.processEvents()
+        box.showPopup()
+        # 动画起点必须在 processEvents 之前取（之后动画已经往前走了）。
+        start_y = box.view().y()
+        qapp.processEvents()
+
+        container = box.findChild(QWidget, "ElaComboBoxContainer")
+        assert container is not None
+        view = box.view()
+        footer = box.popupFooter()
+        layout = container.layout()
+        assert layout is not None
+
+        rows = min(box.count(), box.maxVisibleItems())
+        margins = layout.contentsMargins()
+        contents = container.contentsRect()
+        expected_x = contents.x() + margins.left()
+        expected_y = contents.y() + margins.top() + 40
+        expected_w = contents.width() - margins.left() - margins.right()
+        expected_h = rows * 35
+        assert start_y == expected_y - expected_h
+        assert (view.x(), view.width()) == (expected_x, expected_w)
+        assert view.height() == expected_h
+        assert layout.indexOf(footer) == -1
+        assert footer.isVisible() is False
+
+        assert wait_until(
+            qapp,
+            lambda: layout.indexOf(footer) >= 0 and footer.isVisible(),
+            timeout_ms=2500,
+            use_qwait=True,
+        )
+        assert (view.x(), view.y(), view.width(), view.height()) == (
+            expected_x,
+            expected_y,
+            expected_w,
+            expected_h,
+        )
+        assert container.height() == expected_h + 8 + 40 + footer.height()
+
+        box.hidePopup()
+        wait_until(
+            qapp,
+            lambda: not container.isVisible(),
+            timeout_ms=2000,
+            use_qwait=True,
+        )

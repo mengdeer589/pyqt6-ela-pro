@@ -106,7 +106,7 @@ class TestListAndMarkTheming:
       ``context.palette.Text`` 绘制、字符格式染不上（``drawListItem``），
       结果是「文字变色、符号还是原色」，浅色 opencode 下叠出整页橙黄；
     - 现在：列表**文字**固定正文色，``list`` 语义只服务任务勾选框
-      （``☑ / ☐`` 是文本字形、能染色）。
+      （``■ / □`` 是文本字形、能染色）。
     """
 
     SOURCE = "- 无序项\n1. 有序项\n- [x] 任务项\n\n普通正文 ==高亮==\n"
@@ -141,11 +141,11 @@ class TestListAndMarkTheming:
         block = doc.begin()
         found = []
         while block.isValid():
-            if block.textList() is not None and "☑" in block.text():
+            if block.textList() is not None and "■" in block.text():
                 iterator = block.begin()
                 while not iterator.atEnd():
                     fragment = iterator.fragment()
-                    if fragment.isValid() and fragment.text().strip() == "☑":
+                    if fragment.isValid() and fragment.text().strip() == "■":
                         found.append(fragment.charFormat().foreground().color().name())
                     iterator += 1
             block = block.next()
@@ -173,7 +173,7 @@ class TestListAndMarkTheming:
             v.setMarkdown("- [x] 项")
             assert v.setMarkdownTheme("unit-test-list") is True
             # list 色现在只落在勾选框字形上；文字不再被它染色
-            assert _fragment_color(v, "☑") == "#0f0f0f"
+            assert _fragment_color(v, "■") == "#0f0f0f"
             assert _fragment_color(v, "项") != "#0f0f0f"
             v.deleteLater()
         finally:

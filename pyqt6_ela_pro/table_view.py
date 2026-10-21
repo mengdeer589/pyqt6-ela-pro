@@ -272,23 +272,34 @@ class ElaDataTable(ElaTableView):
         else:
             self._model.sort(column, order)
 
+    #: 列类型判定的非空采样上限
+    _TYPE_SAMPLE = 20
+
     def _get_column_type(self, column: int) -> str:
-        """取前 20 个非空样本判定列类型：``numeric`` / ``chinese`` / ``string``。"""
+        """取前 20 个**非空**样本判定列类型：``numeric`` / ``chinese`` / ``string``。
+
+        空单元格**不占采样名额、也不参与判定**（旧实现把空值算进名额，一个
+        空值就让数字列掉进 ``string`` 分支 —— 排序退化成字典序
+        ``'10' < '9'``，而 ``_sort_numeric`` 专门为「含空值」写好的
+        「空值排最后」永远不会被走到）。
+        """
         numeric_count = 0
         chinese_count = 0
-        sample_size = min(20, self._model.rowCount())
-
-        for row in range(sample_size):
+        checked = 0
+        for row in range(self._model.rowCount()):
+            if checked >= self._TYPE_SAMPLE:
+                break
             item = self._model.item(row, column)
-            if item:
-                text = item.text().strip()
-                if text:
-                    if self._is_numeric(text):
-                        numeric_count += 1
-                    elif self._contains_chinese(text):
-                        chinese_count += 1
+            text = item.text().strip() if item else ""
+            if not text:
+                continue
+            checked += 1
+            if self._is_numeric(text):
+                numeric_count += 1
+            elif self._contains_chinese(text):
+                chinese_count += 1
 
-        if numeric_count == sample_size and sample_size > 0:
+        if checked > 0 and numeric_count == checked:
             return "numeric"
         if chinese_count > 0:
             return "chinese"

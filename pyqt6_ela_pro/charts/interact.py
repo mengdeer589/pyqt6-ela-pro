@@ -26,7 +26,10 @@
 
 from __future__ import annotations
 
+import math
+
 from PyQt6.QtCore import QEvent, QObject, QPointF, QRectF, Qt, QTimer, pyqtSignal
+from PyQt6ElaWidgetTools import ElaIconButton, ElaIconType
 from PyQt6.QtGui import (
     QColor,
     QFontMetricsF,
@@ -34,13 +37,16 @@ from PyQt6.QtGui import (
     QPainter,
     QPainterPath,
     QPen,
+    QPolygonF,
 )
 
+from .._internal import is_deleted
 from .._motion import start_idle_loop
+from .._styles import coerceElaIcon
 from ._tokens import T
 from ._utils import clamp as _clamp
 from ._utils import to_float as _to_float
-from ._utils import warn_once
+from ._utils import warn_key, warn_once
 from .axes import GridCoord, chartFont, formatValue, niceTicks
 from .core import parseDataPoint, registerComponent
 
@@ -104,6 +110,8 @@ class DataZoomComponent(QObject):
         # 完整轴数据缓存（首次布局时捕获）
         self._full_cats = None  # category 轴完整类别
         self._full_range = None  # value 轴 (vmin, vmax)
+        #: 上一次写进 category 轴的 (i0, i1) 窗口（apply 幂等跳过用）
+        self._applied_cats_window = None
         # 拖拽状态：("start"|"end"|"move"|"pan", last_x)
         self._drag = None
         self._track = QRectF()
@@ -144,6 +152,29 @@ class DataZoomComponent(QObject):
             return coord.x_axis
         return None
 
+    def captureExtent(self) -> None:
+        """重捕「全量范围」（``_rebuild`` 在 ``setSeries`` 之后调用，幂等）。
+
+        ``apply()`` 的窗口是相对**全量范围**算的，而全量范围原先只在首次
+        ``apply()`` 时懒捕一次 —— 「空数据起步」的图表会把 ``0~1`` 当全量钉死：
+        数据到了、``setSeries`` 也重算了轴范围，但 dataZoom 随即又把它改回
+        ``0~1``（默认滚轮缩放组件跨 ``setOption`` 存活，必中；症状是「生成 30 万点
+        后图里只有两个点、缩放也没反应」）。数据增长（``appendData`` / 周期
+        ``setOption``）同理。
+
+        类别轴用 ``_all_categories``（全量类别）—— ``categories`` 此时可能已被
+        窗口替换成子集。
+        """
+        axis = self._axis()
+        if axis is None:
+            return
+        if axis.type == "category":
+            full = list(getattr(axis, "_all_categories", None) or axis.categories or [])
+            if full:
+                self._full_cats = full
+        else:
+            self._full_range = (float(axis.vmin), float(axis.vmax))
+
     def _capture_full(self, axis) -> None:
         if axis.type == "category":
             if self._full_cats is None:
@@ -168,7 +199,13 @@ class DataZoomComponent(QObject):
             i1 = int(-(-end / 100.0 * n // 1))  # ceil
             i0 = _clamp(i0, 0, n - 1)
             i1 = _clamp(max(i1, i0 + 1), 1, n)
-            axis.categories = list(full[i0:i1])
+            # 幂等快速路径：窗口没变、且轴内容仍是上一次写的窗口时跳过 ——
+            # 每次布局 apply 会跑两次（applyWindow + 组件 layout），而
+            # 重建类目列表在 1M 个字符串上是 O(n) 复制（实测是 category
+            # 1M 帧的头号开销）。len 检查兜住外部改写 categories 的情况。
+            if (i0, i1) != self._applied_cats_window or len(axis.categories) != i1 - i0:
+                axis.categories = full[i0:i1]  # 切片本身就是新 list，别再包一层
+                self._applied_cats_window = (i0, i1)
         else:
             if self._full_range is None:
                 return
@@ -198,6 +235,17 @@ class DataZoomComponent(QObject):
         return 0.0
 
     # -- 布局 / 绘制（slider） ---------------------------------------------
+    def applyWindow(self) -> None:
+        """布局**前置**钩子：把窗口写回坐标轴（``_layout_all`` 在排系列前调用）。
+
+        顺序是硬要求：系列按当前轴窗口采样（``_window``）、按窗口做
+        坐标映射。放在组件 ``layout()``（系列之后）里 apply 会得到「轴已缩放、
+        曲线仍是**旧窗口**的采样」的错配 —— 而那一帧结束时布局缓存键（含
+        dataZoom 窗口）已经命中，下一次布局直接 early-return，错配**永久留下**，
+        表现就是「缩放后曲线变稀、窗口里只剩几个点」。
+        """
+        self.apply()
+
     def layout(self, rect: QRectF) -> None:
         if self.has_slider:
             h = self.SLIDER_H
@@ -267,6 +315,33 @@ class DataZoomComponent(QObject):
         p.restore()
 
     # -- inside 交互 ---------------------------------------------------------
+    def _inside_move_enabled(self) -> bool:
+        """``inside`` 的拖拽平移是否可用（ECharts ``moveOnMouseMove``，默认 True）。
+
+        实例属性优先：``ElaChartWidget.setDragMode`` 用它把同一个拖拽手势在
+        「平移 / 刷选」之间切换；默认开启的那个滚轮缩放组件则显式关掉它
+        （滚轮缩放不该顺带把拖拽也拿走）。
+        """
+        override = getattr(self, "moveOnMouseMove", None)
+        if isinstance(override, bool):
+            return override
+        for entry in self.entries:
+            value = entry.get("moveOnMouseMove")
+            if isinstance(value, bool):
+                return value
+        return True
+
+    def _inside_wheel_enabled(self) -> bool:
+        """``inside`` 的滚轮缩放是否可用（ECharts ``zoomOnMouseWheel``，默认 True）。"""
+        override = getattr(self, "zoomOnMouseWheel", None)
+        if isinstance(override, bool):
+            return override
+        for entry in self.entries:
+            value = entry.get("zoomOnMouseWheel")
+            if isinstance(value, bool):
+                return value
+        return True
+
     def _inside_enabled(self) -> bool:
         return (
             self.has_inside
@@ -316,6 +391,13 @@ class DataZoomComponent(QObject):
         center = (float(start) + float(end)) / 2.0
         start = _clamp(center - span / 2.0, 0.0, max(0.0, 100.0 - span))
         return start, start + span
+
+    def reset_window(self) -> bool:
+        """把缩放窗口还原到全量（``resetView`` / 双击复位用）。"""
+        started, ended = self.start, self.end
+        return self.applyAction({"type": "dataZoom", "start": 0, "end": 100}) or (
+            started != 0.0 or ended != 100.0
+        )
 
     def applyAction(self, payload: dict) -> bool:
         """``dispatchAction({"type": "dataZoom", ...})``：
@@ -425,11 +507,17 @@ class DataZoomComponent(QObject):
             return False
         try:
             pos = (
-                event.position() if hasattr(event, "position") else QPointF(event.position().toPoint())
+                event.position()
+                if hasattr(event, "position")
+                else QPointF(event.position().toPoint())
             )
         except Exception:  # noqa: BLE001
             pos = QPointF()
         if not self._wheel_hit(pos):
+            return False
+        # ``zoomOnMouseWheel`` 只管 plot 内的滚轮；slider 轨道上滚轮是滑块自身
+        # 的行为（ECharts 同款），不受该键影响。
+        if self._plot().contains(pos) and not self._inside_wheel_enabled():
             return False
         try:
             self._wheel_zoom(event.angleDelta().y(), pos)
@@ -494,10 +582,15 @@ class DataZoomComponent(QObject):
 
     # -- 鼠标钩子 ------------------------------------------------------------
     def _brush_active(self) -> bool:
-        """option 同时配置 brush 时返回 True（左键拖拽让位给刷选）。"""
-        return any(
-            getattr(c, "optionKey", "") == "brush" for c in self.chart.components
-        )
+        """brush 是否正在接管拖拽（``setDragMode`` 按模式开关它的 ``enabled``）。
+
+        只看「组件存在」会让 ``setDragMode("pan")`` 失效：dataZoom 会永远给刷选
+        让位，而刷选自己又因为 ``enabled=False`` 不起手 —— 拖拽两边都不响应。
+        """
+        for comp in self.chart.components:
+            if getattr(comp, "optionKey", "") == "brush":
+                return bool(getattr(comp, "enabled", True))
+        return False
 
     def onMousePress(self, pos: QPointF) -> bool:
         if self.has_slider and not self._track.isNull():
@@ -519,6 +612,7 @@ class DataZoomComponent(QObject):
                 return True
         if (
             self._inside_enabled()
+            and self._inside_move_enabled()
             and not self._brush_active()
             and self._plot().contains(pos)
         ):
@@ -605,6 +699,10 @@ class BrushComponent(QObject):
         self.opt = dict(opt or {})
         self._rect = None  # 当前选框 QRectF（None 表示无选区）
         self._anchor = None  # 拖拽起点
+        #: lasso（套索）轨迹点；``brush.type == "lasso"`` 时使用
+        self._poly = []
+        #: 是否接管拖拽（``setDragMode`` 用；``False`` 时 onMouse* 一律放行）
+        self.enabled = True
         self.selected_items = []
 
     def _plot(self) -> QRectF:
@@ -613,35 +711,65 @@ class BrushComponent(QObject):
             return coord.plot
         return QRectF()
 
+    def brush_type(self) -> str:
+        """刷选形态：``rect``（默认，框选）/ ``lasso``（套索，Plotly 同款）。"""
+        raw = self.opt.get("type", self.opt.get("brushType", "rect"))
+        name = str(raw or "rect").strip().lower()
+        return "lasso" if name in ("lasso", "free", "polygon") else "rect"
+
     def onMousePress(self, pos: QPointF) -> bool:
+        if not self.enabled:
+            return False
         plot = self._plot()
         if plot.isNull() or not plot.contains(pos):
+            # 绘图区外按下：把已有选框收掉（框选是「框不消失」，但点出去该让它走）。
+            # 返回 False 不消费事件，别的组件 / 宿主照常拿到这次按下。
+            if self._rect is not None or self._poly:
+                self.clear()
             return False
         self._anchor = QPointF(pos)
+        self._poly = [QPointF(pos)]
         self._rect = QRectF(pos, pos)
         self.selected_items = []
         self.chart.update()
         return True
 
     def onMouseMove(self, pos: QPointF) -> bool:
-        if self._anchor is None:
+        if not self.enabled or self._anchor is None:
             return False
-        self._rect = QRectF(self._anchor, pos).normalized()
+        if self.brush_type() == "lasso":
+            # 采样点距 <2px 不记，套索轨迹不必要地密集会拖慢 containsPoint
+            if not self._poly or (
+                math.hypot(self._poly[-1].x() - pos.x(), self._poly[-1].y() - pos.y())
+                >= 2.0
+            ):
+                self._poly.append(QPointF(pos))
+            self._rect = QRectF(self._anchor, pos).normalized()
+        else:
+            self._rect = QRectF(self._anchor, pos).normalized()
         self.chart.update()
         return True
 
     def onMouseRelease(self, pos: QPointF) -> bool:
-        if self._anchor is None:
+        if not self.enabled or self._anchor is None:
             return False
         self._rect = QRectF(self._anchor, pos).normalized()
+        if self.brush_type() == "lasso":
+            self._poly.append(QPointF(pos))
         self._anchor = None
-        if (
+        too_small = (
             self._rect is not None
             and self._rect.width() < 3
             and self._rect.height() < 3
-        ):
-            self._rect = None  # 视为单击：清除选区
-            self.selected_items = []
+        ) or (self.brush_type() == "lasso" and len(self._poly) < 4)
+        if too_small:
+            self.clear()  # 视为单击：清除选区
+        elif str(getattr(self.chart, "_drag_mode", "")) == "zoom":
+            # 框选缩放（Plotly ``dragmode="zoom"``）：选框是**一次性手势** ——
+            # 缩放落地后主动消失；「框选」（select / lasso）才把选框与选中集
+            # 留在画面上（直到下一次点击 / 重新框选）。
+            self._zoom_to_rect()
+            self.clear()
         else:
             self._collect()
         self.chart.update()
@@ -649,11 +777,57 @@ class BrushComponent(QObject):
             self.selected.emit(list(self.selected_items))
         return True
 
+    def clear(self) -> None:
+        """清除选框与选中集（框选缩放完成后 / 宿主 ``brush clear`` 动作）。"""
+        self._rect = None
+        self._poly = []
+        self.selected_items = []
+        self.chart.update()
+
+    def _zoom_to_rect(self) -> None:
+        """把当前选框映射成 dataZoom 窗口（``dragmode="zoom"``）。"""
+        coord = self.chart.primaryCoord()
+        rect = self._rect
+        if rect is None or not isinstance(coord, GridCoord) or rect.width() <= 0:
+            return
+        try:
+            left = coord.invertX(QPointF(rect.left(), rect.center().y()))
+            right = coord.invertX(QPointF(rect.right(), rect.center().y()))
+        except Exception:
+            return
+        if left is None or right is None:
+            return
+        axis = coord.x_axis
+        if axis.type == "category":
+            span = max(1, len(axis.categories) - 1)
+            lo, hi = min(left, right), max(left, right)
+            start = max(0.0, lo / span * 100.0)
+            end = min(100.0, hi / span * 100.0)
+        else:
+            total = axis.vmax - axis.vmin
+            if total <= 0:
+                return
+            lo, hi = min(left, right), max(left, right)
+            start = max(0.0, (lo - axis.vmin) / total * 100.0)
+            end = min(100.0, (hi - axis.vmin) / total * 100.0)
+        if end - start < 0.5:
+            return
+        self.chart.dispatchAction(
+            {"type": "dataZoom", "start": start, "end": end, "fromBrush": True}
+        )
+
     def _collect(self) -> None:
         """统计选框内的数据点（经 parseDataPoint + coord 映射，通用各系列）。"""
         self.selected_items = []
         coord = self.chart.primaryCoord()
-        if self._rect is None or not isinstance(coord, GridCoord):
+        polygon = None
+        if self.brush_type() == "lasso":
+            if len(self._poly) < 3:
+                return
+            polygon = QPolygonF([QPointF(pt) for pt in self._poly])
+        elif self._rect is None:
+            return
+        if not isinstance(coord, GridCoord):
             return
         for r in self.chart.seriesRenderers:
             if not r.visible:
@@ -671,7 +845,12 @@ class BrushComponent(QObject):
                     pt = coord.mapPoint(x, y)
                 except Exception:
                     continue
-                if self._rect.contains(pt):
+                inside = (
+                    polygon.containsPoint(pt, Qt.FillRule.OddEvenFill)
+                    if polygon is not None
+                    else self._rect.contains(pt)
+                )
+                if inside:
                     self.selected_items.append(
                         {"series": r.name, "dataIndex": i, "value": y, "x": x}
                     )
@@ -699,10 +878,29 @@ class BrushComponent(QObject):
             out.append((pt, r.color()))
         return out
 
+    def _paint_lasso(self, p: QPainter) -> None:
+        """套索轨迹：半透明填充 + 描边（矩形刷选的同一套强调色语义）。"""
+        accent = QColor(T("color.primary"))
+        fill = QColor(accent)
+        fill.setAlpha(30)
+        stroke = QColor(accent)
+        stroke.setAlpha(140)
+        polygon = QPolygonF([QPointF(pt) for pt in self._poly])
+        p.save()
+        p.setBrush(fill)
+        pen = QPen(stroke, 1.2)
+        pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
+        p.setPen(pen)
+        p.drawPolygon(polygon)
+        p.restore()
+
     def paint(self, p: QPainter, anim_t: float = 1.0) -> None:
         # 选中点高亮（无论选框是否仍在，选中集持续可见）
         if self.selected_items:
             self._paint_highlight(p)
+        if self.brush_type() == "lasso" and len(self._poly) >= 2:
+            self._paint_lasso(p)
+            return
         if self._rect is None or self._rect.isNull():
             return
         plot = self._plot()
@@ -1188,27 +1386,61 @@ class ChartTimeline(QObject):
 
 
 class ToolboxComponent:
-    """右上角图标按钮组（自绘小图标）。
+    """右上角图标按钮组（**真实 ``ElaIconButton`` 子控件**，不再自绘）。
 
     option::
 
-        "toolbox": {"feature": ["saveAsImage", "dataZoom", "restore"]}
+        "toolbox": {"feature": ["saveAsImage", "saveAsSvg", "dataZoom", "restore", "zoomIn", "zoomOut"]}
 
-    - saveAsImage：``chart.grab()`` 后经 QFileDialog 存 PNG；
-      offscreen / 对话框不可用时降级保存到当前目录 ``chart_export.png``；
+    - saveAsImage / saveAsSvg：``chart.saveImage()`` / ``saveImage(format="svg")``；
     - restore：重置全部 dataZoom 组件窗口 + 恢复所有系列显隐；
-    - dataZoom：切换 inside 缩放可用状态（``chart._dataZoomEnabled``）。
+    - dataZoom：切换 inside 缩放可用状态（``chart._dataZoomEnabled``，按钮
+      ``IsSelected`` 反映「缩放开着」）；
+    - zoomIn / zoomOut：``chart.zoomStep(0.7)`` / ``chart.zoomStep(1 / 0.7)``。
 
-    可注入 ``comp.on_action = fn(name)`` 回调观察点击。
+    按钮是 chart 的子控件：悬停 / 按下 / 禁用 / 深浅主题全交给 ``ElaIconButton``
+    （图标来自 Ela 图标字体，配色跟 ``eTheme``），组件只负责摆放与动作分发 ——
+    ``layout()`` 每帧幂等 ``move()``，不重建控件。可注入
+    ``comp.on_action = fn(name)`` 回调观察点击。
     """
 
     optionKey = "toolbox"
 
-    #: 按钮边长与间距
-    BTN = 24.0
-    GAP = 6.0
+    #: 按钮边长 / 间隙 / 图标像素尺寸 / 距绘图区右上角的边距
+    BTN = 26.0
+    GAP = 4.0
+    ICON_PX = 15
+    MARGIN = 8.0
+    TOP = 4.0
 
-    _KNOWN = ("saveAsImage", "dataZoom", "restore")
+    _KNOWN = (
+        "saveAsImage",
+        "saveAsSvg",
+        "dataZoom",
+        "restore",
+        "zoomIn",
+        "zoomOut",
+    )
+
+    #: 功能 → Ela 图标（``ElaIconType.IconName``）
+    ICONS = {
+        "saveAsImage": ElaIconType.IconName.Image,
+        "saveAsSvg": ElaIconType.IconName.FileVector,
+        "dataZoom": ElaIconType.IconName.MagnifyingGlass,
+        "restore": ElaIconType.IconName.ArrowRotateRight,
+        "zoomIn": ElaIconType.IconName.MagnifyingGlassPlus,
+        "zoomOut": ElaIconType.IconName.MagnifyingGlassMinus,
+    }
+
+    #: 功能 → 提示文案（``toolTip`` 与 ``accessibleName`` 共用）
+    TIPS = {
+        "saveAsImage": "导出 PNG",
+        "saveAsSvg": "导出 SVG 矢量图",
+        "dataZoom": "缩放开关",
+        "restore": "还原视图",
+        "zoomIn": "放大",
+        "zoomOut": "缩小",
+    }
 
     def __init__(self, chart, opt):
         self.chart = chart
@@ -1224,28 +1456,96 @@ class ToolboxComponent:
         self.features = [n for n in names if n in self._KNOWN] or list(self._KNOWN)
         #: 动作回调（可注入）：fn(feature_name)
         self.on_action = None
-        #: 最近一次 saveAsImage 的保存路径
+        #: 最近一次 saveAsImage / saveAsSvg 的保存路径
         self.last_saved = None
-        self._buttons = []  # [(name, QRectF)]
-
-    # -- 布局 ----------------------------------------------------------------
-    def layout(self, rect: QRectF) -> None:
+        #: 几何镜像 ``[(name, QRectF)]``（与子控件同步；定位与测试用）
         self._buttons = []
-        n = len(self.features)
-        x = rect.right() - 8 - n * self.BTN - (n - 1) * self.GAP
-        y = rect.top() + 4
+        #: ``{name: ElaIconButton}``（chart 的子控件）
+        self._widgets: dict = {}
+
+    # -- 布局 ---------------------------------------------------------------
+    def layout(self, rect: QRectF) -> None:
+        """把按钮摆到绘图区右上角（每次布局幂等重放，不重建控件）。"""
+        self._buttons = []
+        count = len(self.features)
+        if count <= 0:
+            return
+        enabled = bool(
+            getattr(self.chart, "isInteractionEnabled", lambda _f: True)("toolbox")
+        )
+        zoom_on = bool(getattr(self.chart, "_dataZoomEnabled", True))
+        x = rect.right() - self.MARGIN - count * self.BTN - (count - 1) * self.GAP
+        y = rect.top() + self.TOP
         for name in self.features:
             self._buttons.append((name, QRectF(x, y, self.BTN, self.BTN)))
+            button = self._ensure_button(name)
+            if button is not None:
+                button.move(int(round(x)), int(round(y)))
+                button.setVisible(True)
+                button.setEnabled(enabled)
+                if name == "dataZoom":
+                    button.setIsSelected(zoom_on)
             x += self.BTN + self.GAP
 
     def buttonRect(self, name: str) -> QRectF:
-        """指定功能按钮的矩形（测试定位用，未找到返回空矩形）。"""
+        """指定功能按钮的矩形（未找到返回空矩形）。"""
         for n, r in self._buttons:
             if n == name:
                 return QRectF(r)
         return QRectF()
 
-    # -- 动作 ----------------------------------------------------------------
+    def buttonWidget(self, name: str):
+        """指定功能的 ``ElaIconButton`` 子控件（未创建返回 ``None``）。"""
+        return self._widgets.get(name)
+
+    def _ensure_button(self, name: str):
+        button = self._widgets.get(name)
+        if button is not None and not is_deleted(button):
+            return button
+        icon = self.ICONS.get(name)
+        if icon is None:
+            return None
+        try:
+            button = ElaIconButton(
+                coerceElaIcon(icon),
+                self.ICON_PX,
+                int(round(self.BTN)),
+                int(round(self.BTN)),
+                self.chart,
+            )
+        except Exception as exc:  # 图标字体 / 绑定异常不拖垮整图
+            warn_once(
+                warn_key("toolbox-icon", name, type(exc).__name__),
+                f"工具条按钮创建失败（{name}）: {exc!r}",
+            )
+            return None
+        # 图表是「画布型」控件：按钮不参与 Tab 焦点链（键盘交互归宿主）
+        button.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        button.setToolTip(self.TIPS.get(name, name))
+        button.setAccessibleName(self.TIPS.get(name, name))
+        button.clicked.connect(lambda _checked=False, n=name: self.trigger(n))
+        self._widgets[name] = button
+        return button
+
+    def dispose(self) -> None:
+        """丢弃子控件（``core`` 重建组件 / 图表析构路径）。"""
+        for button in list(self._widgets.values()):
+            if not is_deleted(button):
+                button.setParent(None)
+                button.deleteLater()
+        self._widgets.clear()
+        self._buttons = []
+
+    def onInteractionChanged(self) -> None:
+        """交互开关变化：立即同步按钮启用态（子控件不跟 chart 的重绘走）。"""
+        enabled = bool(
+            getattr(self.chart, "isInteractionEnabled", lambda _f: True)("toolbox")
+        )
+        for button in self._widgets.values():
+            if not is_deleted(button):
+                button.setEnabled(enabled)
+
+    # -- 动作 ---------------------------------------------------------------
     def trigger(self, name: str) -> None:
         """执行指定功能（按钮点击或外部调用）。"""
         if callable(self.on_action):
@@ -1255,15 +1555,31 @@ class ToolboxComponent:
                 pass
         if name == "saveAsImage":
             self._save_image()
+        elif name == "saveAsSvg":
+            self._save_image(svg=True)
         elif name == "restore":
             self._restore()
+        elif name == "zoomIn":
+            self.chart.zoomStep(0.7)
+        elif name == "zoomOut":
+            self.chart.zoomStep(1.0 / 0.7)
         elif name == "dataZoom":
             cur = bool(getattr(self.chart, "_dataZoomEnabled", True))
             self.chart._dataZoomEnabled = not cur
+            # 按钮是子控件，外观不跟 chart 的重绘走：状态要当场同步
+            button = self._widgets.get("dataZoom")
+            if button is not None and not is_deleted(button):
+                button.setIsSelected(not cur)
+                button.setToolTip(
+                    f"{self.TIPS['dataZoom']}（当前：{'开' if not cur else '关'}）"
+                )
             self.chart.update()
 
-    def _save_image(self) -> None:
-        path = self.chart.saveImage()
+    def _save_image(self, svg: bool = False) -> None:
+        if svg:
+            path = self.chart.saveImage(format="svg")
+        else:
+            path = self.chart.saveImage()
         self.last_saved = path or None
 
     def _restore(self) -> None:
@@ -1281,76 +1597,9 @@ class ToolboxComponent:
                     pass
         self.chart.update()
 
-    # -- 交互 ----------------------------------------------------------------
-    def onMousePress(self, pos: QPointF) -> bool:
-        for name, r in self._buttons:
-            if r.adjusted(-2, -2, 2, 2).contains(pos):
-                self.trigger(name)
-                return True
-        return False
-
-    # -- 绘制 ----------------------------------------------------------------
+    # -- 绘制 ---------------------------------------------------------------
     def paint(self, p: QPainter, anim_t: float = 1.0) -> None:
-        if not self._buttons:
-            return
-        p.save()
-        for name, r in self._buttons:
-            p.setPen(QPen(QColor(T("color.border")), 1))
-            p.setBrush(QColor(T("color.bg.elevated")))
-            p.drawRoundedRect(r, 4, 4)
-            enabled = (
-                name != "dataZoom"
-                or bool(getattr(self.chart, "_dataZoomEnabled", True))
-            ) and bool(
-                getattr(self.chart, "isInteractionEnabled", lambda _f: True)("toolbox")
-            )
-            c = (
-                QColor(T("color.text.secondary"))
-                if enabled
-                else QColor(T("color.text.disabled"))
-            )
-            pen = QPen(c, 1.5)
-            pen.setCapStyle(Qt.PenCapStyle.RoundCap)
-            pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
-            p.setPen(pen)
-            p.setBrush(Qt.BrushStyle.NoBrush)
-            cx, cy = r.center().x(), r.center().y()
-            if name == "saveAsImage":
-                self._icon_save(p, cx, cy)
-            elif name == "restore":
-                self._icon_restore(p, cx, cy)
-            elif name == "dataZoom":
-                self._icon_zoom(p, cx, cy)
-        p.restore()
-
-    @staticmethod
-    def _icon_save(p: QPainter, cx: float, cy: float) -> None:
-        # 托盘 + 向下箭头
-        p.drawLine(QPointF(cx - 7, cy + 5), QPointF(cx + 7, cy + 5))
-        p.drawLine(QPointF(cx - 7, cy + 5), QPointF(cx - 7, cy + 1))
-        p.drawLine(QPointF(cx + 7, cy + 5), QPointF(cx + 7, cy + 1))
-        p.drawLine(QPointF(cx, cy - 6), QPointF(cx, cy + 2))
-        p.drawLine(QPointF(cx - 3.5, cy - 1), QPointF(cx, cy + 2.5))
-        p.drawLine(QPointF(cx + 3.5, cy - 1), QPointF(cx, cy + 2.5))
-
-    @staticmethod
-    def _icon_restore(p: QPainter, cx: float, cy: float) -> None:
-        # 圆弧 + 箭头
-        rect = QRectF(cx - 6, cy - 6, 12, 12)
-        p.drawArc(rect, 40 * 16, 290 * 16)
-        p.drawLine(QPointF(cx + 6.2, cy - 2.5), QPointF(cx + 6.2, cy - 6.5))
-        p.drawLine(QPointF(cx + 6.2, cy - 6.5), QPointF(cx + 2.2, cy - 6.5))
-
-    @staticmethod
-    def _icon_zoom(p: QPainter, cx: float, cy: float) -> None:
-        # 放大镜
-        p.drawEllipse(QPointF(cx - 1.5, cy - 1.5), 4.5, 4.5)
-        p.drawLine(QPointF(cx + 1.8, cy + 1.8), QPointF(cx + 5.5, cy + 5.5))
-        p.drawLine(QPointF(cx - 4, cy - 1.5), QPointF(cx + 1, cy - 1.5))
-        p.drawLine(QPointF(cx - 1.5, cy - 4), QPointF(cx - 1.5, cy + 1))
-
-    def hitTest(self, pos: QPointF):
-        return None
+        """无绘制：按钮是真实子控件，外观由 ``ElaIconButton`` 负责。"""
 
 
 # ---------------------------------------------------------------------------

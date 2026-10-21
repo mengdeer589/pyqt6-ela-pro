@@ -54,8 +54,8 @@ class _FakeSignal:
 class _FakeProcess:
     """替身：不真的起浏览器，只验「信号连上了」+「start() 被调了」。"""
 
-    # ????? PyQt6 ????????``QProcess.ProcessChannelMode.X``??
-    # ????????????? AttributeError?
+    # 兼容两种拼写：PyQt6 走 ``QProcess.ProcessChannelMode.X``，旧 PySide6 是
+    # 直挂 ``QProcess.X`` —— 两套都要能取到，被测代码取哪套都不得 AttributeError。
     class ProcessChannelMode:
         SeparateChannels = QProcess.ProcessChannelMode.SeparateChannels
 
@@ -63,7 +63,7 @@ class _FakeProcess:
         Running = QProcess.ProcessState.Running
         NotRunning = QProcess.ProcessState.NotRunning
 
-    # ???????
+    # 顶层平铺别名（旧 PySide6 拼写）
     SeparateChannels = QProcess.ProcessChannelMode.SeparateChannels
     Running = QProcess.ProcessState.Running
     NotRunning = QProcess.ProcessState.NotRunning

@@ -35,6 +35,7 @@ from PyQt6ElaWidgetTools import eApp, eTheme, ElaThemeType, ElaIcon, ElaIconType
 from ._internal import _ThemeAwareMixin
 from ._colors import get_color_scheme, state_tint
 from ._motion import Duration, start_idle_loop, start_transition
+from ._styles import coerceElaIcon
 from ._theme import accent as theme_accent, blend
 from .svg_icon import svg_icon_loader, svg_to_pixmap
 
@@ -127,7 +128,13 @@ class ElaButton(_ThemeAwareMixin, QPushButton):
         self._border_radius = 6
         self._padding_h = 16
         self._size_height = 30
-        self._icon_name: Optional[ElaIconType.IconName] = icon
+        #: ElaAwesome 图标（``ElaIconType.IconName`` 或其整数值，入口即归一）。
+        #: 绘制路径上的 ``getElaIcon`` 只接受枚举成员 —— 传 int 会在
+        #: ``paintEvent`` 里抛 TypeError，穿出 Qt 回调 = 0xC0000409 崩溃，
+        #: 所以归一必须在 setter / 构造期完成（见 ``_styles.coerceElaIcon``）。
+        self._icon_name: Optional[ElaIconType.IconName] = (
+            None if icon is None else coerceElaIcon(icon)
+        )
         self._icon_size = iconSize
         #: SVG 图标源：SVG 源码字符串，或 :class:`ElaSvgIconLoader` 里的图标名
         #: （二选一，见 :meth:`setSvgIcon`）。非 ``None`` 时**压过** ``_icon_name``。
@@ -184,8 +191,9 @@ class ElaButton(_ThemeAwareMixin, QPushButton):
                 return name
         return "middle"
 
-    def setElaIcon(self, iconName: ElaIconType.IconName, iconSize: int = 16) -> None:
-        self._icon_name = iconName
+    def setElaIcon(self, iconName, iconSize: int = 16) -> None:
+        """设置 ElaAwesome 图标（``ElaIconType.IconName`` 或其整数值；``None`` 清除）。"""
+        self._icon_name = None if iconName is None else coerceElaIcon(iconName)
         self._icon_size = iconSize
         self._svg_source = None
         self.setIconSize(QSize(iconSize, iconSize))
@@ -588,8 +596,16 @@ class ElaButton(_ThemeAwareMixin, QPushButton):
                 elif svg_pixmap is not None:
                     painter.drawPixmap(ir, svg_pixmap)
                 else:
-                    icon = ElaIcon.getInstance().getElaIcon(icon_name, text_color)
-                    painter.drawPixmap(ir, icon.pixmap(icon_sz))
+                    # 绘制链兜底：取图标失败（归一后仍非法 / 图标字体未就绪）
+                    # 只丢这一枚图标，绝不让异常穿出 paintEvent
+                    try:
+                        icon = ElaIcon.getInstance().getElaIcon(
+                            coerceElaIcon(icon_name), text_color
+                        )
+                    except Exception:
+                        icon = None
+                    if icon is not None:
+                        painter.drawPixmap(ir, icon.pixmap(icon_sz))
                 if tw:
                     tr = QRect(ir.right() + spacing, _FACE_INSET, tw, fh)
                     painter.drawText(

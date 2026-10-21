@@ -20,6 +20,7 @@
   ``\\overrightarrow`` 等重音 / ``\\overset`` / ``\\underset`` / ``\\xrightarrow``；
 - 字体与颜色：``\\text \\mathrm \\mathbf \\boldsymbol \\bm \\textbf \\texttt`` 等、
   ``\\textcolor`` / ``\\color``（基础色名与 ``#RRGGBB``）、``\\cancel`` 系列；
+- 公式编号：``\\tag`` / ``\\tag*``（编号右对齐在公式末尾，``\\tag*`` 不补括号）；
 - 矩阵环境：``\\begin{matrix/pmatrix/bmatrix/Bmatrix/vmatrix/Vmatrix/cases}``
   （``&`` 分列、``\\\\`` 分行）；多行对齐 ``align`` / ``aligned`` / ``gather`` /
   ``multline`` / ``split`` / ``alignat`` / ``flalign``（``&`` 对齐位）、
@@ -866,17 +867,31 @@ def _parse_define(text: str, pos: int):
     return None
 
 
+#: 宏定义的触发串：整段文本一个都不含时无需扫描（见 ``_collect_macros``）
+_MACRO_TRIGGERS = (r"\newcommand", r"\renewcommand", r"\DeclareMathOperator", r"\def")
+
+
 def _collect_macros(text: str, macros: Optional[dict] = None) -> tuple[str, dict]:
     """收集文本中的宏定义并从正文移除定义段，返回 ``(移除后的文本, {宏名: (参数个数, 展开体)})``；
     传入的 ``macros`` 是文档级收集结果，优先级更低。
+
+    先做触发串检查、再按 ``\\`` 跳着扫（都不命中时整段原样返回）：逐字符
+    Python 循环实测 117KB 要 14ms，而正文里宏定义几乎不存在。
     """
     table: dict = dict(macros) if macros else {}
+    if not any(trigger in text for trigger in _MACRO_TRIGGERS):
+        return text, table
     out: list[str] = []
-    i = 0
     total = len(text)
-    while i < total:
-        char = text[i]
-        if char == "\\" and (
+    i = 0
+    while True:
+        j = text.find("\\", i)
+        if j < 0:
+            out.append(text[i:])
+            break
+        out.append(text[i:j])
+        i = j
+        if (
             text.startswith(r"\newcommand", i)
             or text.startswith(r"\renewcommand", i)
             or text.startswith(r"\DeclareMathOperator", i)
@@ -891,7 +906,7 @@ def _collect_macros(text: str, macros: Optional[dict] = None) -> tuple[str, dict
                 table[name] = (n_args, body)
                 i = end
                 continue
-        out.append(char)
+        out.append("\\")
         i += 1
     return "".join(out), table
 
@@ -1250,6 +1265,14 @@ class _Styled(_Node):
         self.family = family
 
 
+class _Tag(_Node):
+    """``\\tag`` / ``\\tag*``：公式编号（``star`` 为真时不加括号）。"""
+
+    def __init__(self, text: str, star: bool = False):
+        self.text = text
+        self.star = star
+
+
 class _Boxed(_Node):
     """``\\boxed``：带边框的公式。"""
 
@@ -1382,6 +1405,15 @@ def _unescape_text(raw: str) -> str:
         lambda match: _TEXT_ESCAPES.get(match.group(1), match.group(0)),
         raw,
     )
+
+
+#: 文本模式里的空白串（TeX 把连续空白折叠成一个空格）
+_TEXT_SPACE_RE = re.compile(r"[ \t\r\n\f]+")
+
+
+def _normalize_text(raw: str) -> str:
+    """文本模式内容：还原转义并折叠连续空白。"""
+    return _TEXT_SPACE_RE.sub(" ", _unescape_text(raw))
 
 
 def _parse_color(raw: str) -> Optional[QColor]:
@@ -1537,6 +1569,10 @@ class _Parser:
         return row
 
     def _raw_group(self) -> str:
+        # TeX 里控制词后的空白是词尾分隔符（``\text {x}`` 与 ``\text{x}``
+        # 等价），而模型输出 / MinerU 转写常带这个空格。命令参数都走本函数，
+        # 统一在这里跳过一次。
+        self._skip_spaces()
         if self._peek() != "{":
             raise _ParseError("expected {")
         self.i += 1
@@ -1663,6 +1699,7 @@ class _Parser:
             return frac
         if name == r"\sqrt":
             index = None
+            self._skip_spaces()
             if self._peek() == "[":
                 end = self.s.find("]", self.i)
                 if end == -1:
@@ -1709,13 +1746,21 @@ class _Parser:
             return _BigOp(name[1:], True, 1.0)
         if name == r"\operatorname":
             star = False
+            self._skip_spaces()
             if self._peek() == "*":
                 star = True
                 self.i += 1
             raw = self._raw_group()
             if star:
-                return _BigOp(raw, True, 1.0)
-            return _Text(raw, italic=False)
+                return _BigOp(_normalize_text(raw), True, 1.0)
+            return _Text(_normalize_text(raw), italic=False)
+        if name == r"\tag":
+            star = False
+            self._skip_spaces()
+            if self._peek() == "*":
+                star = True
+                self.i += 1
+            return _Tag(_normalize_text(self._raw_group()).strip(), star)
         if name == r"\boxed":
             return _Boxed(self._script_arg())
         if name in (r"\underline", r"\underbar"):
@@ -1810,7 +1855,7 @@ class _Parser:
             raw = self._raw_group()
             italic, bold, family = _TEXT_STYLES[name]
             return _Styled(
-                _Text(_unescape_text(raw), italic=False),
+                _Text(_normalize_text(raw), italic=False),
                 italic=italic,
                 bold=bold,
                 family=family,
@@ -1981,6 +2026,13 @@ def _font(
     bold: bool = False,
     family: Optional[str] = None,
 ) -> QFont:
+    """公式排版字体（``family``：``"mono"`` / ``"sans"`` / 缺省数学字体）。
+
+    各字体族列表**刻意保留多族回退**：数学字形与 ``\\text{中文}`` 的 CJK 覆盖
+    只能二选一，单族化会砸掉一边；公式只渲染一次成图、非逐帧文本路径，Win7
+    多族慢 shaping 的影响面最小 —— 与终端 / 查看器 / 图表 / chat 的单族化策略
+    不同源（见「下游项目反馈bug.md」§3）。
+    """
     global _FAMILIES, _USE_MATH_ITALIC
     if _FAMILIES is None:
         _FAMILIES = _math_families()
@@ -2137,6 +2189,24 @@ class _SpaceBox(_Box):
 
     def paint(self, painter, x, base):
         return
+
+
+class _TaggedBox(_Box):
+    """正文 + 右侧公式编号（编号与正文同基线，间隔固定 ``2em``）。"""
+
+    def __init__(self, body: _Box, tag: _Box, size: float):
+        self.body = body
+        self.tag = tag
+        # ``_SpaceBox`` 的换算：1em = 4/3 pt
+        self.gap = max(size * 8.0 / 3.0, 12.0)
+        self.w = body.w + self.gap + tag.w
+        self.a = max(body.a, tag.a)
+        self.d = max(body.d, tag.d)
+        self.h = self.a + self.d
+
+    def paint(self, painter, x, base):
+        self.body.paint(painter, x, base)
+        self.tag.paint(painter, x + self.w - self.tag.w, base)
 
 
 class _FractionBox(_Box):
@@ -2878,7 +2948,19 @@ def _atom_text(node: _Node) -> str:
         return node.text
     if isinstance(node, _MiddleDelim):
         return node.text
+    if isinstance(node, _Tag):
+        return ""
     return ""
+
+
+def _build_tag(tag: _Tag, size: float) -> _Box:
+    """公式编号：按正文文本直立绘制，``\\tag*`` 不补括号。"""
+    text = tag.text
+    if not text:
+        return _SpaceBox(0.0, size)
+    if not tag.star:
+        text = f"({text})"
+    return _GlyphBox(text, size)
 
 
 def _build(
@@ -2921,7 +3003,11 @@ def _build(
     if isinstance(node, _Row):
         boxes: list = []
         previous = ""
+        tag: Optional[_Tag] = None
         for item in node.items:
+            if isinstance(item, _Tag):
+                tag = item
+                continue
             text = _atom_text(item)
             before = after = 0.0
             if text in _RELATION_ATOMS:
@@ -2961,7 +3047,10 @@ def _build(
             target = others_a + others_d + size * 0.25
             for index, box in middles:
                 boxes[index] = box.resized(target, box)
-        return _RowBox(boxes)
+        row = _RowBox(boxes)
+        if tag is not None:
+            return _TaggedBox(row, _build_tag(tag, size), size)
+        return row
     if isinstance(node, _Frac):
         script = max(size * (0.9 if depth == 0 else 0.75), 4.0)
         return _FractionBox(
@@ -3110,6 +3199,8 @@ def _build(
             _build(node.den, script, italic, bold, depth + 1, family),
             size,
         )
+    if isinstance(node, _Tag):
+        return _build_tag(node, size)
     raise _ParseError(f"unsupported node {type(node).__name__}")
 
 
@@ -3266,16 +3357,33 @@ def render_formula(
 
 
 # ===================================================================== 提取
+#: 行内公式扫描的特殊字符（其余字符整段跳过，避免逐字符 Python 循环）
+_MATH_SPECIAL_RE = re.compile(r"[`$\\]")
+
+
 def _scan_inline_math(line: str, maths: list, mark: str) -> str:
     """扫描一行内的行内公式（``$...$`` / ``\\(...\\)`` / 同行 ``$$...$$``）。
 
     反引号行内代码段原样保留；``\\$`` 视为转义。``$`` 配对遵循 Pandoc
     规则（开 ``$`` 后非空白，闭 ``$`` 前非空白且其后非数字），降低货币
     写法（如「$5 与 $10」）误判率。``mark`` 为实例级占位模板。
+
+    没有 ``$`` / ``\\`` 的行整行原样返回；其余按**特殊字符**跳着扫
+    （逐字符 Python 循环实测 117KB 要 12ms，正文里公式极少）。
     """
+    if "$" not in line and "\\" not in line:
+        return line
     result = []
     i, n = 0, len(line)
     while i < n:
+        match = _MATH_SPECIAL_RE.search(line, i)
+        if match is None:
+            result.append(line[i:])
+            break
+        start = match.start()
+        if start > i:
+            result.append(line[i:start])
+            i = start
         c = line[i]
         if c == "`":
             j = i

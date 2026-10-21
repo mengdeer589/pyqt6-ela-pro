@@ -147,25 +147,29 @@ class DataTablePage(ExamplePage):
         ]
         self._styleTable.setTableData(data, center_columns={1, 2})
         self._styleTable.setColumnWidths({0: 150, 1: 100, 2: 100, 3: 100})
-        for row in range(1, self._styleTable.rowCount() + 1):
+        # 数据行是 **0 起**的（表头不进模型），别从 1 开始
+        for row in range(self._styleTable.rowCount()):
             status_item = self._styleTable.item(row, 3)
             if status_item:
                 status_text = status_item.text()
                 if status_text == "热销":
-                    self._styleTable.setItemForeground(row, 3, QColor(255, 87, 34))
                     self._styleTable.setItem(row, 3, "🔴 热销", center=True)
+                    self._styleTable.setItemForeground(row, 3, QColor(255, 87, 34))
                 elif status_text == "滞销":
-                    self._styleTable.setItemForeground(row, 3, QColor(76, 175, 80))
                     self._styleTable.setItem(row, 3, "🟢 滞销", center=True)
+                    self._styleTable.setItemForeground(row, 3, QColor(76, 175, 80))
                 else:
                     self._styleTable.setItem(row, 3, "🟡 正常", center=True)
-        self._styleTable.setRowBackground(1, QColor(255, 243, 224))
-        self._styleTable.setRowBackground(4, QColor(232, 245, 233))
+        # 行高亮用**半透明**色调：自动与深浅两种主题的底混合，黑字 / 白字都可读。
+        # 实心浅色只适合浅色主题 —— 深色主题下白字压在浅底上直接看不清。
+        # 色相刻意避开状态列的红 / 绿（前景色生效后同色相底会把文字糊掉）。
+        self._styleTable.setRowBackground(1, QColor(64, 158, 255, 51))
+        self._styleTable.setRowBackground(4, QColor(147, 112, 219, 51))
         bold_font = QFont()
         bold_font.setBold(True)
         self._styleTable.setItemFont(0, 0, bold_font)
         self._styleTable.setItemFont(1, 0, bold_font)
-        for row in range(1, self._styleTable.rowCount() + 1):
+        for row in range(self._styleTable.rowCount()):
             sales_item = self._styleTable.item(row, 1)
             if sales_item:
                 sales_value = int(sales_item.text())

@@ -19,7 +19,6 @@ class TestElaGroupBoxInit:
         [
             ("_title", ""),
             ("_border_radius", 6),
-            ("_title_pixel_size", 14),
         ],
     )
     def test_initialization_with_defaults(self, gb, attr, expected):

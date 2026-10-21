@@ -22,7 +22,12 @@ from .ela_tag_combo_base import (
     _get_target_mark_width,
     _paint_tag_multi,
 )
-from ._internal import _adjust_combobox_popup, single_shot_on, hideComboboxPopup
+from ._internal import (
+    _adjust_combobox_popup,
+    _prepare_combobox_popup,
+    single_shot_on,
+    hideComboboxPopup,
+)
 
 
 class ElaTagMultiBox(_TagBoxThemeMixin, _TagBoxAnimMixin, ElaMultiSelectComboBox):
@@ -62,6 +67,7 @@ class ElaTagMultiBox(_TagBoxThemeMixin, _TagBoxAnimMixin, ElaMultiSelectComboBox
         if self.count() == 0:
             return
         self._expand_mark_width = _get_target_mark_width(self)
+        _prepare_combobox_popup(self)
         super().showPopup()
         _adjust_combobox_popup(self)
 

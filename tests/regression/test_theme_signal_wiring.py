@@ -429,16 +429,23 @@ class TestTagBoxFollowsTheme:
         from PyQt6ElaWidgetTools import ElaThemeType, eTheme
 
         box = make(_load(module_name, attr), "语言")
+        # 全局主题是进程级状态：本用例切到 Dark 后必须还原，否则后续用例
+        # （如 chat 的「切到 Dark 应变色」）会因为在 Dark 里再切 Dark 而假失败
+        previous = eTheme.getThemeMode()
         seen = {}
-        for mode in (ElaThemeType.ThemeMode.Light, ElaThemeType.ThemeMode.Dark):
-            eTheme.setThemeMode(mode)
-            qapp.processEvents()
-            assert box._theme_mode == mode, (
-                "{} 的 _theme_mode 没跟随主题切换（仍为 {}）".format(
-                    name, box._theme_mode
+        try:
+            for mode in (ElaThemeType.ThemeMode.Light, ElaThemeType.ThemeMode.Dark):
+                eTheme.setThemeMode(mode)
+                qapp.processEvents()
+                assert box._theme_mode == mode, (
+                    "{} 的 _theme_mode 没跟随主题切换（仍为 {}）".format(
+                        name, box._theme_mode
+                    )
                 )
-            )
-            seen[mode] = box._getBackgroundColor()
+                seen[mode] = box._getBackgroundColor()
+        finally:
+            eTheme.setThemeMode(previous)
+            qapp.processEvents()
 
         light = seen[ElaThemeType.ThemeMode.Light]
         dark = seen[ElaThemeType.ThemeMode.Dark]

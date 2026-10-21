@@ -129,7 +129,7 @@ class TestIndentedFences:
         viewer = make(ElaMarkdownViewer)
         viewer.setMarkdown("- 例：\n  ```\n  - [ ] 这不是任务\n  ```\n")
         text = viewer.document().toPlainText()
-        assert "☐" not in text, "代码内容里的 - [ ] 被当成了任务列表"
+        assert "□" not in text, "代码内容里的 - [ ] 被当成了任务列表"
         assert "- [ ] 这不是任务" in text
 
     def test_quote_nested_fence(self, make):

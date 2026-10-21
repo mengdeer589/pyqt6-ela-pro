@@ -124,6 +124,52 @@ class TestTransparentTextBase:
         assert _px(container, 110, 100) == "#ff0000"
 
 
+class TestTextBaseViewportPropagation:
+    """``setTextBaseColor`` 必须把 ``Base`` 同时写到 **viewport** 上。
+
+    ``QAbstractScrollArea`` 的视口带自己的显式 palette（``WA_SetPalette``），
+    **不跟随**控件的 ``setPalette`` —— 只设控件时，视口自动填充用的还是首次
+    解析出的旧色（换主题后聊天里的查看器留浅色横条就是这个：控件 palette 已
+    是新色、视口没跟上）。
+    """
+
+    def test_viewport_palette_follows_updates(self, qapp, make):
+        browser = make(QTextBrowser)
+        setTextBaseColor(browser, "#ff0000")
+        assert browser.palette().color(QPalette.ColorRole.Base).name() == "#ff0000"
+        assert (
+            browser.viewport().palette().color(QPalette.ColorRole.Base).name()
+            == "#ff0000"
+        )
+        setTextBaseColor(browser, "#0000ff")
+        assert browser.palette().color(QPalette.ColorRole.Base).name() == "#0000ff"
+        assert (
+            browser.viewport().palette().color(QPalette.ColorRole.Base).name()
+            == "#0000ff"
+        )
+
+    def test_viewport_fill_follows_color_change(self, qapp, make):
+        container = make(QWidget)
+        container.resize(220, 120)
+        browser = make(QTextBrowser, container)
+        browser.setGeometry(10, 10, 200, 100)
+        setTextBaseColor(browser, "#ff0000")
+        container.show()
+        qapp.processEvents()
+        assert _px(container, 110, 100) == "#ff0000"
+        setTextBaseColor(browser, "#0000ff")
+        qapp.processEvents()
+        assert _px(container, 110, 100) == "#0000ff"
+
+    def test_transparent_resets_viewport_base(self, qapp, make):
+        browser = make(QTextBrowser)
+        setTextBaseColor(browser, "#ff0000")
+        setTextBaseColor(browser, None)
+        assert (
+            browser.viewport().palette().color(QPalette.ColorRole.Base).alpha() == 0
+        )
+
+
 class TestBareButton:
     def test_paints_nothing(self, qapp, make):
         container = make(QWidget)

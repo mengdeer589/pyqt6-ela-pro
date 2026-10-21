@@ -16,22 +16,26 @@ from __future__ import annotations
 
 from typing import Optional
 
-from PyQt6.QtCore import QSortFilterProxyModel, QModelIndex
-from PyQt6.QtGui import QPalette, QColor
-from PyQt6.QtWidgets import QWidget, QVBoxLayout, QLineEdit, QBoxLayout
+from PyQt6.QtCore import QModelIndex, QSortFilterProxyModel
+from PyQt6.QtGui import QColor, QPalette
+from PyQt6.QtWidgets import QBoxLayout, QLineEdit, QVBoxLayout, QWidget
 from PyQt6ElaWidgetTools import (
-    ElaThemeType,
-    eTheme,
     ElaComboBox,
     ElaMultiSelectComboBox,
+    ElaThemeType,
+    eTheme,
 )
 
 from ._internal import (
     _adjust_combobox_popup,
+    _prepare_combobox_popup,
     _ThemeAwareMixin,
     hideComboboxPopup,
     load_lazy_pinyin,
 )
+
+#: 弹层顶部搜索框的固定高度（与 ``_build_search_widget`` 的 ``setFixedHeight`` 同值）。
+_SEARCH_WIDGET_HEIGHT = 40
 
 
 def _split_keyword(keyword: str) -> list[str]:
@@ -148,6 +152,14 @@ class _SearchComboMixin:
         """返回弹窗顶部搜索框是否可见（默认 ``True``）。"""
         return self._popup_search_visible
 
+    def _popup_extra_heights(self) -> tuple[int, int]:
+        """返回弹层上下两端附件占用的高度 ``(top, bottom)``。"""
+        return (_SEARCH_WIDGET_HEIGHT if self.searchVisible() else 0, 0)
+
+    def _prepare_popup(self) -> None:
+        """把附件高度交给 C++，并释放上一次的屏幕压缩固定高度。"""
+        _prepare_combobox_popup(self, *self._popup_extra_heights())
+
     def _cleanupSearchWidget(self) -> None:
         if getattr(self, "_searchWidget", None):
             self._searchWidget.deleteLater()
@@ -181,6 +193,8 @@ class _SearchComboMixin:
         if isinstance(layout, QBoxLayout):
             layout.insertWidget(0, self._searchWidget)
         self._searchWidget.show()
+        # 列表在动画期间从上方滑下来，搜索框保持在最上层（否则会被列表短暂盖住）
+        self._searchWidget.raise_()
         if self._searchEdit:
             self._applySearchEditPalette()
             self._searchEdit.blockSignals(True)
@@ -194,7 +208,7 @@ def _build_search_widget(
     """创建弹窗内搜索框组件，返回 ``(searchWidget, searchEdit)``。"""
     search_widget = QWidget()
     search_widget.setObjectName("SearchWidget")
-    search_widget.setFixedHeight(40)
+    search_widget.setFixedHeight(_SEARCH_WIDGET_HEIGHT)
 
     search_layout = QVBoxLayout(search_widget)
     search_layout.setContentsMargins(6, 6, 6, 2)
@@ -290,7 +304,17 @@ class ElaSearchMultiBox(_SearchComboMixin, _ThemeAwareMixin, ElaMultiSelectCombo
         self._currentSelection = []
         self._pinyin_cache.clear()
 
-    def setCurrentSelection(self, selection: list) -> None:
+    def setCurrentSelection(self, selection) -> None:
+        """设置当前选中项（接受 ``str`` 或字符串列表）。
+
+        与兄弟类（``ElaTagMultiBox`` / ``ElaTagSearchMultiBox``）同口径：
+        **传 ``str`` 归一成单元素** —— 旧实现 ``list(selection)`` 会把字符串
+        拆成单个字符，匹配不到任何选项（「设了没反应、回读一堆字母」）。
+        """
+        if selection is None:
+            selection = []
+        elif isinstance(selection, str):
+            selection = [selection]
         self._currentSelection = list(selection)
         super().setCurrentSelection(self._currentSelection)
 
@@ -309,6 +333,7 @@ class ElaSearchMultiBox(_SearchComboMixin, _ThemeAwareMixin, ElaMultiSelectCombo
         self._isRestoringSelection = True
         try:
             self._restoreSelection()
+            self._prepare_popup()
             super().showPopup()
 
             container = self.findChild(QWidget, "ElaComboBoxContainer")
@@ -376,6 +401,7 @@ class ElaSearchBox(_SearchComboMixin, _ThemeAwareMixin, ElaComboBox):
         if self.count() == 0:
             return
         self._reset_row_filter()
+        self._prepare_popup()
         super().showPopup()
 
         container = self.findChild(QWidget, "ElaComboBoxContainer")

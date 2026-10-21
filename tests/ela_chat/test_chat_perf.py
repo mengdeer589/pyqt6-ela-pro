@@ -13,9 +13,12 @@ from pyqt6_ela_pro.chat import (
     ElaChatRoleType,
     ElaChatStats,
     ElaChatStatusType,
+    ElaChatToolCall,
     ElaChatView,
     ElaChatWidget,
 )
+from pyqt6_ela_pro.chat.blocks import ReasoningBlock, ToolCallCard
+from pyqt6_ela_pro._styles import ColorText
 
 
 class TestChatPerformance:
@@ -173,3 +176,90 @@ class TestChatPerformance:
         )
         assert view.bubble(ids[-1]).viewersSuspended() is True
         assert view.bubble(ids[-1]).markdownViewer() is None
+
+
+class TestReasoningToggleSizeCache:
+    """思考块展开的尺寸查询只算一次：布局链重复询问必须命中缓存。
+
+    正文是整段 PlainText 的 ``ColorText``；没有缓存时一次展开会重算
+    ``heightForWidth`` 十几遍（18KB 文本实测 343ms），加缓存后独立查询
+    只剩个位数、再次展开 0 次。
+    """
+
+    def test_expand_reuses_size_queries(self, qapp, make, monkeypatch):
+        calls: list = []
+        original = ColorText._compute_size_metric
+
+        def counting(self, kind, width):
+            calls.append((kind, width))
+            return original(self, kind, width)
+
+        monkeypatch.setattr(ColorText, "_compute_size_metric", counting)
+
+        view = make(ElaChatView)
+        view.resize(800, 600)
+        view.show()
+        qapp.processEvents()
+        mid = view.addMessage(ElaChatRoleType.Assistant, "回答段落 " * 50)
+        view.setReasoning(mid, ("长推理段落内容。" * 20 + "\n") * 20, 900.0)
+        qapp.processEvents()
+        block = view.bubble(mid).reasoningBlock()
+        block.setOpened(False)
+        qapp.processEvents()
+
+        calls.clear()
+        block.setOpened(True)
+        qapp.processEvents()
+        assert len(calls) == len(set(calls)), "同一 (类别, 宽度) 不应重算"
+        assert len(calls) <= 8, f"一次展开的独立尺寸查询过多：{calls}"
+
+        calls.clear()
+        block.setOpened(False)
+        qapp.processEvents()
+        block.setOpened(True)
+        qapp.processEvents()
+        assert calls == [], "文本 / 宽度 / 字体都没变时应全部命中缓存"
+
+
+class TestReasoningCollapsedLayout:
+    def test_collapsed_block_keeps_text_out_of_label(self, qapp, make):
+        """收起态只存数据：不把全文塞进 word-wrap 标签（bug #17）。"""
+        block = make(ReasoningBlock)
+        text = "长推理段落。" * 5000
+        block.setText(text)
+
+        assert block.text() == text
+        assert block.label().text() == ""
+
+        block.setOpened(True)
+        qapp.processEvents()
+        assert block.label().text().startswith("长推理段落。")
+
+        block.setOpened(False)
+        qapp.processEvents()
+        assert block.text() == text
+        # 展开过再收起：标签保留已排版文本（重新展开命中 ColorText 缓存）
+        assert block.label().text()
+
+
+class TestToolCallHeaderElide:
+    def test_long_subtitle_is_truncated_before_elide(self, qapp, make):
+        """头部省略先截源：4KB 的 shell command 不整串喂 elidedText（bug #17）。"""
+        command = "x" * 4000
+        card = make(
+            ToolCallCard,
+            tool_call=ElaChatToolCall(
+                id="c1", name="shell", arguments='{"command": "%s"}' % command
+            ),
+            defaultOpen=False,
+        )
+        card.resize(480, 60)
+        card.show()
+        qapp.processEvents()
+        card._elide_header_texts()
+
+        assert card._subtitle_text == command
+        assert len(card._subtitle_label.text()) < 100
+        lengths = [key[1] for key in card._elide_cache if key[1] > 0]
+        assert lengths
+        assert max(lengths) <= 160

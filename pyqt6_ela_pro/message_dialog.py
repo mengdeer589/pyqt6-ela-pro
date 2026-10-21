@@ -50,7 +50,7 @@ class ElaMessageDialog(ElaDialogBase):
         title: str = "标题",
         message: str = "",
         middleText: str | None = None,
-    ) -> int:
+    ) -> Optional[int]:
         """显示消息对话框（类调用模态）或普通显示（实例调用）。
 
         类调用 ``ElaMessageDialog.show(parent, ...)`` 返回按钮值（0=左 / 1=右 /
@@ -58,7 +58,7 @@ class ElaMessageDialog(ElaDialogBase):
         """
         if isinstance(self, ElaMessageDialog):
             super().show()
-            return 0
+            return None
         parent = self
         dialog = ElaMessageDialog(
             title=title, message=message, middleText=middleText, parent=parent

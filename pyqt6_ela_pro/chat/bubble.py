@@ -41,14 +41,22 @@
 
 from __future__ import annotations
 
+import math
 from dataclasses import replace
 from datetime import datetime
 from typing import Optional
 from uuid import uuid4
 
-from .._internal import is_deleted
+from .._internal import execElaMenu, is_deleted
 from PyQt6.QtCore import QRectF, Qt, pyqtSignal
-from PyQt6.QtGui import QColor, QPainter, QPainterPath, QPen, QPixmap
+from PyQt6.QtGui import (
+    QColor,
+    QContextMenuEvent,
+    QPainter,
+    QPainterPath,
+    QPen,
+    QPixmap,
+)
 from PyQt6.QtWidgets import (
     QApplication,
     QGraphicsOpacityEffect,
@@ -58,9 +66,10 @@ from PyQt6.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
-from PyQt6ElaWidgetTools import ElaIconType, ElaText, ElaThemeType
+from PyQt6ElaWidgetTools import ElaIconType, ElaMenu, ElaText, ElaThemeType
 
 from .._styles import ColorText, setTextColor
+from ..ela_button import ElaButton
 from ..ela_markdown_viewer import ElaMarkdownViewer
 from ..widget_base import ElaThemeWidget
 from ._theme import accent_color, base_color, blend, muted_color, text_color
@@ -88,6 +97,7 @@ from .blocks import (
     _HeadingScanner,
     normalizeAvatarShape,
     toolDefaultOpen,
+    toolSubtitleParts,
 )
 from .message import (
     ElaChatAttachment,
@@ -102,7 +112,7 @@ from .message import (
     ElaChatToolCall,
     ElaChatToolStatusType,
 )
-from .renderers import toolRendererGroupable
+from .renderers import toolRendererGroupable, toolRendererSubtitle
 
 #: 气泡圆角半径（逐角：左上 / 右上 / 右下 / 左下；右下小角做“尾巴”）
 _BUBBLE_RADII = (12.0, 12.0, 4.0, 12.0)
@@ -118,6 +128,10 @@ _STREAMING_PLACEHOLDER = "正在生成…"
 DISCLAIMER_TEXT = "内容由 AI 生成，仅供参考"
 #: 底部「AI 生成」提示字号
 _DISCLAIMER_PIXEL_SIZE = 12
+#: 单条消息超过该步骤数时，物化只展开末尾若干步（历史超长回合）
+_STEP_MATERIALIZE_LIMIT = 24
+#: 超长消息物化时保留的末尾步骤数（用户通常停在最新一步）
+_STEP_WINDOW_TAIL = 12
 #: 用量徽标展示模式（底部整轮汇总 / 每步各自显示 / 完全不显示）
 _STATS_MODES = ("footer", "steps", "none")
 #: 状态对应的头部提示文本（``Queued`` 为展示态：流式开始后、首个模型输出前）
@@ -127,6 +141,79 @@ _STATUS_TEXTS = {
     ElaChatStatusType.Stopped: "已停止",
     ElaChatStatusType.Error: "出错",
 }
+#: 右键菜单行高（与 markdown viewer / 终端一致）
+_CONTEXT_MENU_ITEM_HEIGHT = 28
+
+
+def _estimate_parts_height(parts, width: int, stats_mode: str = "footer") -> int:
+    """估算分段区高度（未物化消息的占位高度，物化后用实测值替换）。
+
+    只求量级正确：工具卡 / 思考块按折叠态算，正文按平均字符宽折行。估算误差
+    由物化后的滚动锚点补偿吸收；这里**不能**调 ``QFontMetrics``（批量导入时
+    会为每条消息付字体查询）。
+    """
+    width = max(320, int(width or 0))
+    chars_per_line = max(24, width // 8)
+    stats_height = 24 if stats_mode == "steps" else 0
+    total = 0
+    last_step = 0
+    for part in parts or ():
+        step = max(1, int(getattr(part, "step", 1) or 1))
+        if step != last_step:
+            total += 28  # 每步的工具面板 / 分段间距
+            last_step = step
+        kind = getattr(part, "kind", "")
+        if kind == ElaChatPartKindType.Tool:
+            total += 40
+        elif kind == ElaChatPartKindType.Reasoning:
+            total += 36
+        elif kind == ElaChatPartKindType.Text:
+            lines = max(
+                1, math.ceil(len(getattr(part, "text", "") or "") / chars_per_line)
+            )
+            total += min(6000, 12 + lines * 22)
+        elif kind == ElaChatPartKindType.Stats:
+            total += stats_height
+        elif kind == ElaChatPartKindType.Compaction:
+            total += 64
+        elif kind == ElaChatPartKindType.Permission:
+            total += 96
+        else:
+            total += 40
+    return max(40, total)
+
+
+class _SelectableLabel(QLabel):
+    """可选中纯文本标签：右键菜单走库内 ``ElaMenu``。
+
+    ``QLabel`` 在 ``TextSelectableByMouse`` 下自带 Qt 原生右键菜单（Copy /
+    Select All），与本库外观不一致，所以整体接管。
+    """
+
+    def contextMenuEvent(self, event: QContextMenuEvent) -> None:  # noqa: N802
+        execElaMenu(self._build_context_menu(), event.globalPos())
+        event.accept()
+
+    def _build_context_menu(self) -> ElaMenu:
+        """构建右键菜单（Ela 风格：图标 + 统一行高）。"""
+        menu = ElaMenu(self)
+        menu.setMenuItemHeight(_CONTEXT_MENU_ITEM_HEIGHT)
+        copy = menu.addElaIconAction(ElaIconType.IconName.Copy, "复制")
+        copy.setEnabled(self.hasSelectedText())
+        copy.triggered.connect(self._copy_selection)
+        select_all = menu.addElaIconAction(ElaIconType.IconName.BorderAll, "全选")
+        select_all.triggered.connect(self._select_all)
+        return menu
+
+    def _copy_selection(self) -> None:
+        text = self.selectedText()
+        if text:
+            # Qt 的选区用 U+2029 表示换行，剪贴板里要还原成 \n（对齐原生菜单）
+            QApplication.clipboard().setText(text.replace("\u2029", "\n"))
+
+    def _select_all(self) -> None:
+        # Qt 文本位置按 UTF-16 码元计（emoji 占 2 个），不能直接用 len(text)
+        self.setSelection(0, len(self.text().encode("utf-16-le")) // 2)
 
 
 class _BubbleBody(QWidget):
@@ -278,6 +365,12 @@ class ElaChatBubble(ElaThemeWidget):
         self._content_max_width = 0
         self._parts_container: Optional[QWidget] = None
         self._parts_layout: Optional[QVBoxLayout] = None
+        #: 分段是否只存数据、尚未建控件（批量加载时按需物化）
+        self._parts_deferred = False
+        #: 超长消息只物化了末尾若干步（其余步骤折叠在「展开全部」按钮后）
+        self._parts_windowed = False
+        self._window_button = None
+        self._deferred_placeholder: Optional[QWidget] = None
         self._step_index = 1
         self._current_reasoning_id: Optional[str] = None
         self._current_text_id: Optional[str] = None
@@ -285,6 +378,9 @@ class ElaChatBubble(ElaThemeWidget):
         #: 所属消息 id（由 ``ElaChatView`` 建气泡时写入；工具渲染器上下文要用）
         self._message_id = 0
         self._stats_mode = "footer"
+        #: ``setParts`` 重放期间为 True：逐段 setStepStats 不重复摆徽标，
+        #: 由 setParts 收尾统一 apply 一次（bug #17）。
+        self._stats_batch = False
         self._stream_ended = False
         self._generation_started = True
         #: 底部「AI 生成」提示（仅助手消息；文本 / 显隐见 setDisclaimer）
@@ -388,7 +484,7 @@ class ElaChatBubble(ElaThemeWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
         layout.addStretch(1)
-        self._label = QLabel(holder)
+        self._label = _SelectableLabel(holder)
         self._label.setTextFormat(Qt.TextFormat.PlainText)
         self._label.setWordWrap(True)
         self._label.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -417,7 +513,7 @@ class ElaChatBubble(ElaThemeWidget):
             body_layout = QVBoxLayout(self._body)
             body_layout.setContentsMargins(*_BUBBLE_PADDING)
             body_layout.setSpacing(0)
-            self._label = QLabel(self._body)
+            self._label = _SelectableLabel(self._body)
             self._label.setTextFormat(Qt.TextFormat.PlainText)
             self._label.setWordWrap(True)
             self._label.setTextInteractionFlags(
@@ -475,9 +571,18 @@ class ElaChatBubble(ElaThemeWidget):
         self._actions.undoRequested.connect(self.undoRequested)
         self._actions.regenerateRequested.connect(self.regenerateRequested)
         self._actions.actionTriggered.connect(self.actionTriggered)
+        # **不挂 QGraphicsOpacityEffect**：即使 opacity=0、控件隐藏，效果器仍会让
+        # 每个滚动帧走一次离屏渲染（实测占聊天滚动 ~20%）。显隐交给
+        # setVisible + RetainSizeWhenHidden；这个对象只保留透明度读数供
+        # setActionsHoverReveal 的既有契约使用。
         self._actions_effect = QGraphicsOpacityEffect(self._actions)
         self._actions_effect.setOpacity(0.0 if self._actions_hover_reveal else 1.0)
-        self._actions.setGraphicsEffect(self._actions_effect)
+        # 隐藏时仍占位（否则悬停出现时消息区整体跳动）。**必须用
+        # RetainSizeWhenHidden**：仅靠 ``QGraphicsOpacityEffect(opacity=0)``
+        # 保留占位时，动作栏每个滚动帧仍要整块离屏渲染一次（Win7 上很贵）。
+        policy = self._actions.sizePolicy()
+        policy.setRetainSizeWhenHidden(True)
+        self._actions.setSizePolicy(policy)
         self._set_actions_revealed(not self._actions_hover_reveal)
 
     def _on_copy(self) -> None:
@@ -514,10 +619,12 @@ class ElaChatBubble(ElaThemeWidget):
         return self._actions_hover_reveal
 
     def _set_actions_revealed(self, on: bool) -> None:
-        """淡入 / 淡出操作栏（仅改透明度，占位不变，避免消息区跳动）。"""
+        """显示 / 隐藏操作栏（保留占位，消息区不跳动）。"""
         on = bool(on) or not self._actions_hover_reveal
         self._actions_effect.setOpacity(1.0 if on else 0.0)
         self._actions.setMouseTransparent(not on)
+        # 隐藏时连绘制也停掉：QGraphicsOpacityEffect(0) 仍会走离屏渲染。
+        self._actions.setVisible(on)
 
     def enterEvent(self, event) -> None:  # noqa: N802 (Qt 命名)
         super().enterEvent(event)
@@ -891,6 +998,10 @@ class ElaChatBubble(ElaThemeWidget):
         text = text_color(mode)
         accent = accent_color(mode)
         self._text_width_cache = None
+        for widget in self._part_widgets.values():
+            if isinstance(widget, ElaMarkdownViewer) and not is_deleted(widget):
+                # 嵌入查看器的显式底色是快照，换主题要跟着刷新
+                widget.setViewportBackground(base)
         if self._body is not None:
             self._body.setBackground(blend(base, accent, 0.16))
             # 深色模式加 1px 描边，避免浅色气泡在深底上"糊"成一片
@@ -1081,6 +1192,26 @@ class ElaChatBubble(ElaThemeWidget):
         """查看器是否处于挂起状态。"""
         return self._viewers_suspended
 
+    def hasExpandedSections(self) -> bool:
+        """是否有用户展开中的折叠块 / 思考块 / 工具面板。
+
+        壳回收会销毁这些控件（展开态不属 ``parts`` 数据），因此调用方应跳过
+        这类消息，避免用户滚回来时发现手动展开的内容又收起了。
+        """
+        for card in self._tool_cards.values():
+            if card is not None and not is_deleted(card) and card.isOpened():
+                return True
+        for panel in self._panels:
+            if panel is not None and not is_deleted(panel) and panel.isOpened():
+                return True
+        for part in self._parts:
+            if part.kind != ElaChatPartKindType.Reasoning:
+                continue
+            widget = self._part_widgets.get(part.id)
+            if isinstance(widget, ReasoningBlock) and widget.isOpened():
+                return True
+        return False
+
     def _suspend_viewers(self) -> None:
         layout = self._parts_layout
         for part in self._parts:
@@ -1104,6 +1235,7 @@ class ElaChatBubble(ElaThemeWidget):
                     layout.insertWidget(index, placeholder)
                 else:
                     layout.addWidget(placeholder)
+            widget.hide()
             widget.setParent(None)
             widget.deleteLater()
         self._viewers_suspended = bool(self._suspended_viewers)
@@ -1123,6 +1255,7 @@ class ElaChatBubble(ElaThemeWidget):
                 # 占位控件对应的分段已不存在：一并收掉，别留在布局里
                 if placeholder is not None and not is_deleted(placeholder):
                     self._part_widgets.pop(partId, None)
+                    placeholder.hide()
                     placeholder.setParent(None)
                     placeholder.deleteLater()
                 continue
@@ -1152,6 +1285,7 @@ class ElaChatBubble(ElaThemeWidget):
                 else:
                     layout.addWidget(widget)
             if placeholder is not None:
+                placeholder.hide()
                 placeholder.setParent(None)
                 placeholder.deleteLater()
             self._suspended_viewers.pop(partId, None)
@@ -1223,6 +1357,7 @@ class ElaChatBubble(ElaThemeWidget):
             if widget is None or id(widget) in seen:
                 continue
             seen.add(id(widget))
+            widget.hide()
             widget.setParent(None)
             widget.deleteLater()
 
@@ -1237,6 +1372,7 @@ class ElaChatBubble(ElaThemeWidget):
         self._suspended_viewers.pop(partId, None)
         widget = self._part_widgets.pop(partId, None)
         if widget is not None:
+            widget.hide()
             widget.setParent(None)
             widget.deleteLater()
 
@@ -1290,23 +1426,31 @@ class ElaChatBubble(ElaThemeWidget):
         if self._status == ElaChatStatusType.Streaming:
             return False
 
+        self._parts_deferred = False
+        self._parts_windowed = False
+        self._window_button = None
+        self._deferred_placeholder = None
         self._reset_part_state()
         maxStep = 0
-        for part in parts or ():
-            if part is None:
-                continue
-            maxStep = max(maxStep, int(getattr(part, "step", 1) or 1))
-            # 每段先切到它所属步骤，_step_index 影响新建分段的 step 归属。
-            # 切步必须与 beginStep 一样收口工具分组与当前面板 / 用量段，
-            # 否则后续步骤的工具会并进上一步的面板（重放出的界面与实时不一致）。
-            if int(getattr(part, "step", 1) or 1) != self._step_index:
-                self.endText()
-                self._finish_tool_group()
-                self.endReasoning()
-                self._current_stats_id = None
-                self._current_tool_panel = None
-                self._step_index = int(part.step or 1)
-            self._restore_one_part(part)
+        self._stats_batch = True
+        try:
+            for part in parts or ():
+                if part is None:
+                    continue
+                maxStep = max(maxStep, int(getattr(part, "step", 1) or 1))
+                # 每段先切到它所属步骤，_step_index 影响新建分段的 step 归属。
+                # 切步必须与 beginStep 一样收口工具分组与当前面板 / 用量段，
+                # 否则后续步骤的工具会并进上一步的面板（重放出的界面与实时不一致）。
+                if int(getattr(part, "step", 1) or 1) != self._step_index:
+                    self.endText()
+                    self._finish_tool_group()
+                    self.endReasoning()
+                    self._current_stats_id = None
+                    self._current_tool_panel = None
+                    self._step_index = int(part.step or 1)
+                self._restore_one_part(part)
+        finally:
+            self._stats_batch = False
         # 收尾：把最后一段的临时状态清干净，并落在最后一步
         # （工具分组也要收口，对齐 endStream，否则分组卡停在「正在探索」）
         self.endText()
@@ -1319,10 +1463,155 @@ class ElaChatBubble(ElaThemeWidget):
                 self._replace_part(part.id, part.withStatus(ElaChatStatusType.Done))
         self._apply_theme()
         self._apply_stats_mode()
+        self._sync_stats_duration()
+        # 延迟物化的消息在占位期间藏起了头部 / 底部；这里恢复。
+        self._header.show()
+        if self._footer is not None:
+            self._sync_footer()
         self.updateGeometry()
         if self.layout() is not None:
             self.layout().activate()
         return True
+
+    def setPartsDeferred(self, parts) -> bool:
+        """只保存分段数据、不建控件（批量加载历史时的按需物化入口）。
+
+        与 :meth:`setParts` 的区别：这里**不重放**增量 API，只把 parts 挂到
+        气泡上并在分段区放一个等高占位。首屏 / 滚动到附近时由
+        :meth:`materializeParts` 真正建卡。``parts()`` / ``messages()`` /
+        导出读到的仍是完整数据。
+        """
+        if self._role != ElaChatRoleType.Assistant:
+            return False
+        if self._status == ElaChatStatusType.Streaming:
+            return False
+        self._reset_part_state()
+        normalized = []
+        for part in parts or ():
+            if part is None:
+                continue
+            if part.status == ElaChatStatusType.Streaming:
+                part = part.withStatus(ElaChatStatusType.Done)
+            normalized.append(part)
+        self._parts = normalized
+        self._parts_deferred = True
+        self._step_index = max(
+            (max(1, int(getattr(part, "step", 1) or 1)) for part in normalized),
+            default=1,
+        )
+        # 未物化的历史消息只显示占位高度，不摆头像 / 操作栏 / 「AI 生成」提示：
+        # 一排空壳消息头比空白更像「坏了」。物化时再恢复。
+        self._header.hide()
+        if self._footer is not None:
+            self._footer.hide()
+        if self._parts_layout is not None:
+            width = self.width()
+            if width <= 0 and self._content is not None:
+                width = self._content.width()
+            placeholder = QWidget(self._parts_container or self._content or self)
+            placeholder.setAttribute(
+                Qt.WidgetAttribute.WA_TransparentForMouseEvents, True
+            )
+            placeholder.setFixedHeight(
+                _estimate_parts_height(normalized, width, self._stats_mode) + 90
+            )
+            self._parts_layout.addWidget(placeholder)
+            self._deferred_placeholder = placeholder
+        self.updateGeometry()
+        if self.layout() is not None:
+            self.layout().activate()
+        return True
+
+    def materializeParts(self) -> bool:
+        """把延迟保存的分段真正建成控件；返回是否执行了物化。
+
+        超过 :data:`_STEP_MATERIALIZE_LIMIT` 步的超长消息只建末尾
+        :data:`_STEP_WINDOW_TAIL` 步，其余折叠成「展开全部」按钮；完整
+        ``parts`` 数据仍保留，导出 / 搜索不受影响。
+        """
+        if not self._parts_deferred:
+            return False
+        parts = list(self._parts)
+        self._parts_deferred = False
+        self._deferred_placeholder = None
+        groups = self._stepGroups(parts)
+        if len(groups) > _STEP_MATERIALIZE_LIMIT:
+            return self._setPartsWindowed(parts, groups)
+        return self.setParts(parts)
+
+    @staticmethod
+    def _stepGroups(parts) -> list:
+        """按 ``part.step`` 分组（保持原顺序）。"""
+        groups = []
+        current = []
+        last_step = None
+        for part in parts or ():
+            step = max(1, int(getattr(part, "step", 1) or 1))
+            if step != last_step:
+                if current:
+                    groups.append(current)
+                current = []
+                last_step = step
+            current.append(part)
+        if current:
+            groups.append(current)
+        return groups
+
+    def _setPartsWindowed(self, parts, groups) -> bool:
+        window = [part for group in groups[-_STEP_WINDOW_TAIL:] for part in group]
+        if not window:
+            return False
+        if not self.setParts(window):
+            return False
+        # ``setParts`` 会把 ``_parts`` 覆盖成窗口分段；恢复完整时间线，
+        # 让 parts() / 导出 / 工具快照读取看到的始终是全量数据。
+        self._parts = list(parts)
+        self._parts_windowed = True
+        button = ElaButton(
+            f"展开全部 {len(groups)} 个步骤（当前显示末尾 {_STEP_WINDOW_TAIL} 步）",
+            parent=self._parts_container or self._content or self,
+        )
+        button.clicked.connect(self.expandParts)
+        if self._parts_layout is not None:
+            self._parts_layout.insertWidget(0, button)
+        self._window_button = button
+        self._step_index = max(
+            (max(1, int(getattr(part, "step", 1) or 1)) for part in parts),
+            default=1,
+        )
+        self.updateGeometry()
+        if self.layout() is not None:
+            self.layout().activate()
+        return True
+
+    def expandParts(self) -> bool:
+        """把超长消息折叠的步骤全部展开（用户显式操作）。"""
+        if not self._parts_windowed:
+            return False
+        parts = list(self._parts)
+        self._parts_windowed = False
+        self._window_button = None
+        return self.setParts(parts)
+
+    def partsWindowed(self) -> bool:
+        """是否只物化了超长消息的末尾若干步。"""
+        return self._parts_windowed
+
+    def partsDeferred(self) -> bool:
+        """分段是否仍处于「只有数据、没有控件」状态。"""
+        return self._parts_deferred
+
+    def _ensure_parts_materialized(self) -> None:
+        """写路径入口：延迟分段先物化，再做增量更新。"""
+        if self._parts_deferred:
+            self.materializeParts()
+
+    def estimatedPartsHeight(self) -> int:
+        """当前分段的估算高度（未物化占位用）。"""
+        width = self.width()
+        if width <= 0 and self._content is not None:
+            width = self._content.width()
+        return _estimate_parts_height(self._parts, width, self._stats_mode)
 
     def _restore_one_part(self, part) -> None:
         """重放单个分段的恢复（内部由 :meth:`setParts` 驱动）。"""
@@ -1338,29 +1627,33 @@ class ElaChatBubble(ElaThemeWidget):
                 self.appendText(part.text)
             self.endText()
         elif kind == ElaChatPartKindType.Reasoning:
-            self.beginReasoning(part.id or None)
-            if part.text:
-                self.appendReasoning(part.text)
-            self.endReasoning(part.duration_ms or None)
+            partId = self._ensure_reasoning_part(part.id or None)
+            widget = self._part_widgets.get(partId)
+            if isinstance(widget, ReasoningBlock):
+                widget.setText(part.text or "")
+                widget.finishSilently(part.duration_ms or None)
+            elif isinstance(widget, ElaMarkdownViewer):
+                if part.text:
+                    self._write_viewer_text(partId, widget, part.text)
+                if self._thinking_row is not None:
+                    self._thinking_row.end()
+            self._current_reasoning_id = None
+            self._replace_part(partId, part.withStatus(ElaChatStatusType.Done))
         elif kind == ElaChatPartKindType.Tool:
             call = part.tool_call
             if call is None:
                 return
             callId = self.addToolCall(
-                call.name, call.arguments, toolCallId=call.id or None
+                call.name,
+                call.arguments,
+                toolCallId=call.id or None,
+                tool_call=call,
             )
             if not callId:
                 return
-            if call.result or call.status != ElaChatToolStatusType.Running:
-                ok = call.status != ElaChatToolStatusType.Error
-                self.setToolCallResult(callId, call.result or "", ok=ok)
-            # setToolCallResult 只能落到 Done / Error，而存储里可能是
-            # Pending / Running（宿主重启后还要补结果）或 Aborted（被停止）。
-            # 不还原的话，恢复一次就把「还在跑」悄悄变成了「已完成」。
             current = self._find_part(callId)
             if current is not None and current.tool_call != call:
                 self._replace_part(callId, current.withToolCall(call))
-                # 卡片只是视图；ContextToolGroupCard 没有单调用状态，跳过
                 card = self._tool_cards.get(callId)
                 if isinstance(card, ToolCallCard):
                     card.setStatus(call.status)
@@ -1419,6 +1712,7 @@ class ElaChatBubble(ElaThemeWidget):
         **刻意不插一条用户消息** —— 助手消息正在流式输出，中途插一条用户
         气泡视觉上很怪。回执行留在同一条助手消息内，语义是「插话已送达」。
         """
+        self._ensure_parts_materialized()
         self._mark_generation_started()
         partId = partId or uuid4().hex[:12]
         widget = SteerNotice(self._parts_container or self._content or self)
@@ -1446,6 +1740,7 @@ class ElaChatBubble(ElaThemeWidget):
 
         ``reason`` **只进 journal 原始事件**（宿主诊断用），时间线卡片不展示它。
         """
+        self._ensure_parts_materialized()
         self._mark_generation_started()
         partId = partId or uuid4().hex[:12]
         widget = CompactionSeparator(self._parts_container or self._content or self)
@@ -1515,6 +1810,7 @@ class ElaChatBubble(ElaThemeWidget):
         进来的 ``request`` 已经是**落定态**时（宿主重放后端历史、或自己判定完再补
         登记）直接落成时间线上的记录卡：不进 dock、不发 ``permissionRequested``。
         """
+        self._ensure_parts_materialized()
         self._mark_generation_started()
         partId = partId or uuid4().hex[:12]
         part = ElaChatPart(
@@ -1735,6 +2031,10 @@ class ElaChatBubble(ElaThemeWidget):
         self._current_reasoning_id = None
         self._current_stats_id = None
         self._current_tool_panel = None
+        self._parts_deferred = False
+        self._parts_windowed = False
+        self._window_button = None
+        self._deferred_placeholder = None
         self._pending_text_lead.clear()
         for partId in [part.id for part in self._parts]:
             self._discard_part_state(partId)
@@ -1745,6 +2045,7 @@ class ElaChatBubble(ElaThemeWidget):
             # 否则 ``None.setParent`` 会在 setParts 里抛 AttributeError。
             if widget is None or is_deleted(widget):
                 continue
+            widget.hide()
             widget.setParent(None)
             widget.deleteLater()
         # 占位控件已被销毁，挂起标志必须一起复位；否则 ``viewersSuspended()``
@@ -1764,11 +2065,13 @@ class ElaChatBubble(ElaThemeWidget):
         # 显示一张已经没人再答的卡。
         for card in self._interactive_cards.values():
             if not is_deleted(card):
+                card.hide()
                 card.setParent(None)
                 card.deleteLater()
         self._interactive_cards = {}
         self._permission_cards = {}
         for panel in self._panels:
+            panel.hide()
             panel.setParent(None)
             panel.deleteLater()
         self._panels = []
@@ -1777,6 +2080,7 @@ class ElaChatBubble(ElaThemeWidget):
                 item = self._parts_layout.takeAt(0)
                 widget = item.widget()
                 if widget is not None:
+                    widget.hide()
                     widget.setParent(None)
                     widget.deleteLater()
 
@@ -1787,6 +2091,7 @@ class ElaChatBubble(ElaThemeWidget):
                 self._label.setText(text)
                 self._update_max_width()
             return
+        self._ensure_parts_materialized()
         # 整体替换：还没开段的空白分片属于旧内容，一起丢弃
         self._pending_text_lead.clear()
         if text:
@@ -1857,6 +2162,9 @@ class ElaChatBubble(ElaThemeWidget):
         # 文末段落下边距不计入高度：正文与后续分段的视觉间距与其它分段一致
         viewer.setEmbeddedTrimBottom(True)
         viewer.setBorderRadius(0)
+        # 不透明底色（与消息区同色）：嵌入查看器默认透明，Win7 上会走慢速
+        # 重绘路径（见「下游项目反馈bug.md」§4）
+        viewer.setViewportBackground(base_color(self._theme_mode))
         viewer.setStickToBottom(False)
         if self._status == ElaChatStatusType.Streaming:
             viewer.setPlaceholderText(_STREAMING_PLACEHOLDER)
@@ -1871,6 +2179,7 @@ class ElaChatBubble(ElaThemeWidget):
         """
         if self._role != ElaChatRoleType.Assistant:
             return None
+        self._ensure_parts_materialized()
         if self._current_text_id is not None:
             self.endText()
         partId = partId or uuid4().hex[:12]
@@ -1983,6 +2292,7 @@ class ElaChatBubble(ElaThemeWidget):
                 else:
                     layout.addWidget(widget)
             if old is not None:
+                old.hide()
                 old.setParent(None)
                 old.deleteLater()
             if part.status == ElaChatStatusType.Streaming:
@@ -2033,6 +2343,8 @@ class ElaChatBubble(ElaThemeWidget):
             viewer.setEmbeddedMode(True)
             viewer.setEmbeddedTrimBottom(True)
             viewer.setBorderRadius(0)
+            # 同 _create_text_viewer：嵌入查看器用不透明底色避开 Win7 慢路径
+            viewer.setViewportBackground(base_color(self._theme_mode))
             viewer.setStickToBottom(False)
             viewer.setMarkdown("")
             self.viewerCreated.emit(viewer)
@@ -2194,6 +2506,7 @@ class ElaChatBubble(ElaThemeWidget):
         """
         if self._role != ElaChatRoleType.Assistant:
             return
+        self._ensure_parts_materialized()
         if partId is not None:
             new_id = self._ensure_reasoning_part(partId)
             widget = self._part_widgets.get(new_id)
@@ -2342,13 +2655,27 @@ class ElaChatBubble(ElaThemeWidget):
         return self._tool_grouping
 
     def addToolCall(
-        self, name: str, arguments: str = "", toolCallId: Optional[str] = None
+        self,
+        name: str,
+        arguments: str = "",
+        toolCallId: Optional[str] = None,
+        *,
+        tool_call: Optional[ElaChatToolCall] = None,
     ) -> str:
-        """添加一个工具调用，返回调用 id（上下文工具自动归组）。"""
+        """添加一个工具调用，返回调用 id（上下文工具自动归组）。
+
+        ``tool_call`` 由恢复路径传入**已完成**的快照：卡片构造时就带上结果与
+        最终状态，省掉「先建卡再 setResult」的第二次头部同步。
+        """
         if self._role != ElaChatRoleType.Assistant:
             return ""
+        self._ensure_parts_materialized()
         self._mark_generation_started()
-        callId = toolCallId or uuid4().hex[:12]
+        callId = (
+            toolCallId
+            or (tool_call.id if tool_call is not None else "")
+            or uuid4().hex[:12]
+        )
         if toolCallId and toolCallId in self._tool_cards:
             # 同一调用 id 重复上报（参数分片等）：更新参数不追加重复分段
             card = self._tool_cards[toolCallId]
@@ -2362,11 +2689,16 @@ class ElaChatBubble(ElaThemeWidget):
                     toolCallId, part.withToolCall(card.toolCall(toolCallId))
                 )
             return toolCallId
-        call = ElaChatToolCall(id=callId, name=name, arguments=arguments or "")
+        call = tool_call or ElaChatToolCall(
+            id=callId, name=name, arguments=arguments or ""
+        )
+        name = call.name
+        arguments = call.arguments
         panel = self._ensure_tools()
         container = panel.toolContainer()
         key = (name or "").lower()
         is_context = key in CONTEXT_TOOLS
+        failed = call.status == ElaChatToolStatusType.Error
         # 宿主给上下文工具注册了渲染器 -> 默认退出分组：分组卡只画一行汇总
         # 摘要，会把渲染器整个绕过（那宿主注册它就毫无意义）。
         groupable = toolRendererGroupable(name)
@@ -2379,7 +2711,7 @@ class ElaChatBubble(ElaThemeWidget):
                 # 却不管分组，会让同一策略在两条路径上表现不一致。
                 self._group_card = ContextToolGroupCard(
                     container,
-                    defaultOpen=self._tool_default_open(name, arguments, True),
+                    defaultOpen=self._tool_default_open(name, arguments, not failed),
                 )
                 self._group_card.toggled.connect(self._on_tool_card_toggled)
                 panel.toolLayout().addWidget(self._group_card)
@@ -2395,7 +2727,9 @@ class ElaChatBubble(ElaThemeWidget):
                 # 建卡时结果还没到，ok 传 True（不是失败）；失败展开由
                 # ToolCallCard.setResult(ok=False) 单独处理。传 False 会被
                 # 策略读成「已失败」-> 每张卡都自动展开。
-                defaultOpen=self._tool_default_open(call.name, call.arguments, True),
+                defaultOpen=self._tool_default_open(
+                    call.name, call.arguments, not failed
+                ),
             )
             card.setMessageId(self._message_id)
             card.toggled.connect(self._on_tool_card_toggled)
@@ -2406,7 +2740,11 @@ class ElaChatBubble(ElaThemeWidget):
             ElaChatPart(
                 id=callId,
                 kind=ElaChatPartKindType.Tool,
-                status=ElaChatStatusType.Streaming,
+                status=(
+                    ElaChatStatusType.Done
+                    if call.status in ElaChatToolStatusType.Settled
+                    else ElaChatStatusType.Streaming
+                ),
                 tool_call=call,
                 step=self._step_index,
             )
@@ -2425,6 +2763,48 @@ class ElaChatBubble(ElaThemeWidget):
             self._group_card.finish()
             self._group_card = None
 
+    def _toolPanelSummary(self, calls) -> str:
+        """折叠面板的一行摘要：单调用显示「工具 · 关键参数」，多调用显示名称计数。"""
+        calls = [call for call in calls if call is not None]
+        if not calls:
+            return ""
+        if len(calls) == 1:
+            call = calls[0]
+            name = call.name or "工具"
+            subtitle = ""
+            try:
+                _key, subtitle = toolRendererSubtitle(name, call.arguments)
+                if not subtitle:
+                    _key, subtitle = toolSubtitleParts(call.arguments)
+            except Exception:
+                subtitle = ""
+            subtitle = " ".join(str(subtitle or "").split())
+            if len(subtitle) > 72:
+                subtitle = subtitle[:71] + "…"
+            text = f"{name} · {subtitle}" if subtitle else name
+            if call.status == ElaChatToolStatusType.Error:
+                text += " · 失败"
+            return text
+        counts = {}
+        order = []
+        failed = 0
+        for call in calls:
+            name = call.name or "工具"
+            if name not in counts:
+                order.append(name)
+                counts[name] = 0
+            counts[name] += 1
+            if call.status == ElaChatToolStatusType.Error:
+                failed += 1
+        parts = [
+            f"{name}×{counts[name]}" if counts[name] > 1 else name for name in order[:4]
+        ]
+        if len(order) > 4:
+            parts.append("…")
+        if failed:
+            parts.append(f"失败{failed}")
+        return " · ".join(parts)
+
     def _sync_tool_panel(self, panel: Optional[ToolGroupPanel] = None) -> None:
         """按分段状态刷新指定面板（缺省当前面板）的标题与运行指示。"""
         panel = panel or self._current_tool_panel
@@ -2440,10 +2820,31 @@ class ElaChatBubble(ElaThemeWidget):
         ]
         total = len(calls)
         done = sum(1 for call in calls if call.status in ElaChatToolStatusType.Settled)
-        panel.setCounts(done, total)
+        key = (
+            total,
+            tuple(call.id for call in calls),
+            sum(1 for call in calls if call.status == ElaChatToolStatusType.Error),
+        )
+        if key == getattr(panel, "_summary_key", None):
+            # 结果落定（running -> done）不改摘要，跳过参数 JSON 解析
+            panel.setCounts(done, total)
+        else:
+            panel._summary_key = key
+            panel.setCounts(done, total, summary=self._toolPanelSummary(calls))
 
     def setToolCallResult(self, toolCallId: str, result: str, ok: bool = True) -> None:
         """更新指定工具调用的结果。"""
+        if self._parts_deferred or (
+            self._parts_windowed and toolCallId not in self._tool_cards
+        ):
+            part = self._find_part(toolCallId)
+            if part is not None and part.tool_call is not None:
+                status = (
+                    ElaChatToolStatusType.Done if ok else ElaChatToolStatusType.Error
+                )
+                call = part.tool_call.withResult(result or "", status)
+                self._replace_part(toolCallId, part.withToolCall(call))
+            return
         card = self._tool_cards.get(toolCallId)
         if card is None:
             return
@@ -2456,7 +2857,10 @@ class ElaChatBubble(ElaThemeWidget):
     def toolCall(self, toolCallId: str) -> Optional[ElaChatToolCall]:
         """按 id 获取工具调用快照。"""
         card = self._tool_cards.get(toolCallId)
-        return card.toolCall(toolCallId) if card is not None else None
+        if card is not None:
+            return card.toolCall(toolCallId)
+        part = self._find_part(toolCallId)
+        return part.tool_call if part is not None else None
 
     def toolCalls(self) -> list:
         """获取全部工具调用快照（按添加顺序）。"""
@@ -2477,6 +2881,7 @@ class ElaChatBubble(ElaThemeWidget):
         self._group_card = None
         self._panel_calls.clear()
         for panel in self._panels:
+            panel.hide()
             panel.setParent(None)
             panel.deleteLater()
         self._panels = []
@@ -2561,6 +2966,7 @@ class ElaChatBubble(ElaThemeWidget):
         """
         if self._role != ElaChatRoleType.Assistant:
             return
+        self._ensure_parts_materialized()
         if partId is not None:
             # 恢复路径：明确指定分段 id，不再复用当前步骤的用量段
             self._current_stats_id = partId
@@ -2569,8 +2975,9 @@ class ElaChatBubble(ElaThemeWidget):
                 partId = self._current_stats_id
                 self._current_stats_id = None
                 self._drop_part(partId)
-                self._apply_stats_mode()
-                self._sync_stats_duration()
+                if not self._stats_batch:
+                    self._apply_stats_mode()
+                    self._sync_stats_duration()
             return
         part = self._find_part(self._current_stats_id)
         if part is None:
@@ -2593,6 +3000,8 @@ class ElaChatBubble(ElaThemeWidget):
             widget = self._part_widgets.get(self._current_stats_id)
             if isinstance(widget, StatsBadge):
                 widget.setStats(stats)
+        if self._stats_batch:
+            return
         self._apply_stats_mode()
         self._sync_stats_duration()
 
@@ -2790,7 +3199,9 @@ class ElaChatBubble(ElaThemeWidget):
         """
         if self._footer is None:
             return
-        self._footer.setVisible(self._status != ElaChatStatusType.Streaming)
+        self._footer.setVisible(
+            not self._parts_deferred and self._status != ElaChatStatusType.Streaming
+        )
 
     def _sync_header_status(self) -> None:
         """按状态与「是否已收到首个模型输出」刷新头部提示。

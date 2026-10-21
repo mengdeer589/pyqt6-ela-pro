@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import re
+from pathlib import Path
 
 import pytest
 from PyQt6.QtCore import QEvent, QMimeData, QPoint, QPointF, Qt, QUrl
@@ -593,3 +594,62 @@ class TestMentionTail:
     def test_tail_covers_cjk_extensions(self, text, matched):
         found = re.search(re.escape("@Al") + _MENTION_TAIL, text) is not None
         assert found is matched
+
+
+class TestLargePasteToAttachment:
+    """大段粘贴转附件：临时文件走附件管线；写盘失败回退直插。
+
+    阈值见 ``chat.input`` 的 ``_LARGE_PASTE_CHARS``(8000) / ``_LARGE_PASTE_LINES``(120)。
+    """
+
+    @staticmethod
+    def _paste(widget, text):
+        mime = QMimeData()
+        mime.setText(text)
+        widget.textEdit().insertFromMimeData(mime)
+
+    def test_large_paste_becomes_attachment(self, qapp, make):
+        widget = make(ElaChatInput)
+        added = []
+        widget.filesAdded.connect(added.append)
+        big = "行内容\n" * 200  # 200 行 ≥ _LARGE_PASTE_LINES
+
+        self._paste(widget, big)
+
+        assert widget.text() == "", "大段粘贴不该塞进编辑框"
+        assert widget.attachmentCount() == 1
+        path = widget.attachmentPaths()[0]
+        assert Path(path).read_text(encoding="utf-8") == big, "临时文件内容要逐字节一致"
+        assert added and added[0] == [path], "要经 filesAdded 通知宿主（宿主零改动可用）"
+
+    def test_small_paste_stays_inline(self, qapp, make):
+        widget = make(ElaChatInput)
+
+        self._paste(widget, "短文本")
+
+        assert widget.text() == "短文本"
+        assert widget.attachmentCount() == 0
+
+    def test_same_content_pasted_twice_dedups(self, qapp, make):
+        widget = make(ElaChatInput)
+        big = "x" * 9000  # ≥ _LARGE_PASTE_CHARS
+
+        self._paste(widget, big)
+        self._paste(widget, big)
+
+        assert widget.attachmentCount() == 1, "同内容同路径应被附件条去重"
+
+    def test_write_failure_falls_back_to_inline(self, qapp, make, monkeypatch):
+        widget = make(ElaChatInput)
+        big = "y" * 9000
+
+        def boom(self, *args, **kwargs):
+            raise OSError("disk full")
+
+        monkeypatch.setattr(Path, "write_text", boom)
+
+        with pytest.warns(RuntimeWarning):
+            self._paste(widget, big)
+
+        assert widget.attachmentCount() == 0
+        assert widget.text() == big, "写盘失败不能静默丢内容，要回退直插"

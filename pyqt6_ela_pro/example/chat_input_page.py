@@ -431,6 +431,9 @@ class ChatInputPage(ExamplePage):
 
         容易漏的一处：**复制的文件**（Explorer 里 Ctrl+C）拖进来，mime 是
         ``file://`` URL 而不是路径，各写一份判定就会漏掉这一种。
+
+        **大段粘贴（≥8000 字符或 ≥120 行）自动转附件**：写成临时文件后走
+        同一条附件通道（``filesAdded`` 照常发），不把几兆文本塞进编辑框。
         """
         self._chat.chatInput().addAttachment("blocks.py", "src/chat/blocks.py", 48_120)
         self._chat.sendUserMessage(

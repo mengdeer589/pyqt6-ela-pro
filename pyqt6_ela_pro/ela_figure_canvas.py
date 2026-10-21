@@ -101,8 +101,13 @@ if _FigureCanvas is not None:
 
         # ── Public API ────────────────────────────────────
 
-        def setStyle(self, rcparams: dict) -> None:
-            """应用额外的 matplotlib rcParams 样式参数。"""
+        def setStyleParams(self, rcparams: dict) -> None:
+            """应用额外的 matplotlib rcParams 样式参数。
+
+            **进程级副作用**：直接写全局 ``mpl.rcParams``，影响宿主**所有**
+            matplotlib 图（与构造期的 CJK 注入 / 换肤同一口径）。
+            名字刻意不叫 ``setStyle``（那会遮蔽 ``QWidget.setStyle(QStyle)``）。
+            """
             if mpl:
                 mpl.rcParams.update(rcparams)
             self.draw_idle()

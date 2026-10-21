@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from PyQt6.QtCore import Qt
-from PyQt6.QtGui import QColor, QFont, QTextLength, QTextTable
+from PyQt6.QtGui import QColor, QFont, QPalette, QTextLength, QTextTable
 from PyQt6ElaWidgetTools import ElaScrollBar, ElaThemeType, eTheme
 
 from pyqt6_ela_pro import ela_markdown_viewer as viewer_module
@@ -233,19 +233,42 @@ class TestElaMarkdownViewerThemeColors:
     def _find(self, viewer: ElaMarkdownViewer, text: str):
         return next(f for f in _fragments(viewer) if f.text() == text)
 
-    def test_plain_text_color_follows_theme(self):
+    def test_plain_text_uses_palette_color(self):
+        """纯正文**不带显式前景色**：由控件 palette 的 ``Text`` 提供（随主题）。
 
+        每段正文 merge 一次正文色实测占整渲染 ~16ms（117KB 文档 8260 个
+        片段里 3736 个是纯正文）；改为 palette 提供后屏幕逐像素等价，
+        ``toHtml()`` 不再输出正文 ``color:``、PDF / 打印走默认调色板。
+        """
         v = ElaMarkdownViewer()
         v.setMarkdown("plain text")
 
+        fragment = self._find(v, "plain text")
+        assert fragment.charFormat().foreground().style() == Qt.BrushStyle.NoBrush
         expected = eTheme.getThemeColor(
             v._theme_mode, ElaThemeType.ThemeColor.BasicText
         )
-        assert (
-            self._find(v, "plain text").charFormat().foreground().color().name()
-            == expected.name()
-        )
+        palette = v.textBrowser().palette()
+        assert palette.color(QPalette.ColorRole.Text).name() == expected.name()
         v.deleteLater()
+
+    def test_plain_text_uses_palette_color_in_dark_theme(self):
+        previous = eTheme.getThemeMode()
+        try:
+            eTheme.setThemeMode(ElaThemeType.ThemeMode.Dark)
+            v = ElaMarkdownViewer()
+            v.setMarkdown("plain text")
+
+            fragment = self._find(v, "plain text")
+            assert fragment.charFormat().foreground().style() == Qt.BrushStyle.NoBrush
+            palette = v.textBrowser().palette()
+            expected = eTheme.getThemeColor(
+                ElaThemeType.ThemeMode.Dark, ElaThemeType.ThemeColor.BasicText
+            )
+            assert palette.color(QPalette.ColorRole.Text).name() == expected.name()
+            v.deleteLater()
+        finally:
+            eTheme.setThemeMode(previous)
 
     def test_link_color_follows_theme(self):
 

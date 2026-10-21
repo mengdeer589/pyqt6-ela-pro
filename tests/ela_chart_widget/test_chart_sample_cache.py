@@ -71,19 +71,23 @@ class TestSampleCacheDataIdentity:
         r = _render(chart)
         assert 0 < len(r._point_idx) < N, "采样未生效，用例前提不成立"
 
-    def test_cache_key_contains_data_identity(self, make):
-        """采样缓存键必须随数据对象变化而变化。"""
+    def test_cache_invalidated_on_data_identity_change(self, make):
+        """采样缓存按数据身份失效：换等长数据后旧缓存键必须被清掉。"""
         chart = make(ElaChartWidget)
         chart.resize(900, 500)
         chart.setOption(_option(_spiked_at(0)))
         r = _render(chart)
-        key_a = r._sample_cache_key
-        assert key_a is not None
+        keys_a = list(r._sample_lru)
+        assert keys_a, "首帧未写入采样缓存"
 
         # 同一渲染器实例，换成等长的另一份数据
         r.opt["data"] = _spiked_at(N - 1)
         _relayout(r)
-        assert key_a != r._sample_cache_key, "缓存键未包含数据身份"
+        keys_b = list(r._sample_lru)
+        assert keys_b, "换数据后新窗口未写缓存"
+        assert all(k not in keys_b for k in keys_a), (
+            "换数据后旧缓存键仍在 —— 缓存未按数据身份失效"
+        )
 
     def test_same_length_replacement_recomputes(self, make):
         """等长换数据后采样点集必须重算。"""
@@ -104,17 +108,61 @@ class TestSampleCacheDataIdentity:
         assert (N - 1) in set(second), "新数据的尖峰下标未被采到"
 
     def test_repeated_render_hits_cache(self, make):
-        """同一份数据重复渲染必须命中缓存（确认没把缓存彻底废掉）。"""
+        """同一份数据 + 同一窗口重复渲染必须命中缓存（不重跑抽稀）。"""
+        from types import MethodType
+
         chart = make(ElaChartWidget)
         chart.resize(900, 500)
         chart.setOption(_option(_spiked_at(0)))
         r = _render(chart)
-        key_first = r._sample_cache_key
         idx_first = list(r._point_idx)
+
+        calls = []
+        orig = r._decimate
+
+        def counted(_self, *args, **kwargs):
+            calls.append(1)
+            return orig(*args, **kwargs)
+
+        r._decimate = MethodType(counted, r)
         chart.invalidateLayout()
         r2 = _render(chart)
-        assert r2._sample_cache_key == key_first, "同数据重渲染不应改写缓存键"
+        assert r2 is r
         assert list(r2._point_idx) == idx_first
+        assert not calls, "同数据 + 同窗口重复渲染不应重跑抽稀"
+
+    def test_window_lru_reuses_earlier_zoom(self, make):
+        """窗口 A → B → A：第三次必须命中 LRU（旧的单槽实现会重算）。"""
+        from types import MethodType
+
+        chart = make(ElaChartWidget)
+        chart.resize(900, 500)
+        chart.setOption(_option(_spiked_at(0)))
+        r = _render(chart)
+
+        calls = []
+        orig = r._decimate
+
+        def counted(_self, *args, **kwargs):
+            calls.append(1)
+            return orig(*args, **kwargs)
+
+        r._decimate = MethodType(counted, r)
+
+        def zoom(a, b):
+            chart.dispatchAction({"type": "dataZoom", "start": a, "end": b})
+            chart.grab()
+            QApplication.processEvents()
+
+        zoom(30, 50)
+        n_after_a = len(calls)
+        zoom(50, 70)
+        n_after_b = len(calls)
+        zoom(30, 50)  # 回到窗口 A
+        assert (n_after_a, n_after_b) == (1, 2), (
+            f"每个新窗口应恰好重算一次，实际 {n_after_a}/{n_after_b}"
+        )
+        assert len(calls) == 2, "回到窗口 A 应命中 LRU 缓存，不应重算"
 
 
 @pytest.mark.skipif(not ds.available(), reason="需要 numpy（缓冲区要求 numpy 承载）")

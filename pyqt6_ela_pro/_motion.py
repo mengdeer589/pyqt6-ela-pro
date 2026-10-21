@@ -83,7 +83,11 @@ _REDUCED_TRANSITION_MS = 50
 _SNAP_MIN_DURATION_MS = 1
 
 #: Windows ``SPI_GETCLIENTAREAANIMATION``（``winuser.h``）。返回 0 = 系统关闭了动画。
-_SPI_GETCLIENTAREAANIMATION = 0x0049
+#:
+#: **值就是 ``0x1042``，别改**：``0x0049`` 是 ``SPI_SETANIMATION``（写操作，期望
+#: ``ANIMATIONINFO``），``0x004B`` 是另一个 SET 项 —— 拿 SET 常量当 GET 调用的
+#: 后果是「探测恒假 + 有改写用户系统设置的风险」（本仓库踩过两次）。
+_SPI_GETCLIENTAREAANIMATION = 0x1042
 
 _SLOT_ATTR = "_ela_motion_slot"
 

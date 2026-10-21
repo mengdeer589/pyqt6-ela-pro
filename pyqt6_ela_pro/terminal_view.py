@@ -23,16 +23,22 @@ spinner / ``pip`` / ``git clone`` / ``docker pull`` 都是完整行重画，结�
 
     view = ElaTerminalView(parent)
     view.setMaxLines(5000)
-    view.append("\\x1b[32m✓\\x1b[0m 编译完成\\n")
+    view.append("\\x1b[32m√\\x1b[0m 编译完成\\n")
 """
 
 from __future__ import annotations
 
+import logging
 import os
 from dataclasses import dataclass, replace
 from typing import NamedTuple, Optional
 
-from ._internal import is_deleted
+from ._internal import (
+    applyMissingGlyphFonts,
+    execElaMenu,
+    is_deleted,
+    system_cjk_font_family,
+)
 from PyQt6.QtCore import (
     QEvent,
     QFile,
@@ -72,11 +78,12 @@ from PyQt6ElaWidgetTools import (
     eTheme,
 )
 
-from ._internal import execElaMenu
 from ._styles import editBorderlessStyle
 from .ela_button import ElaButton
 from .tooltips import ElaToolTipPositionType, set_tooltip
 from .widget_base import ElaThemeWidget
+
+logger = logging.getLogger(__name__)
 
 # ── 常量 ────────────────────────────────────────────────────────────────
 
@@ -138,7 +145,7 @@ _DIM_RATIO = 0.45
 #: 搜索命中高亮色（向背景混合）
 _HIGHLIGHT = QColor("#ffcf4d")
 _HIGHLIGHT_RATIO = 0.45
-#: 默认等宽字体
+#: 非 CJK 系统的默认等宽字体（中文系统默认取 ``_default_font_families()`` 的 CJK 字体）
 _DEFAULT_FONT_FAMILY = "Consolas"
 #: 8 基础色 / 8 亮色的调色板键
 _BASIC_KEYS = (
@@ -161,6 +168,20 @@ _ZERO = 0
 _DEFAULT_CSI_PARAM = 0
 #: ``CSI C`` / ``CSI D`` 的缺省步进
 _DEFAULT_CSI_STEP = 1
+
+
+def _default_font_families() -> list[str]:
+    """终端默认字体族（中文系统用**单族** CJK UI 字体，其它系统用 Consolas）。
+
+    Consolas 渲染 CJK 走逐字形 fallback：Win7 上 ~3ms/行且进程级毒化其后一切
+    文本绘制（10~250×，见「下游项目反馈bug.md」§2/§3）；多族列表（等宽 + CJK
+    后备）本身也是慢路径，只能收成单族。Latin 部分非等宽、日志对齐略降是已知
+    代价，宿主可 ``setFontFamilies`` 覆盖。
+    """
+    cjk_family = system_cjk_font_family()
+    if cjk_family:
+        return [cjk_family]
+    return [_DEFAULT_FONT_FAMILY]
 
 
 # ── 调色板注册表 ────────────────────────────────────────────────────────
@@ -1026,6 +1047,8 @@ class ElaTerminalView(ElaThemeWidget):
 
     支持 ANSI 色彩、行号槽、自动滚动跟随、搜索过滤与高亮、右键菜单、导出到
     文件、保留行数上限。**组件不执行任何命令**，输出由宿主 ``append`` 喂入。
+    中文系统默认对主字体缺字形的字符套单族符号字体（只改字体族、不改文本；
+    ``setMissingGlyphFallbackEnabled(False)`` 可关，bug #20）。
 
     :param maxLines: 保留行数上限，``0`` 表示不限
     :param paletteName: 调色板名称（见 :func:`terminalThemes`）
@@ -1064,8 +1087,12 @@ class ElaTerminalView(ElaThemeWidget):
         #: 已发射给宿主的过滤词（用于 :attr:`filterChanged` 的「只在真变时发」判定）
         self._emitted_filter = ""
         self._font_size = _DEFAULT_FONT_SIZE
-        #: 终端字体族列表（按序回退；默认 Consolas，可用 setFontFamilies 换 CJK 友好族）
-        self._font_families: list[str] = [_DEFAULT_FONT_FAMILY]
+        #: 终端字体族列表（按序回退；中文系统默认单族 CJK 字体，其它系统 Consolas）
+        self._font_families: list[str] = _default_font_families()
+        #: 中文系统：主字体缺字形时给字符套单族符号字体（默认开；不改文本）
+        self._missing_glyph_fallback = system_cjk_font_family() is not None
+        #: 已做过缺字形兜底的文档位置（尾行重写 / 裁头时回退）
+        self._glyph_guard_pos = 0
         self._palette_name = (
             paletteName if paletteName in _TERMINAL_THEMES else _DEFAULT_THEME_NAME
         )
@@ -1254,19 +1281,21 @@ class ElaTerminalView(ElaThemeWidget):
             #
             # 不做「文本没变就跳过」的优化：``append("\x1b[0m")`` 这种只改
             # 样式不带文本的片，文本没变但**必须**重画。
-            if self._filter or self._parser.pendingLine() is None:
+            if self._parser.pendingLine() is None:
                 return
-        else:
-            self._lines.extend(lines)
-            self._trim_lines()
-            self._pending_render += len(lines)
+            # 过滤态也走 flush：它只同步尾块（完整行的增量在过滤态下没有
+            # 意义、等重建），否则尾行会冻在「上一次收行」那一刻
+            self._flush_timer.start()
+            return
+        self._lines.extend(lines)
+        self._trim_lines()
+        self._pending_render += len(lines)
         if self._filter:
             # 过滤态下增量渲染没有意义，等去抖后整体重建
             self._filter_timer.start()
         else:
             self._flush_timer.start()
-        if lines:
-            self.linesAppended.emit(len(lines))
+        self.linesAppended.emit(len(lines))
 
     def appendLine(self, text: str) -> None:  # noqa: N802 (Qt 命名)
         """追加一行（自动补换行，忽略文本自带的结尾换行）。"""
@@ -1282,6 +1311,7 @@ class ElaTerminalView(ElaThemeWidget):
         self._doc_lines = 0
         self._doc_tail = False
         self._doc_tail_key = None
+        self._glyph_guard_pos = 0
         self._match_index = []
         self._match_pos = -1
         self._edit.clear()
@@ -1373,7 +1403,10 @@ class ElaTerminalView(ElaThemeWidget):
         self._max_lines = count
         self._trim_lines()
         self._gutter.syncWidth()
-        self._filter_timer.start()
+        # 重建要**保持滚动位置**：改上限不是「用户要看新内容」，别把上滚的
+        # 用户拽回底部（与 _rebuild_document 注释的清单一致）；隐藏时只标记，
+        # showEvent 补做（与换肤路径同口径）
+        self._rebuild_when_visible()
 
     def maxLines(self) -> int:  # noqa: N802 (Qt 命名)
         """获取保留行数上限。"""
@@ -1563,19 +1596,43 @@ class ElaTerminalView(ElaThemeWidget):
         return self._font_size
 
     def setFontFamilies(self, families: list[str]) -> None:  # noqa: N802 (Qt 命名)
-        """设置终端字体族列表（按序回退；默认 ``["Consolas"]``）。
+        """设置终端字体族列表（按序回退；默认：中文系统单族 CJK 字体，其它 Consolas）。
 
-        CJK 密集输出建议带上中文字形族（如 ``["Consolas", "Microsoft YaHei UI"]``）：
-        纯 Latin 等宽字体对每个 CJK 字形逐字回退，Win7 上该 shaping 成本很高。
-        空列表回落默认值。
+        Win7 上 Latin 等宽字体渲染 CJK 逐字回退、多族列表本身也是慢 shaping
+        路径，两者都会让重绘慢一个数量级并进程级毒化（见「下游项目反馈bug.md」
+        §2/§3）—— 需要中文输出时给**单个** CJK 字体（如 ``["Microsoft YaHei"]``）。
+        空列表回落默认值。缺字形兜底按**首族**判断（中文系统默认开，见
+        :meth:`setMissingGlyphFallbackEnabled`）。
         """
         cleaned = [str(name) for name in (families or []) if str(name)]
-        self._font_families = cleaned or [_DEFAULT_FONT_FAMILY]
+        self._font_families = cleaned or _default_font_families()
         self._apply_font()
+        # 字体族变了：旧的缺字形兜底格式要按新主字体重判（重建会一并清掉）
+        if self._missing_glyph_fallback and self._lines:
+            self._glyph_guard_pos = 0
+            self._rebuild_when_visible()
 
     def fontFamilies(self) -> list[str]:  # noqa: N802 (Qt 命名)
         """获取终端字体族列表（副本）。"""
         return list(self._font_families)
+
+    def setMissingGlyphFallbackEnabled(self, on: bool = True) -> None:
+        """主字体缺字形时给字符套单族符号字体（中文系统默认开）。
+
+        只改 ``QTextCharFormat`` 的字体族，**不改文本**（复制 / 导出保真）。
+        开启 / 关闭会重建文档：关闭时恢复主字体，开启时补上兜底。
+        """
+        on = bool(on)
+        if on == self._missing_glyph_fallback:
+            return
+        self._missing_glyph_fallback = on
+        self._glyph_guard_pos = 0
+        if self._lines:
+            self._rebuild_when_visible()
+
+    def missingGlyphFallbackEnabled(self) -> bool:
+        """是否启用「主字体缺字形 → 单族符号字体」兜底。"""
+        return self._missing_glyph_fallback
 
     def setWordWrap(self, on: bool) -> None:  # noqa: N802 (Qt 命名)
         """开关自动换行（默认关闭，终端按整行显示并横向滚动）。"""
@@ -1765,16 +1822,24 @@ class ElaTerminalView(ElaThemeWidget):
             self._render_line(cursor, tail)
 
     def _flush_render(self) -> None:
-        """把待渲染的新行追加进文档（每帧一次）。"""
+        """把待渲染的新行追加进文档（每帧一次）。
+
+        过滤态下**只同步尾块**：完整行的增量渲染在过滤态没有意义（等
+        ``_filter_timer`` 整体重建），但未收口的「当前行」必须随 ``append``
+        实时更新 —— 否则 ``\r`` 进度条会被冻在过滤词出现之前的那一帧。
+        """
         if not _alive(self) or not _alive(self._edit):
             return
         if self._filter:
-            return
-        # 没有完整行**不代表无事可做**：「当前行」（未被 \n 收口的那一行）
-        # 就靠这条路径上屏。原先这里写的是 ``not self._pending_render`` 直接
-        # return，于是尾行永远画不出来。
-        lines = self._lines[-self._pending_render :] if self._pending_render else []
-        self._pending_render = 0
+            lines = []
+        else:
+            # 没有完整行**不代表无事可做**：「当前行」（未被 \n 收口的那一行）
+            # 就靠这条路径上屏。原先这里写的是 ``not self._pending_render``
+            # 直接 return，于是尾行永远画不出来。
+            lines = (
+                self._lines[-self._pending_render :] if self._pending_render else []
+            )
+            self._pending_render = 0
         tail = self._visible_tail()
         tail_key = self._tail_snapshot(tail)
         # 尾行「屏上那份」是否还是最新的：比较**内容快照**，不是有无 ——
@@ -1785,6 +1850,11 @@ class ElaTerminalView(ElaThemeWidget):
         self._auto_scrolling = True
         try:
             # 先摘尾块：新行要接在它**前面**，不摘就只能往尾块后面追加
+            tail_start = None
+            if self._doc_tail:
+                last_block = self._edit.document().lastBlock()
+                if last_block.isValid():
+                    tail_start = last_block.position()
             reuse = self._drop_tail_block()
             cursor = QTextCursor(self._edit.document())
             cursor.movePosition(QTextCursor.MoveOperation.End)
@@ -1792,17 +1862,26 @@ class ElaTerminalView(ElaThemeWidget):
             self._doc_lines += len(lines)
             self._doc_tail = tail is not None
             self._doc_tail_key = tail_key
-            self._trim_document()
+            removed = self._trim_document()
+            # 尾块被重写 → 从它的起点重扫；裁头 → 所有位置左移 removed
+            guard_start = self._glyph_guard_pos
+            if tail_start is not None:
+                guard_start = min(guard_start, tail_start)
+            guard_start = max(0, guard_start - removed)
+            self._apply_missing_glyph_fonts(guard_start)
             if self._following:
                 self._scroll_to_bottom()
         finally:
             self._auto_scrolling = False
         self._gutter.update()
 
-    def _trim_document(self) -> None:
-        """按上限淘汰文档头部块（行号随之从 1 重新计）。"""
+    def _trim_document(self) -> int:
+        """按上限淘汰文档头部块（行号随之从 1 重新计）。
+
+        :return: 被删掉的字符数（缺字形兜底水位线要按它左移）。
+        """
         if not self._max_lines or self._doc_lines <= self._max_lines:
-            return
+            return 0
         excess = self._doc_lines - self._max_lines
         cursor = QTextCursor(self._edit.document())
         cursor.movePosition(QTextCursor.MoveOperation.Start)
@@ -1811,8 +1890,25 @@ class ElaTerminalView(ElaThemeWidget):
             QTextCursor.MoveMode.KeepAnchor,
             excess,
         )
+        removed = cursor.selectionEnd()
         cursor.removeSelectedText()
         self._doc_lines -= excess
+        return removed
+
+    def _apply_missing_glyph_fonts(self, start: int = 0) -> None:
+        """从 ``start`` 起给缺字字符套单族符号字体（**不改文本**）。"""
+        if not self._missing_glyph_fallback or not _alive(self._edit):
+            return
+        if not self._font_families:
+            return
+        try:
+            self._glyph_guard_pos = applyMissingGlyphFonts(
+                self._edit.document(),
+                self._font_families[0],
+                start=max(0, int(start)),
+            )
+        except Exception:  # noqa: BLE001 —— 渲染链路上不能把异常穿出 Qt 回调
+            logger.warning("终端缺字形兜底失败", exc_info=True)
 
     def _rebuild_when_visible(self) -> None:
         """可见时立即重建（保持滚动位置）；隐藏时只标记，等 ``showEvent`` 补做。
@@ -1864,6 +1960,8 @@ class ElaTerminalView(ElaThemeWidget):
             self._doc_lines = len(rendered)
             self._doc_tail = tail is not None
             self._doc_tail_key = self._tail_snapshot(tail)
+            self._glyph_guard_pos = 0
+            self._apply_missing_glyph_fonts(0)
         finally:
             self._edit.setUpdatesEnabled(True)
         self._pending_render = 0

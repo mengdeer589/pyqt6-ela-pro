@@ -12,6 +12,7 @@ from typing import Optional
 from PyQt6.QtCore import pyqtSignal, QTimer, QPointF, Qt, QRect, QRectF, QSize
 from PyQt6.QtGui import (
     QColor,
+    QIcon,
     QPainter,
     QLinearGradient,
     QPainterPath,
@@ -30,6 +31,7 @@ from PyQt6ElaWidgetTools import (
 )
 
 from ._internal import _ThemeAwareMixin
+from ._styles import coerceElaIcon
 from .ela_button import _FACE_INSET
 
 
@@ -105,9 +107,21 @@ class ElaLongPressButton(_ThemeAwareMixin, ElaPushButton):
         self.update()
 
     def setElaIcon(self, icon, iconSize: int = 16) -> None:
-        self._icon_name = icon
+        """设置 ElaAwesome 图标（``ElaIconType.IconName`` 或其整数值；``None`` 清除）。
+
+        入口即归一：``getElaIcon`` 只接受枚举成员，非数值输入在 setter 期
+        响亮失败（而不是在绘制期崩进程）。
+        """
+        self._icon_name = None if icon is None else coerceElaIcon(icon)
         self._icon_size = iconSize
-        self.setIcon(ElaIcon.getInstance().getElaIcon(icon, QColor(255, 255, 255)))
+        if self._icon_name is None:
+            self.setIcon(QIcon())
+        else:
+            self.setIcon(
+                ElaIcon.getInstance().getElaIcon(
+                    self._icon_name, QColor(255, 255, 255)
+                )
+            )
         self.setIconSize(QSize(iconSize, iconSize))
         self.update()
 

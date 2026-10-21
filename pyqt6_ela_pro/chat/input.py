@@ -18,6 +18,8 @@
 - ``Enter`` 发送、``Shift+Enter`` 换行；流式中草稿为空时按钮变「停止」，
   有草稿时仍为「发送」（交由宿主排队）；
 - ``Esc`` / ``Ctrl+G`` 流式中停止；``Ctrl+U`` 打开文件选择；
+- **大段粘贴（≥8000 字符或 ≥120 行）自动转附件**：写成临时文件走附件管线
+  （宿主按 ``path`` 读内容），不把几兆文本塞进编辑框；
 - 输入法组合（IME）期间回车不会误发送。
 
 用户上传的文件路径：附件快照见 :meth:`ElaChatInput.attachments`（每项含
@@ -32,7 +34,10 @@ from __future__ import annotations
 import hashlib
 import os
 import re
+import tempfile
+import warnings
 from datetime import datetime
+from pathlib import Path
 from typing import Callable, Optional
 
 from PyQt6.QtCore import (
@@ -133,12 +138,19 @@ class _ChatPlainTextEdit(ElaPlainTextEdit):
     编辑框自己就是放置点（``setAcceptDrops(True)``）：文本拖放交给 Qt 原生
     处理（含框内选中文本的移动），文件 / 图片经 :meth:`insertFromMimeData`
     转成附件 —— 粘贴与拖入走的是同一个钩子。
+
+    **大段文本（≥ ``_LARGE_PASTE_CHARS`` 字符或 ≥ ``_LARGE_PASTE_LINES`` 行）
+    也转附件**：发 :attr:`largeTextPasted` 而不是把几兆文本塞进编辑框，落临时
+    文件与挂附件由 :class:`ElaChatInput` 完成。
     """
 
     #: 剪贴板图片被粘贴 / 图片被拖入（参数：``QImage``）
     imagePasted = pyqtSignal(QImage)
     #: 本地文件被粘贴 / 拖入（参数：本地文件路径列表）
     filesAdded = pyqtSignal(list)
+    #: **大段文本**被粘贴 / 拖入（参数：文本）—— 编辑器不写盘，由
+    #: :class:`ElaChatInput` 落临时文件后走附件管线（粘贴与拖入同钩子）
+    largeTextPasted = pyqtSignal(str)
     #: 输入法组合文本变化（参数：preedit 串）
     preeditChanged = pyqtSignal(str)
     #: 焦点变化（参数：是否聚焦）
@@ -230,7 +242,9 @@ class _ChatPlainTextEdit(ElaPlainTextEdit):
         if text and (
             len(text) >= _LARGE_PASTE_CHARS or text.count("\n") >= _LARGE_PASTE_LINES
         ):
-            self.insertPlainText(text)
+            # 大段粘贴**不塞进编辑框**：转附件（宿主按文件路径读内容）。
+            # 编辑器自己不写盘（分层），落盘在 ElaChatInput 里做。
+            self.largeTextPasted.emit(text)
             return
         super().insertFromMimeData(source)
 
@@ -488,7 +502,8 @@ class ElaChatInput(ElaThemeWidget):
     textChanged = pyqtSignal(str)
     #: 附件列表变化（参数：``ElaChatAttachment`` 列表）
     attachmentsChanged = pyqtSignal(list)
-    #: 本地文件进入输入区（拖放；或粘贴「复制的文件」。参数：本地文件路径列表，已自动加入附件）
+    #: 本地文件进入输入区（拖放；粘贴「复制的文件」；或大段文本转附件。
+    #: 参数：本地文件路径列表，已自动加入附件）
     filesAdded = pyqtSignal(list)
     #: 点击「上传文件」按钮
     uploadRequested = pyqtSignal()
@@ -561,6 +576,7 @@ class ElaChatInput(ElaThemeWidget):
         self._edit.textChanged.connect(self._on_text_changed)
         self._edit.imagePasted.connect(self._on_image_pasted)
         self._edit.filesAdded.connect(self._on_files_added)
+        self._edit.largeTextPasted.connect(self._on_large_text_pasted)
         self._normal_font = QFont(self._edit.font())
         surface_layout.addWidget(self._edit)
 
@@ -880,6 +896,43 @@ class ElaChatInput(ElaThemeWidget):
 
     def _on_files_added(self, paths: list) -> None:
         self._add_files(paths)
+
+    def _on_large_text_pasted(self, text: str) -> None:
+        """大段粘贴转附件：写临时文件并进附件条（失败回退为直接插入）。
+
+        与 ``_add_files`` 同一条附件管线 → ``filesAdded`` 信号照常发出，
+        宿主零改动即可用 ``path`` 读内容；同内容同 digest 恒同路径，附件条
+        按路径自然去重。
+        """
+        path = self._write_paste_file(text)
+        if path is None:
+            # 写盘失败（权限 / 磁盘满）：**不能静默丢内容** —— 回退成
+            # 旧行为（文本直接进编辑框）并告警一次
+            self._edit.insertPlainText(text)
+            warnings.warn(
+                "大段粘贴转附件失败（临时文件不可写），已回退为直接插入文本",
+                RuntimeWarning,
+                stacklevel=2,
+            )
+            return
+        self._add_files([path])
+
+    @staticmethod
+    def _write_paste_file(text: str) -> Optional[str]:
+        """把粘贴文本写成临时文件，返回路径；失败返回 ``None``。
+
+        文件名带内容摘要（同内容同路径 → 天然幂等）；目录在系统临时目录下，
+        文件生命周期与会话无关（与普通附件同口径，宿主自行决定何时清理）。
+        """
+        try:
+            digest = hashlib.sha1(text.encode("utf-8")).hexdigest()[:8]
+            directory = Path(tempfile.gettempdir()) / "pyqt6_ela_pro_paste"
+            directory.mkdir(exist_ok=True)
+            path = directory / f"粘贴文本-{digest}.txt"
+            path.write_text(text, encoding="utf-8")
+            return str(path)
+        except OSError:
+            return None
 
     def _add_files(self, paths: list) -> bool:
         """本地文件进附件条 + 发 ``filesAdded``（拖放与粘贴共用一条路径）。

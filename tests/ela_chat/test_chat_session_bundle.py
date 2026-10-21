@@ -211,6 +211,35 @@ class TestImportSession:
         view.importSession({"messages": []})
         assert view.statsMode() == "steps"
 
+    def test_clear_true_tolerates_id_overlap_with_current(self, qapp, make):
+        """F21 回归：``clear=True`` 是整会话替换，与当前消息撞 id 不算冲突。
+
+        旧实现在清空**之前**把「与现有消息撞号」也当坏 bundle，于是「往仍有
+        消息的视图里恢复到上次保存状态」会抛 ValueError，必须先手动 clear。
+        """
+        source = _build_view(qapp, make)
+        bundle = source.exportSession()
+        rows = bundle["messages"]
+
+        target = make(ElaChatView)
+        for row in rows:
+            target.addMessageFromDict(row)  # 先塞一份与 bundle 同 id 的消息
+
+        count = target.importSession(bundle)
+
+        assert count == len(rows)
+        assert [message.id for message in target.messages()] == [
+            row["id"] for row in rows
+        ]
+
+    def test_clear_true_still_rejects_in_batch_duplicates(self, qapp, make):
+        """批内重复 id 仍是坏 bundle：抛异常且**一条都不落**。"""
+        view = make(ElaChatView)
+        row = {"id": 7, "role": "user", "text": "重复"}
+        with pytest.raises(ValueError):
+            view.importSession({"messages": [row, dict(row)]})
+        assert view.count() == 0
+
 
 class TestRestorePreserveIds:
     def test_conflict_raises_without_partial_write(self, qapp, make):

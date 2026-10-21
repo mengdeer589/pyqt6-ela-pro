@@ -252,14 +252,19 @@ class TestPasteAndAttachments:
         assert widget.text() == ""
         qapp.processEvents()
 
-    def test_large_paste_inserts_directly(self, qapp, make):
+    def test_large_paste_becomes_attachment(self, qapp, make):
+        """大段粘贴转附件（阈值见 ``chat.input``）：不再把几百行塞进编辑框。"""
         widget = make(ElaChatInput)
         widget.show()
         qapp.processEvents()
         mime = QMimeData()
         mime.setText("行\n" * 200)
+
         widget.textEdit().insertFromMimeData(mime)
-        assert widget.text().count("\n") == 200
+
+        assert widget.text() == ""
+        assert widget.attachmentCount() == 1
+        qapp.processEvents()
 
 
 class TestSubmitSemantics:

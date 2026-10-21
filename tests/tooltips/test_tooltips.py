@@ -153,6 +153,47 @@ class TestToolTip:
         assert TOOLTIP_BORDER_RADIUS == 8
 
 
+class TestToolTipParentShowOrder:
+    """提示框在父窗口 show 之前创建时，不得跟着父窗口一起显示。
+
+    回归：``set_tooltip`` 把提示框挂在顶层窗口下，而宿主常在窗口 ``show()``
+    之前就建好页面 / 工具栏 —— 未 ``showAt`` 定位的提示框会以 (0, 0) 画在
+    窗口左上角，压住正文（``llm_test/render_opencode_session.py`` 实测）。
+    """
+
+    def _child(self, window_widget, qapp):
+        child = QWidget(window_widget)
+        child.setGeometry(10, 10, 60, 24)
+        set_tooltip(child, "提示")
+        window_widget.show()
+        qapp.processEvents()
+        return child
+
+    def test_tooltip_stays_hidden_when_parent_window_shows(self, qapp, window_widget):
+        child = self._child(window_widget, qapp)
+
+        tooltip = _tooltip_dict[child]
+        assert not tooltip.isVisible()
+        assert tooltip.isHidden()
+
+    def test_show_at_still_displays_tooltip(self, qapp, window_widget):
+        child = self._child(window_widget, qapp)
+
+        tooltip = _tooltip_dict[child]
+        tooltip.showAt(child, ElaToolTipPositionType.Top)
+        assert tooltip.isVisible()
+        tooltip.hide()
+
+    def test_remove_tooltip_kills_hidden_instance(self, qapp, window_widget):
+        child = self._child(window_widget, qapp)
+
+        remove_tooltip(child)
+        qapp.processEvents()
+
+        assert child not in _tooltip_dict
+        assert child not in _filter_dict
+
+
 class TestElaToolTipPosition:
     """Test cases for ElaToolTipPositionType enum."""
 
@@ -266,6 +307,45 @@ class TestSetTooltip:
 
         remove_tooltip(widget)
         widget.deleteLater()
+
+
+class TestSetTooltipReuse:
+    """重复绑定时复用同一个提示框（bug #17：恢复一次会话曾建 4609 个）。"""
+
+    def test_reuses_existing_instance_and_updates_text(self, qapp):
+        widget = QWidget()
+        set_tooltip(widget, "a")
+        first = _tooltip_dict[widget]
+
+        set_tooltip(widget, "b", ElaToolTipPositionType.Bottom)
+
+        assert _tooltip_dict[widget] is first
+        assert first._text == "b"
+        assert _filter_dict[widget]._position == ElaToolTipPositionType.Bottom
+
+        remove_tooltip(widget)
+        widget.deleteLater()
+        qapp.processEvents()
+
+    def test_recreates_when_leaving_content_mode(self, qapp):
+        widget = QWidget()
+        set_tooltip(widget, "a")
+        first = _tooltip_dict[widget]
+        content = QWidget()
+        content.setFixedSize(40, 20)
+
+        set_tooltip(widget, "", contentWidget=content)
+        assert _tooltip_dict[widget] is first
+        assert first.contentWidget() is content
+
+        # 没有「清空内容控件」的 API：退回纯文本只能重建
+        set_tooltip(widget, "b")
+        assert _tooltip_dict[widget] is not first
+        assert _tooltip_dict[widget]._text == "b"
+
+        remove_tooltip(widget)
+        widget.deleteLater()
+        qapp.processEvents()
 
 
 class TestRemoveTooltip:

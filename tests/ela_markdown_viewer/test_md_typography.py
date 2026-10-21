@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from PyQt6.QtCore import Qt
-from PyQt6.QtGui import QTextCursor
+from PyQt6.QtGui import QTextCursor, QTextFormat
 
 from pyqt6_ela_pro.ela_markdown_viewer import ElaMarkdownViewer
 from pyqt6_ela_pro.example.markdown_page import (
@@ -53,6 +53,28 @@ class TestTypography:
 
         block = _blocks(v)[0]
         assert block.blockFormat().lineHeight() == 160.0
+        v.deleteLater()
+
+    def test_heading_inline_format_keeps_uniform_size(self):
+        """标题内的行内加粗不能比同段文字大一号（导入器的 FontSizeAdjustment）。"""
+        v = ElaMarkdownViewer()
+        v.setMarkdown("### 结论：**是两个互相独立的问题**，都给你最小复现\n")
+        sizes = set()
+        for block in _blocks(v):
+            if block.blockFormat().headingLevel() != 3:
+                continue
+            iterator = block.begin()
+            while not iterator.atEnd():
+                fragment = iterator.fragment()
+                if fragment.isValid() and fragment.text():
+                    fmt = fragment.charFormat()
+                    assert not fmt.hasProperty(
+                        QTextFormat.Property.FontSizeAdjustment
+                    ), fragment.text()
+                    font = fmt.font()
+                    sizes.add((round(font.pointSizeF(), 3), font.pixelSize()))
+                iterator += 1
+        assert len(sizes) == 1, sizes
         v.deleteLater()
 
     def test_heading_uses_semantic_color(self):
@@ -165,7 +187,7 @@ class TestCategorizedSamples:
         assert "flowchart" in _MARKDOWN_MERMAID
         assert "sequenceDiagram" in _MARKDOWN_MERMAID
         assert "```diff" not in _MARKDOWN_TEXT
-        assert "▸" not in _MARKDOWN_TEXT  # 折叠标签为渲染产物，源码不应包含
+        assert "+ 更多信息" not in _MARKDOWN_TEXT  # 折叠标签为渲染产物，源码不应包含
 
     def test_text_sample_has_no_stale_toc_fragment(self):
         assert "[toc]` 自动生成）" not in _MARKDOWN_TEXT

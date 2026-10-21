@@ -18,7 +18,7 @@ from PyQt6.QtCore import (
     pyqtSignal,
 )
 from PyQt6.QtWidgets import QApplication, QWidget, QVBoxLayout, QHBoxLayout
-from PyQt6.QtGui import QPainter, QPaintEvent, QEnterEvent
+from PyQt6.QtGui import QCursor, QPainter, QPaintEvent, QEnterEvent
 
 from PyQt6ElaWidgetTools import (
     eTheme,
@@ -135,7 +135,10 @@ class ElaNotifyPopup(QWidget):
     @staticmethod
     def _get_screen_geometry():
         app = QApplication.instance()
-        screen = app.primaryScreen() if app is not None else None
+        # 跟随光标所在屏（多屏时别把通知丢到主屏）；取不到回退主屏
+        screen = None
+        if app is not None:
+            screen = QApplication.screenAt(QCursor.pos()) or app.primaryScreen()
         if screen is None:
             return QRect(0, 0, 1920, 1080)
         return screen.availableGeometry()

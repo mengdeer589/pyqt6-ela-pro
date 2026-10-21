@@ -155,10 +155,17 @@ class TestCreateElaSplitter:
         assert layout.indexOf(splitter) == 0
         assert splitter.count() == 2
 
-    def test_parent_auto_detected_adds_when_not_in_layout(self, make):
-        """Test auto-detection addWidget when first widget not in layout."""
+    def test_parent_auto_detected_parents_splitter_but_requires_mount(self, make):
+        """parent 没有布局：splitter 不会被挂载，必须显式告警（F9）。
+
+        返回的 splitter 以 container 为父，但没有任何布局把它摆出来（传入的
+        widgets 已被 reparent 进去、从界面上消失）—— 调用方需自行把返回值
+        挂进布局。行为本身保留（空图比报错更难排查），但要喊一声。
+        """
         container = make(QWidget)
-        splitter = create_ela_splitter(
-            [make(QWidget, container), make(QWidget, container)]
-        )
+        with pytest.warns(RuntimeWarning, match="没有布局"):
+            splitter = create_ela_splitter(
+                [make(QWidget, container), make(QWidget, container)]
+            )
         assert splitter.parentWidget() is container
+        assert splitter.count() == 2

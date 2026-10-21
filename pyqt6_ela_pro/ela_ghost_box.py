@@ -348,6 +348,7 @@ class ElaGhostBox(ElaSearchBox):
         self._placeholder: str = ""
         self._leading_icon: _IconSource = None
         self._popup_open: bool = False
+        self._footer_pending: bool = False
         self._expand_icon_rotate: float = 0.0
         self._footer: Optional[_GhostPopupFooter] = None
         self._footer_close_on_click: bool = True
@@ -376,7 +377,7 @@ class ElaGhostBox(ElaSearchBox):
         # 底栏排到 view 之后的兜底定时器（挂在 self 上，随控件销毁）
         self._footer_retry = QTimer(self)
         self._footer_retry.setSingleShot(True)
-        self._footer_retry.timeout.connect(self._ensure_footer_last)
+        self._footer_retry.timeout.connect(self._on_footer_retry)
 
     # ── 外观 ─────────────────────────────────────────────────────
 
@@ -495,19 +496,31 @@ class ElaGhostBox(ElaSearchBox):
         if self.count() == 0:
             return
         self._popup_open = True
+        self._footer_pending = True
         self._sync_footer_visibility()
         super().showPopup()
-        self._attach_footer()
         self._animate_expand(True)
+        # 底栏必须等 C++ 的 400ms 动画把 view 放回布局后再插入：
+        # 提前 addWidget 会让 C++ 的 addWidget(view()) 落到它后面，列表被挤走。
         self._footer_retry.start(450)
 
     def hidePopup(self) -> None:  # noqa: N802 (Qt 命名)
         """关闭弹窗。"""
         self._popup_open = False
+        self._footer_pending = False
+        self._footer_retry.stop()
         self._animate_expand(False)
         if hideComboboxPopup(self):
             return
         super().hidePopup()
+
+    def _popup_extra_heights(self) -> tuple[int, int]:
+        """返回搜索框 / 底栏占用的高度（底栏只在有内容时计入）。"""
+        top, _ = super()._popup_extra_heights()
+        footer = self._footer
+        if footer is not None and footer.hasContent():
+            return (top, footer.height() or footer.sizeHint().height() or 36)
+        return (top, 0)
 
     # ── 底部固定区 ───────────────────────────────────────────────
 
@@ -581,10 +594,14 @@ class ElaGhostBox(ElaSearchBox):
         footer = self._footer
         if footer is None:
             return
-        if footer.hasContent():
-            footer.show()
-        else:
+        if not footer.hasContent():
             footer.hide()
+            return
+        if self._popup_open and self._footer_pending:
+            # 展开动画期间底栏不进布局、也不显示：等 _footer_retry 在动画结束后插入。
+            footer.hide()
+            return
+        footer.show()
         if self._popup_open:
             self._attach_footer()
 
@@ -594,6 +611,7 @@ class ElaGhostBox(ElaSearchBox):
         if (
             footer is None
             or container is None
+            or self._footer_pending
             or not footer.hasContent()
             or footer.isHidden()
         ):
@@ -605,6 +623,39 @@ class ElaGhostBox(ElaSearchBox):
             layout.addWidget(footer)
         self._ensure_footer_last()
 
+    def _attach_footer_after_view(self) -> bool:
+        """view 已进布局时把底栏追加到它后面，返回是否已处理。
+
+        只在 C++ 动画结束、view 被 ``addWidget`` 后调用；与 view 的加入落在同一
+        趟布局激活里，列表不会被短暂撑高再压回。
+        """
+        footer = self._footer
+        container = self._container
+        view = self.view()
+        if (
+            footer is None
+            or container is None
+            or view is None
+            or not footer.hasContent()
+        ):
+            return False
+        layout = container.layout()
+        if layout is None or layout.indexOf(view) < 0:
+            return False
+        self._footer_pending = False
+        if layout.indexOf(footer) == -1:
+            layout.addWidget(footer)
+        footer.show()
+        return True
+
+    def _on_footer_retry(self) -> None:
+        """C++ 展开动画结束后再插入底栏（提前插入会被 view 的 addWidget 挤到前面）。"""
+        if self._footer is None or not self._footer.hasContent():
+            self._footer_pending = False
+            return
+        if self._attach_footer_after_view():
+            self._ensure_footer_last()
+
     def _ensure_footer_last(self) -> None:
         """把底栏幂等地挪到弹层布局末尾（view 由 C++ 动画结束后追加）。"""
         footer = self._footer
@@ -612,9 +663,9 @@ class ElaGhostBox(ElaSearchBox):
         if (
             footer is None
             or container is None
+            or self._footer_pending
             or not self._popup_open
             or not footer.hasContent()
-            or footer.isHidden()
         ):
             return
         layout = container.layout()
@@ -622,10 +673,12 @@ class ElaGhostBox(ElaSearchBox):
             return
         index = layout.indexOf(footer)
         if index == layout.count() - 1:
+            footer.show()
             return
         if index >= 0:
             layout.removeWidget(footer)
         layout.addWidget(footer)
+        footer.show()
 
     def _on_footer_button_clicked(self, key: str) -> None:
         if self._footer_close_on_click:
@@ -686,6 +739,10 @@ class ElaGhostBox(ElaSearchBox):
                     # 必须在这里吞掉
                     return True
         elif obj is self._container and event_type == QEvent.Type.LayoutRequest:
+            if self._footer_pending:
+                # C++ 动画结束 addWidget(view()) 会投递 LayoutRequest；在同一趟
+                # 布局激活前把底栏追加到 view 后面，避免 view 先撑满再被底栏压回。
+                self._attach_footer_after_view()
             self._ensure_footer_last()
         return super().eventFilter(obj, event)
 

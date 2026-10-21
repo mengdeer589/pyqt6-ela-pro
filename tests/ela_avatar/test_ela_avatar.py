@@ -324,8 +324,8 @@ class TestPaintSafety:
             # 同类型两两配对：必须能画
             painter.drawPixmap(QRectF(0, 0, 4, 4), source, QRectF(source.rect()))
             painter.drawPixmap(QRect(0, 0, 4, 4), source, QRect(source.rect()))
-            # 混类型：PyQt6 容忍（不抛），同样不该崩
-            # ????QRectF ?? + QRect ???PyQt6 **??**?? TypeError
+            # 混类型：QRectF 目标 + QRect 源 —— PyQt6 **必抛** TypeError
+            # （不再容忍混用；同类型两两配对见上面两行，必须都能画）
             with pytest.raises(TypeError):
                 painter.drawPixmap(QRectF(0, 0, 4, 4), source, QRect(0, 0, 4, 4))
         finally:

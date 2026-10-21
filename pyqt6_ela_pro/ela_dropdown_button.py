@@ -32,6 +32,7 @@ from PyQt6.QtWidgets import QWidget
 from PyQt6ElaWidgetTools import ElaThemeType, ElaIconType, ElaMenu
 
 from ._colors import state_tint
+from ._internal import is_deleted
 from ._styles import iconGlyph, paintRoundedCard
 from ._theme import text, textDisabled
 from .widget_base import ElaThemeWidget
@@ -91,7 +92,8 @@ class ElaDropDownButton(ElaThemeWidget):
     def borderRadius(self) -> int:
         return self._border_radius
 
-    def setMenu(self, menu: ElaMenu) -> None:
+    def setMenu(self, menu: Optional[ElaMenu]) -> None:
+        """设置下拉菜单；传 ``None`` 清空（此时点击不再弹菜单）。"""
         self._menu = menu
 
     def menu(self) -> Optional[ElaMenu]:
@@ -148,7 +150,14 @@ class ElaDropDownButton(ElaThemeWidget):
         if event.button() == Qt.MouseButton.LeftButton:
             self._is_pressed = False
             self.update()
-            if self._menu and self.rect().contains(event.position().toPoint()):
+            # **必须判存活**：宿主动态重建菜单时会先删旧菜单，而 ``bool(已删除
+            # 包装器)`` 仍是 True —— 不判存活就对死对象调 ``popup()`` 抛
+            # RuntimeError，穿出 Qt 回调 = 0xC0000409 崩溃（实测）
+            if (
+                self._menu is not None
+                and not is_deleted(self._menu)
+                and self.rect().contains(event.position().toPoint())
+            ):
                 self._menu.popup(self.mapToGlobal(QPoint(0, self.height())))
         super().mouseReleaseEvent(event)
 

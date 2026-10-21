@@ -10,8 +10,10 @@
 2. **不能依赖 ``destroyed`` 一定送达**。所以主题槽本身还带 ``sip.isdeleted()``
    自愈：命中就顺手把自己断开。
 
-外加一条 ``ElaPlainTextEdit`` 的 API 事实：它**没有** ``setTextColor``。在主题
-切换的信号链上写那行等于「切一次主题崩一次」（``AttributeError`` 穿过 C++ 边界）。
+外加 ``ElaPlainTextEdit`` 的 API 事实：① 它**没有** ``setTextColor``（在主题
+切换的信号链上写那行等于「切一次主题崩一次」，``AttributeError`` 穿过 C++ 边界）；
+② ``paintEvent`` 的逐帧 palette 自检已删除（bug 报告 §6#3）——``QPalette::Text``
+宿主可设且不再被 paint 刷回，主题切换纯走 ``themeModeChanged`` 信号。
 """
 
 from __future__ import annotations
@@ -20,7 +22,7 @@ import gc
 
 import pytest
 from PyQt6 import sip
-from PyQt6.QtGui import QColor
+from PyQt6.QtGui import QColor, QPalette
 from PyQt6.QtWidgets import QApplication, QWidget
 from PyQt6ElaWidgetTools import ElaPlainTextEdit, ElaThemeType, eTheme
 
@@ -92,7 +94,7 @@ class TestThemeSlotLifetime:
         probe._theme_cleanup()
         assert not probe._theme_connected
 
-    def test_init_theme_aware_is_idempotent(self, qapp, make):
+    def test_init_theme_aware_is_idempotent(self, qapp, make, restore_mode):
         """重复 init 不得连两次（否则一次切主题触发两遍）。"""
         probe = make(Probe)
         probe._init_theme_aware()
@@ -136,3 +138,44 @@ class TestElaPlainTextEditApi:
         editor.setPalette(palette)
         editor.setPlainText("hello")
         assert editor.palette().color(role) == QColor("#ff0000")
+
+    def test_palette_text_role_survives_paint(self, qapp, make):
+        """``QPalette::Text`` 不再被每个 paint 刷回主题色（bug 报告 §6#3）。
+
+        旧 ``ElaPlainTextEdit::paintEvent`` 每次自检 ``Text != BasicText`` 就
+        调 ``onThemeChanged`` → ``setPalette``：宿主自定义文字色会**每帧被改
+        回去**（宿主若跟着重设 = 每帧 palette 变更 + 文档重算）。自检已删除，
+        主题切换纯走 ``themeModeChanged`` 信号（构造函数里既有连接）。
+        """
+        host, editor = self._editor(qapp, make)
+        host.show()
+        qapp.processEvents()
+        palette = editor.palette()
+        palette.setColor(QPalette.ColorRole.Text, QColor("#ff0000"))
+        editor.setPalette(palette)
+        editor.repaint()
+        qapp.processEvents()
+        assert editor.palette().color(QPalette.ColorRole.Text).name() == "#ff0000"
+
+    def test_theme_switch_still_updates_text_role(self, qapp, make):
+        """删除自检后主题切换仍由 ``themeModeChanged`` 驱动（palette 跟随）。"""
+        _, editor = self._editor(qapp, make)
+        previous = eTheme.getThemeMode()
+        target = (
+            ElaThemeType.ThemeMode.Dark
+            if previous != ElaThemeType.ThemeMode.Dark
+            else ElaThemeType.ThemeMode.Light
+        )
+        try:
+            eTheme.setThemeMode(target)
+            qapp.processEvents()
+            expected = eTheme.getThemeColor(
+                target, ElaThemeType.ThemeColor.BasicText
+            )
+            assert (
+                editor.palette().color(QPalette.ColorRole.Text).name()
+                == expected.name()
+            )
+        finally:
+            eTheme.setThemeMode(previous)
+            qapp.processEvents()

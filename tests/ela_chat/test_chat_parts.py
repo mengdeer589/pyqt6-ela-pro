@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from PyQt6.QtWidgets import QWidget
+
 from pyqt6_ela_pro.chat import (
     ElaChatReasoningStyleType,
     ElaChatBubble,
@@ -17,6 +19,7 @@ from pyqt6_ela_pro.chat import (
     ReasoningBlock,
     StatsBadge,
 )
+from pyqt6_ela_pro.tooltips import _tooltip_dict
 
 
 class TestPartModel:
@@ -206,6 +209,10 @@ class TestStreamBuffers:
         assert block.text() == "abc"
         block.appendText("d")
         block.end(500)
+        # 收起态只保留数据，不把全文灌进 word-wrap 标签（bug #17）
+        assert block.text() == "abcd"
+        assert block.label().text() == ""
+        block.setOpened(True)
         assert "abcd" in block.label().text()
 
 
@@ -469,15 +476,75 @@ class TestBubbleParts:
         bubble.endStream()
 
         badge = bubble.statsBadge()
+        # 徽标在父窗口显示后才会创建 ElaToolTip（隐藏态不建，bug #17）
+        bubble.show()
+        qapp.processEvents()
         tooltip = badge._label.toolTip()
         assert tooltip.startswith("首字 120 ms")
         assert "端到端 7.4s" in tooltip
+        # 悬浮提示走库内 ElaToolTip（不是原生 QToolTip）
+        ela_tooltip = _tooltip_dict.get(badge._label)
+        assert ela_tooltip is not None
+        assert ela_tooltip._text == tooltip
         assert "↑0" in badge._label.text()
         assert "↓0" in badge._label.text()
         assert "总计 5" in badge._label.text()
         # 可见耗时退场（由 tooltip 承载）
         assert bubble.meta().duration() == 0.0
         assert bubble.meta().isHidden()
+
+    def test_badge_without_detail_has_no_empty_tooltip(self, qapp, make):
+        """没有可展示明细时不绑空提示气泡（悬停会弹一个纯底板）。"""
+        badge = make(StatsBadge)
+        badge.setStats(ElaChatStats(total_tokens=8))
+        assert badge._label.toolTip() == ""
+        assert badge._label not in _tooltip_dict
+
+        badge.setStats(ElaChatStats(total_tokens=8, ttft_ms=90.0))
+        assert badge._label in _tooltip_dict
+        assert _tooltip_dict[badge._label]._text == "首字 90 ms"
+
+        badge.setStats(None)
+        assert badge._label not in _tooltip_dict
+
+    def test_hidden_badge_defers_tooltip_until_shown(self, qapp, make):
+        """隐藏的用量徽标不建 ElaToolTip（footer 模式下大部分徽标永不显示）。"""
+        host = make(QWidget)
+        host.resize(240, 120)
+        badge = StatsBadge(host)
+        badge.setStats(ElaChatStats(total_tokens=8, ttft_ms=90.0))
+
+        assert badge._label.toolTip() == "首字 90 ms"
+        assert badge._label not in _tooltip_dict
+
+        host.show()
+        qapp.processEvents()
+        assert badge._label in _tooltip_dict
+        assert _tooltip_dict[badge._label]._text == "首字 90 ms"
+
+    def test_set_parts_applies_stats_mode_once(self, qapp, make):
+        """恢复重放逐段 setStepStats 时只在收尾统一摆一次徽标（bug #17）。"""
+        bubble = make(ElaChatBubble, ElaChatRoleType.Assistant)
+        parts = [
+            ElaChatPart(
+                id=f"stats-{index}",
+                kind=ElaChatPartKindType.Stats,
+                status=ElaChatStatusType.Done,
+                stats=ElaChatStats(total_tokens=index + 1),
+                step=1,
+            )
+            for index in range(5)
+        ]
+        calls: list = []
+        original = bubble._apply_stats_mode
+
+        def _spy() -> None:
+            calls.append(1)
+            original()
+
+        bubble._apply_stats_mode = _spy
+        assert bubble.setParts(parts) is True
+        assert len(calls) == 1, f"setParts 重放触发了 {len(calls)} 次 _apply_stats_mode"
 
     def test_duration_falls_back_to_meta_without_badge(self, qapp, make):
         """没有用量徽标时，端到端耗时仍显示在底部 meta。"""

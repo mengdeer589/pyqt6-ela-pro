@@ -42,7 +42,6 @@ class ElaGroupBox(ElaThemeWidget):
 
         self._title = title
         self._border_radius = border_radius
-        self._title_pixel_size = 14
 
         self.setObjectName("ElaGroupBox")
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)

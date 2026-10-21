@@ -49,18 +49,20 @@ class ElaPasswordEdit(ElaLineEdit):
         disconnect_theme(self)
         super().deleteLater()
 
-    def set_is_password_visible(self, visible: bool) -> None:
+    def setPasswordVisible(self, visible: bool) -> None:
+        """设置密码是否明文可见。"""
         self._is_password_visible = visible
         self.setEchoMode(
             QLineEdit.EchoMode.Normal if visible else QLineEdit.EchoMode.Password
         )
         self._update_eye_icon()
 
-    def is_password_visible(self) -> bool:
+    def isPasswordVisible(self) -> bool:
+        """密码当前是否明文可见。"""
         return self._is_password_visible
 
     def _on_toggle_visibility(self, _checked: bool = False) -> None:
-        self.set_is_password_visible(not self._is_password_visible)
+        self.setPasswordVisible(not self._is_password_visible)
 
     def _update_eye_icon(self, _mode=None) -> None:
         icon_name = (

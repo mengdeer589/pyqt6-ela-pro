@@ -224,3 +224,43 @@ class TestElaDrawer:
         drawer.showDrawer()
 
         assert drawer.isOpened() is True
+
+
+class TestShowDrawerRollback:
+    """F4 回归：``showDrawer`` 异常必须回滚到关闭态。
+
+    原实现 ``except`` 只 ``print`` 后 return：面板 / 遮罩已 ``show()``，而
+    ``_is_opened`` 保持 False —— ``closeDrawer()`` 首行守卫直接返回，抽屉
+    关不掉且 ``isOpened()`` 与视觉相反（实测）。
+    """
+
+    @staticmethod
+    def _boom(*_args, **_kwargs):
+        raise RuntimeError("boom")
+
+    def test_exception_rolls_back_to_closed(self, make, drawer, monkeypatch):
+        drawer.setContentWidget(make(QWidget))
+        monkeypatch.setattr(
+            "pyqt6_ela_pro.ela_side_drawer.start_transition", self._boom
+        )
+
+        drawer.showDrawer()
+
+        assert drawer.isOpened() is False
+        assert not drawer._drawer_widget.isVisible()
+        assert not drawer._dim_widget.isVisible()
+        assert not drawer.isVisible()
+
+    def test_can_reopen_after_rollback(self, make, drawer, monkeypatch):
+        """回滚后状态一致：再调一次（异常消失）可以正常打开。"""
+        drawer.setContentWidget(make(QWidget))
+        monkeypatch.setattr(
+            "pyqt6_ela_pro.ela_side_drawer.start_transition", self._boom
+        )
+        drawer.showDrawer()
+        assert drawer.isOpened() is False
+
+        monkeypatch.undo()
+        drawer.showDrawer()
+
+        assert drawer.isOpened() is True

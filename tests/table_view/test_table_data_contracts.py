@@ -112,3 +112,44 @@ class TestDataShapeValidation:
         table.setTableData([["a", "b"], ["1", "2"]])
         table.setTableData([])
         assert _column(table, 0) == ["1"]
+
+
+class TestColumnTypeSampling:
+    """F22 回归：列类型采样只数**非空**单元格（空值不占名额）。
+
+    旧实现把空值算进 ``sample_size``：一个空值就让整列落到 ``string`` 分支，
+    表头点击排序退化成字典序（``'10' < '9'``），``_sort_numeric`` 为含空值
+    写好的「空值排最后」永远不会被走到（实测 ``['', '10', '9']``）。
+    """
+
+    def test_numeric_column_with_blank_sorts_numerically(self, make):
+        table = make(ElaDataTable)
+        table.setTableData([["n"], ["9"], ["10"], [""]])
+
+        assert table._get_column_type(0) == "numeric"
+
+        table.setSortingEnabled(True)
+        table._onHeaderClicked(0)  # 等价点表头
+
+        assert _column(table) == ["9", "10", ""]
+
+    def test_chinese_with_blank_is_chinese(self, make):
+        table = make(ElaDataTable)
+        table.setTableData([["n"], ["张三"], [""]])
+        assert table._get_column_type(0) == "chinese"
+
+    def test_all_blank_column_is_string(self, make):
+        table = make(ElaDataTable)
+        table.setTableData([["n"], [""], [""]])
+        assert table._get_column_type(0) == "string"
+
+    def test_sample_scans_past_leading_blanks(self, make):
+        """采样要跨过空值取满 20 个非空样本（docstring 的「前 20 个非空」）。"""
+        table = make(ElaDataTable)
+        table.setTableData([["n"]] + [[""]] * 30 + [["1"], ["2"]])
+        assert table._get_column_type(0) == "numeric"
+
+    def test_mixed_numeric_and_chinese_is_chinese(self, make):
+        table = make(ElaDataTable)
+        table.setTableData([["n"], ["1"], ["张三"]])
+        assert table._get_column_type(0) == "chinese"

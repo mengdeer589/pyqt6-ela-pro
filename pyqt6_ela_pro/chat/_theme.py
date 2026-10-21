@@ -14,19 +14,27 @@ from PyQt6ElaWidgetTools import ElaThemeType, eTheme
 # 骨架底色、Avatar 的派生底色都要用同一套插值）。这里再导入一次是因为 chat 内部
 # 有 6 处按 ``from ._theme import blend`` 取它 —— 那不是兼容别名，是 chat 的
 # 语义色都集中在本模块的既有约定。
+from .._internal import system_cjk_font_family
 from .._theme import blend
 
 __all__ = ["MONO_FONT_STACK", "blend", "mono_font"]
 
 #: 等宽字体栈（数字 / 耗时 / 统计 / 工具参数的“代理轨迹”质感；
-#: 中文自动回退系统字体，无需 HTML 混排）
+#: 非中文系统的默认 —— 中文系统收成单族 CJK 字体，见 ``mono_font``）
 MONO_FONT_STACK = ("Consolas", "Cascadia Mono", "Courier New")
 
 
 def mono_font(size_px: int = 11) -> QFont:
-    """等宽标签字体（替代 ``mono_css``：库内禁 QSS，字体直接给 ``QFont``）。"""
+    """等宽标签字体（替代 ``mono_css``：库内禁 QSS，字体直接给 ``QFont``）。
+
+    中文系统收成**单族雅黑**：多族列表在 Win7 上是慢 shaping 路径且进程级毒化
+    （与内容是否 CJK 无关），而这些标签（耗时 / 工具详情 / 差异）又可能含 CJK，
+    单族 CJK 字体是唯一全免触发的选择 —— 代价是丢掉等宽观感（diff 对齐略降，
+    与终端默认字体的取舍同源，见「下游项目反馈bug.md」§2/§3）。
+    """
     font = QFont()
-    font.setFamilies(list(MONO_FONT_STACK))
+    cjk_family = system_cjk_font_family()
+    font.setFamilies([cjk_family] if cjk_family else list(MONO_FONT_STACK))
     font.setPixelSize(int(size_px))
     return font
 

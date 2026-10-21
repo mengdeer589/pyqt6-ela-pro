@@ -155,3 +155,38 @@ class TestElaDashboardGaugeTheme:
 class TestElaDashboardGaugeDeleteLater:
     def test_delete_later_cleans_up(self, g):
         g.deleteLater()
+
+
+class TestRangeChangeClampsAnimation:
+    """F19 回归：值动画期间改量程，显示值不得越界回到旧量程。
+
+    旧实现只夹 ``_value`` / ``_animated_value``，不重夹插值两端：
+    ``setValue(100)``（动画中）后接 ``setMaximum(50)``，后续 tick 会把
+    ``_animated_value`` 插回 100 —— 指针与数值文本短暂超出新量程。
+    """
+
+    def test_maximum_lowered_while_animating(self, g):
+        g.setMaximum(100)
+        g.setValue(100)  # 从 0 向 100 插值
+        assert g._anim_timer.isActive()
+
+        g.setMaximum(50)  # 旧实现：_anim_target 仍是 100
+
+        assert g._anim_target == 50
+        assert g._anim_start <= 50
+        for _ in range(10):
+            g._onAnimTick()
+            assert g._animated_value <= 50, "显示值插回了旧量程"
+
+    def test_minimum_raised_while_animating(self, g):
+        g.setMaximum(100)
+        g.setValue(100)  # 先动起来
+        g.setValue(0)  # 目标改为 0（插值起点高）
+
+        g.setMinimum(60)  # 旧实现：_anim_target 仍是 0
+
+        assert g._anim_target == 60
+        assert g._anim_start >= 60
+        for _ in range(10):
+            g._onAnimTick()
+            assert g._animated_value >= 60, "显示值插回了旧量程"

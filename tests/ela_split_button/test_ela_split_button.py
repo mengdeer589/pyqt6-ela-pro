@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import pytest
-from PyQt6.QtCore import QEvent
-from PyQt6.QtWidgets import QWidget
+from PyQt6 import sip
+from PyQt6.QtCore import QEvent, QPoint, QPointF, Qt
+from PyQt6.QtGui import QMouseEvent
+from PyQt6.QtWidgets import QApplication, QWidget
 from PyQt6ElaWidgetTools import ElaIconType, ElaMenu, ElaThemeType
 
 from pyqt6_ela_pro._theme import textDisabled
@@ -187,3 +189,60 @@ class TestElaSplitButtonAppearance:
 class TestElaSplitButtonDeleteLater:
     def test_delete_later_cleans_up(self, btn):
         btn.deleteLater()
+
+
+class TestElaSplitButtonMenuLifetime:
+    """F13 回归：菜单生命周期边界（宿主先删菜单 / 显式清空）。
+
+    原实现 `if self._menu: self._menu.popup(pos)` 对已删除的 sip 包装器调方法
+    抛 ``RuntimeError``，穿出 Qt 回调 = 0xC0000409 崩进程（子进程探针实测）。
+    """
+
+    @staticmethod
+    def _click_arrow(widget, before_release=None) -> None:
+        right_x = widget.width() - 5  # 右半（箭头区）
+        for kind in (QEvent.Type.MouseButtonPress, QEvent.Type.MouseButtonRelease):
+            QApplication.sendEvent(
+                widget,
+                QMouseEvent(
+                    kind,
+                    QPointF(QPoint(right_x, 5)),
+                    Qt.MouseButton.LeftButton,
+                    Qt.MouseButton.LeftButton,
+                    Qt.KeyboardModifier.NoModifier,
+                ),
+            )
+
+    def test_arrow_click_with_deleted_menu_is_safe(self, make):
+        btn = make(ElaSplitButton)
+        btn.resize(160, 30)
+        menu = make(ElaMenu, btn)
+        btn.setMenu(menu)
+        sip.delete(menu)
+        assert sip.isdeleted(menu)
+
+        self._click_arrow(btn)  # 守卫放行（不再 popup），不得崩
+
+        assert btn._is_right_pressed is False
+
+    def test_arrow_click_with_live_menu_still_pops_up(self, make):
+        btn = make(ElaSplitButton)
+        btn.resize(160, 30)
+        menu = make(ElaMenu, btn)
+        calls: list = []
+        menu.popup = lambda *args: calls.append(args)  # type: ignore[method-assign]
+        btn.setMenu(menu)
+
+        self._click_arrow(btn)
+
+        assert calls, "存活菜单必须照常弹出（守卫不能误伤）"
+
+    def test_set_menu_none_clears_and_click_is_safe(self, make):
+        btn = make(ElaSplitButton)
+        btn.resize(160, 30)
+        btn.setMenu(make(ElaMenu, btn))
+
+        btn.setMenu(None)
+
+        assert btn.menu() is None
+        self._click_arrow(btn)  # 无菜单点击 = 空操作，不崩

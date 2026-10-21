@@ -265,3 +265,35 @@ class TestElaPaginationHoverReset:
 
     def test_class_defines_leave_event(self):
         assert "leaveEvent" in vars(ElaPagination)
+
+
+class TestElaPaginationPagerCountClamp:
+    """F16 回归：``setPagerCount`` 最小 7。
+
+    更小时 ``_getVisiblePages`` 的中间分支 ``side = (pc-4)//2`` 变负，
+    会产出空窗 + **相邻双省略号**（旧实现实测 [1, -3, -1, 50]）。
+    """
+
+    @pytest.mark.parametrize("requested", [3, 5, 7, 11, 0, -2])
+    def test_clamped_to_min_7(self, p, requested):
+        p.setPagerCount(requested)
+        assert p.pagerCount() == max(7, requested)
+
+    @pytest.mark.parametrize("count", [7, 9, 11, 13])
+    def test_no_adjacent_ellipsis_and_no_empty_window(self, p, count):
+        p.setTotalPages(100)
+        p.setPagerCount(count)
+        for current in (1, 2, 50, 99, 100):
+            p.setCurrentPage(current)
+            pages = p._getVisiblePages()
+            assert pages, f"页码窗口为空: count={count} current={current}"
+            for a, b in zip(pages, pages[1:]):
+                assert not (a < 0 and b < 0), f"相邻省略号: {pages}"
+
+    def test_invalid_value_keeps_current(self, p):
+        p.setPagerCount(9)
+
+        p.setPagerCount("x")
+        p.setPagerCount(float("inf"))
+
+        assert p.pagerCount() == 9

@@ -69,6 +69,54 @@ class TestInlineSubSup:
         assert "~" not in v.document().toPlainText()
         v.deleteLater()
 
+    def test_range_values_render_literally(self):
+        """范围值 ``1~23、45~67`` 必须原样渲染。
+
+        放宽的下标规则会把 ``~23、45~`` 配成下标；Qt 导入器（md4c）同样会把
+        任意两个 ``~`` 配对成下标并吞掉（实测原文变成 ``123、4567``）。现在只把
+        **内容为字母数字的成对写法**换成 ``<sub>``，其余单波浪号转义成 ``\\~``。
+        """
+        v = ElaMarkdownViewer()
+        v.setMarkdown("范围 1~23、45~67 都支持")
+        text = v.document().toPlainText()
+        assert "1~23、45~67" in text
+        assert not [
+            f
+            for f in _fragments(v)
+            if f.charFormat().verticalAlignment()
+            == QTextCharFormat.VerticalAlignment.AlignSubScript
+        ]
+        v.deleteLater()
+
+    def test_spaced_ranges_render_literally(self):
+        """带空格 / 单位分隔的范围值同样原样渲染（Qt 会跨这些字符配对）。"""
+        v = ElaMarkdownViewer()
+        v.setMarkdown("温度 1~23℃，湿度 40~60%")
+        assert "1~23℃，湿度 40~60%" in v.document().toPlainText()
+        v.deleteLater()
+
+    def test_math_carets_stay_literal(self):
+        """``a^2+b^2`` / ``2^32、2^64`` 不能被配成上标。"""
+        v = ElaMarkdownViewer()
+        v.setMarkdown("a^2+b^2 与 2^32、2^64")
+        text = v.document().toPlainText()
+        assert "a^2+b^2" in text
+        assert "2^32、2^64" in text
+        assert not [
+            f
+            for f in _fragments(v)
+            if f.charFormat().verticalAlignment()
+            == QTextCharFormat.VerticalAlignment.AlignSuperScript
+        ]
+        v.deleteLater()
+
+    def test_subscript_after_digit_is_literal(self):
+        """``~`` 开符号紧跟数字时不再当下标（挡住 ``1~23m3~45`` 这类串）。"""
+        v = ElaMarkdownViewer()
+        v.setMarkdown("1~23m3~45")
+        assert "1~23m3~45" in v.document().toPlainText()
+        v.deleteLater()
+
     def test_sub_sup_inside_code_untouched(self):
         v = ElaMarkdownViewer()
         v.setMarkdown("`x^2^` 与 `H~2~O`")

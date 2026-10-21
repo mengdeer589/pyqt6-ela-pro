@@ -173,6 +173,38 @@ class TestElaButtonIcon:
         btn.setElaIcon(ElaIconType.IconName.House, iconSize=20)
         assert btn._icon_size == 20
 
+    def test_set_ela_icon_accepts_int(self, btn):
+        """F12 回归：图标契约允许传整数值（入口归一）。
+
+        传 int 时上游 ``getElaIcon`` 抛 ``TypeError``，而绘制路径裸调它 =
+        异常穿出 ``paintEvent`` = 0xC0000409 崩进程（子进程探针实测）。
+        """
+        btn.setElaIcon(int(ElaIconType.IconName.Pencil.value))
+
+        assert btn._icon_name == ElaIconType.IconName.Pencil
+        btn.resize(80, 30)
+        btn.grab()  # 触发 paint：归一后不得抛
+
+    def test_ctor_icon_accepts_int(self, make):
+        b = make(ElaButton, icon=int(ElaIconType.IconName.House.value))
+
+        assert b._icon_name == ElaIconType.IconName.House
+        b.grab()
+
+    def test_invalid_icon_raises_at_setter(self, btn):
+        """非数值输入在 setter 期响亮失败，而不是绘制期静默崩进程。"""
+        with pytest.raises((ValueError, TypeError)):
+            btn.setElaIcon("not-an-icon")
+
+    def test_set_ela_icon_none_clears(self, btn):
+        """``None`` = 清除图标（不画图标分支），不是 None_ 伪成员。"""
+        btn.setElaIcon(ElaIconType.IconName.Pencil)
+
+        btn.setElaIcon(None)
+
+        assert btn._icon_name is None
+        btn.grab()
+
     def test_icon_only_button_icon_centered(self, make, qapp):
         """纯图标按钮：图标绘制在按钮正中（回归：曾保留文字间距导致左偏）。"""
         b = make(

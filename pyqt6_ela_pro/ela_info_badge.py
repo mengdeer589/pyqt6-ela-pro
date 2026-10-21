@@ -30,6 +30,7 @@ from PyQt6.QtWidgets import QWidget
 from PyQt6ElaWidgetTools import eTheme, ElaThemeType, ElaIconType
 
 from ._styles import iconGlyph
+from ._theme import ElaStatusRoleType, statusColor
 from .widget_base import ElaThemeWidget
 
 
@@ -148,9 +149,11 @@ class ElaInfoBadge(ElaThemeWidget):
         if self._severity == self.ElaSeverityType.Informational:
             return eTheme.getThemeColor(mode, ElaThemeType.ThemeColor.PrimaryNormal)
         if self._severity == self.ElaSeverityType.Success:
-            return QColor(0x0F, 0x7B, 0x0F)
+            # 走语义令牌（分深浅两档）；别再写死浅色档 hex —— 会与
+            # `_theme._STATUS_COLORS` 各自漂移、暗色下拿不到暗色档
+            return statusColor(mode, ElaStatusRoleType.Success)
         if self._severity == self.ElaSeverityType.Caution:
-            return QColor(0x9D, 0x5D, 0x00)
+            return statusColor(mode, ElaStatusRoleType.Warning)
         return eTheme.getThemeColor(mode, ElaThemeType.ThemeColor.StatusDanger)
 
     def _updateGeometry(self) -> None:

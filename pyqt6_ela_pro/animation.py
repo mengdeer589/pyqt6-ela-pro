@@ -54,6 +54,8 @@ def fade_in(widget: QWidget, duration: int = Duration.Normal) -> None:
     # 故意**不**连 widget.destroyed：destroyed 在 C++ 析构之后才发出，此时对已失效
     # 的包装器取哈希会触发 0xC0000005（实测全量测试 6/6 必崩）；且 lambda 捕获 widget
     # 会形成引用环让包装器永不回收。条目清理由 WeakKeyDictionary 负责。
+    # （tooltips._auto_remove 在 destroyed 里做同类哈希却实测 5 场景安全 ——
+    # 两处时机/路径不同，结论并存；改任一处前先跑各自回归。）
     _animation_registry[widget] = animation
     start_transition(animation, duration, on_complete=_cleanup)
 

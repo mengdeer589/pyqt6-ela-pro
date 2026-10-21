@@ -95,9 +95,8 @@ class _StatusIcon(QWidget):
     """状态图标：一个 16×16 的透明控件，内画 12px 的 ElaAwesome 字形。
 
     刻意不用 ``ElaIconButton``（那是有悬浮/按下底色的按钮，语义不对）、也不用
-    ``QLabel``（QLabel 画不了 QIcon 的字形）。上游 ``eTheme`` 只暴露了
-    ``drawEffectShadow``、**没有** ``drawElaIcon(painter, pos, size, icon, color)``，
-    所以走 ``ElaIcon.getInstance().getElaIcon(name, color)`` 拿上好色的 QIcon。
+    ``QLabel``（QLabel 画不了字形）。字形绘制走 ``_styles.drawElaIcon`` ——
+    上游 ``eTheme`` 没有这个原语，是库内自绘原语（见 ``_styles``）。
     """
 
     def __init__(self, parent: Optional[QWidget] = None) -> None:

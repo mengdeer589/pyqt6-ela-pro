@@ -1518,7 +1518,17 @@ class ElaBrowserEmbedder(ElaWindowEmbedder):
             if self._embeddedInfo:
                 ElaWindowEmbedder.release(self)
 
-            self._tryEmbedOnce(hwnd)
+            if not self._tryEmbedOnce(hwnd):
+                # 窗口在轮询与嵌入之间消失 / 容器创建失败：``_tryEmbedOnce``
+                # 只记 logger.warning、不发信号、也不重启轮询 —— 不在这里补
+                # 一刀的话，宿主监听 embedCompleted/embedError/embedTimeout
+                # 会**永久等待**（基类 embedByHwnd 对同一返回值会转入等待轮询
+                # 并以 embedTimeout 收尾）
+                msg = f"嵌入浏览器窗口失败: {hwnd}"
+                self._log(msg, 40)
+                self.embedError.emit(msg)
+                self.embedCompleted.emit(False)
+                return
             if original_rect and original_rect[0] < -5000:
                 w = original_rect[2] - original_rect[0]
                 h = original_rect[3] - original_rect[1]

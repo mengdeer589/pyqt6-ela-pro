@@ -146,10 +146,16 @@ def _text_on(color: QColor) -> QColor:
 
 
 def format_elapsed(ms) -> str:
-    """把毫秒格式化为耗时徽标文本：``"12 ms"`` / ``"1.2 s"``。"""
+    """把毫秒格式化为耗时徽标文本：``"12 ms"`` / ``"1.2 s"``。
+
+    非有限值（``inf`` / ``nan``）按「未统计」返回空串 —— 直接格式化会得到
+    ``"inf ms"`` 这种怪徽标（显示层问题，不崩）。
+    """
     if ms is None:
         return ""
     ms = float(ms)
+    if not math.isfinite(ms):
+        return ""
     if ms < 1000.0:
         return f"{ms:.0f} ms"
     return f"{ms / 1000.0:.1f} s"

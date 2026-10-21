@@ -1,6 +1,8 @@
 /benchmark_setdata.py
 /gen_test_data.py
 /.venv/
+/.venv-pyqt6
+/.venv-pyside6
 __pycache__/
 *.pyc
 *.pyo
@@ -27,6 +29,8 @@ PyQt-Fluent-Widgets/
 /bin_5_15_2_x64_MSVC/
 *.whl
 chart_export.png
+# 本地批处理入口（打开 example / 构建 whl）：只在本机用，不随仓库分发
+/*.bat
 # llm_test/ 暂不入库：agents/config.py 里有硬编码的 sk- key，等轮换后再放开这条规则
 /llm_test/
 /Fluent-Qt/

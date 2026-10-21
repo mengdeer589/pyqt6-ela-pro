@@ -28,6 +28,7 @@ from datetime import date, timedelta
 from PyQt6.QtCore import QPointF, QRectF, Qt
 from PyQt6.QtGui import QColor, QFont, QFontMetricsF, QPainter, QPainterPath, QPen
 
+from .._internal import system_cjk_font_family
 from ._tokens import FONT_FAMILIES, T
 from ._utils import to_float as _utils_to_float
 from . import _downsample as _ds
@@ -75,9 +76,15 @@ _MAX_DATE_YEAR = 9999
 
 
 def chartFont(px: int = None, weight: int = None) -> QFont:
-    """构造图表用字体（FONT_FAMILIES 字族；px 默认 font.xs）。"""
+    """构造图表用字体（``FONT_FAMILIES`` 字族；px 默认 font.xs）。
+
+    中文系统收成单族 ``Microsoft YaHei``（即 ``FONT_FAMILIES`` 首族）：多族列表
+    在 Win7 上是慢 shaping 路径（图表文本逐重绘放大，见「下游项目反馈bug.md」
+    §3），而列表其余族全是 mac / linux 字体、Windows 上本就轮不到。
+    """
     font = QFont()
-    font.setFamilies(list(FONT_FAMILIES))
+    cjk_family = system_cjk_font_family()
+    font.setFamilies([cjk_family] if cjk_family else list(FONT_FAMILIES))
     font.setStyleHint(QFont.StyleHint.SansSerif)
     font.setPixelSize(int(px if px else T("font.xs")))
     if weight:
@@ -305,6 +312,8 @@ class AxisModel:
         self.opt = opt
         self.type = str(opt.get("type") or default_type)
         self.name = str(opt.get("name") or "")
+        #: ``windowOffset()`` 的记忆化缓存（类别一变就作废，见 property setter）
+        self._window_offset_cache = None
         self.categories = [str(c) for c in (opt.get("data") or [])]
         #: dataZoom 全量类别缓存：``categories`` 可能被窗口替换，
         #: 本属性始终保留完整列表，供窗外类别映射与窗口偏移换算
@@ -493,15 +502,38 @@ class AxisModel:
             return all_cats.index(s)  # 窗外类别：全量下标（越界）
         return 0
 
+    @property
+    def categories(self) -> list:
+        """可见类别列表（dataZoom 生效时是窗口内的子集）。"""
+        return self._categories
+
+    @categories.setter
+    def categories(self, value) -> None:
+        self._categories = value
+        # 可见类别换了，窗口偏移的线性扫描结果作废
+        self._window_offset_cache = None
+
     def windowOffset(self) -> int:
-        """dataZoom 类别窗口在全量类别中的起始下标（无窗口时 0）。"""
+        """dataZoom 类别窗口在全量类别中的起始下标（无窗口时 0）。
+
+        **必须记忆化**：实现是 ``_all_categories.index(categories[0])`` —— 线性
+        扫描，1M 个类别单次 ~2.4ms；而它会被 ``localIndex`` → ``mapPoint``
+        **逐点**调用（符号清单 133 个点就 320ms，实测「category 1M 缩放一步」
+        339ms 里 320ms 是这 135 次 ``list.index``）。缓存随 ``categories``
+        赋值作废（property setter）。
+        """
+        cached = self._window_offset_cache
+        if cached is not None:
+            return cached
         all_cats = getattr(self, "_all_categories", None) or []
+        offset = 0
         if self.categories and all_cats:
             try:
-                return all_cats.index(self.categories[0])
+                offset = all_cats.index(self.categories[0])
             except ValueError:
-                return 0
-        return 0
+                offset = 0
+        self._window_offset_cache = offset
+        return offset
 
     def invert(self, px: float, start: float, end: float):
         """像素 → 数据值（category 返回窗口内下标，越界收敛到窗口边缘）。"""
@@ -894,6 +926,59 @@ class GridCoord(Coord):
         py = self.y_axis.map(_to_float(y), self.plot.bottom(), self.plot.top())
         return QPointF(px, py)
 
+    def mapArrays(self, xs, ys):
+        """批量映射（numpy 数组进 → ``(px, py)`` 两个数组）；不支持时返回 ``None``。
+
+        与 :meth:`mapPoint` 逐点**同语义**，只是把「每点 ~6µs 的 Python 调用链」
+        换成一次向量化运算（实测 1M 点 2.4s → 数十 ms；采样后 2.6k 点也从
+        16ms 降到 <1ms）。以下情形返回 ``None`` 让调用方退回逐点：
+
+        * 缺 numpy；
+        * 轴类型不在 ``value`` / ``category`` 内（log / time / 自定义）；
+        * category 轴的 x 不是数值（类别名无法向量化）。
+
+        非有限坐标不做过滤：由调用方按 ``isfinite`` 决定是否断开（保持
+        ``mapPoint`` 把 NaN 交给调用方处理的既有约定）。
+        """
+        np_ = _ds.np
+        if np_ is None or xs is None or ys is None:
+            return None
+        xa, ya = self.x_axis, self.y_axis
+        left, right = self.plot.left(), self.plot.right()
+        bottom, top = self.plot.bottom(), self.plot.top()
+
+        if xa.type == "category":
+            count = len(xa.categories)
+            if count <= 0:
+                return None
+            try:
+                idx = np_.asarray(xs, dtype=np_.float64) - float(xa.windowOffset())
+            except (TypeError, ValueError, OverflowError):
+                return None
+            if xa.boundary_gap or count <= 1:
+                frac = (idx + 0.5) / count
+            else:
+                frac = idx / (count - 1)
+        elif xa.type == "value":
+            values = np_.asarray(xs, dtype=np_.float64)
+            span = xa.vmax - xa.vmin
+            frac = np_.zeros_like(values) if span == 0 else (values - xa.vmin) / span
+        else:
+            return None
+        if xa.inverse:
+            frac = 1.0 - frac
+        px = left + (right - left) * frac
+
+        if ya.type != "value":
+            return None
+        y_values = np_.asarray(ys, dtype=np_.float64)
+        y_span = ya.vmax - ya.vmin
+        y_frac = np_.zeros_like(y_values) if y_span == 0 else (y_values - ya.vmin) / y_span
+        if ya.inverse:
+            y_frac = 1.0 - y_frac
+        py = bottom + (top - bottom) * y_frac
+        return px, py
+
     def invertX(self, pos: QPointF):
         return self.x_axis.invert(pos.x(), self.plot.left(), self.plot.right())
 
@@ -908,19 +993,100 @@ class GridCoord(Coord):
         return self.plot.contains(QPointF(pos))
 
     # -- 绘制 -------------------------------------------------------------
-    def _axis_positions(self, axis: AxisModel, horizontal: bool):
-        """轴刻度位置列表 ``[(px, py, label, index)]``（category 用本地下标映射）。"""
+    def _interval_step(self, axis: AxisModel, horizontal: bool, option_key: str) -> int:
+        """标签 / 刻度 / 网格线的抽稀步长（``interval: 'auto'`` 语义）。
+
+        **为什么必须有**：坐标轴现在是「有多少刻度画多少」——1M 个类别的 x 轴
+        会画 1M 个标签 + 1M 条刻度（实测单帧 11.8s + 3.5s，比系列绘制贵两个
+        数量级）。抽稀后绘制量与像素宽度挂钩，与数据量解耦。
+
+        判据：沿轴方向「一个标签占的像素」不够放时按倍数跳。显式 ``interval``
+        （数字 / callable）优先，用户说了算。
+        """
+        opt = axis.axisLabelOption() if option_key == "axisLabel" else None
+        if opt is None:
+            if option_key == "axisTick":
+                opt = axis.axisTickOption()
+            elif option_key == "splitLine":
+                opt = axis.splitLineOption()
+            elif option_key == "splitArea":
+                opt = axis.splitAreaOption()
+            else:
+                opt = {}
+        interval = opt.get("interval")
+        if isinstance(interval, bool):
+            return 1
+        if isinstance(interval, (int, float)):
+            return max(1, int(interval) + 1)
+        if callable(interval):
+            return 1
+        # 每次绘制只算一次：同一次 paintAxes 里标签 / 刻度 / 网格 / 分隔区
+        # 会各问一次，样本量文本不能重复付（记忆化按轴 + 方向 + 画布尺寸）。
+        memo = getattr(self, "_step_memo", None)
+        if memo is None:
+            memo = self._step_memo = {}
+        memo_key = (id(axis), horizontal, option_key)
+        if memo_key in memo:
+            return memo[memo_key]
+        step = self._compute_interval_step(axis, horizontal)
+        memo[memo_key] = step
+        return step
+
+    def _compute_interval_step(self, axis: AxisModel, horizontal: bool) -> int:
+        count = len(axis.categories) if axis.type == "category" else len(axis.ticks())
+        if count <= 1:
+            return 1
+        span = self.plot.height() if horizontal else self.plot.width()
+        if span <= 0:
+            return 1
+        spacing = span / float(count)
+        font = axis.labelFont()
+        fm = QFontMetricsF(font)
+        if horizontal:
+            # y 轴：沿轴方向是标签**高度**（一行）
+            extent = float(fm.height())
+        else:
+            # x 轴：沿轴方向是标签**宽度**；量最多 32 个样本取最宽
+            # （全量量文本会把「画不出来」换成「量不完」）
+            extent = 0.0
+            step_sample = max(1, count // 32)
+            ticks = axis.ticks() if axis.type != "category" else None
+            for i in range(0, count, step_sample):
+                text = (
+                    str(axis.categories[i])
+                    if axis.type == "category"
+                    else axis.formatTickLabel(ticks[i])
+                )
+                extent = max(extent, float(fm.horizontalAdvance(text)))
+            if extent <= 0.0:
+                extent = float(fm.height())
+        need = extent + 6.0
+        if need <= spacing:
+            return 1
+        return int(math.ceil(need / spacing))
+
+    def _axis_positions(self, axis: AxisModel, horizontal: bool, step: int = 1):
+        """轴刻度位置列表 ``[(px, py, label, index)]``（category 用本地下标映射）。
+
+        ``step`` 是抽稀步长（``_interval_step``）：**category 轴按它跳着枚举**，
+        1M 个类别的轴才不会在这里先造出 1M 个元组（光这一步就要 ~0.3s）。
+        """
         out = []
+        step = max(1, int(step))
         if axis.type == "category":
-            for i, label in enumerate(axis.categories):
+            categories = axis.categories
+            for i in range(0, len(categories), step):
+                label = str(categories[i])
                 if horizontal:
                     py = axis.map(i, self.plot.bottom(), self.plot.top(), local=True)
-                    out.append((self.plot.left(), py, str(label), i))
+                    out.append((self.plot.left(), py, label, i))
                 else:
                     px = axis.map(i, self.plot.left(), self.plot.right(), local=True)
-                    out.append((px, self.plot.bottom(), str(label), i))
+                    out.append((px, self.plot.bottom(), label, i))
         else:
-            for tv in axis.ticks():
+            ticks = axis.ticks()
+            for i in range(0, len(ticks), step):
+                tv = ticks[i]
                 if horizontal:
                     py = axis.map(tv, self.plot.bottom(), self.plot.top())
                     out.append((self.plot.left(), py, axis.formatTickLabel(tv), tv))
@@ -938,7 +1104,9 @@ class GridCoord(Coord):
             colors = (area or {}).get("color") if isinstance(area, dict) else None
             if not isinstance(colors, list) or not colors:
                 colors = [T("color.bg.muted")]
-            positions = self._axis_positions(axis, horizontal)
+            positions = self._axis_positions(
+                axis, horizontal, self._interval_step(axis, horizontal, "splitArea")
+            )
             spans = []
             for i, (px, py, _label, _idx) in enumerate(positions):
                 spans.append(py if horizontal else px)
@@ -961,7 +1129,9 @@ class GridCoord(Coord):
             if not bool(opt.get("show", default_show)):
                 continue
             p.setPen(_line_pen(opt, T("color.border")))
-            for px, py, _label, _idx in self._axis_positions(axis, horizontal):
+            for px, py, _label, _idx in self._axis_positions(
+                axis, horizontal, self._interval_step(axis, horizontal, "splitLine")
+            ):
                 if horizontal:
                     p.drawLine(
                         QPointF(self.plot.left(), py), QPointF(self.plot.right(), py)
@@ -993,7 +1163,9 @@ class GridCoord(Coord):
             except (TypeError, ValueError, OverflowError):
                 length = 5.0
             p.setPen(_line_pen(opt, T("color.border.strong")))
-            for px, py, _label, _idx in self._axis_positions(axis, horizontal):
+            for px, py, _label, _idx in self._axis_positions(
+                axis, horizontal, self._interval_step(axis, horizontal, "axisTick")
+            ):
                 if horizontal:
                     x = self.plot.left()
                     p.drawLine(
@@ -1011,7 +1183,9 @@ class GridCoord(Coord):
         p.setFont(font)
         fm = QFontMetricsF(font)
         color = self.y_axis.labelColor()
-        for px, py, label, idx in self._axis_positions(self.y_axis, True):
+        for px, py, label, idx in self._axis_positions(
+            self.y_axis, True, self._interval_step(self.y_axis, True, "axisLabel")
+        ):
             if not self.y_axis.labelShownAt(idx, label):
                 continue
             p.setPen(color)
@@ -1034,7 +1208,9 @@ class GridCoord(Coord):
             rotate = float(self.x_axis.axisLabelOption().get("rotate", 0) or 0)
         except (TypeError, ValueError, OverflowError):
             rotate = 0.0
-        for px, py, label, idx in self._axis_positions(self.x_axis, False):
+        for px, py, label, idx in self._axis_positions(
+            self.x_axis, False, self._interval_step(self.x_axis, False, "axisLabel")
+        ):
             if not self.x_axis.labelShownAt(idx, label):
                 continue
             p.setPen(color)
@@ -1115,6 +1291,8 @@ class GridCoord(Coord):
 
     def paintAxes(self, p: QPainter) -> None:
         p.save()
+        # 抽稀步长的记忆化按「一次绘制」为界：轴范围 / 画布尺寸变了要重算
+        self._step_memo = {}
         # grid 背景 / 边框
         if self.grid_bg:
             p.fillRect(self.plot, QColor(self.grid_bg))
