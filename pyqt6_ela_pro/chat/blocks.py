@@ -2339,6 +2339,21 @@ class AttachmentStrip(ElaThemeWidget):
         policy = QSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
         policy.setHeightForWidth(True)
         self.setSizePolicy(policy)
+        #: 布局后补量一次（同一时刻只留一个待触发）
+        self._sync_timer = QTimer(self)
+        self._sync_timer.setSingleShot(True)
+        self._sync_timer.setInterval(0)
+        self._sync_timer.timeout.connect(self.syncWidth)
+
+    def showEvent(self, event) -> None:  # noqa: N802 (Qt 命名)
+        super().showEvent(event)
+        # 隐藏期间加的附件可能在首次布局前算出了 1px 高度；显示后再量一次。
+        self._schedule_sync()
+
+    def resizeEvent(self, event) -> None:  # noqa: N802 (Qt 命名)
+        super().resizeEvent(event)
+        # 首次布局会先给一个 1px 高；等拿到真实宽度后再量一次（hfw 首轮可能是 0）。
+        self._schedule_sync()
 
     # -- 数据 --------------------------------------------------------------
 
@@ -2359,6 +2374,7 @@ class AttachmentStrip(ElaThemeWidget):
         normalized = [self._normalize(item) for item in (attachments or [])]
         self._rebuild(normalized)
         self.changed.emit(self.attachments())
+        self._schedule_sync()
 
     def addAttachment(
         self, name: str, path: str = "", size: int = 0
@@ -2369,6 +2385,7 @@ class AttachmentStrip(ElaThemeWidget):
             return attachment
         self._append(attachment)
         self.changed.emit(self.attachments())
+        self._schedule_sync()
         return attachment
 
     def addPastedImage(
@@ -2394,6 +2411,7 @@ class AttachmentStrip(ElaThemeWidget):
         )
         self._append(attachment)
         self.changed.emit(self.attachments())
+        self._schedule_sync()
         return attachment
 
     def addAttachments(self, attachments) -> list:
@@ -2409,6 +2427,7 @@ class AttachmentStrip(ElaThemeWidget):
             added.append(attachment)
         if added:
             self.changed.emit(self.attachments())
+            self._schedule_sync()
         return added
 
     def removeAttachment(self, index: int) -> None:
@@ -2455,6 +2474,10 @@ class AttachmentStrip(ElaThemeWidget):
     def alignment(self) -> Qt.AlignmentFlag:
         """获取 chips 行内对齐方式。"""
         return self._alignment
+
+    def _schedule_sync(self) -> None:
+        """布局完成后再量一次（气泡可能还没显示 / 还没完成首次布局）。"""
+        self._sync_timer.start()
 
     def syncWidth(self, available: int = -1) -> None:
         """按内容宽度收缩（右对齐场景）或占满可用宽度，并同步高度。"""

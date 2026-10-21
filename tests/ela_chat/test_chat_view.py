@@ -423,6 +423,27 @@ class TestMessageActions:
         strip.attachmentClicked.emit("C:/a.txt")
         assert clicked == [(messageId, "C:/a.txt")]
 
+    def test_attachments_reflow_after_first_layout(self, qapp, make):
+        """显示前加的附件，首次布局后必须撑开（曾算出 1px 高、整条看不见）。"""
+        view = make(ElaChatView)
+        view.resize(600, 400)
+        messageId = view.addMessage(ElaChatRoleType.User, "看附件")
+        view.setMessageAttachments(
+            messageId,
+            [
+                {"name": "a.txt", "path": "C:/a.txt", "size": 10},
+                {"name": "b.txt", "path": "C:/b.txt", "size": 20},
+            ],
+        )
+        view.show()
+        assert _wait_until(
+            qapp,
+            lambda: view.bubble(messageId).attachmentStrip().height() > 20,
+        )
+        strip = view.bubble(messageId).attachmentStrip()
+        assert strip.count() == 2
+        assert view.bubble(messageId).height() >= strip.height()
+
 
 class TestCopyNotificationToggle:
     def test_default_enabled(self, qapp, make):
