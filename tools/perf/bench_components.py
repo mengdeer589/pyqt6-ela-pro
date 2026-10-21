@@ -14,14 +14,14 @@ import time
 
 
 def run_once() -> int:
-    from PySide6 import QtCore, QtWidgets
+    from PyQt6 import QtCore, QtWidgets
 
-    from PySide6ElaWidgetTools import eApp, ElaText
+    from PyQt6ElaWidgetTools import eApp, ElaText
 
     app = QtWidgets.QApplication(sys.argv)
     eApp.init()
-    import pyside6_ela_pro as lib
-    from pyside6_ela_pro._styles import ColorText
+    import pyqt6_ela_pro as lib
+    from pyqt6_ela_pro._styles import ColorText
 
     now = time.perf_counter
     host = QtWidgets.QWidget()
@@ -65,7 +65,12 @@ def run_once() -> int:
             first.deleteLater()
             app.processEvents()
             rows.append(
-                {"label": label, "ms": statistics.median(samples), "children": children, "native": native}
+                {
+                    "label": label,
+                    "ms": statistics.median(samples),
+                    "children": children,
+                    "native": native,
+                }
             )
         except Exception as exc:  # noqa: BLE001
             rows.append({"label": label, "ms": -1.0, "note": str(exc)[:80]})

@@ -73,10 +73,8 @@ F = TypeVar("F", bound=Callable[..., Any])
 def is_deleted(obj: Any) -> bool:
     """对象是否已销毁（**``None`` 也算已销毁**）。
 
-    不能直接用 ``sip.isdeleted(obj)``：``sip.isdeleted(None)`` 返回 **False**，
-    写反会让「字段还是 None」走到使用已销毁对象的路径上。库内所有存活判断统一走本函数。
-    非 sip 包装的普通 Python 对象按「存活」处理（``TypeError`` 兜底），与 shiboken
-    的 ``isValid()`` 对任意 Python 对象返回 True 同口径。
+    不能直接用 ``sip.isdeleted(obj)``：``None`` 与非 sip 包装的普通 Python 对象
+    都会抛 ``TypeError``。库内所有存活判断统一走本函数；非包装对象按「存活」处理。
     """
     if obj is None:
         return True

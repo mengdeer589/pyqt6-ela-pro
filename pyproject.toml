@@ -17,10 +17,11 @@ classifiers = [
     "Development Status :: 4 - Beta",
     "Intended Audience :: Developers",
 
-    "Operating System :: OS Independent",
+    "Operating System :: Microsoft :: Windows",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
     "Topic :: Software Development :: Libraries :: Python Modules",
     "Topic :: GUI Development",
 ]
@@ -58,17 +59,17 @@ dev = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/mengdeer589/pyqt5-ela-pro"
-Documentation = "https://github.com/mengdeer589/pyqt5-ela-pro#readme"
-Repository = "https://github.com/mengdeer589/pyqt5-ela-pro"
-Issues = "https://github.com/mengdeer589/pyqt5-ela-pro/issues"
+Homepage = "https://github.com/mengdeer589/pyqt6-ela-pro"
+Documentation = "https://github.com/mengdeer589/pyqt6-ela-pro#readme"
+Repository = "https://github.com/mengdeer589/pyqt6-ela-pro"
+Issues = "https://github.com/mengdeer589/pyqt6-ela-pro/issues"
 
 [tool.setuptools.dynamic]
 version = {attr = "pyqt6_ela_pro._version.__version__"}
 
 [tool.setuptools.packages.find]
 where = ["."]
-exclude = ["PyQt*", "PySide*", "PyQt-Fluent*", "PyQt-SiliconUI*", "build*", "dist*", "*.egg-info"]
+exclude = ["PyQt*", "PyQt-Fluent*", "PyQt-SiliconUI*", "build*", "dist*", "*.egg-info"]
 include = ["pyqt6_ela_pro*"]
 
 [tool.setuptools.package-data]
@@ -81,11 +82,11 @@ pyqt6_ela_pro = []
 required-environments="sys_platform == 'win32' and platform_machine == 'AMD64'"
 # 解析也只跑 win/AMD64：本库 Windows only，而「全平台候选」会让每次重新解析都去抓
 # 外平台轮子的 body（这些大轮子没有 PEP 658 metadata）——镜像站上 403 就整条命令失败
-# （实测 PySide6_Addons 的 macOS 轮）。限死后 lock 只登记 win_amd64 候选。
+# （实测 PyQt6_Qt6 的 macOS 轮）。限死后 lock 只登记 win_amd64 候选。
 environments=["sys_platform == 'win32' and platform_machine == 'AMD64'"]
 
 # 默认索引写进项目：宿主环境里可能带着别的第三方索引（如 ustc，对部分包 403），
-# aliyun 完整且稳定 —— 见 WHEEL_ISSUES.md。
+# aliyun 完整且稳定 —— 见 AGENTS.md 的 Install & Run。
 [[tool.uv.index]]
 name = "aliyun"
 url = "https://mirrors.aliyun.com/pypi/simple/"
@@ -93,8 +94,8 @@ default = true
 
 # 开发期依赖走**本地 Win7 交付套件**（`PyElaWidgetTools/wheels/pyqt6-win7/`）：
 # 官方 PyQt6 壳 + 自编译 Qt 6.8.4 运行库 + 基于 qt684 重建的绑定轮 —— 开发运行时
-# 与 Win7 交付运行时保持一致（提前暴露 6.8.4/替换带来的差异），与 PySide6 时代的
-# pyside6-win7 同一策略。运行期自证：``qVersion()`` 应返回 **6.8.4**（官方为 6.8.2）。
+# 与 Win7 交付运行时保持一致（提前暴露 6.8.4/替换带来的差异）。
+# 运行期自证：``qVersion()`` 应返回 **6.8.4**（官方为 6.8.2）。
 # 本地轮重打包后哈希会变，`uv run` / `uv sync` 可能报 Hash mismatch（见 AGENTS.md）。
 [tool.uv.sources]
 pyqt6 = { path = "PyElaWidgetTools/wheels/pyqt6-win7/PyQt6-6.8.1-cp39-abi3-win_amd64.whl" }
