@@ -3494,9 +3494,7 @@ class ElaChartWidget(QWidget):
         self._layout_key = None
         self._geometry_epoch += 1
 
-
     #: 底部组件条带顺序（从外到内，最外层贴近画布底边）
-
 
     # ------------------------------------------------------------- Qt 事件
     def mousePressEvent(self, event) -> None:
@@ -3746,8 +3744,6 @@ class ElaChartWidget(QWidget):
         """可见系列（渲染器可覆写 onMousePress/Move/Release/onWheel 获得交互）。"""
         return [r for r in self._series if r.visible]
 
-
-
     def _make_item_params(
         self, renderer, hit: dict, event_type: str, event=None, pos=None
     ) -> dict:
@@ -3828,11 +3824,6 @@ class ElaChartWidget(QWidget):
             if self._call_hook(renderer, hook_name, *args):
                 return True
         return False
-
-
-
-
-
 
     # -- tooltip 聚合 ------------------------------------------------------
     def textStyle(self) -> dict:

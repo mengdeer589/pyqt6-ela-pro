@@ -525,9 +525,7 @@ class ElaChatPartKindType(StrEnum):
     Permission = "permission"
 
     #: 全部合法类型（非枚举成员）
-    All = nonmember(
-        (Reasoning, Text, Tool, Stats, Synthetic, Compaction, Permission)
-    )
+    All = nonmember((Reasoning, Text, Tool, Stats, Synthetic, Compaction, Permission))
 
 
 class ElaChatReasoningStyleType(StrEnum):
