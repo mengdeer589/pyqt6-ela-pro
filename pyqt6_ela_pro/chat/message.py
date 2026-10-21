@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass, field, replace
+from enum import StrEnum, nonmember
 from typing import Any, Optional, Tuple
 
 from ._json import loads as _loads
@@ -112,7 +113,7 @@ def _as_bool(value, default: bool = False) -> bool:
     return default
 
 
-class ElaChatRoleType:
+class ElaChatRoleType(StrEnum):
     """消息角色常量。"""
 
     #: 用户消息
@@ -122,11 +123,11 @@ class ElaChatRoleType:
     #: 系统提示消息（居中弱化样式）
     System = "system"
 
-    #: 全部合法角色
-    All = (User, Assistant, System)
+    #: 全部合法角色（非枚举成员）
+    All = nonmember((User, Assistant, System))
 
 
-class ElaChatStatusType:
+class ElaChatStatusType(StrEnum):
     """消息状态常量。"""
 
     #: 正在流式生成
@@ -142,11 +143,11 @@ class ElaChatStatusType:
     #: 渲染/生成失败
     Error = "error"
 
-    #: 全部合法状态（不含仅展示用的 :data:`Queued`）
-    All = (Streaming, Done, Stopped, Error)
+    #: 全部合法状态（不含仅展示用的 :data:`Queued`；非枚举成员）
+    All = nonmember((Streaming, Done, Stopped, Error))
 
 
-class ElaChatToolStatusType:
+class ElaChatToolStatusType(StrEnum):
     """工具调用状态常量。"""
 
     #: 已创建、尚未开始执行（不可展开，对齐 opencode）
@@ -160,10 +161,10 @@ class ElaChatToolStatusType:
     #: 回合被停止 / 中断时仍未完成（不会真的失败，故与 Error 分开）
     Aborted = "aborted"
 
-    #: 已落定（不再显示忙碌环）的状态
-    Settled = (Done, Error, Aborted)
-    #: 全部合法状态
-    All = (Pending, Running, Done, Error, Aborted)
+    #: 已落定（不再显示忙碌环）的状态（非枚举成员）
+    Settled = nonmember((Done, Error, Aborted))
+    #: 全部合法状态（非枚举成员）
+    All = nonmember((Pending, Running, Done, Error, Aborted))
 
 
 def _format_size(size) -> str:
@@ -502,7 +503,7 @@ class ElaChatStats:
         )
 
 
-class ElaChatPartKindType:
+class ElaChatPartKindType(StrEnum):
     """消息内容分段类型常量（助手消息按步骤有序排列）。"""
 
     #: 思考段
@@ -523,11 +524,13 @@ class ElaChatPartKindType:
     #: 工具审批段（等用户确认；结构化数据在 :attr:`ElaChatPart.permission`）
     Permission = "permission"
 
-    #: 全部合法类型
-    All = (Reasoning, Text, Tool, Stats, Synthetic, Compaction, Permission)
+    #: 全部合法类型（非枚举成员）
+    All = nonmember(
+        (Reasoning, Text, Tool, Stats, Synthetic, Compaction, Permission)
+    )
 
 
-class ElaChatReasoningStyleType:
+class ElaChatReasoningStyleType(StrEnum):
     """思考展示形态常量（``setReasoningStyle`` 取值）。"""
 
     #: 可折叠思考块（默认）
@@ -535,11 +538,11 @@ class ElaChatReasoningStyleType:
     #: 内联思考（muted Markdown + 思考行）
     Inline = "inline"
 
-    #: 全部合法形态
-    All = (Collapse, Inline)
+    #: 全部合法形态（非枚举成员）
+    All = nonmember((Collapse, Inline))
 
 
-class ElaChatPermissionStatusType:
+class ElaChatPermissionStatusType(StrEnum):
     """工具审批状态常量。"""
 
     #: 等待用户选择
@@ -553,10 +556,10 @@ class ElaChatPermissionStatusType:
     #: 会话结束 / 消息被删导致未答复就作废
     Cancelled = "cancelled"
 
-    #: 已落定（不再是「等用户」状态）
-    Settled = (Allowed, Always, Rejected, Cancelled)
-    #: 全部合法状态
-    All = (Pending, Allowed, Always, Rejected, Cancelled)
+    #: 已落定（不再是「等用户」状态；非枚举成员）
+    Settled = nonmember((Allowed, Always, Rejected, Cancelled))
+    #: 全部合法状态（非枚举成员）
+    All = nonmember((Pending, Allowed, Always, Rejected, Cancelled))
 
 
 @dataclass(frozen=True)
