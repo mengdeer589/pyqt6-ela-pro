@@ -269,7 +269,7 @@ sys.exit(app.exec())
 | **ElaChatAsyncWorker** | 异步后端 worker 基类（QThread + asyncio + 命令队列 + 取消收尾） |
 | **ElaChatMockBackend** | 模拟后端（QTimer，无模型服务跑通全链路，信号与真实 worker 同构） |
 | **ElaChatStatusBar** | 宿主状态栏（信息 + 四档语义状态 + busy 指示） |
-| **ElaChatRoleType / ElaChatStatusType / ElaChatPartKindType / ElaChatToolStatusType / ElaChatReasoningStyleType / ElaChatPermissionStatusType** | 消息角色 / 消息状态（`Queued` 只是头部展示态，不进 `_status`）/ 时间线分段种类 / 工具调用状态 / 思考展示形态（字符串常量容器，收字符串）/ 审批状态 |
+| **ElaChatRoleType / ElaChatStatusType / ElaChatPartKindType / ElaChatToolStatusType / ElaChatReasoningStyleType / ElaChatPermissionStatusType** | 消息角色 / 消息状态（`Queued` 只是头部展示态，不进 `_status`）/ 时间线分段种类 / 工具调用状态 / 思考展示形态 / 审批状态；均为 `StrEnum`（与字符串、JSON 兼容） |
 | **ElaChatAttachment / ElaChatToolCall** | 附件（路径 / 图片 / 名称）与工具调用记录，成对 `toDict` / `fromDict` |
 | **ElaChatPermission / ElaChatQuestion / ElaChatOption** | 审批请求；**`questions` 非空 = 问答型逐题向导**，为空 = 批准型三键。候选项**必须带 description**，自定义答案与候选项互斥 |
 | **ElaChatSuggestion** | 空态建议项 |
