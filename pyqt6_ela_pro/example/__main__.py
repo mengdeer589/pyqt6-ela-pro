@@ -130,6 +130,9 @@ class ExampleWindow(ElaWindow):
         # 设置，Qt 就不再拿布局最小值顶窗口；页面都在滚动区里，缩到 800 宽布局也不坏。
         self.setMinimumSize(800, 560)
 
+        # 左侧导航切页统一用翻转动画（示例主窗口；window_shell_page 可逐档切换对比）
+        self.setStackSwitchMode(ElaWindowType.StackSwitchMode.Flip)
+
         self.setUserInfoCardTitle("组件演示")
         self.setUserInfoCardSubTitle("pyqt6_ela_pro@example.com")
 
