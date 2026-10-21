@@ -1,10 +1,14 @@
 # PyQt5 → PySide6 迁移：踩坑与经验
 
+> **历史文档**：本文件记录 PyQt5 → PySide6 迁移期的经验。当前仓库**只维护 PyQt6 线**
+> （`pyqt6_ela_pro`，PyQt6 6.8.1 + Qt 6.8.2 / Win7 自编译 6.8.4）；本文保留用于理解
+> 跨绑定差异，新的约束与现状以 `README.md` / `AGENTS.md` 为准。
+
 本文是 `pyqt5_ela_pro` → `pyside6_ela_pro`（PySide6 6.8.3 + PySide6ElaWidgetTools 0.13.0）
 这次迁移的**经验沉淀**：哪些 PySide6 / shiboken 行为会咬人、报错为什么误导、怎么定位、怎么把它变成守卫。
 
 - 权威约束清单在 `AGENTS.md`（库内硬规则，逐条可执行）；本文给**症状 → 根因 → 修法 → 守卫**的叙事与判据。
-- 轮子相关（混版、绑定生成器 bug、镜像）见 `WHEEL_ISSUES.md`；`MIGRATION.md` 是本地过程记录（gitignore，含更早一轮 6.6.2 的实测）。
+- 轮子相关（混版、绑定生成器 bug、镜像）见 git 历史（原 `WHEEL_ISSUES.md` 已删除）；`MIGRATION.md` 是本地过程记录（gitignore，含更早一轮 6.6.2 的实测）。
 - 迁移规模与结果：**372 个文件 / +3979 −3555**；全量测试 **0 failed**（官方 6.8.3：5603 passed / 39 skipped；pyside6-win7 运行时：5610 passed / 35 skipped）。
 
 ---

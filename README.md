@@ -1,6 +1,6 @@
-# pyside6-ela-pro
+# pyqt6-ela-pro
 
-> 基于 [PySide6-ElaWidgetTools](https://github.com/HIllya51/PyElaWidgetTools) 的 PySide6 扩展组件库：
+> 基于 [PyQt6-ElaWidgetTools](https://github.com/HIllya51/PyElaWidgetTools) 的 PyQt6 扩展组件库：
 > Ela 风格控件全家桶，外加 **AI 对话栈**、**类 ECharts 图表引擎**、Markdown 渲染与 Windows 桌面集成能力。
 
 ![Platform](https://img.shields.io/badge/Platform-Windows%20AMD64-0078D4.svg)
@@ -25,9 +25,9 @@
 
 ## 这是什么
 
-`pyside6-ela-pro` 在 [ElaWidgetTools](https://github.com/Liniyous/ElaWidgetTools) C++ 组件库
-与其 Python 绑定 [PySide6-ElaWidgetTools](https://github.com/HIllya51/PyElaWidgetTools) 之上做了一层
-**PySide6 扩展**：沿用上游 Ela 外观，补齐上游没有的控件（按钮 / 标签纸片 / 抽屉 / 分页 /
+`pyqt6-ela-pro` 在 [ElaWidgetTools](https://github.com/Liniyous/ElaWidgetTools) C++ 组件库
+与其 Python 绑定 [PyQt6-ElaWidgetTools](https://github.com/HIllya51/PyElaWidgetTools) 之上做了一层
+**PyQt6 扩展**：沿用上游 Ela 外观，补齐上游没有的控件（按钮 / 标签纸片 / 抽屉 / 分页 /
 时间线 / 分段控件 / 骨架屏 …）、一套可全局切换的**主题令牌与动效策略**，以及三个较大的子系统 ——
 **AI 对话栈（`chat/`）**、**类 ECharts 图表引擎（`charts/`）**、**蓝图节点图编辑器（`blueprint/`）**；
 另有 Markdown 渲染增强（公式 / Mermaid / 流式）、终端输出视图、划词助手与窗口 / 浏览器嵌入等桌面能力。
@@ -37,8 +37,8 @@
 仓库顶层结构：
 
 ```text
-pyside6_ela_pro/             组件库源码（chat/ charts/ blueprint/ selection_assistant/ 为子系统）
-pyside6_ela_pro/example/     两级侧边栏示例应用（python -m pyside6_ela_pro.example）
+pyqt6_ela_pro/             组件库源码（chat/ charts/ blueprint/ selection_assistant/ 为子系统）
+pyqt6_ela_pro/example/     两级侧边栏示例应用（python -m pyqt6_ela_pro.example）
 docs/                      README 的深入文档（chat / charts / markdown / 划词助手）
 tests/                     回归测试（按组件目录组织）
 ```
@@ -54,7 +54,9 @@ tests/                     回归测试（按组件目录组织）
 - **AI 对话栈**：命令式回合 API + `ElaChatStreamBinder` 一键接线、分段时间线
   （思考 / 正文 / 工具 / 步骤用量）、工具结果富渲染注册表、审批（批准型 + 问答型逐题向导）、
   排队 / 撤回 / 重新生成 / steer 插话、多话题与崩溃恢复日志、会话导出导入。
-  详见 [docs/chat.md](docs/chat.md)。
+  性能基线可复跑：`tools/perf/bench_chat.py`（构造 / 流式 / 历史 / 滚动 / 主题）与
+  `tools/perf/bench_markdown_paint.py`（原生浏览器 vs 查看器的滚动绘制分项，Win7 排查字体慢路径）。
+  详见 [docs/chat.md](docs/chat.md) 与 [docs/performance.md](docs/performance.md)。
 - **图表引擎**：`ElaChartWidget` 对齐 ECharts 的 `setOption`（21 种系列、tooltip / dataZoom /
   日历热力 / 下钻），百万点级数据有系列层位图缓存与降采样 —— 折线 / 散点 100 万点稳态帧
   ~9ms、悬停 <1ms、进入新窗口 ~12ms；显式时间戳数据的**记录中断自动断开**（`addGaps`，
@@ -90,16 +92,16 @@ uv pip install -e ".[parquet]"   # ElaParquetTable（polars）
 uv pip install -e ".[dev]"       # 开发依赖（pytest 等）
 ```
 
-发布到 PyPI 之后应可用 `pip install pyside6-ela-pro[all]`。
+发布到 PyPI 之后应可用 `pip install pyqt6-ela-pro[all]`。
 
 ## 快速开始
 
 ```python
 import sys
-from PySide6.QtWidgets import QApplication, QVBoxLayout, QWidget
-from PySide6ElaWidgetTools import eApp, ElaWindow
+from PyQt6.QtWidgets import QApplication, QVBoxLayout, QWidget
+from PyQt6ElaWidgetTools import eApp, ElaWindow
 
-from pyside6_ela_pro import ElaButton, show_notify
+from pyqt6_ela_pro import ElaButton, show_notify
 
 app = QApplication(sys.argv)
 eApp.init()          # 必须在创建任何 ElaWindow 之前调用
@@ -107,12 +109,12 @@ eApp.init()          # 必须在创建任何 ElaWindow 之前调用
 class MainWindow(ElaWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("pyside6-ela-pro")
+        self.setWindowTitle("pyqt6-ela-pro")
         self.resize(1000, 700)
 
         page = QWidget(self)
         layout = QVBoxLayout(page)
-        btn = ElaButton("Hello, pyside6-ela-pro", variant="solid", color="primary")
+        btn = ElaButton("Hello, pyqt6-ela-pro", variant="solid", color="primary")
         btn.clicked.connect(lambda: show_notify("提示", "按钮被点击了！"))
         layout.addWidget(btn)
 
@@ -313,7 +315,7 @@ sys.exit(app.exec())
 ## 示例
 
 ```bash
-python -m pyside6_ela_pro.example
+python -m pyqt6_ela_pro.example
 ```
 
 启动一个 ElaWindow 应用：侧边栏是**两级**结构（可折叠分组 → 页面），
@@ -347,10 +349,9 @@ python -m pyside6_ela_pro.example
 | [docs/charts.md](docs/charts.md) | `ElaChartWidget`：`setOption` / 控制 / 事件 / 自定义系列扩展 |
 | [docs/markdown.md](docs/markdown.md) | `ElaMarkdownViewer` 渲染能力清单（排版 / 公式 / Mermaid / 导出） |
 | [docs/selection-assistant.md](docs/selection-assistant.md) | 划词助手与结果对话框（含取词安全闸门与剪贴板恢复策略） |
-| [docs/pyside6-migration.md](docs/pyside6-migration.md) | PyQt5 → PySide6 迁移经验：致命坑、API 差异速查、测试与环境（轮子 / uv）踩坑 |
-| [docs/performance.md](docs/performance.md) | 性能：成本模型（shiboken / Qt6 内核 / 重绘量）+ 宿主四条配方 + 组件构造成本表 |
-| [WHEEL_ISSUES.md](WHEEL_ISSUES.md) | 上游绑定轮 / PySide6 轮的诊断记录（混版、绑定生成器 bug、镜像） |
-| `pyside6_ela_pro/example/chat_guide_page.py` | 应用内聊天接入指南 + API 速查表 |
+| [docs/pyside6-migration.md](docs/pyside6-migration.md) | 迁移史（PyQt5 → PySide6 → **当前 PyQt6 维护线**）：致命坑、API 差异速查、测试与环境（轮子 / uv）踩坑 |
+| [docs/performance.md](docs/performance.md) | 性能：成本模型（shiboken / Qt6 内核 / 重绘量）+ 宿主配方 + 组件构造成本表 + 聊天 / Markdown 滚动基线脚本 |
+| `pyqt6_ela_pro/example/chat_guide_page.py` | 应用内聊天接入指南 + API 速查表 |
 
 ## 可选依赖
 
@@ -376,13 +377,13 @@ python -m pyside6_ela_pro.example
 
 ## 平台
 
-Windows AMD64（**Windows 10+**）。基于 **PySide6 6.8.3**（Qt 6.8）——PySide6 6.8 不支持 Win7（旧 PyQt5 线请见 git tag `pyqt5-final`）。
+Windows AMD64（**Windows 7 SP1+**；交付线使用 PyQt6 6.8.1 + 自编译 Qt 6.8.4 运行库，Windows 10/11 同样可用）。Python 3.11–3.13。
 
 ## 组件来源与致谢
 
 | 组件 / 模块 | 来源 |
 |---|---|
-| 输入、容器、展示、对话框等原生组件 | 上游 [ElaWidgetTools](https://github.com/Liniyous/ElaWidgetTools) C++ + [PySide6-ElaWidgetTools](https://github.com/HIllya51/PyElaWidgetTools) 绑定 |
+| 输入、容器、展示、对话框等原生组件 | 上游 [ElaWidgetTools](https://github.com/Liniyous/ElaWidgetTools) C++ + [PyQt6-ElaWidgetTools](https://github.com/HIllya51/PyElaWidgetTools) 绑定 |
 | `ElaSplitter`、`ElaPagination`、`ElaToast`、`ElaSpotlight`、`ElaSteps`、`ElaTimeline`、`ElaRatingControl`、`ElaInfoBadge`、`ElaChip`、`ElaDropDownButton`、`ElaSplitButton`、`ElaPasswordEdit`、`ElaConfirmDialog`、`ElaMarkdownViewer`、`ElaUploadArea`、`ElaSplashScreen` | [ElaWidgetTools（RainbowCandyX fork）](https://github.com/RainbowCandyX/ElaWidgetTools) C++ 源码移植 |
 | `ElaDrawer` | PyQt-SiliconUI `SiLayerDrawer` 设计（内容槽走 `ElaWidgetOwnershipType` 三态） |
 | `ElaDrawerArea` | 上游 `ElaDrawerArea` 子类化修复（点击标题栏展开 / 收起） |

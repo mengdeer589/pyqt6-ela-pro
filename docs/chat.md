@@ -1,13 +1,13 @@
 # AI 对话（chat）
 
-> 组件位于 `pyside6_ela_pro/chat/`；应用内接入指南（含 `llm_test` 全文快照）见
+> 组件位于 `pyqt6_ela_pro/chat/`；应用内接入指南（含 `llm_test` 全文快照）见
 > `example/chat_guide_page.py`。
 >
 > 交互对齐 opencode 会话 UI，实现件优先复用 Ela 原生组件
 > （`ElaFlowLayout` / `ElaIconButton` / `ElaDropDownButton` / `ElaMenu` /
 > `ElaListView` / `ElaScrollPageArea` / `ElaProgressRing` / `ElaToggleButton`）。
 
-- **ElaChatWidget** — ChatGPT 风格聊天组件（自研，`pyside6_ela_pro.chat`）：
+- **ElaChatWidget** — ChatGPT 风格聊天组件（自研，`pyqt6_ela_pro.chat`）：
   可选头部（标题 / 清空）+ 消息列表 + 分层输入区 + 排队 dock + 输入区
   dock + 审批 dock（`chatView()` / `chatInput()` / `toolBar()` /
   `queueDock()` / `inputDock()` / `permissionDock()` 取各部件句柄）；
@@ -186,8 +186,10 @@
   `ContextToolGroupCard` 自动归并 read/glob/grep/list 并显示计数）、
   步骤用量（`setStepStats` 追加 `StatsBadge`）、附件条
   （`AttachmentStrip`）、底部（`MessageMeta` 整轮耗时 +
-  `MessageActions` 悬停淡入的复制 / 撤回 / 重新生成，占位不变、
-  消息区不跳动，按钮带 ElaToolTip 提示；复制落定弹 `ElaMessageBar`
+  `MessageActions` 悬停显现的复制 / 撤回 / 重新生成，占位用
+  `RetainSizeWhenHidden` 保留、消息区不跳动，按钮带 ElaToolTip 提示；
+  未悬停时 `actions().isVisibleTo(...)` 为 False 属预期，判断可用性看
+  `actions()` 是否存在 + `isEnabled()`；复制落定弹 `ElaMessageBar`
   确认，默认开、`setCopyNotificationEnabled` 可关）；助手流式
   `beginStream` / `appendText` / `endStream`（`streamFinished` 信号），
   `parts()` 返回当前分段快照；免责提示可单条改
@@ -249,7 +251,7 @@
 - **持久化 / 会话 bundle** — 消息 / 分段 / 工具 / 用量 / 附件成对
   `toDict()` / `fromDict()`（纯 JSON、容错、带 `SCHEMA_VERSION`）；JSON 文本
   统一走 `jsonDumps` / `jsonLoads` / `jsonBackend`：**装了 `orjson` 自动用
-  orjson**（`pip install pyside6-ela-pro[all]`），否则标准库 json，两套后端
+  orjson**（`pip install pyqt6-ela-pro[all]`），否则标准库 json，两套后端
   同为紧凑 UTF-8、`allow_nan=False` 语义一致；读回
   `view.addMessageFromDict()`（保留 id）或 `view.restoreMessages(items,
   preserveIds=True)`（批量渐进渲染：先渲染最新的一屏，更早的消息在滚动到顶部时
@@ -283,7 +285,7 @@
 **接入真实 AI 后端（推荐：交给 ElaChatStreamBinder）**：
 
 ```python
-from pyside6_ela_pro.chat import ElaChatStatusType, ElaChatStreamBinder
+from pyqt6_ela_pro.chat import ElaChatStatusType, ElaChatStreamBinder
 
 binder = ElaChatStreamBinder(chat, worker=worker)     # 自动接机械信号
 binder.shutdownOnClose(window)                        # 关窗自动收尾后端
@@ -345,4 +347,4 @@ chat.sendNextQueued()                         # 或手动触发
 
 ---
 
-**延伸阅读**：应用内 API 指南见 `pyside6_ela_pro/example/chat_guide_page.py`；可运行示例是 `example/` 下的聊天五页（总览 / 输入区能力 / Agent 能力 / 会话管理 / 持久化与性能）；最小接入示例在仓库 `llm_test/`（不入库）。
+**延伸阅读**：应用内 API 指南见 `pyqt6_ela_pro/example/chat_guide_page.py`；可运行示例是 `example/` 下的聊天五页（总览 / 输入区能力 / Agent 能力 / 会话管理 / 持久化与性能）；最小接入示例在仓库 `llm_test/`（不入库）。

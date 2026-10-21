@@ -55,7 +55,7 @@ ECharts 事件名经 `on(eventName, handler)` / `off(eventName=None, handler=Non
 **扩展（自定义系列 / 组件）**
 
 ```python
-from pyside6_ela_pro.charts import (
+from pyqt6_ela_pro.charts import (
     SeriesRenderer, registerSeries, chartToken,
 )
 

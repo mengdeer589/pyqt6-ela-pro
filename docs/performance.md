@@ -1,5 +1,9 @@
 # 性能：成本模型与宿主配方
 
+> 当前维护线：**PyQt6 6.8.1 + Qt 6.8.2（Win7 交付线为自编译 Qt 6.8.4）**。
+> 下文的 PySide6 / PyQt5 数据是迁移期对照，保留作历史参考；当前栈的组件成本与
+> 聊天 / Markdown 滚动基线见 `tools/perf/` 与本文「聊天组件自测」。
+>
 > 面向**使用本库的宿主应用**。数字来自 2026-10-13 实测：Win11 主机（CPU 同档）+ Win7 虚拟机，
 > 运行时 = `PySide6 6.8.3` + 自编译 Qt 6.8.4（Win7 套件）；对照组 `PyQt5 5.15.2` / `PyQt6 6.8.1 + Qt 6.8.2` / `PyQt6 6.11`。
 > 背景与逐项归因见 `docs/pyside6-migration.md` 第九节；本页只讲**宿主该怎么做**。
@@ -17,6 +21,8 @@
 
 ## 成本模型（同机实测，ms/次）
 
+> 下表保留迁移期对照：**当前维护线只看 PyQt6 列**，PyQt5 / PySide6 两列用于理解历史差异。
+
 | 操作 | PyQt5<br>sip+Qt5.15 | PyQt6<br>sip+Qt6.8 | PySide6<br>shiboken+Qt6.8 | 结论 |
 |---|---|---|---|---|
 | `QWidget()` | 0.0008 | 0.0012 | **0.0066** | **绑定 5.5×**；Qt6 内核只 1.5× |
@@ -31,7 +37,7 @@
 
 1. **主要是「每个对象/每次跨边界调用」的固定成本**，不是算法慢。一个 2900 控件的界面 ≈ 十几万次跨边界调用 → 累计数百毫秒；控件少的窗口几乎无感。
 2. **绑定税在慢机上被放大**：同一支探针在 Win7 VM 上是 `QWidget()` **10.5µs vs 0.7µs（15×）**。所以「老机器更卡」是预期行为。
-3. **Qt 版本有关**：Qt 6.11 已把 `QWidget()` 造回来（≈1.0µs，接近 Qt5），字体度量也降了 —— 升级 PySide6 是同一个绑定下最便宜的提速手段（Win7 线需要重新打补丁）。
+3. **Qt 版本有关**：Qt 6.11 已把 `QWidget()` 造回来（≈1.0µs，接近 Qt5），字体度量也降了 —— 升级 PyQt6 / Qt 是当前线最便宜的提速手段（Win7 线需用自编译 Qt 重新打补丁）。
 
 ## 宿主配方
 
@@ -43,8 +49,8 @@
 的话自己在启动阶段加这三步：
 
 ```python
-from PySide6.QtGui import QFont, QColor
-from PySide6ElaWidgetTools import ElaIcon, ElaIconType
+from PyQt6.QtGui import QFont, QColor
+from PyQt6ElaWidgetTools import ElaIcon, ElaIconType
 QFont().defaultFamily()        # Qt6 首次 ~190ms；之后再调是 0.0x ms
 ElaIcon.getInstance().getElaIcon(ElaIconType.IconName.Copy, QColor(0, 0, 0))
 from pygments.lexers import get_lexer_by_name
@@ -96,7 +102,7 @@ timer = QTimer(window); timer.setSingleShot(True); timer.timeout.connect(warm_ne
 timer.start(250)
 ```
 
-本库示例（`pyside6_ela_pro/example/…`）就是这么做的：启动 1943ms → **510ms**，24 页在
+本库示例（`pyqt6_ela_pro/example/…`）就是这么做的：启动 1943ms → **510ms**，24 页在
 后台约 1s 内全部预热完。
 
 ### ③ `show()` 之前构建「会挂原生子窗口」的组件
@@ -127,7 +133,7 @@ window.show()
 8.6ms；慢机按 2–5× 放大）。**库已提供公开工具**，宿主挂一次即可：
 
 ```python
-from pyside6_ela_pro import setResizeReflowDeferred
+from pyqt6_ela_pro import setResizeReflowDeferred
 
 class MyPage(QWidget):
     def __init__(self, parent=None):
@@ -145,7 +151,7 @@ class MyPage(QWidget):
 静止 120ms 后恢复 min/max 并让父布局 invalidate + activate 一次。
 
 本库的 chat 组件已有同类开关（`ElaChatView.setResizeReflowDeferred`）。示例里的实现见
-`pyside6_ela_pro/example/base_page.py`（实测单帧 8.6ms → **0.0ms**）。
+`pyqt6_ela_pro/example/base_page.py`（实测单帧 8.6ms → **0.0ms**）。
 
 ### 聊天历史：延迟分段物化
 
@@ -241,11 +247,11 @@ resize（冻结 / 放开）、滚动、深浅主题。开发机（Win11，PyQt6 
 
 ## 自测
 
-最小探针（粘到你的项目里跑）——「同一个操作，PyQt5 与 PySide6 各跑一遍」：
+最小探针（粘到你的项目里跑）—— 当前线用 PyQt6；与 PyQt5 / PySide6 对照时各自替换导入：
 
 ```python
 import time
-from PySide6.QtWidgets import QApplication, QWidget      # PyQt5 侧改成 PyQt5.*
+from PyQt6.QtWidgets import QApplication, QWidget      # 对照侧换成 PyQt5.* / PySide6.*
 app = QApplication([])
 def bench(label, fn, n=5000):
     fn(); t = time.perf_counter()
@@ -254,14 +260,14 @@ def bench(label, fn, n=5000):
 bench("QWidget()", lambda: QWidget())
 ```
 
-判读：`QWidget()` 在 PyQt5 上 ≈0.001ms、PySide6 ≈0.007ms 属正常（绑定差异）；若你的
+判读：`QWidget()` 在 PyQt6 上约 **0.0012ms**（PyQt5 同量级；迁移期 PySide6 约 0.007ms 属 shiboken 包装差异）；若你的
 某项比这还大一两个数量级，那才是代码问题，不是绑定。
 
 更完整的对照工具：
 
 - **随库分发**（`tools/perf/`）：
-  `bench_micro.py`（底层原语：对象创建 / 虚调用 / 参数转换，PyQt5/PyQt6/PySide6 都能跑）、
-  `bench_components.py`（本库组件的构造成本表）；
+  `bench_micro.py`（底层原语：对象创建 / 虚调用 / 参数转换，PyQt5/PyQt6/PySide6 都能跑，历史对照用）、
+  `bench_components.py`（本库组件的构造成本表）、`bench_chat.py` / `bench_markdown_paint.py`（聊天与 Markdown 滚动基线）；
 - 本仓库开发时用的宿主级 harness（仓库外）：`bench_example.py` / `bench_lazy.py`（启动与
   首访）、`bench_anim.py`（侧边栏动画帧间隔）、`bench_theme_icons.py`（主题切换 + 图标
   视图）、`probe_win7_kernel.py`（目标机开关探针）、`watch_windows.py`（窗口出现 / 消失

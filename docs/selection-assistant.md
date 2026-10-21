@@ -73,9 +73,9 @@
   弹窗出现后按键仍发给源应用
 
 ```python
-from PySide6.QtWidgets import QApplication
-from PySide6ElaWidgetTools import ElaIconType
-from pyside6_ela_pro import ElaMenuItem, ElaSelectionAssistant
+from PyQt6.QtWidgets import QApplication
+from PyQt6ElaWidgetTools import ElaIconType
+from pyqt6_ela_pro import ElaMenuItem, ElaSelectionAssistant
 
 assistant = ElaSelectionAssistant(parent)
 assistant.setActions([                              # 菜单项由宿主定义
@@ -107,7 +107,7 @@ assistant.setEnabled(True)
 要跑模型的动作接结果对话框（`copy` / `search` 这类不走对话框）：
 
 ```python
-from pyside6_ela_pro import ElaSelectionResultDialog
+from pyqt6_ela_pro import ElaSelectionResultDialog
 
 dialog = ElaSelectionResultDialog()
 dialog.stopRequested.connect(backend.abort)             # ★ 必须接：关窗即中止
