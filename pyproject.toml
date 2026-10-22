@@ -56,6 +56,7 @@ parquet = [
 ]
 dev = [
     "pytest>=7.0.0",
+    "pytest-xdist>=3.6.1",
 ]
 
 [project.urls]
@@ -109,6 +110,10 @@ pyqt6-elawidgettools = { path = "PyElaWidgetTools/wheels/pyqt6-win7/pyqt6_elawid
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+# 默认并发（每个 worker 独立进程 / 独立 QApplication）；--dist loadfile
+# 让同一测试文件落在一个 worker，保留模块级顺序与共享状态。
+# 需要串行复现时用 `uv run pytest -n 0 ...`；想跑满核用 `-n auto`。
+addopts = "-n 4 --dist loadfile"
 # 让测试目录本身可导入，`from _qthelpers import wait_until` 才能在各子目录的
 # 测试文件里生效（tests/ 下没有 __init__.py，否则靠 conftest 的副作用隐式生效）。
 pythonpath = ["tests"]
@@ -120,4 +125,5 @@ dev = [
     "pygments>=2.15",
     "tsdownsample>=0.1.5.1",
     "orjson>=3.9",
+    "pytest-xdist>=3.6.1",
 ]

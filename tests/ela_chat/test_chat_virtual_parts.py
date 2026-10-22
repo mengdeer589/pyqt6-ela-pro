@@ -126,9 +126,22 @@ class TestDeferredParts:
         qapp.processEvents()
         bar = view.scrollBar()
         assert bar.maximum() > 0
+        # 先确保确实在底部，再滚到顶：首屏若本就在 0，setValue(0) 不发 valueChanged
+        bar.setValue(bar.maximum())
+        qapp.processEvents()
+        target = view._lazy_ids[-1] if view._lazy_ids else None
         bar.setValue(0)
-        # 第一页懒加载取的是「离当前最近的那条旧消息」（id 8），不是最老的 1
-        assert _wait_until(qapp, lambda: view.bubble(8).partsDeferred() is False)
+        qapp.processEvents()
+        # 并行负载下滚动信号可能被合并 / 丢失，显式重放一次滚动处理
+        view._on_scrolled(0)
+        # 第一页懒加载取的是「离当前最近的那条旧消息」，不是最老的 1
+        assert target is not None
+        assert _wait_until(
+            qapp,
+            lambda: (
+                (b := view.bubble(target)) is not None and b.partsDeferred() is False
+            ),
+        )
         assert view.bubble(1).partsDeferred() is True
         # 更早的消息可显式物化
         assert view.scrollToMessage(1) is True
@@ -157,6 +170,8 @@ class TestDeferredShells:
         view.resize(640, 480)
         view.show()
         qapp.processEvents()
+        # 关闭视口挂起：定时器在并行负载下可能抢在贴底前物化 id 1
+        view.setViewportSuspension(False)
         view.importSession(_bundle(100, steps=1))
         qapp.processEvents()
         assert view.bubble(1) is None

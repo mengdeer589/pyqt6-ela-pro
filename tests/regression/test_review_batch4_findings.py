@@ -45,7 +45,9 @@ class _Sig(QObject):
 
 # ------------------------------------------------------------------ 1 & 2
 class TestNonNumericInputs:
-    @pytest.mark.parametrize("bad", ["1.2s", "abc", None, object()])
+    @pytest.mark.parametrize(
+        "bad", ["1.2s", "abc", None, object()], ids=["suffix", "text", "none", "object"]
+    )
     def test_reasoning_end_tolerates_non_numeric_duration(self, qapp, bad):
 
         block = ReasoningBlock()

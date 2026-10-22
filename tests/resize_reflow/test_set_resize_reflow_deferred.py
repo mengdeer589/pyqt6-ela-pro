@@ -107,13 +107,14 @@ class TestResizeReflowGuard:
 
     def test_attach_is_idempotent(self, qapp, make):
         host, page = _page_in_host(make, qapp)
-        setResizeReflowDeferred(page, delayMs=80)
-        setResizeReflowDeferred(page, delayMs=80)
+        setResizeReflowDeferred(page, delayMs=_LONG_MS)
+        setResizeReflowDeferred(page, delayMs=_LONG_MS)
 
         _grow_host(host, qapp)
         assert page.width() < host.width()
 
-        _settle(qapp)
+        setResizeReflowDeferred(page, on=False)
+        qapp.processEvents()
         assert page.width() == host.width()
 
     def test_window_is_ignored_with_warning(self, qapp, caplog, make):

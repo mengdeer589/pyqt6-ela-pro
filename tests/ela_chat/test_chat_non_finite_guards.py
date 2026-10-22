@@ -59,7 +59,9 @@ class TestIntCoercion:
         assert _as_int(True, 5) == 5
         assert journal_int(False, 5) == 5
 
-    @pytest.mark.parametrize("value", [None, object(), [], {}], ids=repr)
+    @pytest.mark.parametrize(
+        "value", [None, object(), [], {}], ids=["none", "object", "list", "dict"]
+    )
     def test_junk_returns_default(self, value):
         assert _as_int(value, 3) == 3
         assert journal_int(value, 3) == 3
