@@ -534,12 +534,26 @@ class TestWheelZoomDefault:
         event = self._wheel(chart, QPointF(4, 4))
         assert not event.isAccepted()
 
-    def test_drag_pans_by_default(self, qapp, make):
-        """按住拖动 = 平移（ECharts ``inside`` 的 ``moveOnMouseMove`` 默认值）。"""
+    def test_drag_zooms_by_default(self, qapp, make):
+        """按住拖动 = 左键框选缩放（Plotly ``dragmode: 'zoom'`` 默认值）。"""
 
         chart = _chart(make)
         comp = chart._component("dataZoom")
-        # 全量窗口（0~100）平移是 No-op：先缩到 20~80 才有可平移的余地
+        plot = chart.primaryCoord().plot
+        before = (comp.start, comp.end)
+        _drag(
+            chart,
+            qapp,
+            QPointF(plot.left() + 30, plot.center().y()),
+            QPointF(plot.left() + 220, plot.center().y()),
+        )
+        assert (comp.start, comp.end) != before, "默认拖拽应框选缩放"
+        assert comp.end - comp.start < 100.0
+
+    def test_pan_drag_mode_restores_panning(self, qapp, make):
+        chart = _chart(make)
+        chart.setDragMode("pan")
+        comp = chart._component("dataZoom")
         chart.dispatchAction({"type": "dataZoom", "start": 20, "end": 80})
         plot = chart.primaryCoord().plot
         before = (comp.start, comp.end)
@@ -549,7 +563,7 @@ class TestWheelZoomDefault:
             QPointF(plot.left() + 30, plot.center().y()),
             QPointF(plot.left() + 220, plot.center().y()),
         )
-        assert (comp.start, comp.end) != before, "默认就该能拖拽平移"
+        assert (comp.start, comp.end) != before, "pan 模式应能拖拽平移"
 
     def test_brush_modes_disable_pan(self, qapp, make):
         """框选 / 套索模式：拖拽交给刷选，不再平移。"""

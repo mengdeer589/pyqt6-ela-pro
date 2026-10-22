@@ -76,6 +76,15 @@ class TestColorTextSizeCache:
         label.minimumSizeHint()
         assert label.computes == [("s", -1), ("m", -1)]
 
+    def test_non_wrapped_minimum_hint_reuses_size_hint(self, make):
+        """非换行标签的 minimumSizeHint 与 sizeHint 同值，不应再算一遍。"""
+        label = make(_CountingText)
+        label.setTextFormat(Qt.TextFormat.PlainText)
+        label.setWordWrap(False)
+        label.setText(TEXT)
+        assert label.minimumSizeHint() == QLabel.minimumSizeHint(label)
+        assert label.computes == [("s", -1)]
+
     def test_cache_is_bounded(self, make):
         label = make(ColorText)
         _prepare(label)

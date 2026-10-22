@@ -262,4 +262,5 @@ class TestToolCallHeaderElide:
         assert len(card._subtitle_label.text()) < 100
         lengths = [key[1] for key in card._elide_cache if key[1] > 0]
         assert lengths
-        assert max(lengths) <= 160
+        # 按目标像素宽度截源：480px 卡片只需几十字符，远小于旧的 160 上限。
+        assert max(lengths) <= 96

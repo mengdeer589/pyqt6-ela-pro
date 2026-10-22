@@ -161,6 +161,106 @@ class ChartsPage(ExamplePage):
         self._demoInteractComponents(main_layout)
         main_layout.addSpacing(24)
         self._demoPlotlyInteractions(main_layout)
+        main_layout.addSpacing(24)
+        self._demoMultiAxisAndLog(main_layout)
+
+    def _demoMultiAxisAndLog(self, parent_layout):
+        parent_layout.addLayout(
+            self._createHeaderRow(
+                "10. 多轴 / log 轴 / 标注标签双击编辑",
+                self._demoMultiAxisAndLog,
+            )
+        )
+        self._addInfoText(
+            "xAxis / yAxis 可传数组：索引 0 默认在左/下，索引 >=1 默认在右/上，"
+            "series 用 xAxisIndex / yAxisIndex 选轴；type: 'log' 支持对数轴；"
+            "series.label.show 显示数据点标签，双击数据点标签（以及 markPoint / "
+            "markLine 标签）即可编辑，Enter 提交、Esc 取消，提交后发 annotationEdited 信号",
+            parent_layout,
+        )
+        chart = ElaChartWidget(self)
+        chart.setMinimumHeight(380)
+        chart.setOption(
+            {
+                "title": {"text": "双 Y / 顶部 X / 右侧 log 轴", "left": "left"},
+                "legend": {"top": "top"},
+                "tooltip": {"trigger": "axis"},
+                "xAxis": [
+                    {
+                        "type": "category",
+                        "data": [f"{i + 1}月" for i in range(12)],
+                        "name": "月份",
+                    },
+                    {
+                        "type": "category",
+                        "data": [
+                            f"Q{i // 3 + 1}" if i % 3 == 0 else "" for i in range(12)
+                        ],
+                        "position": "top",
+                        "name": "季度",
+                    },
+                ],
+                "yAxis": [
+                    {"type": "value", "name": "销量"},
+                    {"type": "log", "position": "right", "name": "访问量"},
+                ],
+                "series": [
+                    {
+                        "type": "line",
+                        "name": "销量",
+                        "data": [
+                            120,
+                            132,
+                            101,
+                            134,
+                            90,
+                            230,
+                            210,
+                            180,
+                            240,
+                            260,
+                            300,
+                            280,
+                        ],
+                        "smooth": True,
+                        "label": {"show": True},
+                        "markPoint": {"data": [{"type": "max", "name": "峰值"}]},
+                    },
+                    {
+                        "type": "line",
+                        "name": "访问量",
+                        "yAxisIndex": 1,
+                        "data": [
+                            1200,
+                            2200,
+                            1800,
+                            9000,
+                            12000,
+                            30000,
+                            26000,
+                            15000,
+                            42000,
+                            58000,
+                            76000,
+                            91000,
+                        ],
+                        "markLine": {"data": [{"type": "average", "name": "均值"}]},
+                    },
+                ],
+            }
+        )
+        parent_layout.addWidget(chart)
+        status = ElaText(
+            "标签编辑：双击销量数据点标签、图中的「峰值」或「均值」标签", self
+        )
+        status.setTextPixelSize(13)
+        chart.annotationEdited.connect(
+            lambda info: status.setText(
+                f"annotationEdited：{info.get('componentType')} "
+                f"#{info.get('dataIndex')} → {info.get('text')}"
+            )
+        )
+        parent_layout.addWidget(status)
 
     # ── 图表容器 ────────────────────────────────────────────────────────
 
@@ -1732,7 +1832,7 @@ class ChartsPage(ExamplePage):
             )
         )
         self._addInfoText(
-            "曲线 / 柱状等直角坐标图默认支持滚轮缩放与按住拖动平移（无 dataZoom 选项时自动内置）；"
+            "曲线 / 柱状等直角坐标图默认支持滚轮缩放与左键框选缩放（无 dataZoom 选项时自动内置）；"
             "拖拽模式可切换（平移 / 框选缩放 / 框选 / 套索），框选缩放的框松手即消失、"
             "框选则保留；双击复位视图，zoomStep 步进缩放；tooltip.order 让联合提示按值排序、"
             "hitRadius 控制命中距离；hoveranywhere 与 clickanywhere 让空区也出提示并发出 "
@@ -1797,7 +1897,7 @@ class ChartsPage(ExamplePage):
             }
         )
         parent_layout.addWidget(chart)
-        chart.setDragMode("pan")  # 初始：拖拽平移 + 滚轮缩放
+        chart.setDragMode("zoom")  # 初始：左键框选缩放 + 滚轮缩放
 
         status = ElaText("事件：—（拖拽 / 双击 / 图例悬停 / 刷选 / 空区点击）", self)
         status.setTextPixelSize(13)

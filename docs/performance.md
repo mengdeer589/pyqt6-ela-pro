@@ -244,6 +244,12 @@ resize（冻结 / 放开）、滚动、深浅主题。开发机（Win11，PyQt6 
   **第三个触发方向**：主字体是 CJK、但文本含它 cmap 里没有的符号（LLM 输出常带 ↔ / ⇒ / □ / √）同样走逐字形回退并毒化（bug #20）。所以库自产进 `QTextDocument` 的标记只用雅黑 cmap 内的字形：任务勾选 `□`/`■`（U+25A1/U+25A0）、折叠 `+`/`−`（U+002B/U+2212）；不要换回 `☐`/`☑`、`▸`/`▾`（均不在雅黑 cmap）。**查看器默认对缺字字符套单族符号字体**（`_internal.applyMissingGlyphFonts`：Segoe UI Symbol / Cambria Math，只改字体族、不改文本；`ElaMarkdownViewer.setMissingGlyphFallbackEnabled(False)` 可关；`ElaTerminalView` 也已默认接入，同样可关）。终端等其它 `QTextDocument` 组件可复用该工具。
   本库已把可控触发点全部收口：**中文系统**下终端默认字体、查看器代码字符格式 / 默认代码字体、图表文本（`chartFont`）与聊天等宽 / 标题标签均为**单族** `Microsoft YaHei`（其它系统保持原状）；宿主仍可用
   `ElaTerminalView.setFontFamilies()` / `ElaMarkdownViewer.setCodeFontFamily()` 覆盖 —— 要避免逐字形回退请给**单个** CJK 字体，**多族列表（等宽 + CJK 后备）同样慢**（公式渲染是唯一保留多族的例外：数学字形与 CJK 覆盖二选一）。
+  **Win7 上若仍复现 #15**：`crystalidea/qt6windows7#63` 指出 6.8.4 的 DirectWrite 路径在 Win7 上异常；可把 Qt 切到 GDI 字体引擎绕过（必须在 `QApplication` 之前）：
+  ```powershell
+  $env:QT_QPA_PLATFORM='windows:nodirectwrite'
+  # 或 QApplication 参数：-platform windows:nodirectwrite
+  ```
+  A/B 探针 `tools/perf/bench_font_engine.py` 在同一台机器跑默认 / `nodirectwrite`，比较 `ascii_after / ascii_before`（正常 ≈1，10~40× 即命中）。Win10 本机对照：default 5.1/5.2 ms、GDI 3.9/3.8 ms，均无毒性；**Win7 需实机验证**。GDI 会改变整进程字体渲染（ClearType / 彩色字体），属宿主级开关，不进库默认。
 
 ## 自测
 

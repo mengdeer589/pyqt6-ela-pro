@@ -39,7 +39,7 @@
 ```text
 pyqt6_ela_pro/             组件库源码（chat/ charts/ blueprint/ selection_assistant/ 为子系统）
 pyqt6_ela_pro/example/     两级侧边栏示例应用（python -m pyqt6_ela_pro.example）
-docs/                      README 的深入文档（chat / charts / markdown / 划词助手）
+docs/                      README 的深入文档（chat / charts / markdown / WebEngine / 划词助手）
 tests/                     回归测试（按组件目录组织）
 ```
 
@@ -58,13 +58,13 @@ tests/                     回归测试（按组件目录组织）
   `tools/perf/bench_markdown_paint.py`（原生浏览器 vs 查看器的滚动绘制分项，Win7 排查字体慢路径）。
   详见 [docs/chat.md](docs/chat.md) 与 [docs/performance.md](docs/performance.md)。
 - **图表引擎**：`ElaChartWidget` 对齐 ECharts 的 `setOption`（21 种系列、tooltip / dataZoom /
-  日历热力 / 下钻），百万点级数据有系列层位图缓存与降采样 —— 折线 / 散点 100 万点稳态帧
+  日历热力 / 下钻），**多轴**（双 Y / 顶部 X / 双 X）、**log 轴**、**数据点标签 /
+  `markPoint` / `markLine` 标签双击编辑**；百万点级数据有系列层位图缓存与降采样 —— 折线 / 散点 100 万点稳态帧
   ~9ms、悬停 <1ms、进入新窗口 ~12ms；显式时间戳数据的**记录中断自动断开**（`addGaps`，
   `connectNulls` 可关）；`tools/perf/bench_charts.py`（含 `zoom新窗口` / `缩回全景` 两列）
-  可复跑；**直角坐标图默认
-  滚轮缩放**；交互对齐 Plotly：双击复位、`setDragMode`（平移 / 框选缩放 / 框选 / **套索**）、
-  可配命中半径、空区坐标事件、图例悬停高亮、联合提示排序、`connectNulls`、**SVG 导出**；
-  工具条是真实 `ElaIconButton`。详见 [docs/charts.md](docs/charts.md)。
+  可复跑；**直角坐标图默认滚轮缩放 + 左键框选缩放**；交互对齐 Plotly：双击复位、`setDragMode`
+  （平移 / 框选缩放 / 框选 / **套索**）、可配命中半径、空区坐标事件、图例悬停高亮、联合提示排序、
+  `connectNulls`、**SVG 导出**；工具条是真实 `ElaIconButton`。详见 [docs/charts.md](docs/charts.md)。
 - **内容渲染**：`ElaMarkdownViewer`（Typora 结构排版、4 套配色主题、GFM / Alert / 脚注 /
   公式 / Mermaid / 流式追加）与 `ElaTerminalView`（ANSI 颜色、跨分片转义、只读）。
   详见 [docs/markdown.md](docs/markdown.md)。
@@ -144,6 +144,7 @@ sys.exit(app.exec())
 | `set_tooltip(widget, text, position, theme)` | 设置自定义工具提示 |
 | `remove_tooltip(widget)` | 移除自定义工具提示 |
 | `setResizeReflowDeferred(widget, on, delayMs)` | 连续 resize（侧栏动画 / 拖窗）期间钉住页面、停手后统一重排（实测单帧 8.6ms → 0.0ms） |
+| `prepareWebEngine()` | 在创建 `QApplication` 之前打开 QtWebEngine 需要的共享 GL 上下文；返回 `False` 表示调用太晚（app 已存在） |
 | `svg_to_icon(svg_data, size, color)` | SVG **字符串**转 QIcon（首参是 SVG 源码，不是文件路径）；`color` 替换图里的 `<<<COLOR_CODE>>>` 占位符 |
 | `svg_to_pixmap(svg_data, size, color)` | 同上转 QPixmap（每次返回新对象） |
 | `svg_to_image(svg_data, size, color)` | 同上转 QImage（值类型，**可跨线程用** —— 前两个的最后一步要 GUI 线程） |
@@ -349,6 +350,8 @@ python -m pyqt6_ela_pro.example
 | [docs/charts.md](docs/charts.md) | `ElaChartWidget`：`setOption` / 控制 / 事件 / 自定义系列扩展 |
 | [docs/markdown.md](docs/markdown.md) | `ElaMarkdownViewer` 渲染能力清单（排版 / 公式 / Mermaid / 导出） |
 | [docs/selection-assistant.md](docs/selection-assistant.md) | 划词助手与结果对话框（含取词安全闸门与剪贴板恢复策略） |
+| [docs/webengine.md](docs/webengine.md) | QtWebEngine 接入：`QApplication` argv 与共享 GL 上下文的硬约束 |
+| [docs/crash-diagnostics.md](docs/crash-diagnostics.md) | 原生崩溃取证：Event 1000 / WER / ProcDump / WinDbg / faulthandler |
 | [docs/pyside6-migration.md](docs/pyside6-migration.md) | 迁移史（PyQt5 → PySide6 → **当前 PyQt6 维护线**）：致命坑、API 差异速查、测试与环境（轮子 / uv）踩坑 |
 | [docs/performance.md](docs/performance.md) | 性能：成本模型（shiboken / Qt6 内核 / 重绘量）+ 宿主配方 + 组件构造成本表 + 聊天 / Markdown 滚动基线脚本 |
 | `pyqt6_ela_pro/example/chat_guide_page.py` | 应用内聊天接入指南 + API 速查表 |

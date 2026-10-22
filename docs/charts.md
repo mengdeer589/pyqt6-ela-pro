@@ -24,6 +24,9 @@
 | `resize(opts=None)` / `resize(w, h)` | 重排；dict 形式 `{"width":…, "height":…}`，也兼容 QWidget 两参数 |
 | `dispatchAction(payload)` | `legendToggleSelect` / `legendSelect` / `legendUnSelect` / `legendAllSelect` / `legendInverseSelect` / `dataZoom`（`start/end` 或 `startValue/endValue`）/ `restore` / `showTip` / `hideTip` / `highlight` / `downplay` / `timelineChange` / `timelinePlayChange`；返回是否识别 |
 | `setInteractive(bool)` / `interactiveEnabled()` | 交互总开关（静态化整图）。**打开 = 全开**：置 `True` 会清空逐项开关的覆盖（之前 `setInteractionEnabled` 关掉的项一并复位）；关闭期间逐项覆盖保留 |
+| `setAnnotationEditingEnabled(bool)` / `annotationEditingEnabled()` | 标注标签双击行内编辑开关（默认开）；关闭后只发 `annotationEditRequested`，宿主自行弹框并可调 `setAnnotationText` 提交 |
+| `setAnnotationText(seriesName, componentType, dataIndex, text)` | 修改 `markPoint` / `markLine` 的 `data[i].name`，重建并发出 `annotationEdited`；`seriesName` 为空时取第一个匹配组件 |
+| `setSeriesLabelText(seriesName, dataIndex, text)` | 修改某个数据点的标签文本（写入 `series.labelTexts[str(index)]`），空字符串 = 恢复默认数值文案；默认只失效系列层位图并重绘，发出 `annotationEdited`（`componentType="seriesLabel"`） |
 | `setInteractionEnabled(feature, bool)` / `isInteractionEnabled(feature)` | 逐项开关：`tooltip` / `legend` / `dataZoom` / `brush` / `timeline` / `toolbox` |
 | `showLoading(type="default", opts=None)` / `hideLoading()` / `isLoading` | 加载遮罩（`text` / `color` / `textColor` / `maskColor` / `fontSize` / `showSpinner` / `spinnerRadius` / `lineWidth`） |
 | `appendData({"seriesIndex"|"seriesName"|"seriesId", "data": …})` | 追加数据点（保留过渡动画） |
@@ -46,6 +49,8 @@ ECharts 事件名经 `on(eventName, handler)` / `off(eventName=None, handler=Non
 | `brushselected` | `{batch, selected}` | 刷选变化 |
 | `restore` / `highlight` / `downplay` | 对应 params | 动作触发 |
 | `finished` | `{}` | 动画播放完毕 |
+| `annotationEditRequested`（Qt 信号） | `{seriesName, componentType, dataIndex, text}` | 双击 `markPoint` / `markLine` 标签 |
+| `annotationEdited`（Qt 信号） | `{seriesName, componentType, dataIndex, text}` | 标签编辑提交 |
 
 同时保留 Qt 信号（宿主可直接 connect）：`legendToggled(str, bool)` /
 `dataZoomChanged(float, float)` / `timelineChanged(int)` / `itemClicked(dict)` /
@@ -81,15 +86,20 @@ registerSeries("myType", MySeries)   # 同名覆盖会告警
   逐级优先。
 - **通用键**：`itemStyle`（`color` / `opacity` / `borderColor` / `borderWidth` /
   `borderRadius`）、直角系列 `label`（`show` / `formatter` 模板或回调 /
-  `fontSize` / `color` / `position`）、`line.stack` + `areaStyle.color`（渐变
+  `fontSize` / `color` / `position`；`show: true` 的数据点标签可双击编辑，
+  编辑结果存 `series.labelTexts[str(index)]`，`label.editable: false` 可关）、
+  `line.stack` + `areaStyle.color`（渐变
   colorStops）、`barGap` / `barCategoryGap`、`emphasis` / `blur`（命中项
   `emphasis.itemStyle.color`、未命中项 `blur.itemStyle.opacity`，缺省加亮 / 淡化）、
   `silent`（跳过命中）、`animation`（系列级关闭动画）、`id`（合并匹配键）。
-- **坐标轴键**：`boundaryGap` / `inverse` / `scale` / `nameLocation` / `nameGap` /
-  `interval` / `minInterval` / `maxInterval` / `splitNumber` /
-  `axisLabel`（`show` / `interval` / `rotate` / `formatter` / `color` / `fontSize`）/
-  `axisTick` / `axisLine` / `splitLine` / `splitArea`；`grid` 支持
-  `show` / `containLabel` / `borderColor` / `borderWidth` / `backgroundColor`。
+- **坐标轴键**：`type`（`category` / `value` / `log`）、`logBase`、`position`
+  （`bottom` / `top` / `left` / `right`）、`offset`、`boundaryGap` / `inverse` /
+  `scale` / `nameLocation` / `nameGap` / `interval` / `minInterval` /
+  `maxInterval` / `splitNumber` / `axisLabel`（`show` / `interval` / `rotate` /
+  `formatter` / `color` / `fontSize`）/ `axisTick` / `axisLine` / `splitLine` /
+  `splitArea`；`grid` 支持 `show` / `containLabel` / `borderColor` /
+  `borderWidth` / `backgroundColor`。`xAxis` / `yAxis` 可传数组，系列用
+  `xAxisIndex` / `yAxisIndex` 选轴（索引 0 默认左/下，其他默认右/上）。
 - **tooltip 键**：`formatter`（模板 / callable）/ `valueFormatter` /
   `axisPointer.type`（`line` / `shadow` / `cross` / `none`）/ `backgroundColor` /
   `borderColor` / `borderWidth` / `textStyle`；数据项可用
@@ -141,7 +151,7 @@ registerSeries("myType", MySeries)   # 同名覆盖会告警
 | `zoomStep(factor)` | 模式条 zoom in / out | `<1` 放大、`>1` 缩小，围绕窗口中心，最小 0.5% |
 | `setDragMode("pan"/"zoom"/"select"/"lasso")` | `dragmode` | `zoom` = 拖拽框选即缩放；`select` / `lasso` = 框选 / 套索选择（结果走 `brushChanged`）。**拖拽与点击共存**：即使 dataZoom / brush 占用了按下，原地松开（位移 ≤4px）仍发 `itemClicked`，真拖拽不会误发 |
 | `setDragMode("zoom")` 的选框 | `dragmode: 'zoom'` 的框选缩放 | 选框是**一次性手势**：松手缩放落地后自动消失（不留选中集）；`select` / `lasso` 则保留选框与选中集，点绘图区外收框（`brushComponent().clear()` 也可手工收） |
-| `setWheelZoomEnabled(True)`、`wheelZoomEnabled()` | `config.scrollZoom` + `dragmode: 'pan'`（Plotly 都需手动开） | **默认开**：直角坐标图**滚轮缩放 + 按住拖动平移**（自动挂一个 `inside` 组件，`zoomOnMouseWheel` / `moveOnMouseMove` 均为 True，对齐 ECharts 默认值）；`setDragMode("zoom"/"select"/"lasso")` 把拖拽让给刷选。option 里自己配了 `dataZoom` 则完全听用户的，本开关不再插手 |
+| `setWheelZoomEnabled(True)`、`wheelZoomEnabled()` | `config.scrollZoom` + `dragmode: 'zoom'` | **默认开**：直角坐标图**滚轮缩放 + 左键框选缩放**（自动挂一个 `inside` 组件；`setDragMode("pan")` 可切回按住拖动平移）；`setDragMode("zoom"/"select"/"lasso")` 把拖拽让给刷选。option 里自己配了 `dataZoom` 则完全听用户的，本开关不再插手；显式配置 `brush` 而未调 `setDragMode` 时默认 `select`（框选数据） |
 | `toolbox.buttonWidget(name)` | 模式条按钮句柄 | 工具条按钮是**真实 `ElaIconButton` 子控件**（Ela 图标字体 + 主题配色，不再是自绘小图标）；导出 PNG / SVG 时自动隐藏（导出的是图，不是 UI） |
 | `brush: {"type": "lasso"}`、`brushComponent()` | lasso select | 套索轨迹多边形命中（`QPolygonF.containsPoint`），`selected` 信号给 `[{series, dataIndex, value, x}]` |
 | `tooltip.hitRadius`（或 `hoverdistance`） | `hoverdistance` | 命中半径 px，默认 10；折线 / 散点共用 |
@@ -151,3 +161,48 @@ registerSeries("myType", MySeries)   # 同名覆盖会告警
 | `saveImage("x.svg")` / `saveImage(format="svg")` / `getDataURL({"type": "svg"})` | 模式条导出 SVG | 走 `QSvgGenerator` 的同一绘制链（矢量图元 + 位图符号内嵌） |
 | `toolbox.feature` | 模式条按钮 | `saveAsImage` / **`saveAsSvg`** / `dataZoom` / `restore` / **`zoomIn`** / **`zoomOut`** |
 | 图例悬停 | 悬停图例高亮 trace | 指针压在图例条目上时该系列正常绘制、其余降到 35% 不透明度；提示框让位 |
+
+---
+
+## 多轴 / log / 标注编辑（2026-10）
+
+### 多轴
+
+```python
+chart.setOption({
+    "xAxis": [
+        {"type": "category", "data": months},
+        {"type": "category", "data": quarters, "position": "top"},
+    ],
+    "yAxis": [
+        {"type": "value", "name": "销量"},
+        {"type": "log", "position": "right", "name": "访问量"},
+    ],
+    "series": [
+        {"type": "line", "data": sales},
+        {"type": "line", "yAxisIndex": 1, "data": visits},
+    ],
+})
+```
+
+- `xAxis` / `yAxis` 接受单个 dict 或数组；`series.xAxisIndex` / `series.yAxisIndex` 选轴。
+- 索引 0 默认左 / 下，索引 ≥1 默认右 / 上；显式 `position` 优先，同侧多轴可用 `offset` 外扩。
+- 右侧 Y / 顶部 X 的标签与轴名会自动预留边距；副轴 `splitLine` 默认关闭（显式 `splitLine.show: true` 可开）。
+- `dataZoom.xAxisIndex` 可指定要缩放的一条或多条 X 轴（缺省 = 全部）。
+- `convertToPixel` / `convertFromPixel` / `containPixel` 的 finder 支持 `{"xAxisIndex": 1}` / `{"yAxisIndex": 1}`。
+
+### log 轴
+
+- `type: "log"`，`logBase` 默认 10；X / Y 均可。
+- 只接受正值：非正值数据点跳过（线断开、柱跳过）；全非正时回退默认量级并保持可绘制。
+- 刻度按数量级生成；跨度不足两个数量级时补 1 / 2 / 5 子刻度；`<1e-4` 或 `>=1e6` 的标签用 `1e-5` / `1e6` 形式。
+- `dataZoom` 在对数空间插值（50% 窗口 = 几何中点）；柱 / 面积基线落在 `axis.vmin`（绘图区底边）。
+
+### 标注 / 数据点标签双击编辑
+
+- `markPoint` / `markLine` 的标签，以及系列 `label.show: true` 画出的**数据点标签**，双击都能进入行内编辑：Enter / 失焦提交，Esc 取消。数据点标签目前覆盖折线 / 散点 / 柱状（其它系列可后续按同一 `_label_rects` 协议接入）。
+- 数据点标签编辑结果写入 `series.labelTexts[str(dataIndex)]`（不改 `data` 形状，百万点系列仍走 numpy / LOD 快路径）；空字符串删除覆盖、恢复默认数值文案。
+- 标注提交回写 `data[i].name` 并重建，发 `annotationEdited` 信号。
+- `setAnnotationEditingEnabled(False)` 关闭内置编辑器；此时只发 `annotationEditRequested`，宿主可自行弹框并调用 `setAnnotationText(...)` / `setSeriesLabelText(...)` 提交。
+- 单个系列可用 `label.editable: false` 关闭该系列的数据点标签编辑。
+- 双击非标签区域仍是原来的 `resetView()`。

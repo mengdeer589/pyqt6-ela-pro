@@ -47,7 +47,7 @@ from ._tokens import T
 from ._utils import clamp as _clamp
 from ._utils import to_float as _to_float
 from ._utils import warn_key, warn_once
-from .axes import GridCoord, chartFont, formatValue, niceTicks
+from .axes import GridCoord, chartFont, formatValue
 from .core import parseDataPoint, registerComponent
 
 __all__ = [
@@ -57,6 +57,20 @@ __all__ = [
     "ChartTimeline",
     "ToolboxComponent",
 ]
+
+
+def _axis_index_list(raw):
+    """dataZoom ``xAxisIndex`` → 索引列表；None 表示「全部 x 轴」。"""
+    if raw is None:
+        return None
+    values = raw if isinstance(raw, (list, tuple)) else [raw]
+    out = []
+    for value in values:
+        try:
+            out.append(int(value))
+        except (TypeError, ValueError, OverflowError):
+            continue
+    return out or None
 
 
 # ---------------------------------------------------------------------------
@@ -107,11 +121,16 @@ class DataZoomComponent(QObject):
         self.has_slider = any(str(e.get("type")) == "slider" for e in self.entries)
         if not self.has_inside and not self.has_slider and self.entries:
             self.has_inside = True  # 未指明类型时按 inside 处理
-        # 完整轴数据缓存（首次布局时捕获）
-        self._full_cats = None  # category 轴完整类别
-        self._full_range = None  # value 轴 (vmin, vmax)
+        self._x_axis_indices = None
+        for entry in self.entries:
+            if entry.get("xAxisIndex") is not None:
+                self._x_axis_indices = _axis_index_list(entry.get("xAxisIndex"))
+                break
+        # 完整轴数据缓存（首次布局时捕获）：按 x 轴索引分桶
+        self._full_cats: dict = {}  # index -> category 轴完整类别
+        self._full_range: dict = {}  # index -> value/log 轴 (vmin, vmax)
         #: 上一次写进 category 轴的 (i0, i1) 窗口（apply 幂等跳过用）
-        self._applied_cats_window = None
+        self._applied_cats_window: dict = {}
         # 拖拽状态：("start"|"end"|"move"|"pan", last_x)
         self._drag = None
         self._track = QRectF()
@@ -146,11 +165,20 @@ class DataZoomComponent(QObject):
         self._drag = None
 
     # -- 轴窗口 ------------------------------------------------------------
-    def _axis(self):
+    def _axes(self):
+        """受本组件控制的 x 轴 ``[(index, AxisModel)]``（``xAxisIndex`` 缺省=全部）。"""
         coord = self.chart.primaryCoord()
-        if isinstance(coord, GridCoord):
-            return coord.x_axis
-        return None
+        if not isinstance(coord, GridCoord):
+            return []
+        axes = list(enumerate(coord.x_axes))
+        if self._x_axis_indices is None:
+            return axes
+        chosen = set(self._x_axis_indices)
+        return [(i, axis) for i, axis in axes if i in chosen]
+
+    def _axis(self):
+        axes = self._axes()
+        return axes[0][1] if axes else None
 
     def captureExtent(self) -> None:
         """重捕「全量范围」（``_rebuild`` 在 ``setSeries`` 之后调用，幂等）。
@@ -163,60 +191,57 @@ class DataZoomComponent(QObject):
         ``setOption``）同理。
 
         类别轴用 ``_all_categories``（全量类别）—— ``categories`` 此时可能已被
-        窗口替换成子集。
+        窗口替换成子集。多 x 轴时按索引分桶。
         """
-        axis = self._axis()
-        if axis is None:
-            return
-        if axis.type == "category":
-            full = list(getattr(axis, "_all_categories", None) or axis.categories or [])
-            if full:
-                self._full_cats = full
-        else:
-            self._full_range = (float(axis.vmin), float(axis.vmax))
+        self._full_cats = {}
+        self._full_range = {}
+        self._applied_cats_window = {}
+        for index, axis in self._axes():
+            if axis.type == "category":
+                full = list(
+                    getattr(axis, "_all_categories", None) or axis.categories or []
+                )
+                if full:
+                    self._full_cats[index] = full
+            else:
+                self._full_range[index] = (float(axis.vmin), float(axis.vmax))
 
-    def _capture_full(self, axis) -> None:
+    def _capture_full(self, index: int, axis) -> None:
         if axis.type == "category":
-            if self._full_cats is None:
-                self._full_cats = list(axis.categories)
+            if index not in self._full_cats:
+                self._full_cats[index] = list(axis.categories)
         else:
-            if self._full_range is None:
-                self._full_range = (float(axis.vmin), float(axis.vmax))
+            if index not in self._full_range:
+                self._full_range[index] = (float(axis.vmin), float(axis.vmax))
 
     def apply(self) -> None:
-        """按 start/end 幂等重放轴窗口（每次布局调用）。"""
-        axis = self._axis()
-        if axis is None:
-            return
-        self._capture_full(axis)
+        """按 start/end 幂等重放轴窗口（每次布局调用；多 x 轴各写一份）。"""
         start, end = self.start, self.end
-        if axis.type == "category":
-            full = self._full_cats or []
-            n = len(full)
-            if n == 0:
-                return
-            i0 = int(start / 100.0 * n)
-            i1 = int(-(-end / 100.0 * n // 1))  # ceil
-            i0 = _clamp(i0, 0, n - 1)
-            i1 = _clamp(max(i1, i0 + 1), 1, n)
-            # 幂等快速路径：窗口没变、且轴内容仍是上一次写的窗口时跳过 ——
-            # 每次布局 apply 会跑两次（applyWindow + 组件 layout），而
-            # 重建类目列表在 1M 个字符串上是 O(n) 复制（实测是 category
-            # 1M 帧的头号开销）。len 检查兜住外部改写 categories 的情况。
-            if (i0, i1) != self._applied_cats_window or len(axis.categories) != i1 - i0:
-                axis.categories = full[i0:i1]  # 切片本身就是新 list，别再包一层
-                self._applied_cats_window = (i0, i1)
-        else:
-            if self._full_range is None:
-                return
-            lo, hi = self._full_range
-            span = hi - lo
-            axis.vmin = lo + start / 100.0 * span
-            axis.vmax = lo + end / 100.0 * span
-            if axis.vmax <= axis.vmin:
-                axis.vmax = axis.vmin + max(1e-6, span * 0.01)
-            _, _, ticks = niceTicks(axis.vmin, axis.vmax)
-            axis._ticks = ticks
+        for index, axis in self._axes():
+            self._capture_full(index, axis)
+            if axis.type == "category":
+                full = self._full_cats.get(index) or []
+                n = len(full)
+                if n == 0:
+                    continue
+                i0 = int(start / 100.0 * n)
+                i1 = int(-(-end / 100.0 * n // 1))  # ceil
+                i0 = _clamp(i0, 0, n - 1)
+                i1 = _clamp(max(i1, i0 + 1), 1, n)
+                # 幂等快速路径：窗口没变、且轴内容仍是上一次写的窗口时跳过 ——
+                # 每次布局 apply 会跑两次（applyWindow + 组件 layout），而
+                # 重建类目列表在 1M 个字符串上是 O(n) 复制（实测是 category
+                # 1M 帧的头号开销）。len 检查兜住外部改写 categories 的情况。
+                if (i0, i1) != self._applied_cats_window.get(index) or len(
+                    axis.categories
+                ) != i1 - i0:
+                    axis.categories = full[i0:i1]  # 切片本身就是新 list，别再包一层
+                    self._applied_cats_window[index] = (i0, i1)
+            else:
+                full = self._full_range.get(index)
+                if full is None:
+                    continue
+                axis.setWindow(full[0], full[1], start, end)
 
     def restore(self) -> None:
         """还原初始窗口（toolbox restore 调用）。"""
@@ -415,10 +440,11 @@ class DataZoomComponent(QObject):
                     return False
             except (TypeError, ValueError, OverflowError):
                 return False
-        axis = self._axis()
-        if axis is None:
+        axes = self._axes()
+        if not axes:
             return False
-        self._capture_full(axis)
+        axis_index, axis = axes[0]
+        self._capture_full(axis_index, axis)
         start = _to_float(payload.get("start"), None)
         end = _to_float(payload.get("end"), None)
         if start is None and end is None:
@@ -427,7 +453,7 @@ class DataZoomComponent(QObject):
             if sv is None and ev is None:
                 return False
             if axis.type == "category":
-                full = self._full_cats or []
+                full = self._full_cats.get(axis_index) or []
                 n = len(full)
                 if n == 0:
                     return False
@@ -449,14 +475,22 @@ class DataZoomComponent(QObject):
                 start = i0 / n * 100.0
                 end = (i1 + 1) / n * 100.0
             else:
-                if self._full_range is None:
+                full = self._full_range.get(axis_index)
+                if full is None:
                     return False
-                lo, hi = self._full_range
-                span = hi - lo or 1.0
+                lo, hi = full
 
                 def _pct(value):
                     num = _to_float(value, None)
-                    return None if num is None else (num - lo) / span * 100.0
+                    if num is None:
+                        return None
+                    if axis.type == "log":
+                        if lo <= 0.0 or hi <= 0.0 or num <= 0.0:
+                            return None
+                        l0, l1 = math.log(lo), math.log(hi)
+                        return (math.log(num) - l0) / (l1 - l0) * 100.0
+                    span = hi - lo or 1.0
+                    return (num - lo) / span * 100.0
 
                 start = _pct(sv) if sv is not None else 0.0
                 end = _pct(ev) if ev is not None else 100.0
@@ -785,31 +819,30 @@ class BrushComponent(QObject):
         self.chart.update()
 
     def _zoom_to_rect(self) -> None:
-        """把当前选框映射成 dataZoom 窗口（``dragmode="zoom"``）。"""
+        """把当前选框映射成 dataZoom 窗口（``dragmode="zoom"``）。
+
+        比例直接按**当前 dataZoom 窗口**换算：``start/end`` 是相对全量范围的
+        百分比，先缩到 20-80 再框一小块时必须叠加，否则会跳回全量。
+        """
         coord = self.chart.primaryCoord()
         rect = self._rect
         if rect is None or not isinstance(coord, GridCoord) or rect.width() <= 0:
             return
-        try:
-            left = coord.invertX(QPointF(rect.left(), rect.center().y()))
-            right = coord.invertX(QPointF(rect.right(), rect.center().y()))
-        except Exception:
+        comp = self.chart._component("dataZoom")
+        if comp is None:
+            comp = self.chart._ensure_zoom_component()
+        if comp is None:
             return
-        if left is None or right is None:
+        plot = coord.plot
+        if plot.width() <= 0:
             return
-        axis = coord.x_axis
-        if axis.type == "category":
-            span = max(1, len(axis.categories) - 1)
-            lo, hi = min(left, right), max(left, right)
-            start = max(0.0, lo / span * 100.0)
-            end = min(100.0, hi / span * 100.0)
-        else:
-            total = axis.vmax - axis.vmin
-            if total <= 0:
-                return
-            lo, hi = min(left, right), max(left, right)
-            start = max(0.0, (lo - axis.vmin) / total * 100.0)
-            end = min(100.0, (hi - axis.vmin) / total * 100.0)
+        span = float(comp.end) - float(comp.start)
+        if span <= 0:
+            return
+        frac0 = _clamp((rect.left() - plot.left()) / plot.width(), 0.0, 1.0)
+        frac1 = _clamp((rect.right() - plot.left()) / plot.width(), 0.0, 1.0)
+        start = float(comp.start) + min(frac0, frac1) * span
+        end = float(comp.start) + max(frac0, frac1) * span
         if end - start < 0.5:
             return
         self.chart.dispatchAction(
@@ -832,17 +865,20 @@ class BrushComponent(QObject):
         for r in self.chart.seriesRenderers:
             if not r.visible:
                 continue
+            series_coord = self.chart.coordFor(r.opt)
+            if not isinstance(series_coord, GridCoord):
+                continue
             for i, item in enumerate(r.data()):
                 x, y = parseDataPoint(item, i)
                 if y is None:
                     continue
-                if coord.x_axis.type == "category":
-                    idx = coord.x_axis.localIndex(x)
-                    n = len(coord.x_axis.categories)
+                if series_coord.x_axis.type == "category":
+                    idx = series_coord.x_axis.localIndex(x)
+                    n = len(series_coord.x_axis.categories)
                     if not (0 <= idx < n):
                         continue  # 窗口外数据点跳过（不映射，防坍缩误选）
                 try:
-                    pt = coord.mapPoint(x, y)
+                    pt = series_coord.mapPoint(x, y)
                 except Exception:
                     continue
                 inside = (
@@ -869,11 +905,14 @@ class BrushComponent(QObject):
             y = item.get("value")
             if y is None:
                 continue
+            series_coord = self.chart.coordFor(r.opt)
+            if not isinstance(series_coord, GridCoord):
+                continue
             try:
-                pt = coord.mapPoint(item.get("x"), y)
+                pt = series_coord.mapPoint(item.get("x"), y)
             except Exception:
                 continue
-            if not coord.plot.adjusted(-2, -2, 2, 2).contains(pt):
+            if not series_coord.plot.adjusted(-2, -2, 2, 2).contains(pt):
                 continue
             out.append((pt, r.color()))
         return out

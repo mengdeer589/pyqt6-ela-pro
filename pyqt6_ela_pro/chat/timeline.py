@@ -252,6 +252,7 @@ class ChatPartTimeline:
         self._bubble._deferred_placeholder = None
         self._bubble._reset_part_state()
         maxStep = 0
+        self._bubble._begin_bulk_build()
         self._bubble._stats_batch = True
         try:
             for part in parts or ():
@@ -271,6 +272,7 @@ class ChatPartTimeline:
                 self._bubble._restore_one_part(part)
         finally:
             self._bubble._stats_batch = False
+            self._bubble._end_bulk_build()
         # 收尾：把最后一段的临时状态清干净，并落在最后一步
         # （工具分组也要收口，对齐 endStream，否则分组卡停在「正在探索」）
         self._bubble.endText()
@@ -465,7 +467,12 @@ class ChatPartTimeline:
                 card = self._bubble._tool_cards.get(callId)
                 if isinstance(card, ToolCallCard):
                     card.setStatus(call.status)
-                self._bubble._sync_tool_panel(self._bubble._panel_for_call(callId))
+                panel = self._bubble._panel_for_call(callId)
+                if panel is not None:
+                    if self._bubble._bulk_build:
+                        self._bubble._bulk_panels.add(panel)
+                    else:
+                        self._bubble._sync_tool_panel(panel)
         elif kind == ElaChatPartKindType.Stats:
             if part.stats is not None:
                 self._bubble.setStepStats(part.stats, part.id or None)

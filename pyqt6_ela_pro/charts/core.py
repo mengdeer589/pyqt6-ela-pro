@@ -44,14 +44,16 @@ from PyQt6.QtGui import (
     QFontMetricsF,
     QImage,
     QPainter,
+    QPalette,
     QPen,
     QPolygonF,
 )
-from PyQt6.QtWidgets import QWidget
+from PyQt6.QtWidgets import QLineEdit, QWidget
 from PyQt6ElaWidgetTools import eTheme
 
 from .._internal import connect_theme_signal, disconnect_theme
 from .._motion import ElaMotionKindType, motion, start_idle_loop
+from .._styles import editBorderlessStyle
 from . import data as _cdata
 from .data import ElaNumericBuffer
 from .option import (
@@ -367,6 +369,8 @@ class SeriesRenderer:
 
     def __init__(self, chart: "ElaChartWidget", opt: dict):
         self.chart = chart
+        #: 原始 series option（**不是副本**；标签编辑等需要写回宿主 option）
+        self._source_opt = opt if isinstance(opt, dict) else {}
         self.opt = dict(opt or {})
         self.name = str(self.opt.get("name") or "")
         #: ECharts ``series.id``（setOption 合并时的身份匹配键）
@@ -380,6 +384,8 @@ class SeriesRenderer:
         self.prev_data = None
         #: itemStyle 均匀性缓存 (key, {} | None)，见 ``uniformItemStyle``
         self._uniform_style_cache = None
+        #: 最近一次绘制出的数据标签命中框 ``[(dataIndex, QRectF, text)]``
+        self._label_rects = []
 
     # -- 协议 ------------------------------------------------------------
     def layout(self, rect: QRectF) -> None:
@@ -698,13 +704,32 @@ class SeriesRenderer:
         except (TypeError, ValueError, OverflowError):
             return float(T("font.xs"))
 
+    def _apply_label_formatter(self, formatter, params: dict, fallback: str) -> str:
+        """统一执行 ``label.formatter``（callable / 模板字符串）。"""
+        if callable(formatter):
+            try:
+                text = formatter(params)
+                return str(text) if text is not None else fallback
+            except Exception:
+                return fallback
+        if isinstance(formatter, str):
+            text = formatLabelTemplate(formatter, params)
+            if text is not None:
+                return text
+        return fallback
+
     def labelText(self, index, value, name=None) -> str:
         """按 ``label.formatter`` 生成标签文本（缺省显示数值）。
 
-        formatter 支持 callable(params) 或 ``{a}/{b}/{c}/{d}/{value}/{name}``
-        模板（``{d}`` 需调用方在 params 中提供）。
+        文本优先级：系列 ``labelTexts`` 覆盖（双击编辑写入）→ 数据项
+        ``label.text``（字面量）/ ``label.formatter`` → 系列 ``label.formatter``。
         """
-        formatter = self.labelOption().get("formatter")
+        # 1) 双击编辑写入的按点覆盖
+        overrides = self._source_opt.get("labelTexts")
+        if isinstance(overrides, dict):
+            key = str(index)
+            if key in overrides:
+                return str(overrides[key])
         params = {
             "a": self.name,
             "b": name if name is not None else self.name,
@@ -714,17 +739,68 @@ class SeriesRenderer:
             "series": self.name,
             "dataIndex": index,
         }
-        if callable(formatter):
-            try:
-                text = formatter(params)
-                return str(text) if text is not None else formatValue(value)
-            except Exception:
-                return formatValue(value)
-        if isinstance(formatter, str):
-            text = formatLabelTemplate(formatter, params)
-            if text is not None:
-                return text
-        return formatValue(value)
+        # 2) 数据项级 label（ECharts 兼容）
+        item = None
+        try:
+            data = self.data()
+            idx = int(index)
+            if 0 <= idx < len(data):
+                item = data[idx]
+        except (TypeError, ValueError, OverflowError):
+            item = None
+        item_label = item.get("label") if isinstance(item, dict) else None
+        params["data"] = item
+        if isinstance(item_label, dict):
+            if "text" in item_label:
+                return str(item_label.get("text") or "")
+            if item_label.get("formatter") is not None:
+                return self._apply_label_formatter(
+                    item_label.get("formatter"), params, formatValue(value)
+                )
+        # 3) 系列级 formatter
+        return self._apply_label_formatter(
+            self.labelOption().get("formatter"), params, formatValue(value)
+        )
+
+    def setLabelText(self, index, text) -> bool:
+        """覆盖某个数据点的标签文本（写入 ``series.labelTexts[str(index)]``）。
+
+        空字符串 = 删除覆盖、恢复默认数值文案。不改 data 形状，因此不会破坏
+        大数组的 numpy / LOD 快路径。
+        """
+        try:
+            idx = int(index)
+        except (TypeError, ValueError, OverflowError):
+            return False
+        data = self.data()
+        if not (0 <= idx < len(data)):
+            return False
+        text = str(text)
+        overrides = self._source_opt.get("labelTexts")
+        if not isinstance(overrides, dict):
+            overrides = {}
+            self._source_opt["labelTexts"] = overrides
+            self.opt["labelTexts"] = overrides
+        if text == "":
+            overrides.pop(str(idx), None)
+        else:
+            overrides[str(idx)] = text
+        return True
+
+    def labelHitTest(self, pos: QPointF):
+        """数据点标签命中：返回 ``(dataIndex, rect, text)``，未命中 None。
+
+        命中框由各渲染器在 ``paint`` 时写入 ``_label_rects``（与画出来的
+        标签完全一致）；``label.editable: false`` 可关闭单个系列的编辑。
+        """
+        if not self.labelShown():
+            return None
+        if self.labelOption().get("editable", True) is False:
+            return None
+        for index, rect, text in reversed(self._label_rects):
+            if rect.adjusted(-2, -2, 2, 2).contains(pos):
+                return index, QRectF(rect), text
+        return None
 
     def valueAtIndex(self, index: int):
         """tooltip axis 触发：返回 {"name","value","series","color"} 或 None。"""
@@ -1444,6 +1520,23 @@ class Tooltip:
 # ---------------------------------------------------------------------------
 
 
+class _AnnotationEditor(QLineEdit):
+    """标注标签的行内编辑器：Enter 提交、Esc 取消（失焦也提交）。"""
+
+    cancelled = pyqtSignal()
+
+    def keyPressEvent(self, event) -> None:
+        if event.key() == Qt.Key.Key_Escape:
+            self.cancelled.emit()
+            event.accept()
+            return
+        if event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
+            self.editingFinished.emit()
+            event.accept()
+            return
+        super().keyPressEvent(event)
+
+
 class ElaChartWidget(QWidget):
     """类 ECharts 图表控件（Ela 主题感知，纯 QPainter 自绘）。
 
@@ -1480,6 +1573,10 @@ class ElaChartWidget(QWidget):
     toolboxTriggered = pyqtSignal(str)
     #: brush 选区变化：选中数据点列表（空列表 = 清除选区）
     brushChanged = pyqtSignal(list)
+    #: 双击标注标签：宿主可自行弹出编辑框（内置编辑器开启时也会发）
+    annotationEditRequested = pyqtSignal(dict)
+    #: 标注标签提交：{seriesName, componentType, dataIndex, text}
+    annotationEdited = pyqtSignal(dict)
     #: 动画播放完毕（ECharts ``finished`` 事件）
     finished = pyqtSignal()
 
@@ -1536,8 +1633,16 @@ class ElaChartWidget(QWidget):
         self._legend_hover = None
         #: 本次按下的 (位置, 是否被拖拽组件吞掉)——松开时判「点击 vs 拖拽」
         self._press_ctx = None
+        #: 标注标签行内编辑器与当前编辑目标（双击 markPoint/markLine 标签）
+        self._annotation_editor = None
+        self._annotation_target = None
+        self._annotation_editable = True
         #: 直角坐标图默认内置缩放平移（无 dataZoom 时自动挂 inside 组件）
         self._wheel_zoom_enabled = bool(self.WHEEL_ZOOM_DEFAULT)
+        #: 默认左键拖拽模式（Plotly ``dragmode`` 语义）
+        self._drag_mode = str(self.DRAG_MODE_DEFAULT)
+        #: 宿主是否显式调用过 ``setDragMode``（显式配置 brush 时默认走 select）
+        self._drag_mode_explicit = False
         #: lazyUpdate 延迟重建标记
         self._lazy_pending = False
         #: 宿主经 ``addComponent`` 注入的组件（跨 ``setOption`` 存活，见该方法）
@@ -2264,10 +2369,16 @@ class ElaChartWidget(QWidget):
                 if finder.get(key) is not None:
                     renderer = self._renderer_for(finder)
                     return self.coordFor(renderer.opt) if renderer else None
+            grid = next((c for c in self._coords if c.kind == "grid"), None)
+            if grid is not None and (
+                finder.get("xAxisIndex") is not None
+                or finder.get("yAxisIndex") is not None
+            ):
+                return grid.axis_view_for_indices(
+                    finder.get("xAxisIndex", 0), finder.get("yAxisIndex", 0)
+                )
             for key, kind in (
                 ("gridIndex", "grid"),
-                ("xAxisIndex", "grid"),
-                ("yAxisIndex", "grid"),
                 ("polarIndex", "polar"),
                 ("angleAxisIndex", "polar"),
                 ("radiusAxisIndex", "polar"),
@@ -2510,6 +2621,10 @@ class ElaChartWidget(QWidget):
         self.tooltip.hide()
         self._hover = None
         self._event_handlers.clear()
+        if self._annotation_editor is not None:
+            self._hide_annotation_editor()
+            self._annotation_editor.deleteLater()
+            self._annotation_editor = None
         # 组件一并解挂：事件过滤器 / 定时器虽然 parent 在 chart 上会跟着销毁，
         # 但组件可能持有 chart 之外的东西（宿主句柄、注册的全局回调）。
         self._dispose_components(include_host=True)
@@ -2841,7 +2956,7 @@ class ElaChartWidget(QWidget):
         return self._coords[0] if self._coords else None
 
     def coordFor(self, series_opt: dict = None):
-        """按 series 的 coordinateSystem 匹配坐标系（默认首个）。"""
+        """按 series 的 ``coordinateSystem`` / ``xAxisIndex`` / ``yAxisIndex`` 取坐标系。"""
         want = None
         if isinstance(series_opt, dict):
             want = series_opt.get("coordinateSystem")
@@ -2857,8 +2972,13 @@ class ElaChartWidget(QWidget):
         if want:
             for c in self._coords:
                 if c.kind == want:
+                    if isinstance(c, GridCoord):
+                        return c.axis_view(series_opt)
                     return c
-        return self.primaryCoord()
+        primary = self.primaryCoord()
+        if isinstance(primary, GridCoord):
+            return primary.axis_view(series_opt)
+        return primary
 
     # -- 图例 / 系列显隐（内部；对外走 dispatchAction / legend.selected） --
     def _setSeriesVisible(self, name, visible: bool) -> None:
@@ -2988,6 +3108,8 @@ class ElaChartWidget(QWidget):
 
     #: 拖拽模式（对齐 Plotly ``dragmode``）：平移 / 框选缩放 / 框选 / 套索
     DRAG_MODES = ("pan", "zoom", "select", "lasso")
+    #: 默认拖拽模式：左键框选缩放（Plotly ``dragmode: 'zoom'``）。
+    DRAG_MODE_DEFAULT = "zoom"
 
     #: 直角坐标图是否默认内置滚轮缩放（``setWheelZoomEnabled`` 可改）
     WHEEL_ZOOM_DEFAULT = True
@@ -3012,6 +3134,7 @@ class ElaChartWidget(QWidget):
                 self._drop_component(auto)
             return
         self._ensure_wheel_zoom()
+        self._apply_drag_mode()
 
     def wheelZoomEnabled(self) -> bool:
         """内置滚轮缩放开关状态。"""
@@ -3038,6 +3161,38 @@ class ElaChartWidget(QWidget):
         self.invalidateLayout()
         self.update()
 
+    def _ensure_zoom_component(self):
+        """确保存在一个 dataZoom 组件（框选缩放用；滚轮开关关掉时也能工作）。"""
+        comp = self._component("dataZoom")
+        if comp is not None:
+            return comp
+        if not any(isinstance(coord, GridCoord) for coord in self._coords):
+            return None
+        cls = COMPONENT_REGISTRY.get("dataZoom")
+        if cls is None:  # pragma: no cover
+            return None
+        try:
+            comp = cls(
+                self,
+                [
+                    {
+                        "type": "inside",
+                        "zoomOnMouseWheel": False,
+                        "moveOnMouseMove": False,
+                    }
+                ],
+            )
+        except Exception as exc:
+            warn_once(
+                warn_key("brush-zoom-ctor", type(exc).__name__),
+                f"框选缩放组件构造失败: {exc!r}",
+            )
+            return None
+        comp._brush_zoom_auto = True
+        self._host_components.append(comp)
+        self._components.append(comp)
+        return comp
+
     def _ensure_wheel_zoom(self) -> None:
         """无 ``dataZoom`` 的直角坐标图自动挂 ``inside`` 组件（滚轮缩放 + 拖拽平移）。
 
@@ -3062,7 +3217,7 @@ class ElaChartWidget(QWidget):
                     {
                         "type": "inside",
                         "zoomOnMouseWheel": True,
-                        "moveOnMouseMove": True,
+                        "moveOnMouseMove": self.dragMode() == "pan",
                     }
                 ],
             )
@@ -3081,7 +3236,7 @@ class ElaChartWidget(QWidget):
         """切换拖拽模式（Plotly ``dragmode`` 语义）。
 
         * ``"pan"`` —— 拖拽平移 + 滚轮缩放（ECharts ``inside`` 默认行为）；
-        * ``"zoom"`` —— 拖拽**框选即缩放**（松手把 x 范围缩到选框）；
+        * ``"zoom"`` —— 拖拽**框选即缩放**（默认，松手把 x 范围缩到选框）；
         * ``"select"`` —— 矩形框选（结果走 ``brushChanged``，不缩放）；
         * ``"lasso"`` —— 套索选择（同上，任意多边形）。
 
@@ -3094,17 +3249,25 @@ class ElaChartWidget(QWidget):
                 f"未知拖拽模式：{mode!r}（可选：{', '.join(self.DRAG_MODES)}）"
             )
         self._drag_mode = key
+        self._drag_mode_explicit = True
+        self._apply_drag_mode()
+        self.update()
+
+    def _apply_drag_mode(self) -> None:
+        """把当前 ``_drag_mode`` 应用到 dataZoom / brush（重建后也要重放）。"""
+        key = str(getattr(self, "_drag_mode", self.DRAG_MODE_DEFAULT) or "zoom")
         data_zoom = self._component("dataZoom")
         if data_zoom is not None:
             # 缩放 / 选择模式：拖拽交给 brush（否则两者抢同一个拖拽手势）
             data_zoom.moveOnMouseMove = key == "pan"
             if hasattr(data_zoom, "zoomOnMouseWheel"):
-                data_zoom.zoomOnMouseWheel = True
+                data_zoom.zoomOnMouseWheel = bool(self._wheel_zoom_enabled)
+        if not any(isinstance(coord, GridCoord) for coord in self._coords):
+            return
         brush = self._ensure_brush_component()
         if brush is not None:
             brush.enabled = key in ("zoom", "select", "lasso")
             brush.opt["type"] = "lasso" if key == "lasso" else "rect"
-        self.update()
 
     def _ensure_brush_component(self):
         """取 brush 组件；option 里没配就按需建一个（``setDragMode`` 用）。
@@ -3129,12 +3292,269 @@ class ElaChartWidget(QWidget):
         return brush
 
     def dragMode(self) -> str:
-        """当前拖拽模式（未设置过时按 dataZoom ``inside`` 的默认行为报 ``"pan"``）。"""
-        return str(getattr(self, "_drag_mode", "") or "pan")
+        """当前拖拽模式（默认 ``"zoom"``：左键框选缩放）。"""
+        return str(getattr(self, "_drag_mode", "") or self.DRAG_MODE_DEFAULT)
 
     def brushComponent(self):
         """brush 组件句柄（宿主可读 ``selected_items`` / 接 ``selected`` 信号）。"""
         return self._component("brush")
+
+    # ------------------------------------------------------------ 标注编辑
+    def setAnnotationEditingEnabled(self, enabled: bool) -> None:
+        """是否启用内置的标注标签双击行内编辑（默认开）。
+
+        关闭后双击标签只发 ``annotationEditRequested``，不弹编辑器；
+        宿主可自行弹框并调用 :meth:`setAnnotationText` 提交。
+        """
+        self._annotation_editable = bool(enabled)
+        if not self._annotation_editable:
+            self._hide_annotation_editor()
+
+    def annotationEditingEnabled(self) -> bool:
+        """内置标注编辑器是否启用。"""
+        return bool(self._annotation_editable)
+
+    def _annotation_target_at(self, pos: QPointF):
+        """查找双击位置下的标注标签 → ``{component, ...}`` 或 None。"""
+        for comp in self._components:
+            if str(getattr(comp, "optionKey", "")) not in _HOVERABLE_COMPONENTS:
+                continue
+            hit = getattr(comp, "labelEditHit", None)
+            if not callable(hit):
+                continue
+            try:
+                found = hit(pos)
+            except Exception:
+                continue
+            if not found:
+                continue
+            index, rect = found
+            renderer = comp._renderer() if hasattr(comp, "_renderer") else None
+            text = ""
+            edit_text = getattr(comp, "labelEditText", None)
+            if callable(edit_text):
+                try:
+                    text = edit_text(index)
+                except Exception:
+                    text = ""
+            return {
+                "component": comp,
+                "componentType": str(getattr(comp, "optionKey", "")),
+                "dataIndex": int(index),
+                "rect": QRectF(rect),
+                "text": text,
+                "seriesName": renderer.name if renderer is not None else "",
+            }
+        return None
+
+    def _series_label_target_at(self, pos: QPointF):
+        """查找双击位置下的数据点标签 → 编辑目标 dict 或 None。"""
+        for renderer in reversed(self._series):
+            if not renderer.visible:
+                continue
+            hit = getattr(renderer, "labelHitTest", None)
+            if not callable(hit):
+                continue
+            try:
+                found = hit(pos)
+            except Exception:
+                continue
+            if not found:
+                continue
+            index, rect, text = found
+            return {
+                "kind": "seriesLabel",
+                "renderer": renderer,
+                "componentType": "seriesLabel",
+                "dataIndex": int(index),
+                "rect": QRectF(rect),
+                "text": str(text),
+                "seriesName": renderer.name,
+            }
+        return None
+
+    def _begin_annotation_edit(self, pos: QPointF) -> bool:
+        """双击命中标注 / 数据点标签：发请求信号，按需打开内置编辑器。"""
+        target = self._annotation_target_at(pos)
+        if target is None:
+            target = self._series_label_target_at(pos)
+        if target is None:
+            return False
+        self.annotationEditRequested.emit(
+            {
+                "seriesName": target["seriesName"],
+                "componentType": target["componentType"],
+                "dataIndex": target["dataIndex"],
+                "text": target["text"],
+            }
+        )
+        if self._annotation_editable:
+            self._show_annotation_editor(target)
+        return True
+
+    def _ensure_annotation_editor(self):
+        if self._annotation_editor is not None:
+            return self._annotation_editor
+        editor = _AnnotationEditor(self)
+        editor.setStyle(editBorderlessStyle())
+        editor.setFrame(False)
+        editor.setAutoFillBackground(True)
+        editor.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+        palette = editor.palette()
+        palette.setColor(QPalette.ColorRole.Base, QColor(T("color.bg.elevated")))
+        palette.setColor(QPalette.ColorRole.Window, QColor(T("color.bg.elevated")))
+        palette.setColor(QPalette.ColorRole.Text, QColor(T("color.text.primary")))
+        editor.setPalette(palette)
+        editor.editingFinished.connect(self._commit_annotation_edit)
+        editor.cancelled.connect(self._cancel_annotation_edit)
+        self._annotation_editor = editor
+        return editor
+
+    def _show_annotation_editor(self, target: dict) -> None:
+        editor = self._ensure_annotation_editor()
+        self._annotation_target = target
+        rect = QRectF(target["rect"]).adjusted(-4, -4, 4, 4)
+        rect = rect.intersected(QRectF(self.rect()))
+        if rect.width() < 40:
+            rect.setWidth(min(160.0, max(40.0, self.width() - rect.left() - 4)))
+        height = max(22.0, rect.height())
+        editor.setGeometry(
+            int(rect.left()), int(rect.top()), int(rect.width()), int(height)
+        )
+        editor.setText(str(target.get("text") or ""))
+        editor.selectAll()
+        editor.show()
+        editor.raise_()
+        editor.setFocus(Qt.FocusReason.MouseFocusReason)
+
+    def _hide_annotation_editor(self) -> None:
+        self._annotation_target = None
+        editor = self._annotation_editor
+        if editor is not None:
+            editor.hide()
+
+    def _commit_annotation_edit(self) -> None:
+        target = self._annotation_target
+        editor = self._annotation_editor
+        if target is None or editor is None:
+            return
+        text = editor.text()
+        self._annotation_target = None
+        editor.hide()
+        if target.get("kind") == "seriesLabel":
+            self.setSeriesLabelText(
+                target.get("seriesName"),
+                target.get("dataIndex"),
+                text,
+            )
+        else:
+            self.setAnnotationText(
+                target.get("seriesName"),
+                target.get("componentType"),
+                target.get("dataIndex"),
+                text,
+            )
+        self.setFocus(Qt.FocusReason.OtherFocusReason)
+
+    def _cancel_annotation_edit(self) -> None:
+        self._hide_annotation_editor()
+        self.setFocus(Qt.FocusReason.OtherFocusReason)
+
+    def setAnnotationText(
+        self,
+        seriesName: str,
+        componentType: str,
+        dataIndex: int,
+        text: str,
+        *,
+        rebuild: bool = True,
+    ) -> bool:
+        """修改标注标签文本（markPoint / markLine 的 ``name``）。
+
+        ``seriesName`` 为空时作用于第一个含该组件的系列。返回是否成功。
+        """
+        name = str(seriesName or "")
+        wanted = str(componentType or "")
+        target_comp = None
+        resolved_name = name
+        for comp in self._components:
+            if str(getattr(comp, "optionKey", "")) != wanted:
+                continue
+            renderer = comp._renderer() if hasattr(comp, "_renderer") else None
+            if name and (renderer is None or renderer.name != name):
+                continue
+            target_comp = comp
+            if renderer is not None:
+                resolved_name = renderer.name
+            break
+        if target_comp is None:
+            return False
+        setter = getattr(target_comp, "setLabelText", None)
+        if not callable(setter):
+            return False
+        try:
+            if not setter(int(dataIndex), str(text)):
+                return False
+        except Exception:
+            return False
+        self._opt_version += 1
+        if rebuild:
+            self._rebuild()
+            self.update()
+        self.annotationEdited.emit(
+            {
+                "seriesName": resolved_name,
+                "componentType": wanted,
+                "dataIndex": int(dataIndex),
+                "text": str(text),
+            }
+        )
+        return True
+
+    def setSeriesLabelText(
+        self,
+        seriesName: str,
+        dataIndex: int,
+        text: str,
+        *,
+        rebuild: bool = False,
+    ) -> bool:
+        """修改某个数据点的标签文本（写入 ``series.labelTexts[str(index)]``）。
+
+        空字符串 = 删除覆盖、恢复默认数值文案。默认只失效系列层位图并重绘，
+        不重建坐标系 / 系列（百万点图表上编辑标签不会卡顿）；``rebuild=True``
+        可强制全量重建。``seriesName`` 为空时取首个可见系列。返回是否成功。
+        """
+        name = str(seriesName or "")
+        renderer = None
+        for candidate in self._series:
+            if name and candidate.name != name:
+                continue
+            if name or candidate.visible:
+                renderer = candidate
+                break
+        if renderer is None or not hasattr(renderer, "setLabelText"):
+            return False
+        try:
+            if not renderer.setLabelText(int(dataIndex), str(text)):
+                return False
+        except Exception:
+            return False
+        if rebuild:
+            self._opt_version += 1
+            self._rebuild()
+        else:
+            self.invalidateSeriesLayer()
+        self.update()
+        self.annotationEdited.emit(
+            {
+                "seriesName": renderer.name,
+                "componentType": "seriesLabel",
+                "dataIndex": int(dataIndex),
+                "text": str(text),
+            }
+        )
+        return True
 
     def setDoubleClickReset(self, enabled: bool) -> None:
         """双击是否复位视图（默认 **开**，对齐 Plotly ``doubleClick: 'reset'``）。"""
@@ -3266,6 +3686,7 @@ class ElaChartWidget(QWidget):
     # ------------------------------------------------------------- 内部构建
     def _rebuild(self) -> None:
         """按当前 option 重建组件 / 坐标系 / 系列渲染器（并使布局缓存失效）。"""
+        self._hide_annotation_editor()
         opt = self._option
         self._layout_key = None
         self.title.setOption(_component_opt(opt.get("title"), "show"))
@@ -3368,6 +3789,18 @@ class ElaChartWidget(QWidget):
                 self._spawn_component(cls, value, series_opt)
         # 直角坐标图默认滚轮缩放（用户配了 dataZoom 就完全听用户的）
         self._ensure_wheel_zoom()
+        # 显式配置 brush = 用户要框选数据；未显式 setDragMode 时默认走 select
+        if not self._drag_mode_explicit and self._drag_mode == self.DRAG_MODE_DEFAULT:
+            if isinstance(opt.get("brush"), (dict, list)):
+                self._drag_mode = "select"
+        elif (
+            not self._drag_mode_explicit
+            and self._drag_mode == "select"
+            and not isinstance(opt.get("brush"), (dict, list))
+        ):
+            self._drag_mode = self.DRAG_MODE_DEFAULT
+        # 默认左键框选：dataZoom / brush 的拖拽接管按当前模式重放
+        self._apply_drag_mode()
 
         # 图例条目
         items = []
@@ -3520,12 +3953,16 @@ class ElaChartWidget(QWidget):
 
     def resizeEvent(self, event) -> None:
         super().resizeEvent(event)
+        if self._annotation_editor is not None and self._annotation_editor.isVisible():
+            self._hide_annotation_editor()
         self._layout_all()
         self.update()
 
     def _on_theme_changed(self, _mode) -> None:
         # 配色全部经 T() 实时取，重绘即生效；主题可能影响字体度量等布局
         # 输入，保守失效布局缓存（下一次绘制全量重排一次）
+        if self._annotation_editor is not None and self._annotation_editor.isVisible():
+            self._hide_annotation_editor()
         self._layout_key = None
         self.update()
 

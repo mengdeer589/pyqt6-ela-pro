@@ -164,7 +164,9 @@ class MarkPointComponent(_SeriesMarkBase):
         data = self.opt.get("data") or []
         if not isinstance(data, list):
             return
-        for item in data:
+        font = chartFont(T("font.xs"))
+        fm = QFontMetricsF(font)
+        for index, item in enumerate(data):
             if not isinstance(item, dict):
                 continue
             x = y = None
@@ -187,7 +189,25 @@ class MarkPointComponent(_SeriesMarkBase):
             label = item.get("name")
             if label is None:
                 label = formatValue(_to_float(item.get("value"), y))
-            self._marks.append({"pos": pos, "text": str(label), "x": x, "y": y})
+            text = str(label)
+            tw = fm.horizontalAdvance(text)
+            top = pos.y() - 14
+            label_rect = QRectF(
+                pos.x() - tw / 2 - 2,
+                top - fm.height() - 2,
+                tw + 4,
+                fm.height(),
+            )
+            self._marks.append(
+                {
+                    "pos": pos,
+                    "text": text,
+                    "x": x,
+                    "y": y,
+                    "index": index,
+                    "rect": label_rect,
+                }
+            )
 
     def paint(self, p: QPainter, anim_t: float = 1.0) -> None:
         if not self._marks or not self._visible():
@@ -229,6 +249,32 @@ class MarkPointComponent(_SeriesMarkBase):
                 }
         return None
 
+    def labelEditHit(self, pos: QPointF):
+        """标签命中：返回 ``(data_index, label_rect)``，未命中 None。"""
+        for mark in reversed(self._marks):
+            rect = mark.get("rect")
+            if isinstance(rect, QRectF) and rect.adjusted(-2, -2, 2, 2).contains(pos):
+                return mark.get("index"), QRectF(rect)
+        return None
+
+    def setLabelText(self, index: int, text: str) -> bool:
+        """把 ``markPoint.data[index].name`` 改成 ``text``（共享 option 数据）。"""
+        data = self.opt.get("data")
+        if not isinstance(data, list) or not (0 <= int(index) < len(data)):
+            return False
+        item = data[int(index)]
+        if not isinstance(item, dict):
+            return False
+        item["name"] = str(text)
+        return True
+
+    def labelEditText(self, index: int) -> str:
+        """编辑框初始文本（当前标签文案；没有 name 时给默认值文案）。"""
+        for mark in self._marks:
+            if mark.get("index") == index:
+                return str(mark.get("text") or "")
+        return ""
+
 
 # ---------------------------------------------------------------------------
 # markLine
@@ -266,7 +312,10 @@ class MarkLineComponent(_SeriesMarkBase):
         data = self.opt.get("data") or []
         if not isinstance(data, list):
             return
-        for item in data:
+        font = chartFont(T("font.xs"))
+        fm = QFontMetricsF(font)
+        plot = coord.plot
+        for index, item in enumerate(data):
             if not isinstance(item, dict):
                 continue
             orient = value = None
@@ -293,7 +342,24 @@ class MarkLineComponent(_SeriesMarkBase):
             name = str(item.get("name") or default_label)
             vtxt = formatValue(value) if isinstance(value, (int, float)) else str(value)
             text = f"{name} {vtxt}" if name else vtxt
-            self._lines.append({"orient": orient, "value": value, "text": text})
+            if orient == "h":
+                py = coord.y_axis.map(_to_float(value, 0.0), plot.bottom(), plot.top())
+                rect = QRectF(
+                    plot.right() - 120, py - fm.height() - 3, 118, fm.height()
+                )
+            else:
+                px = coord.x_axis.map(value, plot.left(), plot.right())
+                rect = QRectF(px + 4, plot.top() + 3, 120, fm.height())
+            self._lines.append(
+                {
+                    "orient": orient,
+                    "value": value,
+                    "text": text,
+                    "name": name,
+                    "index": index,
+                    "rect": rect,
+                }
+            )
 
     def paint(self, p: QPainter, anim_t: float = 1.0) -> None:
         if not self._lines or not self._visible():
@@ -361,6 +427,32 @@ class MarkLineComponent(_SeriesMarkBase):
                         "series": r.name if r is not None else "markLine",
                     }
         return None
+
+    def labelEditHit(self, pos: QPointF):
+        """标签命中：返回 ``(data_index, label_rect)``，未命中 None。"""
+        for line in reversed(self._lines):
+            rect = line.get("rect")
+            if isinstance(rect, QRectF) and rect.adjusted(-2, -2, 2, 2).contains(pos):
+                return line.get("index"), QRectF(rect)
+        return None
+
+    def setLabelText(self, index: int, text: str) -> bool:
+        """把 ``markLine.data[index].name`` 改成 ``text``（共享 option 数据）。"""
+        data = self.opt.get("data")
+        if not isinstance(data, list) or not (0 <= int(index) < len(data)):
+            return False
+        item = data[int(index)]
+        if not isinstance(item, dict):
+            return False
+        item["name"] = str(text)
+        return True
+
+    def labelEditText(self, index: int) -> str:
+        """编辑框初始文本（当前 name；没有 name 时给默认类型名）。"""
+        for line in self._lines:
+            if line.get("index") == index:
+                return str(line.get("name") or "")
+        return ""
 
 
 # ---------------------------------------------------------------------------
@@ -776,7 +868,9 @@ class MapSeriesRenderer(SeriesRenderer):
             return False
         try:
             pos = (
-                event.position() if hasattr(event, "position") else QPointF(event.position().toPoint())
+                event.position()
+                if hasattr(event, "position")
+                else QPointF(event.position().toPoint())
             )
             delta = event.angleDelta().y()
         except Exception:

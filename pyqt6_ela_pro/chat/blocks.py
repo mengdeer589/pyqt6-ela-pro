@@ -38,6 +38,7 @@ from PyQt6.QtCore import QPointF, QRectF, QSize, Qt, QTimer, pyqtSignal
 from PyQt6.QtGui import (
     QColor,
     QFont,
+    QFontMetrics,
     QIcon,
     QImage,
     QPainter,
@@ -426,6 +427,18 @@ _PREVIEW_ITEMS = 8
 #: 而展示区最多几十字符。本 bundle 实测 613/1428 个工具副标题 >200 字
 #: （最大 4124，shell command 全量）—— 不截源就每次 resize 都整串测量。
 _ELIDE_SOURCE_MAX = 160
+
+
+def _elide_source(text: str, cap: int, fm: QFontMetrics) -> str:
+    """按目标像素宽度限制 ``elidedText`` 的源串长度。
+
+    展示区只有 ``cap`` 像素宽，源串再长也不会多显示一个字符；按平均字符宽
+    反推所需字符数，避免把 4KB 的 shell command 整串喂给字体测量。
+    """
+    if len(text) <= 64:
+        return text
+    needed = int(max(0, cap) / max(1.0, float(fm.averageCharWidth()))) + 8
+    return text[: min(len(text), max(48, min(_ELIDE_SOURCE_MAX, needed)))]
 
 
 def _preview_value(value) -> str:
@@ -1668,8 +1681,9 @@ class ToolCallCard(_CollapsibleBlock):
         insert_at = self.headerLayout().count() - 1
         self.insertHeaderWidget(insert_at, self._subtitle_label)
         self.insertHeaderWidget(insert_at + 1, self._args_label)
+        # _sync_header() 内部已调 _apply_theme()；再调一次会让每个卡片多一次
+        # 字体/颜色写入（Win7 上字体变更会触发重新 shaping）。
         self._sync_header()
-        self._apply_theme()
 
     def showEvent(self, event) -> None:  # noqa: N802 (Qt 命名)
         # 初始展开（defaultOpen / 宿主策略）的卡：super().__init__ 先 setChecked
@@ -1928,11 +1942,9 @@ class ToolCallCard(_CollapsibleBlock):
             if not text:
                 label.setText("")
                 continue
-            # 先截源再测量：elidedText 的展示结果由 cap 决定，源串再长也不会
-            # 多显示一个字符；而 Win7 上 4KB 串的逐字形测量很贵（bug #17）。
-            source = (
-                text if len(text) <= _ELIDE_SOURCE_MAX else text[:_ELIDE_SOURCE_MAX]
-            )
+            # 先按目标像素宽度截源再测量：elidedText 的展示结果由 cap 决定，
+            # 源串再长也不会多显示一个字符；Win7 上逐字形测量很贵（bug #17）。
+            source = _elide_source(text, cap, label.fontMetrics())
             key = (cap, len(source), hash(source), label.font().toString())
             elided = self._elide_cache.get(key)
             if elided is None:
@@ -2042,7 +2054,7 @@ class ContextToolGroupCard(_CollapsibleBlock):
         self._call_rows[call.id] = row
         self._sync_row(call)
         self._sync_header()
-        self._apply_theme()
+        self._apply_theme(row)
 
     def toolCall(self, callId: str) -> Optional[ElaChatToolCall]:
         """按 id 获取包含的工具调用快照。"""
@@ -2133,15 +2145,17 @@ class ContextToolGroupCard(_CollapsibleBlock):
         if running:
             self.setTitle("正在探索")
 
-    def _apply_theme(self) -> None:
+    def _apply_theme(self, row: Optional[ColorText] = None) -> None:
         super()._apply_theme()
         if not hasattr(self, "_summary_label"):
             return
         self._summary_label.setTextColor(muted_color(self._theme_mode, 0.5))
         self._summary_label.setTextPixelSize(12)
-        for row in self._call_rows.values():
-            row.setTextColor(muted_color(self._theme_mode, 0.7))
-            row.setTextPixelSize(12)
+        # 追加一行时只给新行上色；主题切换（row=None）才遍历全部行。
+        rows = (row,) if row is not None else self._call_rows.values()
+        for item in rows:
+            item.setTextColor(muted_color(self._theme_mode, 0.7))
+            item.setTextPixelSize(12)
 
 
 class ToolGroupPanel(_CollapsibleBlock):
@@ -2633,6 +2647,12 @@ class StatsBadge(ElaThemeWidget):
 
     def setStats(self, stats: Optional[ElaChatStats]) -> None:
         """更新用量统计（``None`` 或全零则隐藏徽标）。"""
+        self._setStats(stats, deferShow=False)
+
+    def _setStats(
+        self, stats: Optional[ElaChatStats], *, deferShow: bool = False
+    ) -> None:
+        """``setStats`` 的内部实现；历史批量回放时只填数据、不显示。"""
         self._stats = stats
         if stats is None or not (
             stats.total_tokens or stats.prompt_tokens or stats.completion_tokens
@@ -2650,6 +2670,11 @@ class StatsBadge(ElaThemeWidget):
         if stats.cache_write_tokens:
             parts.append(f"缓存写 {stats.cache_write_tokens}")
         self._label.setText("  ·  ".join(parts))
+        if deferShow:
+            # 最终显隐由 _apply_stats_mode 决定：footer 模式只有最后一个可见，
+            # 回放期把 500 个徽标都 show 出来纯属浪费（bug #17）。
+            self._apply_theme()
+            return
         self._label.show()
         self._apply_tooltip()
         self._apply_theme()

@@ -340,6 +340,10 @@ class ElaChatBubble(ElaThemeWidget):
         #: ``setParts`` 重放期间为 True：逐段 setStepStats 不重复摆徽标，
         #: 由 setParts 收尾统一 apply 一次（bug #17）。
         self._stats_batch = False
+        #: 历史分段批量构建深度：回放期间暂缓布局 / 面板显示（bug #17）
+        self._bulk_build = 0
+        #: 回放期间待统一 show / 刷新摘要的工具面板
+        self._bulk_panels: set = set()
         self._stream_ended = False
         self._generation_started = True
         #: 底部「AI 生成」提示（仅助手消息；文本 / 显隐见 setDisclaimer）
@@ -1685,6 +1689,7 @@ class ElaChatBubble(ElaThemeWidget):
             panel.setParent(None)
             panel.deleteLater()
         self._panels = []
+        self._bulk_panels.clear()
         if self._parts_layout is not None:
             while self._parts_layout.count():
                 item = self._parts_layout.takeAt(0)
@@ -1693,6 +1698,37 @@ class ElaChatBubble(ElaThemeWidget):
                     widget.hide()
                     widget.setParent(None)
                     widget.deleteLater()
+
+    def _begin_bulk_build(self) -> None:
+        """进入历史分段批量构建：暂缓布局与面板显示（可嵌套）。"""
+        self._bulk_build += 1
+        if self._bulk_build != 1:
+            return
+        if self._parts_container is not None:
+            self._parts_container.setUpdatesEnabled(False)
+        if self._parts_layout is not None:
+            self._parts_layout.setEnabled(False)
+
+    def _end_bulk_build(self) -> None:
+        """结束批量构建：统一刷面板、恢复布局并激活一次。"""
+        if self._bulk_build <= 0:
+            return
+        self._bulk_build -= 1
+        if self._bulk_build > 0:
+            return
+        for panel in list(self._bulk_panels):
+            if not is_deleted(panel):
+                self._sync_tool_panel(panel)
+                panel.show()
+        self._bulk_panels.clear()
+        if self._parts_layout is not None:
+            self._parts_layout.setEnabled(True)
+        if self._parts_container is not None:
+            self._parts_container.setUpdatesEnabled(True)
+            self._parts_container.update()
+        if self._parts_layout is not None:
+            self._parts_layout.activate()
+        self.updateGeometry()
 
     def setText(self, text: str) -> None:
         """设置消息文本（助手消息整体替换当前正文段并走 Markdown 渲染）。"""
@@ -2361,8 +2397,13 @@ class ElaChatBubble(ElaThemeWidget):
         )
         self._part_widgets[callId] = card
         self._move_step_stats_to_end(self._step_index)
-        panel.show()
-        self._sync_tool_panel(panel)
+        if self._bulk_build:
+            # 回放期间只登记；收尾统一 show + 刷新摘要，避免每个工具都触发
+            # 一次面板 show / 全量 parts 扫描（bug #17）。
+            self._bulk_panels.add(panel)
+        else:
+            panel.show()
+            self._sync_tool_panel(panel)
         return callId
 
     def _on_tool_card_toggled(self, _checked: bool = False) -> None:
@@ -2593,7 +2634,7 @@ class ElaChatBubble(ElaThemeWidget):
         if part is None:
             partId = partId or uuid4().hex[:12]
             badge = StatsBadge(self._parts_container or self._content or self)
-            badge.setStats(stats)
+            badge._setStats(stats, deferShow=self._stats_batch)
             self._append_part(
                 ElaChatPart(
                     id=partId,

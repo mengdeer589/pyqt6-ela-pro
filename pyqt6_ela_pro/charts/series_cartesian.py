@@ -155,14 +155,27 @@ def _datum_list(item):
     return out
 
 
-def _grid_series_opts(chart):
-    """当前 option 中落在 grid 坐标系的系列 option 列表（内部引用，零拷贝）。"""
+def _grid_series_opts(chart, axis_kind: str = None, axis_index: int = 0):
+    """当前 option 中落在 grid 坐标系的系列 option 列表（内部引用，零拷贝）。
+
+    ``axis_kind`` 为 ``"x"`` / ``"y"`` 时只保留绑定到该轴索引的系列
+    （缺省索引 = 0）；``None`` 表示不过滤。
+    """
     out = []
     for s in chart._option_ref().get("series") or []:
         if not isinstance(s, dict):
             continue
-        if s.get("coordinateSystem") in (None, "cartesian2d", "grid"):
-            out.append(s)
+        if s.get("coordinateSystem") not in (None, "cartesian2d", "grid"):
+            continue
+        if axis_kind in ("x", "y"):
+            key = "xAxisIndex" if axis_kind == "x" else "yAxisIndex"
+            try:
+                idx = int(s.get(key, 0) or 0)
+            except (TypeError, ValueError, OverflowError):
+                idx = 0
+            if idx != axis_index:
+                continue
+        out.append(s)
     return out
 
 
@@ -258,14 +271,19 @@ def _seq_len(value) -> int:
         return 0
 
 
-def _grid_value_extent(chart):
+def _grid_value_extent(chart, axis_kind: str = "y", axis_index: int = 0):
     """grid 数值轴真实范围（类型感知）：stack 柱按堆叠和。返回 (dmin, dmax) 或 None。
 
     带缓存（见 ``_GRID_EXTENT_CACHE``）：逐系列 ``layout`` 都会调它，
-    百万点下每次全量遍历会让布局时间放大一个数量级。
+    百万点下每次全量遍历会让布局时间放大一个数量级。``axis_kind`` /
+    ``axis_index`` 只筛选**哪些系列**参与（多 y 轴时副轴不能污染主轴范围）。
     """
-    opts = _grid_series_opts(chart)
-    key = tuple((id(s), id(s.get("data")), _seq_len(s.get("data"))) for s in opts)
+    opts = _grid_series_opts(chart, axis_kind, axis_index)
+    key = (
+        axis_kind,
+        axis_index,
+        tuple((id(s), id(s.get("data")), _seq_len(s.get("data"))) for s in opts),
+    )
     hit = _GRID_EXTENT_CACHE.get(key)
     # 命中时复核 series 对象仍是同一批（key 里只有 id，靠强引用 + is 兜底）
     if hit is not None:
@@ -348,13 +366,24 @@ def _axis_label(axis, x):
     return formatValue(x)
 
 
-def _fix_value_axis(axis, chart):
+def _fix_value_axis(axis, chart, series_opt=None, axis_kind: str = "y"):
     """按 ``_grid_value_extent`` 重设数值轴范围（category 轴自动跳过）。"""
-    if axis is None or axis.type != "value":
+    if axis is None or axis.type not in ("value", "log"):
         return
-    ext = _grid_value_extent(chart)
+    s = series_opt if isinstance(series_opt, dict) else {}
+    key = "xAxisIndex" if axis_kind == "x" else "yAxisIndex"
+    try:
+        axis_index = int(s.get(key, 0) or 0)
+    except (TypeError, ValueError, OverflowError):
+        axis_index = 0
+    ext = _grid_value_extent(chart, axis_kind, axis_index)
     if ext is not None:
-        axis.setExtent(ext[0], ext[1])
+        lo, hi = ext
+        if axis.type == "log":
+            # log 轴只接受正值；全非正时保持 setSeries 给的默认范围。
+            if lo <= 0.0 or hi <= 0.0:
+                return
+        axis.setExtent(lo, hi)
 
 
 # ---------------------------------------------------------------------------
@@ -388,7 +417,12 @@ class BarSeriesRenderer(SeriesRenderer):
         self._horizontal = coord.y_axis.type == "category"
         cat_axis = coord.y_axis if self._horizontal else coord.x_axis
         val_axis = coord.x_axis if self._horizontal else coord.y_axis
-        _fix_value_axis(val_axis, self.chart)
+        _fix_value_axis(
+            val_axis,
+            self.chart,
+            self.opt,
+            "x" if self._horizontal else "y",
+        )
         self._plot = coord.plot
 
         # 槽位：grid 内全部 bar 系列按 stack 名 / 自身序号分槽
@@ -477,6 +511,11 @@ class BarSeriesRenderer(SeriesRenderer):
                 continue
             v0 = (pos_bases if y >= 0 else neg_bases).get(i, 0.0)
             v1 = v0 + y
+            if val_axis.type == "log":
+                # log 轴没有 0 基线：底边就是 vmin；负值 / 0 无法映射，跳过。
+                v0 = max(v0, float(val_axis.vmin))
+                if v1 <= 0.0:
+                    continue
             center = cat_axis.map(x, c0, c1)
             slot_center = center - half_gw + slot_w * (slot_idx + 0.5)
             pa = val_axis.map(v0, a0, a1)
@@ -615,6 +654,7 @@ class BarSeriesRenderer(SeriesRenderer):
         return QRectF(bar["center"] - w / 2, min(pa, pb), w, abs(pb - pa))
 
     def paint(self, p: QPainter, anim_t: float) -> None:
+        self._label_rects = []
         if not self._bars:
             return
         coord = self.chart.coordFor(self.opt)
@@ -701,7 +741,9 @@ class BarSeriesRenderer(SeriesRenderer):
             else:
                 p.drawRect(r)
             if show_label:
-                self._paint_bar_label(p, r, bar, fm)
+                label_hit = self._paint_bar_label(p, r, bar, fm)
+                if label_hit is not None:
+                    self._label_rects.append((index, label_hit[0], label_hit[1]))
         p.restore()
 
     def _bar_radius(self, index: int, rect: QRectF) -> float:
@@ -714,11 +756,14 @@ class BarSeriesRenderer(SeriesRenderer):
         radius = _to_float(raw, 0.0)
         return max(0.0, min(radius, rect.width() / 2, rect.height() / 2))
 
-    def _paint_bar_label(self, p: QPainter, rect: QRectF, bar: dict, fm) -> None:
-        """柱数据标签（默认柱顶 / 横条右端，``label.position`` 可改）。"""
+    def _paint_bar_label(self, p: QPainter, rect: QRectF, bar: dict, fm):
+        """柱数据标签（默认柱顶 / 横条右端，``label.position`` 可改）。
+
+        返回 ``(labelRect, text)``，供双击编辑命中；无文本时返回 None。
+        """
         text = self.labelText(bar["index"], bar["y"], bar["label"])
         if not text:
-            return
+            return None
         position = str(self.labelOption().get("position") or "")
         if not position:
             position = "right" if self._horizontal else "top"
@@ -733,15 +778,21 @@ class BarSeriesRenderer(SeriesRenderer):
                 ),
                 text,
             )
-            return
+            return box, text
+        tw = fm.horizontalAdvance(text)
         if self._horizontal:
             anchor = QPointF(rect.right() + 4, rect.center().y() + fm.height() / 4)
             p.drawText(anchor, text)
-        else:
-            anchor = QPointF(
-                rect.center().x() - fm.horizontalAdvance(text) / 2, rect.top() - 3
-            )
-            p.drawText(anchor, text)
+            box = QRectF(
+                anchor.x(), anchor.y() - fm.ascent(), tw, fm.height()
+            ).adjusted(-2, -2, 2, 2)
+            return box, text
+        anchor = QPointF(rect.center().x() - tw / 2, rect.top() - 3)
+        p.drawText(anchor, text)
+        box = QRectF(anchor.x(), anchor.y() - fm.ascent(), tw, fm.height()).adjusted(
+            -2, -2, 2, 2
+        )
+        return box, text
 
     # -- 交互 -------------------------------------------------------------
     def hitTest(self, pos: QPointF):
@@ -1419,9 +1470,12 @@ class LineSeriesRenderer(SeriesRenderer):
                     continue
                 try:
                     if single:
-                        self._points.append(coord.mapPoint(yi))
+                        pt = coord.mapPoint(yi)
                     else:
-                        self._points.append(coord.mapPoint(self._x_at(orig), yi))
+                        pt = coord.mapPoint(self._x_at(orig), yi)
+                    if not (math.isfinite(pt.x()) and math.isfinite(pt.y())):
+                        pt = None
+                    self._points.append(pt)
                 except Exception:
                     self._points.append(None)
                 self._point_idx.append(orig)
@@ -1622,9 +1676,11 @@ class LineSeriesRenderer(SeriesRenderer):
         return None, seg
 
     def _baseline_y(self, coord):
-        """面积填充基线（grid：0 值线收敛到 plot 内）。"""
+        """面积填充基线（grid：0 值线收敛到 plot 内；log 轴落在绘图区底边）。"""
         if isinstance(coord, GridCoord):
             ax = coord.y_axis
+            if ax.type == "log":
+                return coord.plot.bottom()
             v = min(max(0.0, ax.vmin), ax.vmax) if ax.type == "value" else 0.0
             return ax.map(v, coord.plot.bottom(), coord.plot.top())
         return None
@@ -1635,6 +1691,7 @@ class LineSeriesRenderer(SeriesRenderer):
         valid = [pt for pt in pts if pt is not None]
         if not valid:
             return
+        self._label_rects = []
         coord = self.chart.coordFor(self.opt)
         color = self.color()
         ls = self.opt.get("lineStyle") or {}
@@ -1809,8 +1866,8 @@ class LineSeriesRenderer(SeriesRenderer):
                     for pt, orig in zip(self._points, self._point_idx)
                     if pt is not None
                 ]
-            hollow = symbol_name in ("emptyCircle", "circle")
-            kind = "circle" if hollow else symbol_name
+            hollow = symbol_name == "emptyCircle"
+            kind = "circle" if symbol_name == "circle" else symbol_name
             # 循环外解析一次统一外观（None = 存在 per-item itemStyle）
             uni = self.uniformItemStyleResolved()
             uni_color = (
@@ -1887,12 +1944,21 @@ class LineSeriesRenderer(SeriesRenderer):
                 if show_label and orig is not None:
                     text = self.labelText(orig, self._raw_value(orig), self._x_at(orig))
                     p.setPen(self.labelColor())
+                    tw = fm.horizontalAdvance(text)
                     p.drawText(
-                        QPointF(
-                            pt.x() - fm.horizontalAdvance(text) / 2, pt.y() - rr - 4
-                        ),
+                        QPointF(pt.x() - tw / 2, pt.y() - rr - 4),
                         text,
                     )
+                    rect = QRectF(
+                        pt.x() - tw / 2 - 2,
+                        pt.y() - rr - 4 - fm.height(),
+                        tw + 4,
+                        fm.height() + 2,
+                    )
+                    rect = rect.united(
+                        QRectF(pt.x() - rr - 2, pt.y() - rr - 2, rr * 2 + 4, rr * 2 + 4)
+                    )
+                    self._label_rects.append((orig, rect, text))
         p.restore()
 
     def _symbol_points(self, coord, single, interval: int):
@@ -2083,6 +2149,8 @@ class ScatterSeriesRenderer(SeriesRenderer):
                 pt = coord.mapPoint(y) if single else coord.mapPoint(x, y)
             except Exception:
                 continue
+            if not (math.isfinite(pt.x()) and math.isfinite(pt.y())):
+                continue
             if fixed is not None:
                 r = max(1.0, fixed / 2)
             elif thirds[i] is not None:
@@ -2147,6 +2215,7 @@ class ScatterSeriesRenderer(SeriesRenderer):
         return idx
 
     def paint(self, p: QPainter, anim_t: float) -> None:
+        self._label_rects = []
         if not self._dots:
             return
         p.save()
@@ -2227,12 +2296,25 @@ class ScatterSeriesRenderer(SeriesRenderer):
             drawSymbol(p, kind, d["pt"], r * 2)
             if show_label:
                 text = self.labelText(index, d["value"], formatValue(d["x"]))
-                anchor = QPointF(
-                    d["pt"].x() - fm.horizontalAdvance(text) / 2,
-                    d["pt"].y() - r - 4,
-                )
+                tw = fm.horizontalAdvance(text)
+                anchor = QPointF(d["pt"].x() - tw / 2, d["pt"].y() - r - 4)
                 p.setPen(self.labelColor())
                 p.drawText(anchor, text)
+                rect = QRectF(
+                    anchor.x() - 2,
+                    anchor.y() - fm.height(),
+                    tw + 4,
+                    fm.height() + 2,
+                )
+                rect = rect.united(
+                    QRectF(
+                        d["pt"].x() - r - 2,
+                        d["pt"].y() - r - 2,
+                        r * 2 + 4,
+                        r * 2 + 4,
+                    )
+                )
+                self._label_rects.append((index, rect, text))
         p.restore()
 
     # -- 交互 -------------------------------------------------------------
@@ -2819,7 +2901,7 @@ class CandlestickSeriesRenderer(SeriesRenderer):
         coord = self.chart.coordFor(self.opt)
         if not isinstance(coord, GridCoord):
             return
-        _fix_value_axis(coord.y_axis, self.chart)
+        _fix_value_axis(coord.y_axis, self.chart, self.opt, "y")
         band = coord.x_axis.bandWidth(coord.plot.left(), coord.plot.right())
         if band <= 0:
             band = coord.plot.width() / max(1, len(self.data()))
@@ -2971,7 +3053,7 @@ class BoxplotSeriesRenderer(SeriesRenderer):
         coord = self.chart.coordFor(self.opt)
         if not isinstance(coord, GridCoord):
             return
-        _fix_value_axis(coord.y_axis, self.chart)
+        _fix_value_axis(coord.y_axis, self.chart, self.opt, "y")
         band = coord.x_axis.bandWidth(coord.plot.left(), coord.plot.right())
         if band <= 0:
             band = coord.plot.width() / max(1, len(self.data()))

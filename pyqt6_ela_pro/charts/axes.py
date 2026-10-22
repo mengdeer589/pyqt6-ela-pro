@@ -200,6 +200,50 @@ def _clamp_tick_count(nice_min, nice_max, step, limit):
     return nice_min, nice_max, ticks
 
 
+def _format_log_tick(value) -> str:
+    """log 轴刻度文案：普通量级走 ``formatValue``，极端量级用 ``1e-5`` / ``1e6``。"""
+    try:
+        v = float(value)
+    except (TypeError, ValueError, OverflowError):
+        return formatValue(value)
+    if v == 0.0 or not math.isfinite(v):
+        return formatValue(value)
+    a = abs(v)
+    if 1e-4 <= a < 1e6:
+        return formatValue(v)
+    exp = int(math.floor(math.log10(a)))
+    mant = v / (10.0**exp)
+    if abs(mant - round(mant)) < 1e-9:
+        mant = float(round(mant))
+    text = f"{mant:g}e{exp}"
+    return text.replace("e+", "e")
+
+
+def _log_ticks(vmin: float, vmax: float, base: float, segments: int = 5) -> list:
+    """对数轴刻度：按数量级取幂；跨度不足两个数量级时补 1/2/5 子刻度。"""
+    if vmin <= 0.0 or vmax <= 0.0 or vmax <= vmin:
+        return [1.0, 10.0]
+    log_base = math.log(base)
+    e0 = int(math.floor(math.log(vmin) / log_base))
+    e1 = int(math.ceil(math.log(vmax) / log_base))
+    if e1 <= e0:
+        e1 = e0 + 1
+    ticks = [base**e for e in range(e0, e1 + 1)]
+    # 十年内（例如 1..100）只有 3 个幂次标签太稀，补 2/5 子刻度。
+    if e1 - e0 <= 2 and abs(base - 10.0) < 1e-9:
+        ticks = [m * (10.0**e) for e in range(e0, e1 + 1) for m in (1, 2, 5)]
+    ticks = [t for t in ticks if vmin * (1.0 - 1e-9) <= t <= vmax * (1.0 + 1e-9)]
+    if len(ticks) < 2:
+        ticks = [vmin, vmax]
+    limit = max(2, min(int(segments) + 1, _MAX_TICKS))
+    if len(ticks) > limit:
+        step = max(1, int(math.ceil(len(ticks) / float(limit))))
+        ticks = ticks[::step]
+        if ticks[-1] != vmax:
+            ticks.append(vmax)
+    return ticks
+
+
 # ---------------------------------------------------------------------------
 # 坐标协议基类
 # ---------------------------------------------------------------------------
@@ -310,8 +354,23 @@ class AxisModel:
     def __init__(self, opt: dict = None, default_type: str = "value"):
         opt = dict(opt or {})
         self.opt = opt
-        self.type = str(opt.get("type") or default_type)
+        self.type = str(opt.get("type") or default_type).strip().lower()
         self.name = str(opt.get("name") or "")
+        #: ``xAxis`` / ``yAxis`` 的 ``position``（bottom/top 或 left/right）。
+        #: 空串表示由 :class:`GridCoord` 按索引给默认值。
+        self.position = str(opt.get("position") or "").strip().lower()
+        #: 同侧多轴的外扩偏移（px）；0 表示贴绘图区边缘。
+        try:
+            self.offset = max(0.0, float(opt.get("offset", 0) or 0))
+        except (TypeError, ValueError, OverflowError):
+            self.offset = 0.0
+        #: log 轴底数（``type="log"`` 时生效）
+        try:
+            self.log_base = float(opt.get("logBase", 10) or 10)
+        except (TypeError, ValueError, OverflowError):
+            self.log_base = 10.0
+        if not math.isfinite(self.log_base) or self.log_base <= 1.0:
+            self.log_base = 10.0
         #: ``windowOffset()`` 的记忆化缓存（类别一变就作废，见 property setter）
         self._window_offset_cache = None
         self.categories = [str(c) for c in (opt.get("data") or [])]
@@ -351,11 +410,14 @@ class AxisModel:
         data_max: float = None,
         segments: int = 5,
     ) -> None:
-        """按数据范围计算 value 轴 nice ticks（min/max/scale 可覆盖端点）。
+        """按数据范围计算 value / log 轴 nice ticks（min/max/scale 可覆盖端点）。
 
         非法 min/max（空字符串 / 非数值 / NaN 等输入）降级为未设置；
         ``minInterval`` / ``maxInterval`` 约束刻度步长。
         """
+        if self.type == "log":
+            self._set_log_extent(data_min, data_max, segments)
+            return
         if self.type != "value":
             return
         lo = 0.0 if data_min is None else float(data_min)
@@ -434,6 +496,44 @@ class AxisModel:
             for i in range(count + 1)
         ]
 
+    def _set_log_extent(self, data_min, data_max, segments: int = 5) -> None:
+        """log 轴范围：正值过滤 + 按数量级生成刻度。
+
+        非正值在 :meth:`GridCoord.setSeries` 收数据时已经跳过；这里再兜一层，
+        避免宿主直接调用 ``setExtent(-1, 0)`` 把轴打塌。
+        """
+        lo = _to_float(data_min, None)
+        hi = _to_float(data_max, None)
+        if lo is None or lo <= 0.0 or hi is None or hi <= 0.0 or hi <= lo:
+            lo, hi = 1.0, 10.0
+        user_lo = _opt_bound(self.min)
+        user_hi = _opt_bound(self.max)
+        if user_lo is not None and user_lo > 0.0:
+            lo = user_lo
+        if user_hi is not None and user_hi > 0.0:
+            hi = user_hi
+        if hi <= lo:
+            hi = lo * self.log_base
+        try:
+            segments = max(1, int(self.opt.get("splitNumber", segments)))
+        except (TypeError, ValueError, OverflowError):
+            pass
+        e0 = int(math.floor(math.log(lo) / math.log(self.log_base)))
+        e1 = int(math.ceil(math.log(hi) / math.log(self.log_base)))
+        if e1 <= e0:
+            e1 = e0 + 1
+        # 主轴范围扩到整数量级；用户显式 min/max 时保留用户边界。
+        nice_lo = self.log_base**e0
+        nice_hi = self.log_base**e1
+        if user_lo is not None and user_lo > 0.0:
+            nice_lo = lo
+        if user_hi is not None and user_hi > 0.0:
+            nice_hi = hi
+        if nice_hi <= nice_lo:
+            nice_hi = nice_lo * self.log_base
+        self.vmin, self.vmax = nice_lo, nice_hi
+        self._ticks = _log_ticks(nice_lo, nice_hi, self.log_base, segments)
+
     def ticks(self) -> list:
         """刻度列表：category 返回类别字符串，value 返回数值列表。"""
         if self.type == "category":
@@ -474,12 +574,75 @@ class AxisModel:
             if self.inverse:
                 frac = 1.0 - frac
             return start + (end - start) * frac
+        if self.type == "log":
+            v = _to_float(value, None)
+            if v is None or v <= 0.0 or self.vmin <= 0.0 or self.vmax <= 0.0:
+                return float("nan")
+            lo, hi = math.log(self.vmin), math.log(self.vmax)
+            if hi == lo:
+                frac = 0.0
+            else:
+                frac = (math.log(v) - lo) / (hi - lo)
+            if self.inverse:
+                frac = 1.0 - frac
+            return start + (end - start) * frac
         v = _to_float(value, self.vmin)
         span = self.vmax - self.vmin
         frac = 0.0 if span == 0 else (v - self.vmin) / span
         if self.inverse:
             frac = 1.0 - frac
         return start + (end - start) * frac
+
+    def fraction(self, value) -> float:
+        """数据值 → 0..1 归一化位置（log 轴走对数空间；无效值返回 NaN）。"""
+        v = _to_float(value, None)
+        if v is None:
+            return float("nan")
+        if self.type == "log":
+            if v <= 0.0 or self.vmin <= 0.0 or self.vmax <= 0.0:
+                return float("nan")
+            lo, hi = math.log(self.vmin), math.log(self.vmax)
+            if hi == lo:
+                return 0.0
+            return (math.log(v) - lo) / (hi - lo)
+        span = self.vmax - self.vmin
+        if span == 0:
+            return 0.0
+        return (v - self.vmin) / span
+
+    def setWindow(
+        self, full_min: float, full_max: float, start: float, end: float
+    ) -> None:
+        """按 dataZoom 的 0-100 窗口重设轴范围与刻度（log 轴在对数空间插值）。"""
+        if self.type == "category":
+            return
+        lo = _to_float(full_min, self.vmin)
+        hi = _to_float(full_max, self.vmax)
+        if lo is None or hi is None or hi <= lo:
+            return
+        start = max(0.0, min(100.0, float(start)))
+        end = max(start, min(100.0, float(end)))
+        if self.type == "log":
+            if lo <= 0.0 or hi <= 0.0:
+                return
+            l0, l1 = math.log(lo), math.log(hi)
+            a = l0 if start <= 0.0 else l0 + (l1 - l0) * start / 100.0
+            b = l1 if end >= 100.0 else l0 + (l1 - l0) * end / 100.0
+            self.vmin, self.vmax = math.exp(a), math.exp(b)
+            if start <= 0.0:
+                self.vmin = lo
+            if end >= 100.0:
+                self.vmax = hi
+            if self.vmax <= self.vmin:
+                self.vmax = self.vmin * self.log_base
+            self._ticks = _log_ticks(self.vmin, self.vmax, self.log_base)
+            return
+        span = hi - lo
+        self.vmin = lo + span * start / 100.0
+        self.vmax = lo + span * end / 100.0
+        if self.vmax <= self.vmin:
+            self.vmax = self.vmin + max(1e-6, span * 0.01)
+        _, _, self._ticks = niceTicks(self.vmin, self.vmax)
 
     def bandWidth(self, start: float, end: float) -> float:
         """category 轴单个 band 的像素宽度（value 轴返回 0）。"""
@@ -549,6 +712,10 @@ class AxisModel:
             else:
                 idx = int(frac * n)
             return min(max(idx, 0), n - 1)
+        if self.type == "log":
+            if self.vmin <= 0.0 or self.vmax <= 0.0:
+                return None
+            return self.vmin * (self.vmax / self.vmin) ** frac
         return self.vmin + frac * (self.vmax - self.vmin)
 
     # -- 外观 ------------------------------------------------------------
@@ -578,6 +745,8 @@ class AxisModel:
         try:
             size = float(label.get("fontSize", T("font.xs")))
         except (TypeError, ValueError, OverflowError):
+            size = float(T("font.xs"))
+        if not math.isfinite(size) or size <= 0:
             size = float(T("font.xs"))
         try:
             weight = int(label.get("fontWeight", 400))
@@ -617,7 +786,7 @@ class AxisModel:
             )
         else:
             raw = str(value)
-        text = formatValue(raw)
+        text = _format_log_tick(raw) if self.type == "log" else formatValue(raw)
         if callable(formatter):
             try:
                 out = formatter(raw, 0)
@@ -713,6 +882,26 @@ _PEN_STYLES = {
 }
 
 
+def _axis_options(value) -> list:
+    """``xAxis`` / ``yAxis`` → option dict 列表（单 dict 与数组两种写法）。"""
+    if isinstance(value, dict):
+        return [dict(value)]
+    if isinstance(value, (list, tuple)):
+        return [dict(v) for v in value if isinstance(v, dict)]
+    return []
+
+
+def _axis_index(value, count: int) -> int:
+    """轴索引归一化：非整数 / 越界一律收敛到合法范围（默认 0）。"""
+    if count <= 0:
+        return 0
+    try:
+        idx = int(value)
+    except (TypeError, ValueError, OverflowError):
+        idx = 0
+    return min(max(idx, 0), count - 1)
+
+
 def _line_pen(opt: dict, default_color, default_width=1.0) -> QPen:
     """解析 ``{lineStyle: {color, width, type}}`` → QPen。"""
     style = opt.get("lineStyle")
@@ -732,23 +921,40 @@ def _line_pen(opt: dict, default_color, default_width=1.0) -> QPen:
 
 
 class GridCoord(Coord):
-    """直角坐标系：grid 边距 + x/y 轴 + 网格 / 区域 / 刻度 / 标签。
+    """直角坐标系：grid 边距 + 多 x/y 轴 + 网格 / 区域 / 刻度 / 标签。
 
     option 键：``grid``（left/right/top/bottom 默认 48/24/40/36、``show``、
     ``containLabel``、``borderColor`` / ``borderWidth`` / ``backgroundColor``）、
-    ``xAxis`` / ``yAxis``（见 AxisModel）。边距支持数值 px 或 ``"N%"``。
-    ``mapPoint(x, y)``：x 为类别名/下标或数值，y 为数值。
+    ``xAxis`` / ``yAxis``（单个 dict 或数组，见 AxisModel）。边距支持数值 px
+    或 ``"N%"``。``mapPoint(x, y)``：x 为类别名/下标或数值，y 为数值；
+    可选 ``x_axis_index`` / ``y_axis_index`` 指定轴。
+
+    多轴通过 :meth:`axis_view` 返回绑定到某对轴的轻量视图；系列渲染器继续
+    读 ``coord.x_axis`` / ``coord.y_axis``，无需逐个改。
     """
 
     kind = "grid"
 
     def __init__(self, chart=None, option: dict = None):
         super().__init__(chart, option)
-        xopt = dict(self.option.get("xAxis") or {})
-        yopt = dict(self.option.get("yAxis") or {})
-        x_default = "category" if xopt.get("data") else "value"
-        self.x_axis = AxisModel(xopt, x_default)
-        self.y_axis = AxisModel(yopt, "value")
+        xopts = _axis_options(self.option.get("xAxis"))
+        yopts = _axis_options(self.option.get("yAxis"))
+        if not xopts:
+            xopts = [{}]
+        if not yopts:
+            yopts = [{}]
+        self.x_axes = [
+            AxisModel(o, "category" if o.get("data") else "value") for o in xopts
+        ]
+        self.y_axes = [AxisModel(o, "value") for o in yopts]
+        for i, axis in enumerate(self.x_axes):
+            if axis.position not in ("top", "bottom"):
+                axis.position = "bottom" if i == 0 else "top"
+        for i, axis in enumerate(self.y_axes):
+            if axis.position not in ("left", "right"):
+                axis.position = "left" if i == 0 else "right"
+        #: ``(x_axis_index, y_axis_index)`` → 轴对视图缓存
+        self._axis_views: dict = {}
         grid = dict(self.option.get("grid") or {})
         self._m_left = _parse_margin(grid.get("left"), 48)
         self._m_right = _parse_margin(grid.get("right"), 24)
@@ -765,14 +971,48 @@ class GridCoord(Coord):
             self.grid_border_width = 0.0
         self.contain_label = bool(grid.get("containLabel", False))
 
+    @property
+    def x_axis(self) -> AxisModel:
+        """主轴（索引 0）；多轴请用 :meth:`axis_view` 或直接读 ``x_axes``。"""
+        return self.x_axes[0]
+
+    @property
+    def y_axis(self) -> AxisModel:
+        """主轴（索引 0）。"""
+        return self.y_axes[0]
+
+    def _series_axes(self, series_opt: dict):
+        """系列 → ``(x_axis_index, y_axis_index)``（越界静默收敛）。"""
+        s = series_opt if isinstance(series_opt, dict) else {}
+        return (
+            _axis_index(s.get("xAxisIndex"), len(self.x_axes)),
+            _axis_index(s.get("yAxisIndex"), len(self.y_axes)),
+        )
+
+    def axis_view_for_indices(self, x_axis_index=0, y_axis_index=0):
+        """取绑定到某对轴的视图（同一个 GridCoord 共享绘图区）。"""
+        xi = _axis_index(x_axis_index, len(self.x_axes))
+        yi = _axis_index(y_axis_index, len(self.y_axes))
+        key = (xi, yi)
+        view = self._axis_views.get(key)
+        if view is None:
+            view = _GridAxisView(self, xi, yi)
+            self._axis_views[key] = view
+        return view
+
+    def axis_view(self, series_opt: dict = None):
+        """按系列 ``xAxisIndex`` / ``yAxisIndex`` 取轴对视图。"""
+        xi, yi = self._series_axes(series_opt)
+        return self.axis_view_for_indices(xi, yi)
+
     # -- 数据范围 ---------------------------------------------------------
-    def _extent(self, data):
-        """带缓存的数值范围（``(x_min, x_max, y_min, y_max)`` 或 None）。
+    def _extent(self, data, positive_x: bool = False, positive_y: bool = False):
+        """带缓存的数值范围 ``(x0, x1, y0, y1)``（缺失维度为 ``None``）。
 
         缓存是**缩放 / 平移流畅度的关键**：``setSeries`` 在每次重建
         （缩放、平移、数据更新、图例切换都会触发）时都重算全量范围，
         百万点逐点扫描要 400 ms 以上。范围只取决于数据本身，与窗口无关，
-        因此按「数据对象身份 + 长度」缓存后，缩放时这一步接近零成本。
+        因此按「数据对象身份 + 长度 + 正值过滤」缓存后，缩放时这一步接近零成本。
 
         缓存值同时**持有数据对象的强引用**（见 ``_EXTENT_CACHE`` 的说明），
         否则对象被回收后 ``id`` 会被复用，把别的数据的范围当成自己的。
@@ -781,21 +1021,26 @@ class GridCoord(Coord):
             return None
         if _cdata.isBufferLike(data) or _ds.np is not None:
             try:
-                key = (id(data), len(data))
+                n = len(data)
+                key = (
+                    (id(data), n)
+                    if not positive_x and not positive_y
+                    else (id(data), n, int(bool(positive_x)), int(bool(positive_y)))
+                )
             except TypeError:
-                return self._numpy_extent(data)
+                return self._numpy_extent(data, positive_x, positive_y)
             hit = _EXTENT_CACHE.get(key)
             if hit is not None and hit[0] is data:
                 return hit[1]
-            ext = self._numpy_extent(data)
+            ext = self._numpy_extent(data, positive_x, positive_y)
             if len(_EXTENT_CACHE) >= _EXTENT_CACHE_LIMIT:
                 _EXTENT_CACHE.clear()
             _EXTENT_CACHE[key] = (data, ext)
             return ext
-        return self._numpy_extent(data)
+        return self._numpy_extent(data, positive_x, positive_y)
 
-    def _numpy_extent(self, data):
-        """numpy 快速路径：返回 (x_min, x_max, y_min, y_max) 或 None。
+    def _numpy_extent(self, data, positive_x: bool = False, positive_y: bool = False):
+        """numpy 快速路径：返回 ``(x0, x1, y0, y1)``（缺失维度为 ``None``）或 None。
 
         纯数值列表：x 按下标语义（0 .. n-1）；[x, y] 列表：取两列；
         含字典 / None / 混合形式返回 None（调用方回退 Python 循环）。
@@ -821,31 +1066,61 @@ class GridCoord(Coord):
             if not arr.size:
                 return None
             arr = np_.where(np_.isfinite(arr), arr, np_.nan)
+            if positive_y:
+                arr = np_.where(arr > 0.0, arr, np_.nan)
             if not np_.isfinite(arr).any():
                 return None
             ymin, ymax = float(np_.nanmin(arr)), float(np_.nanmax(arr))
-            return 0.0, float(arr.size - 1), ymin, ymax
+            x0 = 1.0 if positive_x and arr.size > 1 else 0.0
+            if positive_x and arr.size <= 1:
+                return None
+            return x0, float(arr.size - 1), ymin, ymax
         if arr.ndim == 2 and arr.shape[1] >= 2 and arr.shape[0]:
             xcol = np_.where(np_.isfinite(arr[:, 0]), arr[:, 0], np_.nan)
             ycol = np_.where(np_.isfinite(arr[:, 1]), arr[:, 1], np_.nan)
-            if not (np_.isfinite(ycol).any() and np_.isfinite(xcol).any()):
+            if positive_x:
+                xcol = np_.where(xcol > 0.0, xcol, np_.nan)
+            if positive_y:
+                ycol = np_.where(ycol > 0.0, ycol, np_.nan)
+            xpair = (
+                (float(np_.nanmin(xcol)), float(np_.nanmax(xcol)))
+                if np_.isfinite(xcol).any()
+                else None
+            )
+            ypair = (
+                (float(np_.nanmin(ycol)), float(np_.nanmax(ycol)))
+                if np_.isfinite(ycol).any()
+                else None
+            )
+            if ypair is None and not (positive_x or positive_y):
+                return None
+            if xpair is None and ypair is None:
                 return None
             return (
-                float(np_.nanmin(xcol)),
-                float(np_.nanmax(xcol)),
-                float(np_.nanmin(ycol)),
-                float(np_.nanmax(ycol)),
+                xpair[0] if xpair else None,
+                xpair[1] if xpair else None,
+                ypair[0] if ypair else None,
+                ypair[1] if ypair else None,
             )
         return None
 
     def setSeries(self, series_opts: list) -> None:
-        ys = []
-        xs = []
+        xs = [[] for _ in self.x_axes]
+        ys = [[] for _ in self.y_axes]
         for s in series_opts or []:
             if not isinstance(s, dict):
                 continue
             if s.get("coordinateSystem") not in (None, "cartesian2d", "grid"):
                 continue
+            xi, yi = self._series_axes(s)
+            xaxis = self.x_axes[xi]
+            yaxis = self.y_axes[yi]
+            need_x = xaxis.type in ("value", "log")
+            need_y = yaxis.type in ("value", "log")
+            if not need_x and not need_y:
+                continue
+            positive_x = xaxis.type == "log"
+            positive_y = yaxis.type == "log"
             data = s.get("data")
             # ``data: 5`` / ``3.5`` / ``True`` 这类**标量**不是合法序列（ECharts
             # 也不接受），但它此前一路走到下面的 ``enumerate(data)`` 抛 TypeError，
@@ -859,36 +1134,44 @@ class GridCoord(Coord):
                 data = []
             elif not _cdata.isBufferLike(data) and not isinstance(data, (list, tuple)):
                 data = []
-            ext = self._extent(data)
+            ext = self._extent(data, positive_x, positive_y)
             if ext is not None:
-                # ``_numpy_extent`` 已把 NaN / inf 都排除（inf 只跳 NaN 的
-                # ``nanmin`` 是不够的，见该方法 docstring）
                 x0, x1, y0, y1 = ext
-                ys.extend((y0, y1))
-                if self.x_axis.type == "value":
-                    xs.extend((x0, x1))
-                continue
+                have_x = x0 is not None and x1 is not None
+                have_y = y0 is not None and y1 is not None
+                if need_x and have_x:
+                    xs[xi].extend((x0, x1))
+                if need_y and have_y:
+                    ys[yi].extend((y0, y1))
+                if (not need_x or have_x) and (not need_y or have_y):
+                    continue
             for i, item in enumerate(data):
                 # ``_datum_y`` / ``_datum_x`` 在入口已滤掉 NaN / inf
                 y = _datum_y(item)
-                if y is not None:
-                    ys.append(y)
-                if self.x_axis.type == "value":
+                if need_y and y is not None and (not positive_y or y > 0.0):
+                    ys[yi].append(y)
+                if need_x:
                     x = _datum_x(item)
-                    if isinstance(x, (int, float)) and not isinstance(x, bool):
-                        xs.append(float(x))
-                    elif y is not None:
-                        # 纯数值数据：x 取下标（index 语义），保证 value-x 轴范围正确
-                        xs.append(float(i))
-        if ys:
-            self.y_axis.setExtent(min(ys), max(ys))
-        else:
-            self.y_axis.setExtent(0.0, 1.0)
-        if self.x_axis.type == "value":
-            if xs:
-                self.x_axis.setExtent(min(xs), max(xs))
-            else:
-                self.x_axis.setExtent(0.0, 1.0)
+                    if x is None:
+                        if y is not None:
+                            x = float(i)  # 纯数值数据：x 取下标（index 语义）
+                        else:
+                            continue
+                    if positive_x and x <= 0.0:
+                        continue
+                    xs[xi].append(float(x))
+        for i, axis in enumerate(self.y_axes):
+            if axis.type in ("value", "log"):
+                vals = ys[i]
+                axis.setExtent(min(vals), max(vals)) if vals else axis.setExtent(
+                    0.0, 1.0
+                )
+        for i, axis in enumerate(self.x_axes):
+            if axis.type in ("value", "log"):
+                vals = xs[i]
+                axis.setExtent(min(vals), max(vals)) if vals else axis.setExtent(
+                    0.0, 1.0
+                )
 
     # -- 协议 -------------------------------------------------------------
     def layout(self, rect: QRectF) -> None:
@@ -898,8 +1181,7 @@ class GridCoord(Coord):
         self.m_right = _margin_px(self._m_right, rect.width())
         self.m_top = _margin_px(self._m_top, rect.height())
         self.m_bottom = _margin_px(self._m_bottom, rect.height())
-        if self.contain_label:
-            self._apply_contain_label(rect)
+        self._apply_axis_margins(rect)
         self.plot = QRectF(
             rect.left() + self.m_left,
             rect.top() + self.m_top,
@@ -907,26 +1189,81 @@ class GridCoord(Coord):
             max(10.0, rect.height() - self.m_top - self.m_bottom),
         )
 
-    def _apply_contain_label(self, rect: QRectF) -> None:
-        """``grid.containLabel``：边距按轴标签实际尺寸扩到够放。"""
-        font = self.y_axis.labelFont()
+    def _axis_label_extent(self, axis: AxisModel, horizontal: bool) -> float:
+        """轴标签在垂直轴方向（y 轴宽度 / x 轴高度）需要的像素。"""
+        if axis.axisLabelOption().get("show", True) is False:
+            return 0.0
+        font = axis.labelFont()
         fm = QFontMetricsF(font)
-        if self.y_axis.axisLabelOption().get("show", True) is not False:
+        if horizontal:
+            if axis.type == "category":
+                values = axis.categories
+            else:
+                values = axis._ticks
+            if not values:
+                return 0.0
+            step = max(1, len(values) // 64)
             width = 0.0
-            for tv in self.y_axis.ticks():
-                width = max(
-                    width, fm.horizontalAdvance(self.y_axis.formatTickLabel(tv))
+            for i in range(0, len(values), step):
+                label = (
+                    str(values[i])
+                    if axis.type == "category"
+                    else axis.formatTickLabel(values[i])
                 )
-            self.m_left = max(self.m_left, width + 12)
-        if self.x_axis.axisLabelOption().get("show", True) is not False:
-            self.m_bottom = max(self.m_bottom, fm.height() + 12)
+                width = max(width, float(fm.horizontalAdvance(label)))
+            extra = float(fm.height()) + 6.0 if axis.name else 0.0
+            return width + 12.0 + axis.offset + extra
+        height = float(fm.height()) + 12.0 + axis.offset
+        if axis.name:
+            height += float(fm.height()) + 4.0
+        return height
 
-    def mapPoint(self, x, y=None) -> QPointF:
-        px = self.x_axis.map(x, self.plot.left(), self.plot.right())
-        py = self.y_axis.map(_to_float(y), self.plot.bottom(), self.plot.top())
+    def _apply_axis_margins(self, rect: QRectF) -> None:
+        """按轴位置预留标签空间（右侧 Y / 顶部 X 是新功能，必须自动留白）。"""
+        left = [a for a in self.y_axes if a.position == "left"]
+        right = [a for a in self.y_axes if a.position == "right"]
+        bottom = [a for a in self.x_axes if a.position == "bottom"]
+        top = [a for a in self.x_axes if a.position == "top"]
+        left_need = sum(self._axis_label_extent(a, True) for a in left)
+        right_need = sum(self._axis_label_extent(a, True) for a in right)
+        bottom_need = sum(self._axis_label_extent(a, False) for a in bottom)
+        top_need = sum(self._axis_label_extent(a, False) for a in top)
+        if self.contain_label:
+            self.m_left = max(self.m_left, left_need)
+            self.m_right = max(self.m_right, right_need)
+            self.m_bottom = max(self.m_bottom, bottom_need)
+            self.m_top = max(self.m_top, top_need)
+            return
+        # 非 containLabel：主轴保持既有边距（向后兼容），副轴 / 右 / 上必须留白。
+        if any(a is not self.y_axes[0] for a in left):
+            self.m_left = max(self.m_left, left_need)
+        if right:
+            self.m_right = max(self.m_right, right_need)
+        if any(a is not self.x_axes[0] for a in bottom):
+            self.m_bottom = max(self.m_bottom, bottom_need)
+        if top:
+            self.m_top = max(self.m_top, top_need)
+
+    def mapPoint(
+        self,
+        x,
+        y=None,
+        x_axis_index: int = 0,
+        y_axis_index: int = 0,
+    ) -> QPointF:
+        xa = self.x_axes[_axis_index(x_axis_index, len(self.x_axes))]
+        ya = self.y_axes[_axis_index(y_axis_index, len(self.y_axes))]
+        px = xa.map(x, self.plot.left(), self.plot.right())
+        py = ya.map(_to_float(y), self.plot.bottom(), self.plot.top())
         return QPointF(px, py)
 
-    def mapArrays(self, xs, ys):
+    def mapArrays(
+        self,
+        xs,
+        ys,
+        x_axis_index: int = 0,
+        y_axis_index: int = 0,
+    ):
         """批量映射（numpy 数组进 → ``(px, py)`` 两个数组）；不支持时返回 ``None``。
 
         与 :meth:`mapPoint` 逐点**同语义**，只是把「每点 ~6µs 的 Python 调用链」
@@ -934,16 +1271,18 @@ class GridCoord(Coord):
         16ms 降到 <1ms）。以下情形返回 ``None`` 让调用方退回逐点：
 
         * 缺 numpy；
-        * 轴类型不在 ``value`` / ``category`` 内（log / time / 自定义）；
+        * 轴类型不在 ``value`` / ``category`` / ``log`` 内；
         * category 轴的 x 不是数值（类别名无法向量化）。
 
         非有限坐标不做过滤：由调用方按 ``isfinite`` 决定是否断开（保持
-        ``mapPoint`` 把 NaN 交给调用方处理的既有约定）。
+        ``mapPoint`` 把 NaN 交给调用方处理的既有约定）。log 轴的非正值
+        产出 NaN。
         """
         np_ = _ds.np
         if np_ is None or xs is None or ys is None:
             return None
-        xa, ya = self.x_axis, self.y_axis
+        xa = self.x_axes[_axis_index(x_axis_index, len(self.x_axes))]
+        ya = self.y_axes[_axis_index(y_axis_index, len(self.y_axes))]
         left, right = self.plot.left(), self.plot.right()
         bottom, top = self.plot.bottom(), self.plot.top()
 
@@ -963,30 +1302,58 @@ class GridCoord(Coord):
             values = np_.asarray(xs, dtype=np_.float64)
             span = xa.vmax - xa.vmin
             frac = np_.zeros_like(values) if span == 0 else (values - xa.vmin) / span
+        elif xa.type == "log":
+            values = np_.asarray(xs, dtype=np_.float64)
+            frac = np_.full(values.shape, np_.nan, dtype=np_.float64)
+            valid = values > 0.0
+            if xa.vmin > 0.0 and xa.vmax > 0.0:
+                lo, hi = math.log(xa.vmin), math.log(xa.vmax)
+                if hi != lo:
+                    frac[valid] = (np_.log(values[valid]) - lo) / (hi - lo)
+                else:
+                    frac[valid] = 0.0
         else:
             return None
         if xa.inverse:
             frac = 1.0 - frac
         px = left + (right - left) * frac
 
-        if ya.type != "value":
+        if ya.type == "value":
+            y_values = np_.asarray(ys, dtype=np_.float64)
+            y_span = ya.vmax - ya.vmin
+            y_frac = (
+                np_.zeros_like(y_values)
+                if y_span == 0
+                else (y_values - ya.vmin) / y_span
+            )
+        elif ya.type == "log":
+            y_values = np_.asarray(ys, dtype=np_.float64)
+            y_frac = np_.full(y_values.shape, np_.nan, dtype=np_.float64)
+            valid = y_values > 0.0
+            if ya.vmin > 0.0 and ya.vmax > 0.0:
+                lo, hi = math.log(ya.vmin), math.log(ya.vmax)
+                if hi != lo:
+                    y_frac[valid] = (np_.log(y_values[valid]) - lo) / (hi - lo)
+                else:
+                    y_frac[valid] = 0.0
+        else:
             return None
-        y_values = np_.asarray(ys, dtype=np_.float64)
-        y_span = ya.vmax - ya.vmin
-        y_frac = np_.zeros_like(y_values) if y_span == 0 else (y_values - ya.vmin) / y_span
         if ya.inverse:
             y_frac = 1.0 - y_frac
         py = bottom + (top - bottom) * y_frac
         return px, py
 
-    def invertX(self, pos: QPointF):
-        return self.x_axis.invert(pos.x(), self.plot.left(), self.plot.right())
+    def invertX(self, pos: QPointF, x_axis_index: int = 0):
+        xa = self.x_axes[_axis_index(x_axis_index, len(self.x_axes))]
+        return xa.invert(pos.x(), self.plot.left(), self.plot.right())
 
-    def invertPoint(self, pos: QPointF):
+    def invertPoint(self, pos: QPointF, x_axis_index: int = 0, y_axis_index: int = 0):
         """像素 → ``[x, y]``（category 轴返回窗口内下标）。"""
+        xa = self.x_axes[_axis_index(x_axis_index, len(self.x_axes))]
+        ya = self.y_axes[_axis_index(y_axis_index, len(self.y_axes))]
         return [
-            self.x_axis.invert(pos.x(), self.plot.left(), self.plot.right()),
-            self.y_axis.invert(pos.y(), self.plot.bottom(), self.plot.top()),
+            xa.invert(pos.x(), self.plot.left(), self.plot.right()),
+            ya.invert(pos.y(), self.plot.bottom(), self.plot.top()),
         ]
 
     def containPoint(self, pos: QPointF) -> bool:
@@ -1095,8 +1462,27 @@ class GridCoord(Coord):
                     out.append((px, self.plot.bottom(), axis.formatTickLabel(tv), tv))
         return out
 
+    def _axis_sides(self):
+        """``(axis, horizontal, primary)``：y 轴 horizontal=True，x 轴 False。"""
+        out = []
+        for i, axis in enumerate(self.y_axes):
+            out.append((axis, True, i == 0))
+        for i, axis in enumerate(self.x_axes):
+            out.append((axis, False, i == 0))
+        return out
+
+    def _axis_line_pos(self, axis: AxisModel, horizontal: bool) -> float:
+        """轴线所在像素（y 轴返回 x，x 轴返回 y）。"""
+        if horizontal:
+            if axis.position == "right":
+                return self.plot.right() + axis.offset
+            return self.plot.left() - axis.offset
+        if axis.position == "top":
+            return self.plot.top() - axis.offset
+        return self.plot.bottom() + axis.offset
+
     def _paint_split_area(self, p: QPainter) -> None:
-        for axis, horizontal in ((self.y_axis, True), (self.x_axis, False)):
+        for axis, horizontal, _primary in self._axis_sides():
             opt = axis.splitAreaOption()
             if not bool(opt.get("show", False)):
                 continue
@@ -1108,7 +1494,7 @@ class GridCoord(Coord):
                 axis, horizontal, self._interval_step(axis, horizontal, "splitArea")
             )
             spans = []
-            for i, (px, py, _label, _idx) in enumerate(positions):
+            for px, py, _label, _idx in positions:
                 spans.append(py if horizontal else px)
             for i in range(len(spans) - 1):
                 lo, hi = sorted((spans[i], spans[i + 1]))
@@ -1122,10 +1508,11 @@ class GridCoord(Coord):
                 p.fillRect(rect, color)
 
     def _paint_split_lines(self, p: QPainter) -> None:
-        for axis, horizontal in ((self.y_axis, True), (self.x_axis, False)):
+        for axis, horizontal, primary in self._axis_sides():
             opt = axis.splitLineOption()
-            # ECharts 默认：value 轴显示网格线，category 轴不显示
-            default_show = axis.type == "value"
+            # ECharts 默认：value / log 轴显示网格线，category 轴不显示。
+            # 副轴默认不画（否则两套网格叠在一起），显式 show 可开。
+            default_show = axis.type in ("value", "log") and primary
             if not bool(opt.get("show", default_show)):
                 continue
             p.setPen(_line_pen(opt, T("color.border")))
@@ -1142,18 +1529,20 @@ class GridCoord(Coord):
                     )
 
     def _paint_axis_lines(self, p: QPainter) -> None:
-        for axis, points in (
-            (self.x_axis, (self.plot.bottomLeft(), self.plot.bottomRight())),
-            (self.y_axis, (self.plot.bottomLeft(), self.plot.topLeft())),
-        ):
+        for axis, horizontal, _primary in self._axis_sides():
             opt = axis.axisLineOption()
             if not bool(opt.get("show", True)):
                 continue
             p.setPen(_line_pen(opt, T("color.border.strong")))
-            p.drawLine(points[0], points[1])
+            if horizontal:
+                x = self._axis_line_pos(axis, True)
+                p.drawLine(QPointF(x, self.plot.bottom()), QPointF(x, self.plot.top()))
+            else:
+                y = self._axis_line_pos(axis, False)
+                p.drawLine(QPointF(self.plot.left(), y), QPointF(self.plot.right(), y))
 
     def _paint_ticks(self, p: QPainter) -> None:
-        for axis, horizontal in ((self.y_axis, True), (self.x_axis, False)):
+        for axis, horizontal, _primary in self._axis_sides():
             opt = axis.axisTickOption()
             if not bool(opt.get("show", True)):
                 continue
@@ -1163,131 +1552,154 @@ class GridCoord(Coord):
             except (TypeError, ValueError, OverflowError):
                 length = 5.0
             p.setPen(_line_pen(opt, T("color.border.strong")))
+            line = self._axis_line_pos(axis, horizontal)
+            # 向外方向的符号：left=-1 / right=+1 / bottom=+1 / top=-1
+            if horizontal:
+                outward = 1.0 if axis.position == "right" else -1.0
+            else:
+                outward = 1.0 if axis.position == "bottom" else -1.0
+            direction = -outward if inside else outward
             for px, py, _label, _idx in self._axis_positions(
                 axis, horizontal, self._interval_step(axis, horizontal, "axisTick")
             ):
                 if horizontal:
-                    x = self.plot.left()
                     p.drawLine(
-                        QPointF(x, py), QPointF(x + (length if inside else -length), py)
+                        QPointF(line, py), QPointF(line + direction * length, py)
                     )
                 else:
-                    y = self.plot.bottom()
                     p.drawLine(
-                        QPointF(px, y), QPointF(px, y - (length if inside else -length))
+                        QPointF(px, line), QPointF(px, line + direction * length)
                     )
 
     def _paint_axis_labels(self, p: QPainter) -> None:
-        # y 轴标签（右对齐到轴线左侧）
-        font = self.y_axis.labelFont()
-        p.setFont(font)
-        fm = QFontMetricsF(font)
-        color = self.y_axis.labelColor()
-        for px, py, label, idx in self._axis_positions(
-            self.y_axis, True, self._interval_step(self.y_axis, True, "axisLabel")
-        ):
-            if not self.y_axis.labelShownAt(idx, label):
-                continue
-            p.setPen(color)
-            p.drawText(
-                QRectF(
-                    self.rect.left(),
-                    py - fm.height() / 2,
-                    max(8.0, self.plot.left() - self.rect.left() - 6),
-                    fm.height(),
-                ),
-                Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter,
-                label,
-            )
-        # x 轴标签（居中于刻度，可按 axisLabel.rotate 旋转）
-        font = self.x_axis.labelFont()
-        p.setFont(font)
-        fm = QFontMetricsF(font)
-        color = self.x_axis.labelColor()
-        try:
-            rotate = float(self.x_axis.axisLabelOption().get("rotate", 0) or 0)
-        except (TypeError, ValueError, OverflowError):
-            rotate = 0.0
-        for px, py, label, idx in self._axis_positions(
-            self.x_axis, False, self._interval_step(self.x_axis, False, "axisLabel")
-        ):
-            if not self.x_axis.labelShownAt(idx, label):
-                continue
-            p.setPen(color)
-            if abs(rotate) < 1e-6:
-                p.drawText(
-                    QRectF(px - 40, self.plot.bottom() + 5, 80, fm.height()),
-                    Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignTop,
-                    label,
-                )
+        # y 轴标签：left 右对齐到轴线左侧，right 左对齐到轴线右侧
+        for axis in self.y_axes:
+            font = axis.labelFont()
+            p.setFont(font)
+            fm = QFontMetricsF(font)
+            color = axis.labelColor()
+            line = self._axis_line_pos(axis, True)
+            if axis.position == "right":
+                left = line + 6
+                right = max(left + 8, self.rect.right())
+                align = Qt.AlignmentFlag.AlignLeft
             else:
-                p.save()
-                p.translate(px, self.plot.bottom() + 5 + fm.height() / 2)
-                p.rotate(rotate)
+                left = self.rect.left()
+                right = max(left + 8, line - 6)
+                align = Qt.AlignmentFlag.AlignRight
+            for px, py, label, idx in self._axis_positions(
+                axis, True, self._interval_step(axis, True, "axisLabel")
+            ):
+                if not axis.labelShownAt(idx, label):
+                    continue
+                p.setPen(color)
                 p.drawText(
-                    QRectF(-60, -fm.height() / 2, 120, fm.height()),
-                    Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignVCenter,
+                    QRectF(
+                        left, py - fm.height() / 2, max(8.0, right - left), fm.height()
+                    ),
+                    align | Qt.AlignmentFlag.AlignVCenter,
                     label,
                 )
-                p.restore()
+        # x 轴标签：bottom 在轴线下，top 在轴线上；可按 axisLabel.rotate 旋转
+        for axis in self.x_axes:
+            font = axis.labelFont()
+            p.setFont(font)
+            fm = QFontMetricsF(font)
+            color = axis.labelColor()
+            try:
+                rotate = float(axis.axisLabelOption().get("rotate", 0) or 0)
+            except (TypeError, ValueError, OverflowError):
+                rotate = 0.0
+            line = self._axis_line_pos(axis, False)
+            top_side = axis.position == "top"
+            for px, py, label, idx in self._axis_positions(
+                axis, False, self._interval_step(axis, False, "axisLabel")
+            ):
+                if not axis.labelShownAt(idx, label):
+                    continue
+                p.setPen(color)
+                if abs(rotate) < 1e-6:
+                    rect = (
+                        QRectF(px - 40, line - 5 - fm.height(), 80, fm.height())
+                        if top_side
+                        else QRectF(px - 40, line + 5, 80, fm.height())
+                    )
+                    p.drawText(
+                        rect,
+                        Qt.AlignmentFlag.AlignHCenter
+                        | (
+                            Qt.AlignmentFlag.AlignBottom
+                            if top_side
+                            else Qt.AlignmentFlag.AlignTop
+                        ),
+                        label,
+                    )
+                else:
+                    center_y = (
+                        line - 5 - fm.height() / 2
+                        if top_side
+                        else line + 5 + fm.height() / 2
+                    )
+                    p.save()
+                    p.translate(px, center_y)
+                    p.rotate(rotate)
+                    p.drawText(
+                        QRectF(-60, -fm.height() / 2, 120, fm.height()),
+                        Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignVCenter,
+                        label,
+                    )
+                    p.restore()
 
     def _paint_axis_names(self, p: QPainter) -> None:
         c_name = QColor(T("color.text.tertiary"))
-        if self.x_axis.name:
+        for axis in self.x_axes:
+            if not axis.name:
+                continue
             p.setPen(c_name)
-            fm = QFontMetricsF(self.x_axis.labelFont())
-            base_y = self.plot.bottom() + self.x_axis.name_gap
-            if self.x_axis.name_location == "start":
-                p.drawText(
-                    QRectF(self.plot.left() - 40, base_y, 80, fm.height()),
-                    Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop,
-                    self.x_axis.name,
-                )
-            elif self.x_axis.name_location == "middle":
-                p.drawText(
-                    QRectF(self.plot.center().x() - 60, base_y, 120, fm.height()),
-                    Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignTop,
-                    self.x_axis.name,
-                )
-            else:  # end（默认）
-                p.drawText(
-                    QRectF(self.plot.right() - 80, base_y, 80, fm.height()),
-                    Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignTop,
-                    self.x_axis.name,
-                )
-        if self.y_axis.name:
+            fm = QFontMetricsF(axis.labelFont())
+            line = self._axis_line_pos(axis, False)
+            if axis.position == "top":
+                base_y = line - 5 - fm.height() - fm.height() - 2
+                align_v = Qt.AlignmentFlag.AlignBottom
+            else:
+                base_y = line + 5 + fm.height() + 2
+                align_v = Qt.AlignmentFlag.AlignTop
+            if axis.name_location == "start":
+                rect = QRectF(self.plot.left() - 40, base_y, 80, fm.height())
+                align_h = Qt.AlignmentFlag.AlignLeft
+            elif axis.name_location == "middle":
+                rect = QRectF(self.plot.center().x() - 60, base_y, 120, fm.height())
+                align_h = Qt.AlignmentFlag.AlignHCenter
+            else:
+                rect = QRectF(self.plot.right() - 80, base_y, 80, fm.height())
+                align_h = Qt.AlignmentFlag.AlignRight
+            p.drawText(rect, align_h | align_v, axis.name)
+        for axis in self.y_axes:
+            if not axis.name:
+                continue
             p.setPen(c_name)
-            fm = QFontMetricsF(self.y_axis.labelFont())
-            if self.y_axis.name_location == "start":
+            fm = QFontMetricsF(axis.labelFont())
+            line = self._axis_line_pos(axis, True)
+            if axis.position == "right":
+                left = line + 4
+                width = max(20.0, self.rect.right() - left)
+                align_h = Qt.AlignmentFlag.AlignLeft
+            else:
+                left = self.rect.left()
+                width = max(20.0, line - 4 - left)
+                align_h = Qt.AlignmentFlag.AlignRight
+            if axis.name_location == "start":
                 y = self.plot.bottom() - fm.height()
-                x = self.plot.left() + 4
-                p.drawText(
-                    QRectF(x, y, 120, fm.height()),
-                    Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignBottom,
-                    self.y_axis.name,
-                )
-            elif self.y_axis.name_location == "middle":
-                p.drawText(
-                    QRectF(
-                        self.rect.left(),
-                        self.plot.center().y() - fm.height() / 2,
-                        120,
-                        fm.height(),
-                    ),
-                    Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
-                    self.y_axis.name,
-                )
-            else:  # end（默认，轴顶）
-                p.drawText(
-                    QRectF(
-                        self.rect.left(),
-                        self.plot.top() - fm.height() - 4,
-                        120,
-                        fm.height(),
-                    ),
-                    Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignBottom,
-                    self.y_axis.name,
-                )
+                align_v = Qt.AlignmentFlag.AlignBottom
+            elif axis.name_location == "middle":
+                y = self.plot.center().y() - fm.height() / 2
+                align_v = Qt.AlignmentFlag.AlignVCenter
+            else:
+                y = self.plot.top() - fm.height() - 4
+                align_v = Qt.AlignmentFlag.AlignBottom
+            p.drawText(
+                QRectF(left, y, width, fm.height()), align_h | align_v, axis.name
+            )
 
     def paintAxes(self, p: QPainter) -> None:
         p.save()
@@ -1314,7 +1726,11 @@ class GridCoord(Coord):
         p.restore()
 
     def paintTooltipMarker(
-        self, p: QPainter, pos: QPointF, kind: str = "cross"
+        self,
+        p: QPainter,
+        pos: QPointF,
+        kind: str = "cross",
+        x_axis_index: int = 0,
     ) -> None:
         if kind == "none":
             return
@@ -1325,7 +1741,8 @@ class GridCoord(Coord):
         x = min(max(pos.x(), self.plot.left()), self.plot.right())
         y = min(max(pos.y(), self.plot.top()), self.plot.bottom())
         if kind == "shadow":
-            band = self.x_axis.bandWidth(self.plot.left(), self.plot.right())
+            xa = self.x_axes[_axis_index(x_axis_index, len(self.x_axes))]
+            band = xa.bandWidth(self.plot.left(), self.plot.right())
             width = band if band > 1.0 else 8.0
             shadow = QColor(T("color.bg.muted"))
             shadow.setAlpha(90)
@@ -1339,6 +1756,77 @@ class GridCoord(Coord):
             p.drawLine(QPointF(x, self.plot.top()), QPointF(x, self.plot.bottom()))
             p.drawLine(QPointF(self.plot.left(), y), QPointF(self.plot.right(), y))
         p.restore()
+
+
+class _GridAxisView(GridCoord):
+    """绑定到一对 ``(xAxisIndex, yAxisIndex)`` 的 GridCoord 视图。
+
+    共享 ``plot`` / ``rect``，只把 ``x_axis`` / ``y_axis`` 换成所选轴。
+    继承 ``GridCoord`` 是为了让系列 / 组件里既有的
+    ``isinstance(coord, GridCoord)`` 判断继续成立。
+    """
+
+    def __init__(self, owner: GridCoord, x_axis_index: int, y_axis_index: int):
+        self._owner = owner
+        self.chart = owner.chart
+        self.option = owner.option
+        self.x_axis_index = x_axis_index
+        self.y_axis_index = y_axis_index
+        self.x_axis = owner.x_axes[x_axis_index]
+        self.y_axis = owner.y_axes[y_axis_index]
+
+    #: 覆盖基类的只读 property，让实例可以指向所选轴
+    x_axis = None
+    y_axis = None
+
+    @property
+    def plot(self) -> QRectF:  # type: ignore[override]
+        return self._owner.plot
+
+    @property
+    def rect(self) -> QRectF:  # type: ignore[override]
+        return self._owner.rect
+
+    def mapPoint(self, x, y=None, x_axis_index=None, y_axis_index=None) -> QPointF:
+        return self._owner.mapPoint(
+            x,
+            y,
+            self.x_axis_index if x_axis_index is None else x_axis_index,
+            self.y_axis_index if y_axis_index is None else y_axis_index,
+        )
+
+    def mapArrays(self, xs, ys, x_axis_index=None, y_axis_index=None):
+        return self._owner.mapArrays(
+            xs,
+            ys,
+            self.x_axis_index if x_axis_index is None else x_axis_index,
+            self.y_axis_index if y_axis_index is None else y_axis_index,
+        )
+
+    def invertX(self, pos: QPointF, x_axis_index=None):
+        return self._owner.invertX(
+            pos, self.x_axis_index if x_axis_index is None else x_axis_index
+        )
+
+    def invertPoint(self, pos: QPointF, x_axis_index=None, y_axis_index=None):
+        return self._owner.invertPoint(
+            pos,
+            self.x_axis_index if x_axis_index is None else x_axis_index,
+            self.y_axis_index if y_axis_index is None else y_axis_index,
+        )
+
+    def containPoint(self, pos: QPointF) -> bool:
+        return self._owner.containPoint(pos)
+
+    def paintTooltipMarker(
+        self, p: QPainter, pos: QPointF, kind: str = "cross", x_axis_index=None
+    ) -> None:
+        return self._owner.paintTooltipMarker(
+            p,
+            pos,
+            kind,
+            self.x_axis_index if x_axis_index is None else x_axis_index,
+        )
 
 
 def _datum_y(item):

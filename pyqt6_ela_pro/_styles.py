@@ -481,6 +481,10 @@ class ColorText(ElaText):
         return self._size_metric("s", -1)
 
     def minimumSizeHint(self) -> QSize:  # noqa: N802 (Qt 命名)
+        # 非换行标签的 minimumSizeHint 与 sizeHint 同值（实测短/长文本逐值相等），
+        # 复用后者可省一次完整 shaping；换行标签仍交给 Qt 按最小宽度算。
+        if not self.wordWrap():
+            return self.sizeHint()
         return self._size_metric("m", -1)
 
     def setTextColor(self, color) -> None:  # noqa: N802 (Qt 命名)

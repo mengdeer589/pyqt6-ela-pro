@@ -103,6 +103,13 @@ class ChartInteraction:
         chart = self._chart
         if chart._loading:
             return
+        # 标注标签优先：双击标签进入编辑，不触发 resetView
+        try:
+            if chart._begin_annotation_edit(event.position()):
+                event.accept()
+                return
+        except Exception:
+            pass
         if chart._dispatch_hook("onMouseDoubleClick", event.position()):
             QWidget.mouseDoubleClickEvent(chart, event)
             return
