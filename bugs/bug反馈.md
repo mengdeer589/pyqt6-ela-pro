@@ -19,5 +19,6 @@
   - 报告里的行号是 pyd 行表伪影，不能证明 AV 发生在 `__getattr__`；「单例判空」不会命中任何分支，不能作为修复。
   - 已做防御性收口：`PyElaWidgetTools/scripts/wheel/__init__.py` 的 `__wrapsingleton` 改为首次访问时缓存 `getInstance()` 的 wrapper 并持有强引用；`tests/regression/test_binding_singleton_proxy.py` 守护缓存逻辑，`tests/regression/test_binding_singleton_lifetime.py` 守护已装轮子的非 Python 所有权。**该模板改动需重编 / 重打包 `pyqt6-elawidgettools` 轮子后才在运行时生效。**
   - 仍需下游提供：下次复现的 faulting module + offset（WER `Get-WinEvent -FilterHashtable @{LogName='Application'; Id=1000}`）、pyd 编译时 Qt 版本与运行时 DLL 是否一致。没有 offset 不能定位真正的 C++ 路径。取证步骤与一键收集脚本见 [`docs/crash-diagnostics.md`](../docs/crash-diagnostics.md)。
+- **2026-10-22 重编后更新**：本次重编的 C++ 在途改动包含 `ElaAppBarPrivate::onCloseButtonClicked` 的 use-after-free 修复——原实现 `window->close()` 后调 `QApplication::processEvents()`，带 `WA_DeleteOnClose` 的窗口会同步自毁，再取 `window->windowHandle()` 即 UAF（代码注释直接引用 bug #19）。这比 `__wrapsingleton` 缓存更可能是实际 AV 根因；`tests/regression/test_binding_appbar_close.py` 已通过。**待下游 Win7 复测确认后再从 `bugs/` 移除。**
 
 - 项目侧临时规避及移除条件：无（空闲期偶发、宿主侧无法规避；crash_diagnostics 保底取证）。若稳定复现某控件 / 某操作路径，再评估项目侧绕行。

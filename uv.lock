@@ -256,7 +256,7 @@ dependencies = [
     { name = "pyqt6" },
 ]
 wheels = [
-    { filename = "pyqt6_elawidgettools-0.13.0-cp39-abi3-win_amd64.whl", hash = "sha256:8bef58f6df74b59812575d67a8a0b0c480b02d56f94775c3b0ca3b139d9c9aed" },
+    { filename = "pyqt6_elawidgettools-0.13.0-cp39-abi3-win_amd64.whl", hash = "sha256:b1384070512afa6e44c8385b4c82469433985e2740487fe58e43adce0006ceb7" },
 ]
 
 [package.metadata]
