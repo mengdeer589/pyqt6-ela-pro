@@ -26,7 +26,8 @@
 ``LineSeriesRenderer._y_at`` 的 ``math.isfinite`` 判空口径一致，断点语义不变。
 
 依赖说明：numpy / tsdownsample 是本模块的可选依赖（见 ``charts._downsample``），
-未安装时全部降级为 ``array('d')`` 承载，语义一致。
+两者独立判断：numpy 缺失时降级为 ``array('d')`` 承载；tsdownsample 缺失只关闭
+其算法，numpy 仍可用于向量化承载与按桶抽稀。
 """
 
 from __future__ import annotations
@@ -100,14 +101,30 @@ class ElaNumericBuffer(Sequence):
             # 直接切。只有下标取值才需要显式 ``float()``（int dtype 兼容）。
             if _np is not None and isinstance(self._buf, _np.ndarray):
                 return self._buf[index].tolist()
-            return [float(v) for v in self._buf[index]]
-        return float(self._buf[index])
+            sliced = self._buf[index]
+            if sliced and isinstance(sliced[0], (list, tuple)):
+                return list(sliced)
+            return [float(v) for v in sliced]
+        value = self._buf[index]
+        if isinstance(value, (list, tuple)):
+            return value
+        if _np is not None and isinstance(value, _np.ndarray):
+            return value.tolist()
+        return float(value)
 
     def __iter__(self):
         if _np is not None and isinstance(self._buf, _np.ndarray):
             # tolist() 在 C 层完成 float64 -> Python float 转换，比逐个
             # 下标取值快一个数量级；大数组的迭代是热路径。
             return iter(self._buf.tolist())
+        # 非 ndarray 的 2D buffer-like（例如 future 的缓冲协议对象）：
+        # 行序列原样交出；1D array('d') 仍走 float 归一化。
+        if len(self._buf):
+            first = self._buf[0]
+            if isinstance(first, (list, tuple)) or hasattr(first, "tolist"):
+                return iter(
+                    self._buf.tolist() if hasattr(self._buf, "tolist") else self._buf
+                )
         return (float(v) for v in self._buf)
 
     def __array__(self, dtype=None, copy=None):

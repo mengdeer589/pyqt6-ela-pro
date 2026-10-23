@@ -107,6 +107,18 @@ class TestBufferSemantics:
         assert len(empty) == 0
         assert not empty  # __len__ 驱动真值，供 `data or []` 语义使用
 
+    @pytest.mark.skipif(np is None, reason="需要 numpy")
+    def test_two_column_buffer_iterates_rows(self):
+        """2D ``[t, v]`` 缓冲迭代 / 下标必须给行，不能 ``float(row)``。"""
+        arr = np.column_stack([np.arange(300.0), np.arange(300.0)])
+        buf = toBuffer(arr)
+        assert isinstance(buf, ElaNumericBuffer)
+        rows = list(buf)
+        assert len(rows) == 300
+        assert rows[0] == [0.0, 0.0]
+        assert buf[0] == [0.0, 0.0]
+        assert buf[:2] == [[0.0, 0.0], [1.0, 1.0]]
+
 
 # ---------------------------------------------------------------------------
 # 何时包装 / 何时不包装

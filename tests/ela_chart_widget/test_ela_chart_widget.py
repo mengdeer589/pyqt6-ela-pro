@@ -942,3 +942,35 @@ class TestChartOptionalDownsample:
         assert not img.isNull()
         assert chart.seriesRenderers
         chart.deleteLater()
+
+    def test_numpy_available_without_tsdownsample(self, monkeypatch):
+        """tsdownsample 缺失只关算法，不能把可用的 numpy 一起关掉。"""
+        np = pytest.importorskip("numpy")
+        monkeypatch.setattr(ds, "_AVAILABLE", False)
+        monkeypatch.setattr(ds, "_ALGORITHMS", {})
+        assert ds.np is not None
+        assert ds.available() is False
+        assert ds.is_sorted([1, 2, 3]) is True
+        picked = ds.bucket_minmax_indices(np.arange(100.0), 10)
+        assert picked is not None
+        assert len(picked) <= 10
+
+    def test_two_column_series_without_tsdownsample(self, monkeypatch):
+        np = pytest.importorskip("numpy")
+        monkeypatch.setattr(ds, "_AVAILABLE", False)
+        monkeypatch.setattr(ds, "_ALGORITHMS", {})
+        x = np.arange(300.0)
+        data = np.column_stack([x, np.sin(x)])
+        chart = ElaChartWidget()
+        chart.setOption(
+            {
+                "xAxis": {"type": "value"},
+                "yAxis": {"type": "value"},
+                "series": [{"type": "line", "data": data}],
+            }
+        )
+        chart.resize(480, 360)
+        chart.anim.setProgress(1.0)
+        assert chart.seriesRenderers
+        assert not chart.grab().toImage().isNull()
+        chart.deleteLater()

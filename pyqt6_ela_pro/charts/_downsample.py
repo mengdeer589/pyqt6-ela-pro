@@ -1,7 +1,7 @@
 """
 charts 折线降采样适配层（tsdownsample，可选依赖）。
 
-- ``available()``：tsdownsample / numpy 是否可用；
+- ``available()``：tsdownsample 是否可用（numpy 的可用性独立判断，见 ``np``）；
 - ``is_sorted(x)``：x 是否单调不减（tsdownsample 算法要求有序 x，
   非单调时返回空结果，调用方须退化为不采样）；
 - ``analyze_x(x)``：一次性分析时间基（单调性 / 步长 / 记录中断位置），
@@ -10,7 +10,8 @@ charts 折线降采样适配层（tsdownsample，可选依赖）。
   采样点下标（uint64 ndarray），失败 / 不可用返回 None。
 
 算法名对齐 tsdownsample：minmax / m4 / lttb / minmaxLTTB。
-未安装 tsdownsample 时本模块全部降级（渲染走原始全量路径，不崩溃）。
+未安装 tsdownsample 时只关闭这些算法（调用方退化到 ``bucket_minmax_indices``
+的 numpy 按桶抽稀）；只有 numpy 也缺失时才走原始全量路径，不崩溃。
 """
 
 from __future__ import annotations
@@ -19,7 +20,10 @@ import math
 
 try:
     import numpy as np
+except ImportError:  # numpy 可选；与 tsdownsample 的可用性独立
+    np = None
 
+try:
     from tsdownsample import (
         LTTBDownsampler,
         M4Downsampler,
@@ -34,8 +38,7 @@ try:
         "minmaxLTTB": MinMaxLTTBDownsampler,
     }
     _AVAILABLE = True
-except ImportError:  # 可选依赖：未安装时降级
-    np = None
+except ImportError:  # 可选依赖：未安装时只关闭 tsdownsample 算法
     LTTBDownsampler = M4Downsampler = MinMaxDownsampler = MinMaxLTTBDownsampler = None
     _ALGORITHMS = {}
     _AVAILABLE = False
@@ -70,8 +73,8 @@ def min_out_for(algorithm: str) -> int:
 
 
 def available() -> bool:
-    """tsdownsample 与 numpy 是否可用。"""
-    return _ALGORITHMS and _AVAILABLE and np is not None
+    """tsdownsample 是否可用（numpy 是否可用单独看 ``np``）。"""
+    return bool(_ALGORITHMS) and _AVAILABLE and np is not None
 
 
 def bucket_minmax_indices(y, n_out: int):
@@ -133,10 +136,12 @@ def bucket_minmax_indices(y, n_out: int):
 def is_sorted(x) -> bool:
     """x 是否单调**严格**递增（NaN / inf / 重复值均视为非法，返回 False）。
 
+    只依赖 numpy；tsdownsample 缺失时仍可用于窗口裁剪 / 中断分析。
+
     必须是**严格**递增而不是「不减」：tsdownsample 内部对 x 做 searchsorted，
     遇到重复值会算出越界下标并直接 Rust panic（``index out of bounds``）。
     """
-    if not _AVAILABLE or np is None or x is None:
+    if np is None or x is None:
         return False
     x = np.asarray(x)
     if x.size < 2:
