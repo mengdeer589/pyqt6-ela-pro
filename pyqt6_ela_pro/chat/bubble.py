@@ -696,42 +696,64 @@ class ElaChatBubble(ElaThemeWidget):
         在「工具调用 → 下一步」的过程中反复跳动（默认 ``"footer"`` 那一行更是还在
         长的整轮汇总）。回合结束（状态离开 ``Streaming``）后按模式展示：``"footer"``
         整轮汇总停靠到底部行，``"steps"`` 每步各自一行，``"none"`` 不显示。
+
+        历史恢复时 ``setStepStats`` 只存数据、不建控件；这里按模式**按需**建
+        ``StatsBadge``（footer 每条消息只建最后一个），避免 500 个徽标里 449 个
+        最终不可见却仍付创建 / 布局成本（bug #17）。
         """
-        badges = []
-        for part in self._parts:
-            if part.kind != ElaChatPartKindType.Stats:
-                continue
-            widget = self._part_widgets.get(part.id)
-            if isinstance(widget, StatsBadge):
-                badges.append((part, widget))
-        if not badges:
+        stats_parts = [
+            part
+            for part in self._parts
+            if part.kind == ElaChatPartKindType.Stats and part.stats is not None
+        ]
+        if not stats_parts:
             return
         if self._stats_mode == "none" or self._status == ElaChatStatusType.Streaming:
-            for _part, badge in badges:
-                badge.hide()
+            for part in stats_parts:
+                widget = self._part_widgets.get(part.id)
+                if isinstance(widget, StatsBadge) and not is_deleted(widget):
+                    widget.hide()
             return
-        for part, badge in badges[:-1]:
-            if self._stats_mode == "footer":
-                badge.hide()
-            else:
-                badge.show()
-                badge.setStats(part.stats)
-        lastPart, lastBadge = badges[-1]
         if self._stats_mode == "footer":
-            merged = ElaChatStats.merge(
-                item.stats
-                for item in self._parts
-                if item.kind == ElaChatPartKindType.Stats and item.stats is not None
-            )
-            lastBadge.setStats(merged if merged is not None else lastPart.stats)
+            visible_parts = stats_parts[-1:]
         else:
-            lastBadge.setStats(lastPart.stats)
-        lastBadge.show()
+            visible_parts = stats_parts
+        visible_ids = {part.id for part in visible_parts}
+        for part in stats_parts:
+            if part.id in visible_ids:
+                continue
+            widget = self._part_widgets.get(part.id)
+            if isinstance(widget, StatsBadge) and not is_deleted(widget):
+                widget.hide()
+        for part in visible_parts:
+            badge = self._ensure_stats_badge(part)
+            badge.show()
+        if self._stats_mode == "footer":
+            last_part = stats_parts[-1]
+            last_badge = self._ensure_stats_badge(last_part)
+            merged = ElaChatStats.merge(part.stats for part in stats_parts)
+            last_badge.setStats(merged if merged is not None else last_part.stats)
+        else:
+            for part in stats_parts:
+                self._ensure_stats_badge(part).setStats(part.stats)
         # 判据是**消息状态**，不是 ``_stream_ended``：``setParts()`` 恢复 /
         # ``setStatus(Done)`` 静态收尾都不经过 ``endStream`` —— 拿历史标志当
         # 「回合已结束」会把恢复出来的整轮汇总徽标留在时间线里，与实时渲染不一致。
         if self._status != ElaChatStatusType.Streaming:
             self._dock_step_stats_to_footer()
+
+    def _ensure_stats_badge(self, part: ElaChatPart) -> StatsBadge:
+        """按需创建 / 复用某个用量分段的徽标（历史恢复延迟建控件）。"""
+        widget = self._part_widgets.get(part.id)
+        if isinstance(widget, StatsBadge) and not is_deleted(widget):
+            return widget
+        badge = StatsBadge(self._parts_container or self._content or self)
+        self._part_widgets[part.id] = badge
+        if self._parts_layout is not None:
+            self._parts_layout.insertWidget(self._part_layout_index(part.id), badge)
+        else:
+            badge.setParent(self._parts_container or self._content or self)
+        return badge
 
     def attachmentStrip(self) -> AttachmentStrip:
         """获取附件层控件（按需创建，位于正文与底部操作之间）。"""
@@ -2633,8 +2655,12 @@ class ElaChatBubble(ElaThemeWidget):
         part = self._find_part(self._current_stats_id)
         if part is None:
             partId = partId or uuid4().hex[:12]
-            badge = StatsBadge(self._parts_container or self._content or self)
-            badge._setStats(stats, deferShow=self._stats_batch)
+            badge = None
+            if not self._stats_batch:
+                # 历史回放期只登记数据；最终可见的徽标由 _apply_stats_mode
+                # 按需创建（footer 只建最后一个），避免隐藏徽标的创建成本。
+                badge = StatsBadge(self._parts_container or self._content or self)
+                badge._setStats(stats, deferShow=False)
             self._append_part(
                 ElaChatPart(
                     id=partId,

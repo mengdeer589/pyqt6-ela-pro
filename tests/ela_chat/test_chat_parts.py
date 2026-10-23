@@ -371,6 +371,33 @@ class TestBubbleParts:
         assert badges[0].isHidden() is True
         assert badges[1].stats().total_tokens == 3
 
+    def test_set_parts_builds_stats_badges_lazily(self, qapp, make):
+        """历史回放 footer 模式只建最后一个徽标；切 steps 才补齐其余。"""
+        bubble = make(ElaChatBubble, ElaChatRoleType.Assistant)
+        parts = [
+            ElaChatPart(
+                id=f"s{index}",
+                kind=ElaChatPartKindType.Stats,
+                status=ElaChatStatusType.Done,
+                stats=ElaChatStats(total_tokens=index + 1),
+                step=1,
+            )
+            for index in range(3)
+        ]
+        assert bubble.setParts(parts) is True
+        stats_parts = [
+            part for part in bubble.parts() if part.kind == ElaChatPartKindType.Stats
+        ]
+        badges = [bubble._part_widgets.get(part.id) for part in stats_parts]
+        assert sum(isinstance(badge, StatsBadge) for badge in badges) == 1
+        assert isinstance(badges[-1], StatsBadge)
+        assert bubble.statsBadge() is badges[-1]
+
+        bubble.setStatsMode("steps")
+        badges = [bubble._part_widgets.get(part.id) for part in stats_parts]
+        assert all(isinstance(badge, StatsBadge) for badge in badges)
+        assert [badge.stats().total_tokens for badge in badges] == [1, 2, 3]
+
     def test_stats_mode_none_hides_and_falls_back_duration(self, qapp, make):
         """none 模式不显示徽标，端到端耗时回退到底部 meta。"""
         bubble = make(ElaChatBubble, ElaChatRoleType.Assistant)
