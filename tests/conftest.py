@@ -81,7 +81,7 @@ def qapp():
     app = QApplication.instance()
     if app is None:
         # 必须带程序名：QtWebEngine 的 base::CommandLine 不接受空参数表，
-        # `QApplication([])` + 首次 WebEngine 初始化会 fail-fast（bug #18）。
+        # `QApplication([])` + 首次 WebEngine 初始化会 fail-fast。
         app = QApplication(["pyqt6-ela-pro-tests"])
     # ``eApp.init()`` **必须在创建任何 ElaWindow 之前**调用（AGENTS.md 的硬约束），
     # 少了这一步 `ElaWindow()` 直接 access violation，且崩在构造那一行、看不出

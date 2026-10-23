@@ -1,4 +1,4 @@
-"""库内禁止把信号直连到绑定内建方法（PyQt6 无参信号 bug #22）。"""
+"""库内禁止把信号直连到绑定内建方法（PyQt6 无参信号绑定缺陷）。"""
 
 from __future__ import annotations
 
@@ -52,6 +52,6 @@ def test_no_signal_connects_builtin_method():
         for path, line, name in _iter_connect_calls()
     ]
     assert not offenders, (
-        "无参 pyqtSignal() 直连绑定内建方法会在 PyQt6 emit 时原生崩溃（bug #22）；"
+        "无参 pyqtSignal() 直连绑定内建方法会在 PyQt6 emit 时原生崩溃；"
         "请改成 lambda / 自定义槽：\n" + "\n".join(offenders)
     )
