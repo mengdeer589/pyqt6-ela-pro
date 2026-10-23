@@ -398,6 +398,19 @@ class TestBubbleParts:
         assert all(isinstance(badge, StatsBadge) for badge in badges)
         assert [badge.stats().total_tokens for badge in badges] == [1, 2, 3]
 
+    def test_set_parts_restores_text_without_streaming(self, qapp, make):
+        """历史正文一次性 setMarkdown，不走流式缓冲。"""
+        text = "# 标题\n\n正文 `code`\n\n```python\nprint(1)\n```"
+        bubble = make(ElaChatBubble, ElaChatRoleType.Assistant)
+        assert bubble.setParts(
+            [ElaChatPart(id="t1", kind=ElaChatPartKindType.Text, text=text)]
+        )
+        part = bubble.parts()[0]
+        assert part.text == text
+        viewer = bubble._part_widgets[part.id]
+        assert viewer.toPlainText().strip()
+        assert viewer.isStreaming() is False
+
     def test_stats_mode_none_hides_and_falls_back_duration(self, qapp, make):
         """none 模式不显示徽标，端到端耗时回退到底部 meta。"""
         bubble = make(ElaChatBubble, ElaChatRoleType.Assistant)

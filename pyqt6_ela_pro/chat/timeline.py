@@ -432,10 +432,7 @@ class ChatPartTimeline:
             part = replace(part, id=uuid4().hex[:12])
         kind = getattr(part, "kind", "")
         if kind == ElaChatPartKindType.Text:
-            self._bubble.beginText(part.id or None)
-            if part.text:
-                self._bubble.appendText(part.text)
-            self._bubble.endText()
+            self._bubble._restore_text_part(part.id, part.text or "")
         elif kind == ElaChatPartKindType.Reasoning:
             partId = self._bubble._ensure_reasoning_part(part.id or None)
             widget = self._bubble._part_widgets.get(partId)

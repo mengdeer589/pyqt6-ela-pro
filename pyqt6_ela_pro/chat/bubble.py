@@ -1839,6 +1839,22 @@ class ElaChatBubble(ElaThemeWidget):
         self.viewerCreated.emit(viewer)
         return viewer
 
+    def _restore_text_part(self, partId: str, text: str) -> None:
+        """历史恢复正文段：一次性 ``setMarkdown``，不走流式缓冲（bug #17）。"""
+        if self._current_text_id is not None:
+            self.endText()
+        viewer = self._create_text_viewer()
+        viewer.setMarkdown(text or "")
+        part = ElaChatPart(
+            id=partId,
+            kind=ElaChatPartKindType.Text,
+            status=ElaChatStatusType.Done,
+            text=text or "",
+            step=self._step_index,
+        )
+        self._append_part(part, viewer)
+        self._current_text_id = None
+
     def beginText(self, partId: Optional[str] = None) -> Optional[str]:
         """开始一个新的正文段，返回分段 id（非助手消息返回 ``None``）。
 
