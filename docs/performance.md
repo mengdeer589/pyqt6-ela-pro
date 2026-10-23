@@ -209,7 +209,7 @@ resize（冻结 / 放开）、滚动、深浅主题。开发机（Win11，PyQt6 
 
 `bench_markdown_paint.py` 是 Win7 的**分项探针**：同一个文档分别用原生
 `QTextBrowser` 与 `ElaMarkdownViewer` 滚动，一步 40px 的耗时差就是查看器自绘
-装饰层的成本。**一次进程只测一种文档**（`bugs/未处理项.md` #15 的 shaping 毒化是
+装饰层的成本。**一次进程只测一种文档**（Win7 的字体 shaping 毒化是
 进程级的，先测 CJK 会污染后面的 ASCII 数字）。命中字体慢路径时先修字体
 （单族 CJK / 缺字形 fallback），再谈控件与绘制优化。
 
@@ -240,16 +240,16 @@ resize（冻结 / 放开）、滚动、深浅主题。开发机（Win11，PyQt6 
 - **绘制 1.4×**：难以避免，但只在每帧重绘很多控件时才可见（配方 ④ 就是为它准备的）。
 - **透明文本视口（Win7）**：`QTextBrowser` 系在 palette `Base` 透明 + 视口不自填充时走慢速重绘路径（滚动实测 ×8）。本库查看器对非嵌入 / 圆角形态默认用不透明同色底 +
   圆角 mask（`ElaMarkdownViewer.setViewportBackground`，bugs #14）；嵌入查看器（聊天气泡）保持透明、由宿主传入自己的底色作不透明底（聊天组件已传）；宿主自绘文本控件同理。
-- **CJK 字体 shaping（Win7）**：非 CJK 主字体渲染 CJK 内容（逐字形回退）与多族字体列表（逐字形族匹配）都会走慢 shaping，且任一走过一次即**进程级毒化**后续一切文本绘制（10~250×，Qt/DirectWrite 层 —— bugs #12/#15，见「下游项目反馈bug.md」§2/§3）。
-  **第三个触发方向**：主字体是 CJK、但文本含它 cmap 里没有的符号（LLM 输出常带 ↔ / ⇒ / □ / √）同样走逐字形回退并毒化（bug #20）。所以库自产进 `QTextDocument` 的标记只用雅黑 cmap 内的字形：任务勾选 `□`/`■`（U+25A1/U+25A0）、折叠 `+`/`−`（U+002B/U+2212）；不要换回 `☐`/`☑`、`▸`/`▾`（均不在雅黑 cmap）。**查看器默认对缺字字符套单族符号字体**（`_internal.applyMissingGlyphFonts`：Segoe UI Symbol / Cambria Math，只改字体族、不改文本；`ElaMarkdownViewer.setMissingGlyphFallbackEnabled(False)` 可关；`ElaTerminalView` 也已默认接入，同样可关）。终端等其它 `QTextDocument` 组件可复用该工具。
+- **CJK 字体 shaping（Win7）**：非 CJK 主字体渲染 CJK 内容（逐字形回退）与多族字体列表（逐字形族匹配）都会走慢 shaping，且任一走过一次即**进程级毒化**后续一切文本绘制（10~250×，Qt/DirectWrite 层；Win7 交付线已用 GDI 引擎规避）。
+  **第三个触发方向**：主字体是 CJK、但文本含它 cmap 里没有的符号（LLM 输出常带 ↔ / ⇒ / □ / √）同样走逐字形回退并毒化。所以库自产进 `QTextDocument` 的标记只用雅黑 cmap 内的字形：任务勾选 `□`/`■`（U+25A1/U+25A0）、折叠 `+`/`−`（U+002B/U+2212）；不要换回 `☐`/`☑`、`▸`/`▾`（均不在雅黑 cmap）。**查看器默认对缺字字符套单族符号字体**（`_internal.applyMissingGlyphFonts`：Segoe UI Symbol / Cambria Math，只改字体族、不改文本；`ElaMarkdownViewer.setMissingGlyphFallbackEnabled(False)` 可关；`ElaTerminalView` 也已默认接入，同样可关）。终端等其它 `QTextDocument` 组件可复用该工具。
   本库已把可控触发点全部收口：**中文系统**下终端默认字体、查看器代码字符格式 / 默认代码字体、图表文本（`chartFont`）与聊天等宽 / 标题标签均为**单族** `Microsoft YaHei`（其它系统保持原状）；宿主仍可用
   `ElaTerminalView.setFontFamilies()` / `ElaMarkdownViewer.setCodeFontFamily()` 覆盖 —— 要避免逐字形回退请给**单个** CJK 字体，**多族列表（等宽 + CJK 后备）同样慢**（公式渲染是唯一保留多族的例外：数学字形与 CJK 覆盖二选一）。
-  **Win7 上若仍复现 #15**：`crystalidea/qt6windows7#63` 指出 6.8.4 的 DirectWrite 路径在 Win7 上异常；可把 Qt 切到 GDI 字体引擎绕过（必须在 `QApplication` 之前）：
+  **Win7 交付线使用 GDI 引擎**：`crystalidea/qt6windows7#63` 的 DirectWrite 路径在 Win7 上异常；`QT_QPA_PLATFORM=windows:nodirectwrite`（GDI）已由下游实机验证能消除 CJK→Latin 慢路径（必须在 `QApplication` 之前）：
   ```powershell
   $env:QT_QPA_PLATFORM='windows:nodirectwrite'
   # 或 QApplication 参数：-platform windows:nodirectwrite
   ```
-  A/B 探针 `tools/perf/bench_font_engine.py` 在同一台机器跑默认 / `nodirectwrite`，比较 `ascii_after / ascii_before`（正常 ≈1，10~40× 即命中）。Win10 本机对照：default 5.1/5.2 ms、GDI 3.9/3.8 ms，均无毒性；**Win7 需实机验证**。GDI 会改变整进程字体渲染（ClearType / 彩色字体），属宿主级开关，不进库默认。
+  A/B 探针 `tools/perf/bench_font_engine.py` 保留作复测，比较 `ascii_after / ascii_before`（正常 ≈1，10~40× 即命中）。Win10 本机对照：default 5.1/5.2 ms、GDI 3.9/3.8 ms，均无毒性。GDI 会改变整进程字体渲染（ClearType / 彩色字体），属宿主级开关，不进库默认。
 
 ## 自测
 

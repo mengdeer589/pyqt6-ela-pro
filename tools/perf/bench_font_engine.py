@@ -1,6 +1,6 @@
 """Win7 字体引擎 A/B 探针：ASCII → CJK → ASCII 的绘制耗时。
 
-用来验证 bug #15（CJK shaping 后纯 Latin 文本变慢）是否与 DirectWrite 字体引擎有关。
+用来对比 Win7 上 DirectWrite 与 GDI 的 CJK / Latin 绘制耗时。
 同一台机器跑两次，只改平台插件参数：
 
     uv run python tools/perf/bench_font_engine.py
@@ -8,7 +8,7 @@
     uv run python tools/perf/bench_font_engine.py
 
 关注 ``ascii_after`` 相对 ``ascii_before`` 的倍率：正常应接近 1；若达到 10~40×，
-说明命中了 #15 的进程级 shaping 慢路径。``nodirectwrite`` 把 Qt 切到 GDI 字体
+说明命中了进程级 shaping 慢路径。``nodirectwrite`` 把 Qt 切到 GDI 字体
 引擎（issue crystalidea/qt6windows7#63 的 workaround），用于判断换引擎是否消除。
 """
 
