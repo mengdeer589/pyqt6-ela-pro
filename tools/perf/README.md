@@ -11,7 +11,6 @@
 | `bench_chat.py` | 聊天栈：构造 / 流式 / 历史导入 / resize / 滚动 / 主题切换 |
 | `bench_charts.py` | `ElaChartWidget`：大数据的 ingest / layout / paint / hover / zoom |
 | `bench_markdown_paint.py` | Markdown 滚动绘制：原生浏览器 vs 查看器，CJK / ASCII / mixed |
-| `bench_font_engine.py` | Win7 字体引擎 A/B：DirectWrite vs GDI |
 
 ```powershell
 python tools/perf/bench_micro.py
@@ -19,7 +18,6 @@ python tools/perf/bench_components.py
 uv run python tools/perf/bench_chat.py
 uv run python tools/perf/bench_charts.py
 uv run python tools/perf/bench_markdown_paint.py --doc cjk --target viewer
-uv run python tools/perf/bench_font_engine.py
 ```
 
 ## `bench_micro.py`：把绑定与 Qt 版本分开
@@ -78,24 +76,4 @@ uv run python tools/perf/bench_markdown_paint.py --doc mixed --target viewer --s
 **一次进程只测一种文档**：Win7 上先测的那份可能毒化后测的那份。`native` vs `viewer`
 可把「Qt 的文本绘制」与「查看器自绘装饰层」分开。
 
-## `bench_font_engine.py`：Win7 字体引擎 A/B
 
-背景：Win7 上出现过 CJK shaping 后纯 Latin 文本慢 10~40× 的进程级毒化；`crystalidea/qt6windows7#63` 的 GDI 绕过已由下游实机验证有效（Win7 交付线使用 `windows:nodirectwrite`）。
-
-同一台机器跑两次，只改平台插件参数：
-
-```powershell
-uv run python tools/perf/bench_font_engine.py
-$env:QT_QPA_PLATFORM = 'windows:nodirectwrite'
-uv run python tools/perf/bench_font_engine.py
-```
-
-输出 `ascii_before` / `cjk` / `ascii_after` 的 repaint 中位数。判读：
-
-- `ascii_after / ascii_before` ≈ 1：正常；
-- 默认引擎 10~40×、GDI 回到 ≈1：命中慢路径，宿主可在 `QApplication` 之前设置
-  `QT_QPA_PLATFORM=windows:nodirectwrite`（或 `-platform windows:nodirectwrite`）；
-- GDI 也慢：慢路径在 GDI 侧，需要 Qt 源补丁，不是换引擎能解决的。
-
-GDI 会改变整进程字体渲染（ClearType / 彩色字体 / 字体度量），属于**宿主级开关**，
-不进库默认。Win10 本机对照：默认 5.1/5.2ms、GDI 3.9/3.8ms，均无毒性；Win7 需实机验证。
