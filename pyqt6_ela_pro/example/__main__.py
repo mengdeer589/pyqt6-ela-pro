@@ -768,7 +768,27 @@ class ExampleWindow(ElaWindow):
         self._log(f"打开页面「{title}」")
 
 
+def _is_windows_7() -> bool:
+    """当前是否 Windows 7 / Server 2008 R2（内核 6.1）。"""
+    if sys.platform != "win32":
+        return False
+    try:
+        version = sys.getwindowsversion()
+    except Exception:
+        return False
+    return version.major == 6 and version.minor == 1
+
+
+def _prepare_qpa_platform() -> None:
+    """Win7 默认切到 GDI 引擎；宿主已显式指定 ``QT_QPA_PLATFORM`` 时不覆盖。"""
+    if _is_windows_7():
+        os.environ.setdefault("QT_QPA_PLATFORM", "windows:nodirectwrite")
+
+
 if __name__ == "__main__":
+    # Win7 上 DirectWrite 路径会在部分字体组合下崩 / 卡；GDI 引擎更稳。
+    # 必须在 QApplication 之前设置。
+    _prepare_qpa_platform()
     app = QApplication(sys.argv)
     eApp.init()
     #
