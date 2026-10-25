@@ -40,7 +40,7 @@
 pyqt6_ela_pro/             组件库源码（chat/ charts/ blueprint/ selection_assistant/ 为子系统）
 pyqt6_ela_pro/example/     两级侧边栏示例应用（python -m pyqt6_ela_pro.example）
 docs/                      README 的深入文档（chat / charts / markdown / WebEngine / 划词助手）
-tests/                     回归测试（按组件目录组织）
+tests/                     回归测试（按组件 / 家族目录组织；`-m "not slow"` 跳过慢用例）
 ```
 
 ## 核心能力
@@ -75,7 +75,7 @@ tests/                     回归测试（按组件目录组织）
   公式 / Mermaid / 流式追加）与 `ElaTerminalView`（ANSI 颜色、跨分片转义、只读）。
   详见 [docs/markdown.md](docs/markdown.md)。
 - **桌面集成**：全局划词助手（**默认带取词安全闸门**，避免向终端注入 Ctrl+C）、
-  划词结果对话框、Windows 托盘、窗口 / Chromium 嵌入（CDP）、Office 预览、任务栏进度。
+  划词结果对话框、Windows 托盘、窗口 / Chromium 嵌入（CDP）、任务栏进度。
 - **示例应用**：两级侧边栏，每个组件旁有 `</> 代码` 按钮直接看实现源码；
   聊天五页为「预填 + 可重播」，只在流式中可见的过程可以直接重看。
 
@@ -336,16 +336,16 @@ python -m pyqt6_ela_pro.example
 
 | 分组 | 页面 |
 |---|---|
-| 基础组件 | 输入与选择 / 下拉框全变体 / 容器与布局 / 视图与列表 / 按钮与菜单 / 进度与反馈 |
-| 数据与图表 | 表格（ElaDataTable / ElaParquetTable）/ 图表（ElaChartWidget / pyqtgraph / matplotlib / 仪表盘） |
-| 内容渲染 | Markdown（文本 / 代码 / 公式 / Mermaid / 流式）/ Office 文档预览 |
+| 基础组件 | 输入与选择 / 下拉框组件 / 容器与布局 / 视图与列表 / 按钮与菜单 / 进度与反馈 |
+| 数据与图表 | 表格（ElaDataTable / ElaParquetTable）/ 图表（第三方库：pyqtgraph / matplotlib / 仪表盘）/ ElaChartWidget 图表工作台 |
+| 内容渲染 | Markdown（文本 / 代码 / 公式 / Mermaid / 流式） |
 | AI 对话 | 总览 / 输入区能力 / Agent 能力 / 会话管理 / 持久化与性能（预填 + 可重播） |
 | 窗口与应用外壳 | ElaWindow 应用外壳（本页操作主窗口：导航栏模式、窗口按钮、背景绘制、内容堆栈、dock、新窗口打开、关闭链路）/ 弹窗与提示 / 启动与托盘 |
-| 系统交互与嵌入 | 窗口嵌入 / 浏览器嵌入 / 终端输出 / 划词助手 |
-| 动效与图形 | 动画与图标 / 蓝图节点编辑器 |
+| 系统交互与嵌入 | 外部内容嵌入（窗口 / 浏览器）/ 终端输出 / 划词助手 |
+| 动效与图形 | 动画与图标 / 节点图编辑器 |
 | 参考文档 | 聊天组件 API 指南（用 `ElaMarkdownViewer` 渲染 `llm_test` 源码快照） |
 
-> 窗口 / 浏览器嵌入、Office 预览等页面依赖可选依赖（`pywin32` / `comtypes`）；
+> 窗口 / 浏览器嵌入等页面依赖可选依赖（`pywin32` / `comtypes`）；
 > 缺失时对应页面会降级为说明文字，不影响其它页面。
 
 ## 文档
@@ -367,7 +367,7 @@ python -m pyqt6_ela_pro.example
 | 依赖 | 安装方式 | 用途 |
 |---|---|---|
 | pywin32 | `[all]` | 窗口嵌入 / 浏览器嵌入 / 任务栏进度 |
-| comtypes | `[all]` | Office 文档预览（ActiveX） |
+| comtypes | `[all]` | 浏览器嵌入（OLE 拖放）/ 任务栏进度 |
 | pygments | `[all]` | Markdown 代码语法高亮（缺失自动降级） |
 | tsdownsample | `[all]` | `ElaChartWidget` 大数据降采样（缺失自动降级） |
 | mermaidx | `[all]` | Markdown Mermaid 图渲染（缺失回退代码卡片） |
