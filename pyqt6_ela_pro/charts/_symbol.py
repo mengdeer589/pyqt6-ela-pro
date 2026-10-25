@@ -8,7 +8,9 @@ from __future__ import annotations
 
 
 from PyQt6.QtCore import QPointF, QRectF, Qt
-from PyQt6.QtGui import QColor, QPainter, QPainterPath, QPen, QPixmap
+from PyQt6.QtGui import QPainter, QPainterPath, QPen, QPixmap
+
+from ._utils import parse_color
 
 __all__ = ["symbolPath", "drawSymbol", "symbolPixmap", "KNOWN_SYMBOLS"]
 
@@ -106,8 +108,8 @@ def symbolPixmap(
     **返回副本**（对齐 ``svg_icon`` 的教训：缓存里存的活动对象一旦被调用方
     就地改写 —— 例如 ``fill(red)`` —— 之后所有调用方都会拿到被改过的图）。
     """
-    fill = QColor(color)
-    stroke = QColor(border_color) if border_color is not None else None
+    fill = parse_color(color)
+    stroke = parse_color(border_color) if border_color is not None else None
     width = float(border_width or 0.0)
     dpr = max(0.5, float(dpr or 1.0))
     size = max(1.0, float(size))

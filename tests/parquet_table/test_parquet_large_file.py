@@ -11,6 +11,8 @@ from pyqt6_ela_pro.parquet_table import ElaParquetTable  # noqa: E402
 
 _HORIZONTAL = Qt.Orientation.Horizontal
 
+pytestmark = pytest.mark.slow
+
 ROWS = 200_000
 #: 强制切出 20 个 row group —— 聚合必须跨组归并才对
 ROW_GROUP_SIZE = 10_000

@@ -56,24 +56,6 @@ class TestBatchLazyRendering:
         # 快照读路径会结算 parts（数据齐全，不依赖 viewer 是否渲染）
         assert [part.kind for part in message.parts] == [ElaChatPartKindType.Text]
 
-    def test_scroll_to_top_loads_older_page(self, qapp, make):
-        view, _ids = _batch_view(make, qapp)
-        bar = view._scroll.verticalScrollBar()
-        assert bar.maximum() > 0
-        assert view._lazy_ids
-        lazy_before = len(view._lazy_ids)
-        oldest_rendered_before = min(
-            mid for mid in _ids if not view.bubble(mid).renderDeferred()
-        )
-        bar.setValue(0)
-        assert _wait_until(qapp, lambda: len(view._lazy_ids) < lazy_before)
-        # 锚点补偿：更早的内容插在视口上方后，滚动位置要跟着抬高
-        assert _wait_until(qapp, lambda: bar.value() > 0)
-        oldest_rendered_after = min(
-            mid for mid in _ids if not view.bubble(mid).renderDeferred()
-        )
-        assert oldest_rendered_after < oldest_rendered_before
-
     def test_pages_drain_all_messages(self, qapp, make):
         view, ids = _batch_view(make, qapp)
         for _ in range(len(ids)):

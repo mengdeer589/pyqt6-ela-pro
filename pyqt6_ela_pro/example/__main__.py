@@ -193,7 +193,7 @@ class ExampleWindow(ElaWindow):
         )
         self._addPage(
             "数据与图表",
-            "ElaChartWidget 图表引擎",
+            "ElaChartWidget 图表工作台",
             ChartsPage(self),
             data,
             icon.ChartLine,

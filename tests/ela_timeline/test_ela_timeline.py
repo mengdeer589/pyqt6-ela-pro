@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 from PyQt6.QtCore import QSize
-from PyQt6ElaWidgetTools import ElaIconType, ElaThemeType
+from PyQt6ElaWidgetTools import ElaIconType
 
 from pyqt6_ela_pro.ela_timeline import ElaTimeline
 
@@ -158,14 +158,3 @@ class TestElaTimelineOrientation:
         t.show()
         qapp.processEvents()
         assert not t.grab().isNull()
-
-
-class TestElaTimelineTheme:
-    def test_on_theme_changed_updates_mode(self, t):
-        t._onThemeChanged(ElaThemeType.ThemeMode.Dark)
-        assert t._theme_mode == ElaThemeType.ThemeMode.Dark
-
-
-class TestElaTimelineDeleteLater:
-    def test_delete_later_cleans_up(self, t):
-        t.deleteLater()

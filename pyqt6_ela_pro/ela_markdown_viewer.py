@@ -136,6 +136,7 @@ from ._internal import (
     system_cjk_font_family,
 )
 from ._motion import start_idle_loop
+from ._colors import parse_color
 from ._styles import FlatIconButton, setTextBaseColor
 from .math_lite import (
     MATH_ENVS,
@@ -2732,7 +2733,7 @@ class ElaMarkdownViewer(ElaThemeWidget):
         一律以该色作不透明视口底色；确实需要严格透出下层时传透明色
         （``QColor(0, 0, 0, 0)``）。
         """
-        self._viewport_bg = QColor(color) if color is not None else None
+        self._viewport_bg = parse_color(color) if color is not None else None
         self._apply_viewport_base()
 
     def viewportBackground(self) -> Optional[QColor]:
@@ -3757,7 +3758,7 @@ class ElaMarkdownViewer(ElaThemeWidget):
                 style = _token_style(token_type, token_module, palette)
                 if style is not None:
                     color, italic = style
-                    fmt.setForeground(QColor(color))
+                    fmt.setForeground(parse_color(color))
                     if italic:
                         fmt.setFontItalic(True)
                 result.append((value, fmt))
@@ -5042,14 +5043,14 @@ class ElaMarkdownViewer(ElaThemeWidget):
         semantic = variant["semantic"]
         self._token_palette = dict(variant["syntax"])
         self._token_palette.update(self._token_overrides)
-        self._link_color = QColor(semantic["link"])
-        self._md_heading_color = QColor(semantic["heading"])
-        self._md_strong_color = QColor(semantic["strong"])
-        self._md_emphasis_color = QColor(semantic["emphasis"])
-        self._md_code_color = QColor(semantic["code"])
-        self._md_quote_color = QColor(semantic["quote"])
-        self._md_list_color = QColor(semantic["list"])
-        self._md_mark_color = QColor(semantic["mark"])
+        self._link_color = parse_color(semantic["link"])
+        self._md_heading_color = parse_color(semantic["heading"])
+        self._md_strong_color = parse_color(semantic["strong"])
+        self._md_emphasis_color = parse_color(semantic["emphasis"])
+        self._md_code_color = parse_color(semantic["code"])
+        self._md_quote_color = parse_color(semantic["quote"])
+        self._md_list_color = parse_color(semantic["list"])
+        self._md_mark_color = parse_color(semantic["mark"])
         code_alpha = 0.1 if self._is_dark_theme else 0.06
         self._code_bg = self._blend(background, self._text_color, code_alpha)
         self._code_border = self._blend(background, self._text_color, 0.18)
@@ -5060,7 +5061,7 @@ class ElaMarkdownViewer(ElaThemeWidget):
         self._table_stripe_bg = self._blend(
             background, self._text_color, 0.06 if self._is_dark_theme else 0.035
         )
-        self._base_bg = QColor(background)
+        self._base_bg = parse_color(background)
         self._mark_bg = self._blend(
             background, self._md_mark_color, 0.26 if self._is_dark_theme else 0.34
         )

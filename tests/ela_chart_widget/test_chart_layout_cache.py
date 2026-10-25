@@ -17,7 +17,8 @@ import pytest
 from PyQt6.QtWidgets import QApplication
 
 from pyqt6_ela_pro.charts import _downsample as _ds
-from pyqt6_ela_pro.charts import series_cartesian as sc
+from pyqt6_ela_pro.charts.series_cartesian import BarSeriesRenderer
+from pyqt6_ela_pro.charts.series_cartesian import _shared as sc
 from pyqt6_ela_pro.charts.core import ElaChartWidget
 
 np = _ds.np
@@ -40,7 +41,7 @@ def _ready(chart, option, w=800, h=500):
 
 def _bar(chart):
     for r in chart.seriesRenderers:
-        if isinstance(r, sc.BarSeriesRenderer):
+        if isinstance(r, BarSeriesRenderer):
             return r
     raise AssertionError("未找到 bar 渲染器")
 

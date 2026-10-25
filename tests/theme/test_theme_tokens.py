@@ -137,11 +137,25 @@ class TestAccentDerivation:
         assert _slot(_L, _TC.PrimaryNormal) == "#c0392b"
         assert _slot(_D, _TC.PrimaryNormal) == _FACTORY[_D]["primary"]
 
-    @pytest.mark.parametrize("bad", [None, "red", 42])
+    @pytest.mark.parametrize("bad", [None, 42, "", "not-a-color"])
     def test_set_accent_rejects_non_color(self, bad):
         before = _slot(_L, _TC.PrimaryNormal)
         T.setAccentColor(bad)
         assert _slot(_L, _TC.PrimaryNormal) == before, "非法输入必须静默忽略"
+
+    @pytest.mark.parametrize(
+        "color",
+        ["#c0392b", "rgb(192, 57, 43)", "rgba(192, 57, 43, 1)"],
+        ids=["hex", "rgb", "rgba"],
+    )
+    def test_set_accent_accepts_color_strings(self, color):
+        """颜色字符串与 ``QColor`` 等价（``QColor`` 自己解析不了 ``rgb()``）。"""
+        T.setAccentColor(QColor("#c0392b"))
+        expected = _slot(_L, _TC.PrimaryNormal)
+        T.resetAccentColor()
+
+        T.setAccentColor(color)
+        assert _slot(_L, _TC.PrimaryNormal) == expected
 
     def test_set_accent_rejects_invalid_color(self):
         before = _slot(_L, _TC.PrimaryNormal)

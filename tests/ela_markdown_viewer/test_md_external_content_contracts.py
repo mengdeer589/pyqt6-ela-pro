@@ -415,6 +415,7 @@ class TestStripInlineLinks:
         ratio = self._growth_ratio(lambda n: "[a](b" * n + ")")
         assert ratio < 3.2, f"输入翻倍耗时涨 {ratio:.2f} 倍，二次增长会到≈4"
 
+    @pytest.mark.slow
     def test_quadratic_reference_would_be_caught(self):
         """守卫自身有效性：拿一个**故意二次**的实现跑同一判据，必须被抓。
 

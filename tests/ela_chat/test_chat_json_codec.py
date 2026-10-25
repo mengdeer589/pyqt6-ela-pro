@@ -91,3 +91,15 @@ class TestJournalUsesCodec:
         assert '"中文分片"' in text
         assert all(json.loads(line)["e"] for line in lines)
         assert ElaChatTurnJournal.loadsLine(lines[-1]) is not None
+
+
+class TestFloatExponentDifference:
+    def test_backends_parse_to_same_value(self, monkeypatch):
+        """浮点指数记法可能不同（1e-07 / 1e-7），但解析值必须一致。"""
+        if _json._orjson is None:
+            pytest.skip("orjson 未安装，无法对比两套后端")
+        text_orjson = jsonDumps({"x": 1e-07})
+        monkeypatch.setattr(_json, "_orjson", None)
+        text_stdlib = jsonDumps({"x": 1e-07})
+        assert text_orjson != text_stdlib  # 已知差异：不要拿文本做跨机器比对
+        assert jsonLoads(text_orjson) == jsonLoads(text_stdlib) == {"x": 1e-07}

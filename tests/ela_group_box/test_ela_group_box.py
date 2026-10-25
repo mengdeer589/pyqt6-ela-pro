@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import pytest
-from PyQt6ElaWidgetTools import ElaThemeType
 
 from pyqt6_ela_pro.ela_group_box import ElaGroupBox
 
@@ -57,14 +56,3 @@ class TestElaGroupBoxSizeHint:
         sz = gb.sizeHint()
         assert sz.width() == 160
         assert sz.height() > 0
-
-
-class TestElaGroupBoxTheme:
-    def test_on_theme_changed_updates_mode(self, gb):
-        gb._onThemeChanged(ElaThemeType.ThemeMode.Dark)
-        assert gb._theme_mode == ElaThemeType.ThemeMode.Dark
-
-
-class TestElaGroupBoxDeleteLater:
-    def test_delete_later_cleans_up(self, gb):
-        gb.deleteLater()

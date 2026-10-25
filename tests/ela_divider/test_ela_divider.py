@@ -100,8 +100,3 @@ class TestElaDividerVertical:
         d = make(ElaDivider, vertical=initial)
         d.setVertical(expected)
         assert d.isVertical() is expected
-
-
-class TestElaDividerDeleteLater:
-    def test_delete_later_cleans_up(self, d):
-        d.deleteLater()

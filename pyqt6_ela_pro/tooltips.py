@@ -28,6 +28,7 @@ from PyQt6.QtCore import (
     QRectF,
 )
 
+from ._colors import parse_color
 from ._internal import is_deleted, single_shot_on
 from ._motion import Duration, start_idle_loop, start_transition
 from .widget_base import ElaThemeWidget
@@ -113,7 +114,7 @@ class _ToolTipLabel(QLabel):
         self._text_color: Optional[QColor] = None
 
     def setTextColor(self, color) -> None:  # noqa: N802 (Qt 命名)
-        self._text_color = QColor(color)
+        self._text_color = parse_color(color)
         self._apply_text_color()
 
     def _apply_text_color(self) -> None:

@@ -27,8 +27,6 @@ import ast
 import io
 import os
 
-import pytest
-
 EXAMPLE_DIR = os.path.join(
     os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
     "pyqt6_ela_pro",
@@ -78,13 +76,18 @@ def _violations(path: str) -> list[tuple[int, str]]:
     return _scan(io.open(path, encoding="utf-8-sig").read())
 
 
-@pytest.mark.parametrize("path", _python_files(), ids=os.path.basename)
-def test_no_glued_closing_fence(path):
+def test_no_glued_closing_fence():
     """围栏必须独占一行：紧贴在 ``+`` 右边的 ``` 会被判成未闭合围栏。"""
-    bad = _violations(path)
-    assert not bad, (
-        f"{os.path.basename(path)} 用字符串拼接把闭合围栏粘在了前一段文字后面 {bad}；"
-        "让闭合 ``` 独占一行（如 example/chat_guide_page.py 的 _code_block）"
+    problems = []
+    for path in _python_files():
+        bad = _violations(path)
+        if bad:
+            problems.append(
+                f"{os.path.basename(path)} 用字符串拼接把闭合围栏粘在了前一段文字后面 {bad}"
+            )
+    assert not problems, (
+        "\n".join(problems)
+        + "\n让闭合 ``` 独占一行（如 example/chat_guide_page.py 的 _code_block）"
     )
 
 

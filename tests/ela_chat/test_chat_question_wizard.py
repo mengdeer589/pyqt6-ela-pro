@@ -27,6 +27,8 @@ from __future__ import annotations
 
 import json
 
+from _qthelpers import wait_until as _wait_until
+
 import pytest
 from PyQt6.QtCore import QEvent, QPoint, Qt, QPointF
 from PyQt6.QtGui import QColor, QKeyEvent, QMouseEvent
@@ -1436,3 +1438,34 @@ class TestWizardDraftRetention:
         card._enter_editing("q0")
 
         assert row.editorText() == "打了一半的草稿"
+
+
+class TestCustomEditorHeight:
+    """自定义答案输入框必须真的长高（不能只改 sizeHint 不改几何）。"""
+
+    def test_editor_height_matches_content(self, qapp, make):
+        chat = make(ElaChatWidget)
+        chat.resize(820, 640)
+        chat.show()
+        qapp.processEvents()
+        card = _single(chat, _turn(chat), options=(("A", ""),))
+        card._enter_editing("q0")
+        row = card._custom_row("q0")
+        editor = row._editor
+        assert _wait_until(qapp, lambda: editor.height() == editor.sizeHint().height())
+        base = editor.height()
+
+        editor.setPlainText("一\n二\n三\n四\n五\n六")
+        assert _wait_until(
+            qapp,
+            lambda: editor.height() > base + 20
+            and editor.height() == editor.sizeHint().height(),
+        )
+
+        # 长单段（折行）同样要长高；旧实现按 blockCount 算，永远只报一行。
+        editor.setPlainText("这是一段很长的自定义答案，" * 40)
+        assert _wait_until(
+            qapp,
+            lambda: editor.height() > base + 60
+            and editor.height() == editor.sizeHint().height(),
+        )

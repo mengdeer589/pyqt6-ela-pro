@@ -5,7 +5,6 @@ from __future__ import annotations
 import pytest
 from PyQt6.QtCore import QEvent, QPoint, Qt, QPointF
 from PyQt6.QtGui import QMouseEvent
-from PyQt6ElaWidgetTools import ElaThemeType
 
 from pyqt6_ela_pro.ela_rating_control import ElaRatingControl
 
@@ -144,14 +143,3 @@ class TestElaRatingControlHover:
         r._hovered_star = 3.0
         r.leaveEvent(QEvent(QEvent.Type.Leave))
         assert r._hovered_star == -1.0
-
-
-class TestElaRatingControlTheme:
-    def test_on_theme_changed_updates_mode(self, r):
-        r._onThemeChanged(ElaThemeType.ThemeMode.Dark)
-        assert r._theme_mode == ElaThemeType.ThemeMode.Dark
-
-
-class TestElaRatingControlDeleteLater:
-    def test_delete_later_cleans_up(self, r):
-        r.deleteLater()

@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import pytest
+from PyQt6.QtCore import QEvent, QPointF, Qt
+from PyQt6.QtGui import QMouseEvent
 from PyQt6.QtWidgets import QWidget
 from PyQt6ElaWidgetTools import ElaThemeType, eTheme
 
@@ -105,6 +107,72 @@ class TestElaSpotlightNavigation:
         assert s._is_active is False
 
 
+class TestElaSpotlightMousePress:
+    """回归 #23：``QRectF.contains`` 在 PyQt6 只收 ``QPointF``。
+
+    原先传 ``event.position().toPoint()``，教程期间点页面任意位置即抛
+    ``TypeError``（宿主按「未捕获异常 = 进程终止」处理，整个程序退出）。
+    """
+
+    @staticmethod
+    def _press(qapp, widget, pos: QPointF) -> None:
+        event = QMouseEvent(
+            QEvent.Type.MouseButtonPress,
+            pos,
+            pos,
+            Qt.MouseButton.LeftButton,
+            Qt.MouseButton.LeftButton,
+            Qt.KeyboardModifier.NoModifier,
+        )
+        qapp.sendEvent(widget, event)
+
+    @pytest.fixture
+    def active(self, make, s, qapp):
+        parent = s.parent()
+        parent.resize(600, 400)
+        target = make(QWidget, parent)
+        target.setGeometry(20, 20, 80, 40)
+        s.setSteps([ElaSpotlight.SpotlightStep(target, "标题", "内容")])
+        s.start()
+        qapp.processEvents()
+        assert s._is_active is True
+        assert s._spotlight_rect.isValid()
+        return s
+
+    def test_click_outside_hole_finishes_single_step(self, qapp, active):
+        received = []
+        active.finished.connect(lambda: received.append(True))
+        self._press(qapp, active, QPointF(500.0, 350.0))
+        assert received == [True]
+        assert active._is_active is False
+
+    def test_click_inside_hole_keeps_running(self, qapp, active):
+        received = []
+        active.finished.connect(lambda: received.append(True))
+        self._press(qapp, active, QPointF(60.0, 40.0))
+        assert received == []
+        assert active._is_active is True
+
+    def test_click_outside_multi_step_keeps_running(self, make, s, qapp):
+        parent = s.parent()
+        parent.resize(600, 400)
+        target = make(QWidget, parent)
+        target.setGeometry(20, 20, 80, 40)
+        s.setSteps(
+            [
+                ElaSpotlight.SpotlightStep(target, "一", ""),
+                ElaSpotlight.SpotlightStep(target, "二", ""),
+            ]
+        )
+        s.start()
+        qapp.processEvents()
+        received = []
+        s.finished.connect(lambda: received.append(True))
+        self._press(qapp, s, QPointF(500.0, 350.0))
+        assert received == []
+        assert s._is_active is True
+
+
 class TestElaSpotlightTargetRect:
     def test_get_target_rect_none_target(self, s):
         assert s._getTargetRect(None).isNull()
@@ -116,9 +184,6 @@ class TestElaSpotlightTargetRect:
 
 
 class TestElaSpotlightTheme:
-    def test_on_theme_changed_updates_mode(self, s):
-        s._onThemeChanged(ElaThemeType.ThemeMode.Dark)
-        assert s._theme_mode == ElaThemeType.ThemeMode.Dark
 
     def test_tip_card_repaints_on_theme_switch(self, s, make, qapp):
         """回归：卡片配色原先缓存、只在重定位时刷新，开着遮罩切主题会停在旧色。

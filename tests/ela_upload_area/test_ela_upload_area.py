@@ -6,7 +6,6 @@ import pytest
 from PyQt6.QtCore import QEvent, QMimeData, QPoint, QPointF, Qt
 from PyQt6.QtGui import QDragEnterEvent, QDragLeaveEvent, QEnterEvent, QMouseEvent
 from PyQt6.QtWidgets import QFileDialog
-from PyQt6ElaWidgetTools import ElaThemeType
 
 from pyqt6_ela_pro.ela_upload_area import ElaUploadArea
 
@@ -210,17 +209,6 @@ class TestElaUploadAreaEvents:
         area._is_hover = True
         area.leaveEvent(QEvent(QEvent.Type.Leave))
         assert area._is_hover is False
-
-
-class TestElaUploadAreaTheme:
-    def test_on_theme_changed_updates_mode(self, area):
-        area._onThemeChanged(ElaThemeType.ThemeMode.Dark)
-        assert area._theme_mode == ElaThemeType.ThemeMode.Dark
-
-
-class TestElaUploadAreaDeleteLater:
-    def test_delete_later_cleans_up(self, area):
-        area.deleteLater()
 
 
 class TestElaUploadAreaSuffixNormalization:

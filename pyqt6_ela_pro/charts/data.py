@@ -292,7 +292,14 @@ def unwrapData(value):
         return value.toList()
     if isBufferLike(value):
         try:
-            return [float(v) for v in value]
+            rows = value.tolist() if hasattr(value, "tolist") else list(value)
         except (TypeError, ValueError, OverflowError):
             return value
+        if rows and isinstance(rows[0], (list, tuple)):
+            # 2D（``[x, y]`` 点对）：逐行复制成 list，别把内部 ndarray 交出去
+            return [list(row) for row in rows]
+        try:
+            return [float(v) for v in rows]
+        except (TypeError, ValueError, OverflowError):
+            return rows
     return value

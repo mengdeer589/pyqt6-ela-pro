@@ -19,13 +19,9 @@ from __future__ import annotations
 import ast
 import pathlib
 import re
-from collections import Counter, defaultdict
+from collections import Counter
 
-import pytest
-
-_EXAMPLE_DIR = (
-    pathlib.Path(__file__).resolve().parents[2] / "pyqt6_ela_pro" / "example"
-)
+_EXAMPLE_DIR = pathlib.Path(__file__).resolve().parents[2] / "pyqt6_ela_pro" / "example"
 
 _TITLE_RE = re.compile(r"^(\d+)\.\s*(.*)$")
 _GROUP_RE = re.compile(r"^===.*===$")
@@ -67,9 +63,7 @@ def _render_order(cls: ast.ClassDef) -> list[str]:
     「先标题后内容」正是实际渲染出来的样子。
     """
     methods = {
-        item.name: item
-        for item in cls.body
-        if isinstance(item, ast.FunctionDef)
+        item.name: item for item in cls.body if isinstance(item, ast.FunctionDef)
     }
     adder = methods.get("_addDemoContent")
     if adder is None:  # pragma: no cover - 调用方已筛过
@@ -105,7 +99,6 @@ def _iter_page_classes() -> list[tuple[str, ast.ClassDef]]:
 
 
 _PAGES = list(_iter_page_classes())
-_IDS = ["{}::{}".format(f, c.name) for f, c in _PAGES]
 
 
 class TestSectionTitlesUnique:
@@ -114,16 +107,18 @@ class TestSectionTitlesUnique:
     def test_library_has_pages_to_check(self):
         assert len(_PAGES) >= 10, "示例页没扫到，检查 _iter_page_classes"
 
-    @pytest.mark.parametrize("filename,cls", _PAGES, ids=_IDS)
-    def test_no_duplicate_section_title(self, filename, cls):
-        titles = [t for t in _render_order(cls) if not _GROUP_RE.match(t)]
-        duplicates = {t: n for t, n in Counter(titles).items() if n > 1}
-        assert not duplicates, "{} 有重复渲染的节标题：{}".format(
-            filename, sorted(duplicates)
-        )
+    def test_no_duplicate_section_title(self):
+        problems = []
+        for filename, cls in _PAGES:
+            titles = [t for t in _render_order(cls) if not _GROUP_RE.match(t)]
+            duplicates = {t: n for t, n in Counter(titles).items() if n > 1}
+            if duplicates:
+                problems.append(
+                    "{} 有重复渲染的节标题：{}".format(filename, sorted(duplicates))
+                )
+        assert not problems, "\n".join(problems)
 
-    @pytest.mark.parametrize("filename,cls", _PAGES, ids=_IDS)
-    def test_numbers_ascend_within_group(self, filename, cls):
+    def test_numbers_ascend_within_group(self):
         """同一分组内编号必须严格递增（撞号即重复渲染的「视觉版本」）。
 
         分组有两个来源：显式的 ``=== xxx ===`` 标记，以及**隐式回落** —— 这批页面
@@ -131,56 +126,57 @@ class TestSectionTitlesUnique:
         都写标记。判据因此取「编号比前一个小 ⇒ 新分组」，组内要求严格递增。
         """
         problems = []
-        previous = None
-        group = "<页首>"
-        for title in _render_order(cls):
-            if _GROUP_RE.match(title):
-                group = title
-                previous = None
-                continue
-            match = _TITLE_RE.match(title)
-            if match is None:
-                continue
-            number = match.group(1)
-            value = int(number) if number.isdigit() else None
-            if previous is not None and value is not None:
-                if value < previous:
-                    group = "<隐式分组，始于 {}>".format(group)
-                elif value == previous:
-                    problems.append(
-                        "{}: 分组 {!r} 内编号 {} 连续出现两次（{}）".format(
-                            filename, group, value, title
+        for filename, cls in _PAGES:
+            previous = None
+            group = "<页首>"
+            for title in _render_order(cls):
+                if _GROUP_RE.match(title):
+                    group = title
+                    previous = None
+                    continue
+                match = _TITLE_RE.match(title)
+                if match is None:
+                    continue
+                number = match.group(1)
+                value = int(number) if number.isdigit() else None
+                if previous is not None and value is not None:
+                    if value < previous:
+                        group = "<隐式分组，始于 {}>".format(group)
+                    elif value == previous:
+                        problems.append(
+                            "{}: 分组 {!r} 内编号 {} 连续出现两次（{}）".format(
+                                filename, group, value, title
+                            )
                         )
-                    )
-            previous = value
+                previous = value
         assert not problems, "\n".join(problems)
 
-    @pytest.mark.parametrize("filename,cls", _PAGES, ids=_IDS)
-    def test_no_reachable_demo_twice(self, filename, cls):
+    def test_no_reachable_demo_twice(self):
         """回归：``_addDemoContent`` 不许同时调 A 与 A 内部调到的 B。
 
         这是标题重复的**成因**（渲染了两遍），比看标题更早一步暴露。
         """
-        methods = {
-            item.name: item
-            for item in cls.body
-            if isinstance(item, ast.FunctionDef)
-        }
-        adder = methods.get("_addDemoContent")
-        assert adder is not None
-        directly = set(_self_calls(adder))
-
         problems = []
-        for name in sorted(directly):
-            inner = set(_self_calls(methods[name])) if name in methods else set()
-            # 只看 demo 方法：``_addInfoText`` / ``note`` 这类通用 helper 本来
-            # 就会被页面和各个 demo 各自调用一次，不是重复渲染
-            overlap = {n for n in inner & directly if n.startswith("_demo")}
-            if overlap:
-                problems.append(
-                    "{}: _addDemoContent 同时调了 {} 与 {}，"
-                    "而 {} 内部又调 {} → 同一段内容渲染两遍".format(
-                        filename, sorted(overlap), name, name, sorted(overlap)
+        for filename, cls in _PAGES:
+            methods = {
+                item.name: item
+                for item in cls.body
+                if isinstance(item, ast.FunctionDef)
+            }
+            adder = methods.get("_addDemoContent")
+            assert adder is not None
+            directly = set(_self_calls(adder))
+
+            for name in sorted(directly):
+                inner = set(_self_calls(methods[name])) if name in methods else set()
+                # 只看 demo 方法：``_addInfoText`` / ``note`` 这类通用 helper 本来
+                # 就会被页面和各个 demo 各自调用一次，不是重复渲染
+                overlap = {n for n in inner & directly if n.startswith("_demo")}
+                if overlap:
+                    problems.append(
+                        "{}: _addDemoContent 同时调了 {} 与 {}，"
+                        "而 {} 内部又调 {} → 同一段内容渲染两遍".format(
+                            filename, sorted(overlap), name, name, sorted(overlap)
+                        )
                     )
-                )
         assert not problems, "\n".join(problems)

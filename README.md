@@ -58,13 +58,19 @@ tests/                     回归测试（按组件目录组织）
   `tools/perf/bench_markdown_paint.py`（原生浏览器 vs 查看器的滚动绘制分项，Win7 排查字体慢路径）。
   详见 [docs/chat.md](docs/chat.md) 与 [docs/performance.md](docs/performance.md)。
 - **图表引擎**：`ElaChartWidget` 对齐 ECharts 的 `setOption`（21 种系列、tooltip / dataZoom /
-  日历热力 / 下钻），**多轴**（双 Y / 顶部 X / 双 X）、**log 轴**、**数据点标签 /
-  `markPoint` / `markLine` 标签双击编辑**；百万点级数据有系列层位图缓存与降采样 —— 折线 / 散点 100 万点稳态帧
+  日历热力 / 下钻），**多轴**（双 Y / 顶部 X / 双 X）、**多网格**（`gridIndex`）、**多标题 / 多图例**、**log 轴**、**时间轴**
+  （`xAxis.type: "time"`：日期字符串 / 毫秒时间戳、自动时间刻度）、**数据点标签 /
+  `markPoint` / `markLine` 标签双击编辑**；**文字外观**（字号 / 字重 / 单族字体 /
+  斜体，组件级优先、顶层 `textStyle` 兜底）；折线 / 散点支持 Plotly 三模式
+  `mode: "lines" / "lines+markers" / "markers"`（line 默认只有线）；百万点级数据有系列层位图缓存与降采样 —— 折线 / 散点 100 万点稳态帧
   ~9ms、悬停 <1ms、进入新窗口 ~12ms；显式时间戳数据的**记录中断自动断开**（`addGaps`，
   `connectNulls` 可关）；`tools/perf/bench_charts.py`（含 `zoom新窗口` / `缩回全景` 两列）
-  可复跑；**直角坐标图默认滚轮缩放 + 左键框选缩放**；交互对齐 Plotly：双击复位、`setDragMode`
-  （平移 / 框选缩放 / 框选 / **套索**）、可配命中半径、空区坐标事件、图例悬停高亮、联合提示排序、
-  `connectNulls`、**SVG 导出**；工具条是真实 `ElaIconButton`。详见 [docs/charts.md](docs/charts.md)。
+  可复跑；**直角坐标图默认滚轮缩放 + 左键框选缩放（同时 XY）**；交互对齐 Plotly：双击复位、`setDragMode`
+  （平移 / 框选缩放 / 框选 / **套索**）、**选中态**（`selectedMode` / `selectchanged`）、
+  悬停事件（`mouseover` / `mouseout` / `mousemove` / `globalout`）、跨图联动
+  （`setGroup` + `connectCharts`）、可配命中半径、空区坐标事件、图例悬停高亮与**自动分页**、
+  联合提示排序、`connectNulls`、**SVG 导出**；工具条是真实 `ElaIconButton`（含 `magicType`）。
+  详见 [docs/charts.md](docs/charts.md)。
 - **内容渲染**：`ElaMarkdownViewer`（Typora 结构排版、4 套配色主题、GFM / Alert / 脚注 /
   公式 / Mermaid / 流式追加）与 `ElaTerminalView`（ANSI 颜色、跨分片转义、只读）。
   详见 [docs/markdown.md](docs/markdown.md)。
@@ -139,7 +145,7 @@ sys.exit(app.exec())
 | `start_idle_loop(timer, ms, on_stop=)` | 启动持续动效循环；`Reduced` 下停掉，`on_stop` 落到静态基态 |
 | `surface(mode)` / `text(mode)` / `accent(mode)` | 语义令牌（`surface`/`surfaceRaised`/`surfacePopup`/`surfaceDialog`/`border`/`text`/`textMuted`/`accent`…） |
 | `statusColor(mode, ElaStatusRoleType.X)` | 校验/提示状态色（`Neutral`/`Error`/`Warning`/`Success`） |
-| `setAccentColor(color)` | 换强调色，**并一并派生写入 hover/press/开关圆点**（换色后需自行触发重绘） |
+| `setAccentColor(color)` | 换强调色（`QColor` / hex / `rgb()` / `rgba()`），**并一并派生写入 hover/press/开关圆点**（换色后需自行触发重绘） |
 | `motion.setMode(ElaMotionModeType.Reduced)` | 全局动效：状态过渡压到 ≤50ms、持续动效停止 |
 | `set_tooltip(widget, text, position, theme)` | 设置自定义工具提示 |
 | `remove_tooltip(widget)` | 移除自定义工具提示 |

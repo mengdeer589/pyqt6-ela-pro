@@ -7,13 +7,17 @@ import json
 import pytest
 
 from pyqt6_ela_pro.chat import (
+    ElaChatMessage,
+    ElaChatPart,
+    ElaChatPartKindType,
     ElaChatReasoningStyleType,
-    SESSION_SCHEMA_VERSION,
-    ElaChatAttachment,
     ElaChatRoleType,
     ElaChatSessionInfo,
     ElaChatStats,
+    ElaChatToolCall,
     ElaChatView,
+    SESSION_SCHEMA_VERSION,
+    ElaChatAttachment,
     jsonDumps,
     jsonLoads,
 )
@@ -267,3 +271,88 @@ class TestRestorePreserveIds:
         view.clear()
         restored = view.restoreMessages(rows, preserveIds=True)
         assert restored == [row["id"] for row in rows]
+
+
+class TestRestoreSettlesOpenState:
+    """恢复出来的消息不能保留在途态（streaming / running 工具）。"""
+
+    @staticmethod
+    def _row(mid, *, status="streaming", call_status="running", error=""):
+        part = ElaChatPart(
+            id=f"t{mid}",
+            kind=ElaChatPartKindType.Tool,
+            status="streaming",
+            tool_call=ElaChatToolCall(
+                id=f"c{mid}",
+                name="shell",
+                arguments='{"command": "ls"}',
+                status=call_status,
+            ),
+        )
+        message = (
+            ElaChatMessage(id=mid, role=ElaChatRoleType.Assistant)
+            .withParts((part,))
+            .withStatus(status)
+        )
+        if error:
+            message = message.withError(error, "Timeout")
+        return message.toDict()
+
+    def test_shell_virtual_restore_settles_streaming_status(self, qapp, make):
+        view = make(ElaChatView)
+        view.resize(640, 480)
+        view.show()
+        qapp.processEvents()
+        rows = [
+            self._row(index + 1, status="streaming" if index == 0 else "done")
+            for index in range(100)
+        ]
+        view.importSession({"schema": 1, "session": {"id": "s"}, "messages": rows})
+        qapp.processEvents()
+
+        assert view.message(1).status == "stopped"
+        assert view.exportSession()["messages"][0]["status"] == "stopped"
+
+    def test_restore_settles_running_tool_calls(self, qapp, make):
+        view = make(ElaChatView)
+        messageId = view.addMessageFromDict(self._row(1))
+        message = view.message(messageId)
+        assert message.tool_calls[0].status == "aborted"
+        assert message.parts[0].status == "done"
+        card = view.bubble(messageId)._tool_cards["c1"]
+        assert card.status() == "aborted"
+
+    def test_error_restore_settles_tool_as_error(self, qapp, make):
+        view = make(ElaChatView)
+        messageId = view.addMessageFromDict(
+            self._row(1, status="error", error="接口超时")
+        )
+        message = view.message(messageId)
+        assert message.status == "error"
+        assert message.tool_calls[0].status == "error"
+
+    def test_restore_empty_tool_id_is_normalized(self, qapp, make):
+        part = ElaChatPart(
+            id="p1",
+            kind=ElaChatPartKindType.Tool,
+            status="streaming",
+            tool_call=ElaChatToolCall(
+                id="", name="grep", arguments='{"pattern": "x"}', status="running"
+            ),
+        )
+        row = (
+            ElaChatMessage(id=1, role=ElaChatRoleType.Assistant)
+            .withParts((part,))
+            .withStatus("streaming")
+            .toDict()
+        )
+        view = make(ElaChatView)
+        messageId = view.addMessageFromDict(row)
+        callId = view.message(messageId).parts[0].id
+        assert view.message(messageId).tool_calls[0].id == callId
+
+        view.setToolCallResult(messageId, callId, "命中 3 处", ok=True)
+        call = view.message(messageId).tool_calls[0]
+        assert call is not None and call.id == callId
+        assert call.result == "命中 3 处"
+        assert call.status == "done"

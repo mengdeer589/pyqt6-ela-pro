@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-import pyqt6_ela_pro.chat.bubble as bubble_module
+import pyqt6_ela_pro.chat.bubble_stats as bubble_stats
+import pyqt6_ela_pro.chat.bubble_tools as bubble_tools
 from pyqt6_ela_pro.chat import (
     ElaChatBubble,
     ElaChatPart,
@@ -50,8 +51,8 @@ class TestBulkMaterialize:
     def test_panels_and_badges_show_once(self, qapp, make, monkeypatch):
         _CountingStatsBadge.show_calls = 0
         _CountingToolGroupPanel.show_calls = 0
-        monkeypatch.setattr(bubble_module, "StatsBadge", _CountingStatsBadge)
-        monkeypatch.setattr(bubble_module, "ToolGroupPanel", _CountingToolGroupPanel)
+        monkeypatch.setattr(bubble_stats, "StatsBadge", _CountingStatsBadge)
+        monkeypatch.setattr(bubble_tools, "ToolGroupPanel", _CountingToolGroupPanel)
 
         bubble = make(ElaChatBubble)
         bubble.resize(640, 480)

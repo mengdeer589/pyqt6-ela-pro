@@ -282,10 +282,15 @@ class TestWidgetIntegration:
         assert 0 < len(r._points) <= n
         assert chart.convertToPixel("grid", {"x": 10.0, "y": 5.0}) is not None
         assert chart.convertFromPixel("grid", [10.0, 20.0]) is not None
-        # 命中查询不得因缓冲区而抛异常（悬停按采样点位置判定）
-        assert (
-            chart.hitItem(chart.coords[0].plot.center().toPoint()) is not None or True
-        )
+        # 命中查询：拿采样后的屏幕坐标直接命中（采样 / 缓冲区链不得让命中查询抛错，
+        # 且坐标必须原样回填到 params —— 传 QPoint 会在 QRectF 命中链里 TypeError）
+        point = next((p for p in r._points if p is not None), None)
+        assert point is not None, "布局后没有任何可命中的采样点"
+        hit = chart.hitItem(point)
+        assert hit is not None
+        assert hit["seriesName"] == "A"
+        assert isinstance(hit["dataIndex"], int)
+        assert (hit["offsetX"], hit["offsetY"]) == (point.x(), point.y())
 
     def test_animation_disabled_skips_snapshot(self, make):
         """``animation: False`` 时不再物化百万级旧数据快照。"""

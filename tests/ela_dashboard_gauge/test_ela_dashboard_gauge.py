@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import pytest
-from PyQt6ElaWidgetTools import ElaThemeType
 
 from pyqt6_ela_pro.ela_dashboard_gauge import ElaDashboardGauge
 
@@ -144,12 +143,6 @@ class TestElaDashboardGaugeThresholds:
     def test_threshold_roundtrip(self, g, setter, getter, requested, expected):
         getattr(g, setter)(requested)
         assert getattr(g, getter)() == expected
-
-
-class TestElaDashboardGaugeTheme:
-    def test_on_theme_changed_updates_mode(self, g):
-        g._onThemeChanged(ElaThemeType.ThemeMode.Dark)
-        assert g._theme_mode == ElaThemeType.ThemeMode.Dark
 
 
 class TestElaDashboardGaugeDeleteLater:

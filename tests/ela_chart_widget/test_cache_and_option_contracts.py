@@ -465,3 +465,16 @@ class TestShortNumpyArraysAreNotDropped:
             },
         )
         chart.grab()
+
+
+def test_short_2d_ndarray_getoption_returns_detached_list(make):
+    np = pytest.importorskip("numpy")
+    chart = make(ElaChartWidget)
+    data = np.array([[1.0, 2.0], [3.0, 4.0]])
+    chart.setOption(
+        {"animation": False, "xAxis": {}, "yAxis": {}, "series": [{"type": "line", "data": data}]}
+    )
+    out = chart.getOption()["series"][0]["data"]
+    assert isinstance(out, list)
+    out[0][0] = 999.0
+    assert chart.getOption()["series"][0]["data"][0][0] == 1.0

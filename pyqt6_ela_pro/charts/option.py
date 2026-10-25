@@ -36,8 +36,13 @@ def _deep_merge(dst: dict, src: dict) -> dict:
     return dst
 
 
-#: setOption 合并时按 ECharts 组件数组「逐项合并」的顶层键
-_MERGE_ARRAY_KEYS = frozenset({"series", "dataZoom", "graphic"})
+#: setOption 合并时按 ECharts 组件数组「逐项合并」的顶层键。
+#: ``visualMap`` 也在这里 —— 它天生是数组语义（多个色带各绑一个系列），
+#: 整体替换会让「只改第 1 个」静默丢掉其余色带。
+_MERGE_ARRAY_KEYS = frozenset({"series", "dataZoom", "graphic", "visualMap"})
+#: 坐标轴数组：**只按下标**逐项合并（轴的 ``name`` 是轴名，不是身份；
+#: 按 name 匹配会把「给第 2 条轴改名」合并到同名的第 1 条上）
+_AXIS_ARRAY_KEYS = frozenset({"xAxis", "yAxis", "singleAxis"})
 
 
 def _match_option_index(new_item, old_list: list, index: int) -> int:
@@ -98,6 +103,43 @@ def _merge_option_array(old_list: list, new_list: list) -> list:
             used.add(idx)
         else:
             result.append(_copy_series_entry(new_item))
+    return result
+
+
+def _axis_option_list(value) -> list:
+    """坐标轴 option → list（单 dict 与数组两种写法）。"""
+    if isinstance(value, dict):
+        return [value]
+    if isinstance(value, (list, tuple)):
+        return list(value)
+    return []
+
+
+def _merge_axis_option(old, new):
+    """坐标轴合并：单对象与数组**互相等价**，一律按下标逐项合并。
+
+    单对象 = 「只给第 0 条」（ECharts 语义）。只认 list → list 的话，多轴图上
+    一句 ``setOption({"xAxis": {"axisLabel": …}})`` 会把 2 条轴**塌成 1 条**
+    （第二条连同 ``data`` 一起消失，且没有任何告警）。
+
+    返回形状跟旧值：旧值是 dict 就回 dict（不逼 ``getOption()`` 改变形状），
+    旧值是数组就回数组。
+    """
+    old_is_list = isinstance(old, (list, tuple))
+    result = [_hold_value(item) for item in _axis_option_list(old)]
+    for index, new_item in enumerate(_axis_option_list(new)):
+        if not isinstance(new_item, dict):
+            if index < len(result):
+                result[index] = _hold_value(new_item)
+            else:
+                result.append(_hold_value(new_item))
+            continue
+        if index < len(result) and isinstance(result[index], dict):
+            _deep_merge(result[index], new_item)
+        else:
+            result.append(_hold_value(new_item))
+    if not old_is_list and len(result) == 1:
+        return result[0]
     return result
 
 
@@ -267,6 +309,8 @@ def _merge_option(dst: dict, src: dict) -> dict:
             and isinstance(dst.get(k), list)
         ):
             dst[k] = _merge_option_array(dst[k], v)
+        elif k in _AXIS_ARRAY_KEYS and isinstance(v, (dict, list)):
+            dst[k] = _merge_axis_option(dst.get(k), v)
         elif k == "series" and isinstance(v, list):
             # series 首次出现（dst 侧还不是 list）：逐项拷贝并包装大数组。
             # 少了这一支，默认的合并模式会把整个 series 深拷贝一遍 ——

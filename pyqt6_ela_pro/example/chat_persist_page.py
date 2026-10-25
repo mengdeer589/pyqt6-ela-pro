@@ -328,8 +328,13 @@ class ChatPersistPage(ExamplePage):
         """
         view = self._chat.chatView()
         bundle = view.exportSession(ElaChatSessionInfo(id="s1", title="话题"))
-        view.importSession(bundle)  # clear=True：先清空，再按原 id 恢复
-        view.restoreMessages(bundle["messages"], preserveIds=True)
+
+        # 路径 A：整会话替换（clear=True 先清空，再按原 id 恢复）
+        view.importSession(bundle)
+
+        # 路径 B：按条恢复。preserveIds=True 必须先 clear，否则与现有消息撞 id
+        # view.clear()
+        # view.restoreMessages(bundle["messages"], preserveIds=True)
 
     def _on_export(self):
         view = self._chat.chatView()
@@ -413,9 +418,8 @@ class ChatPersistPage(ExamplePage):
         view = self._chat.chatView()
         view.setResizeReflowDeferred(True, minMessages=50, delayMs=120)
         view.beginBatch()
-        rows = [message.toDict() for message in view.messages()]
-        for row in rows:
-            view.addMessageFromDict(row)
+        for index in range(30):
+            view.addMessage(ElaChatRoleType.User, f"历史消息 {index + 1}")
         view.endBatch()
         view.setViewportSuspension(True)
 

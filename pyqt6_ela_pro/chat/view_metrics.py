@@ -14,3 +14,12 @@ _LAZY_PAGE_SIZE = 1
 _SUSPEND_INTERVAL_MS = 100
 #: 挂起判定余量（视口高度的倍数，上下各留）
 _SUSPEND_MARGIN_VIEWPORTS = 2.0
+
+#: 判定「贴底」的容差（像素，对齐 opencode 的 10px）
+_BOTTOM_MARGIN = 10
+#: 「回到底部」按钮显示阈值下限（离底距离，像素）
+_JUMP_MIN_DISTANCE = 400
+#: 展开 / 收起工具卡后暂停贴底跟随的时长（毫秒）
+_FOLLOW_HOLD_MS = 250
+#: 浮动按钮距右下角边距
+_FLOAT_MARGIN = 16

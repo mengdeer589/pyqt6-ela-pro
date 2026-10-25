@@ -36,6 +36,7 @@ from PyQt6.QtWidgets import QWidget
 
 from PyQt6ElaWidgetTools import ElaIconType
 
+from ._colors import parse_color
 from ._styles import drawCoverPixmap, drawElaIcon
 from ._theme import (
     ElaStatusRoleType,
@@ -343,7 +344,7 @@ class ElaAvatar(ElaThemeWidget):
         return QColor(self._background_color)
 
     def setBackgroundColor(self, color) -> None:  # noqa: N802
-        value = QColor(color)
+        value = parse_color(color)
         if value.rgba() == self._background_color.rgba():
             return
         self._background_color = value
@@ -354,7 +355,7 @@ class ElaAvatar(ElaThemeWidget):
         return QColor(self._foreground_color)
 
     def setForegroundColor(self, color) -> None:  # noqa: N802
-        value = QColor(color)
+        value = parse_color(color)
         if value.rgba() == self._foreground_color.rgba():
             return
         self._foreground_color = value

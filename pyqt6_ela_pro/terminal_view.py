@@ -78,6 +78,7 @@ from PyQt6ElaWidgetTools import (
     eTheme,
 )
 
+from ._colors import parse_color
 from ._styles import editBorderlessStyle
 from .ela_button import ElaButton
 from .tooltips import ElaToolTipPositionType, set_tooltip
@@ -1685,7 +1686,7 @@ class ElaTerminalView(ElaThemeWidget):
         if color is None:
             self._highlight_override = None
         else:
-            new = QColor(color)
+            new = parse_color(color)
             if not new.isValid():
                 # 非法色存进 QTextCharFormat 后QPainter 直接不画 —— 搜索高亮
                 # 会「整块消失」而不是「显示成某个颜色」，静默且难查

@@ -353,3 +353,70 @@ class TestResizeFreeze:
         assert view._resize_frozen_width > 0
         view.setResizeReflowDeferred(False)
         assert view._resize_frozen_width == 0
+
+
+class TestVirtualListNewMessage:
+    def test_new_message_does_not_duplicate_bottom_spacer(self, qapp, make):
+        view = make(ElaChatView)
+        view.resize(640, 480)
+        view.show()
+        qapp.processEvents()
+        view.importSession(_bundle(300, steps=1))
+        qapp.processEvents()
+        view.materializeMessage(300)
+        previous = view.bubble(300)
+        assert previous is not None
+
+        mid = view.addMessage(ElaChatRoleType.Assistant, "新回答 " * 40)
+        qapp.processEvents()
+        view._refresh_virtual_window(at_bottom=True)
+        qapp.processEvents()
+
+        bubble = view.bubble(mid)
+        assert bubble is not None
+        assert mid in view._virtual_bubble_ids
+        # 新消息在末尾：bottom spacer 不应再算一遍它的高度
+        assert view._virtual_bottom_spacer.height() == 0
+        gap = bubble.y() - (previous.y() + previous.height())
+        assert 0 <= gap <= 30
+
+
+class TestShellRecycling:
+    def test_far_bubbles_are_recycled_to_placeholders(self, qapp, make):
+        view = make(ElaChatView)
+        view.resize(640, 480)
+        view.show()
+        qapp.processEvents()
+        view.importSession(_bundle(120, steps=1))
+        qapp.processEvents()
+        assert view.bubble(120) is not None
+
+        view._scroll.verticalScrollBar().setValue(0)
+        assert _wait_until(qapp, lambda: len(view._bubbles) < 40, timeout_ms=5000)
+        assert len(view._shell_placeholders) > 80
+        assert view._shell_recycling is True
+
+        # 滚回底部要能重新物化最新消息
+        view.scrollToBottom()
+        assert _wait_until(qapp, lambda: view.bubble(120) is not None, timeout_ms=5000)
+
+
+class TestRecyclingFlushesParts:
+    def test_dematerialize_flushes_unsynced_parts(self, qapp, make):
+        view = make(ElaChatView)
+        view.resize(640, 480)
+        view.show()
+        qapp.processEvents()
+        view.importSession(_bundle(120, steps=1))
+        qapp.processEvents()
+
+        bar = view._scroll.verticalScrollBar()
+        assert _wait_until(qapp, lambda: bar.maximum() > 0, timeout_ms=5000)
+        bar.setValue(0)
+        assert _wait_until(qapp, lambda: view.bubble(1) is not None, timeout_ms=5000)
+        view.addToolCall(1, "shell", '{"command": "ls"}')
+        assert 1 in view._dirty_syncs
+
+        view.scrollToBottom()
+        assert _wait_until(qapp, lambda: view.bubble(1) is None, timeout_ms=5000)
+        assert view.message(1).tool_calls

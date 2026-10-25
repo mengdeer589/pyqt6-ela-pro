@@ -1,7 +1,7 @@
 """图表导出（PNG / JPEG / SVG / data URL）。
 
 从 ``ElaChartWidget`` 拆出的纯导出逻辑：不拥有绘图状态，只读画布当前
-option / 几何与子控件，导出前后恢复临时隐藏的工具条按钮。
+option / 几何，用 ``_paint_content`` 离屏重绘（子控件 —— 工具条按钮 —— 天然不入镜）。
 """
 
 from __future__ import annotations
@@ -9,14 +9,14 @@ from __future__ import annotations
 import base64
 import pathlib
 import tempfile
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Optional
 
 from PyQt6.QtCore import QBuffer, QIODevice, QRect, QSize, Qt
 from PyQt6.QtGui import QColor, QGuiApplication, QImage, QPainter
 from PyQt6.QtWidgets import QFileDialog
 
-from .._internal import is_deleted
 from ._tokens import T
+from ._utils import parse_color
 
 if TYPE_CHECKING:
     from .core import ElaChartWidget
@@ -36,7 +36,7 @@ class ChartExporter:
             return self._svg_data_url()
         fmt = "jpeg" if fmt in ("jpeg", "jpg") else "png"
         try:
-            image = self._grab_without_toolbox().toImage()
+            image = self._render_image(opts, opaque=fmt == "jpeg")
         except Exception:
             return ""
         if image.isNull():
@@ -52,16 +52,6 @@ class ChartExporter:
                 Qt.AspectRatioMode.IgnoreAspectRatio,
                 Qt.TransformationMode.SmoothTransformation,
             )
-        background = opts.get("backgroundColor")
-        if background or fmt == "jpeg":
-            canvas = QImage(image.size(), QImage.Format.Format_RGB32)
-            canvas.fill(
-                QColor(background) if background else QColor(T("color.bg.base"))
-            )
-            painter = QPainter(canvas)
-            painter.drawImage(0, 0, image)
-            painter.end()
-            image = canvas
         buffer = QBuffer()
         buffer.open(QIODevice.OpenModeFlag.WriteOnly)
         ok = image.save(buffer, fmt.upper())
@@ -94,7 +84,8 @@ class ChartExporter:
         if want_svg:
             return self._save_svg(str(target))
         try:
-            if self._grab_without_toolbox().save(target, "PNG"):
+            image = self._render_image()
+            if not image.isNull() and image.save(str(target), "PNG"):
                 return str(target)
         except Exception:
             pass
@@ -116,7 +107,8 @@ class ChartExporter:
             generator.setTitle("ElaChartWidget")
             painter = QPainter(generator)
             try:
-                painter.fillRect(QRect(0, 0, width, height), QColor(T("color.bg.base")))
+                self._paint_backgrounds(painter, width, height, {})
+                chart._layout_all()
                 chart._paint_content(painter)
             finally:
                 painter.end()
@@ -124,32 +116,71 @@ class ChartExporter:
         except Exception:
             return ""
 
-    def _toolbox_widgets(self) -> list:
-        """工具条按钮子控件（导出时临时隐藏用）。"""
-        result = []
-        for component in self._chart._components:
-            if str(getattr(component, "optionKey", "")) != "toolbox":
-                continue
-            widgets = getattr(component, "_widgets", None)
-            if isinstance(widgets, dict):
-                result.extend(
-                    widget
-                    for widget in list(widgets.values())
-                    if not is_deleted(widget)
-                )
-        return result
+    @staticmethod
+    def _option_color(raw) -> Optional[QColor]:
+        """option 里的颜色 → QColor；``None`` / 非法值返回 ``None``。"""
+        if raw is None:
+            return None
+        color = parse_color(raw)
+        return color if color.isValid() else None
 
-    def _grab_without_toolbox(self):
-        """``grab()`` 前隐藏工具条按钮：导出 / 截图要的是图，不是 UI。"""
-        buttons = self._toolbox_widgets()
-        hidden = [button for button in buttons if button.isVisible()]
-        for button in hidden:
-            button.setVisible(False)
+    def _background_layers(self, opts: dict) -> tuple:
+        """→ (导出底色, 图表背景)，与 ECharts 同序：导出参数在下、图表背景在上。
+
+        两者都没给时导出底色回落主题底（与控件观感一致）；图表显式设了
+        ``"transparent"`` 时不铺主题底 —— PNG 就是真正的透明背景。
+        """
+        export_bg = self._option_color((opts or {}).get("backgroundColor"))
+        chart_bg = self._option_color(self._chart.getOption().get("backgroundColor"))
+        if export_bg is None and chart_bg is None:
+            export_bg = QColor(T("color.bg.base"))
+        return export_bg, chart_bg
+
+    def _paint_backgrounds(self, painter: QPainter, width: int, height: int, opts):
+        """按层铺底色（alpha 0 的层跳过，免得 SVG 里留一个空矩形）。"""
+        for color in self._background_layers(opts):
+            if color is not None and color.alpha() > 0:
+                painter.fillRect(QRect(0, 0, width, height), color)
+
+    def _render_image(self, opts: dict = None, *, opaque: bool = False) -> QImage:
+        """图表内容 → 离屏 ``QImage``（不含子控件，工具条按钮不会入镜）。
+
+        ``opaque``（JPEG）时把透明像素压到主题底上 —— JPEG 没有 alpha 通道。
+        """
+        chart = self._chart
+        dpr = max(1.0, float(chart.devicePixelRatioF() or 1.0))
+        image = QImage(
+            max(1, int(round(chart.width() * dpr))),
+            max(1, int(round(chart.height() * dpr))),
+            QImage.Format.Format_ARGB32_Premultiplied,
+        )
+        image.setDevicePixelRatio(dpr)
+        image.fill(Qt.GlobalColor.transparent)
+        painter = QPainter(image)
         try:
-            return self._chart.grab()
+            painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+            painter.setRenderHint(QPainter.RenderHint.TextAntialiasing)
+            self._paint_backgrounds(painter, chart.width(), chart.height(), opts or {})
+            chart._layout_all()
+            chart._paint_content(painter)
         finally:
-            for button in hidden:
-                button.setVisible(True)
+            painter.end()
+        if opaque:
+            image = self._flatten(image)
+        return image
+
+    @staticmethod
+    def _flatten(image: QImage) -> QImage:
+        """把带透明度的图压到主题底（JPEG 用）。"""
+        canvas = QImage(image.size(), QImage.Format.Format_RGB32)
+        canvas.setDevicePixelRatio(image.devicePixelRatio())
+        canvas.fill(QColor(T("color.bg.base")))
+        painter = QPainter(canvas)
+        try:
+            painter.drawImage(0, 0, image)
+        finally:
+            painter.end()
+        return canvas
 
     def _svg_data_url(self) -> str:
         """矢量图 → ``data:image/svg+xml;base64,...``。"""

@@ -8,10 +8,53 @@
 
 from __future__ import annotations
 
+import re
 from typing import Optional
 
 from PyQt6.QtGui import QColor
 from PyQt6ElaWidgetTools import ElaThemeType
+
+#: CSS ``rgb()`` / ``rgba()``（ECharts / 网页里最常见的颜色写法；``QColor`` 不解析）
+_RGB_FUNC_RE = re.compile(
+    r"rgba?\(\s*([0-9.]+)\s*,\s*([0-9.]+)\s*,\s*([0-9.]+)"
+    r"\s*(?:,\s*([0-9.]+)\s*)?\)",
+    re.IGNORECASE,
+)
+
+
+def parse_color(value) -> QColor:
+    """颜色字符串 → QColor（支持 ``#rgb`` / ``#rrggbb`` / 具名色 /
+    ``rgb(r,g,b)`` / ``rgba(r,g,b,a)``）。非法值返回无效 QColor。
+
+    十六进制 / 具名色直接交给 ``QColor``，只有 ``rgb`` 前缀才走正则 ——
+    这个函数在逐项绘制路径上被调用，别让正则成为常态开销。
+
+    ``QColor`` 不认 ``rgb()`` / ``rgba()``：直接用 ``QColor(text)`` 会得到
+    无效色（绘制出来是黑色，且零报错），所以**凡是颜色字符串都过这里**
+    （charts 的 option 颜色、宿主传入的强调色 / 文本色等）。
+    """
+    if isinstance(value, QColor):
+        return QColor(value)
+    if not isinstance(value, str):
+        return QColor()
+    text = value.strip()
+    if text[:3].lower() != "rgb":
+        return QColor(text)
+    match = _RGB_FUNC_RE.fullmatch(text)
+    if match is None:
+        return QColor(text)
+    try:
+        red, green, blue = (int(float(match.group(i))) for i in (1, 2, 3))
+        alpha = float(match.group(4)) if match.group(4) is not None else 1.0
+    except (TypeError, ValueError, OverflowError):
+        return QColor()
+    return QColor(
+        max(0, min(255, red)),
+        max(0, min(255, green)),
+        max(0, min(255, blue)),
+        int(round(max(0.0, min(1.0, alpha)) * 255)),
+    )
+
 
 _COLOR_PALETTE: dict[str, dict[str, dict[str, str]]] = {
     "default": {

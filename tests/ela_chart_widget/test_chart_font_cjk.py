@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import pytest
 
-from pyqt6_ela_pro.charts import axes as charts_axes
+from pyqt6_ela_pro.charts.axes import _shared as charts_axes
 from pyqt6_ela_pro.charts._tokens import FONT_FAMILIES
 
 _CJK = "Microsoft YaHei"

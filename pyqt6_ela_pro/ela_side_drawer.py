@@ -17,6 +17,7 @@ from PyQt6.QtWidgets import QWidget, QVBoxLayout, QGraphicsDropShadowEffect
 
 from PyQt6ElaWidgetTools import eTheme, ElaThemeType
 
+from ._colors import parse_color
 from ._motion import Duration, Easing, start_transition
 from ._ownership import ContentSlot, ElaWidgetOwnershipType
 from .widget_base import ElaThemeWidget
@@ -44,7 +45,7 @@ class ElaDrawerPanel(QWidget):
         self._bg_color = QColor(0, 0, 0, 0)
 
     def setBgColor(self, color: QColor) -> None:
-        self._bg_color = color
+        self._bg_color = parse_color(color)
         self.update()
 
     def setPosition(self, position: ElaDrawerPositionType) -> None:

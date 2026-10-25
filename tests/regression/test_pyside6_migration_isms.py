@@ -19,6 +19,11 @@
   PyQt6 仍只有 ``globalPos()``（没有 ``globalPosition()``）。
 - 上游绑定的枚举参数只收枚举成员：写成 ``setDisplayMode(0)`` 会抛
   ``TypeError: argument 1 has unexpected type 'int'``（实测，窗口构造期即炸）。
+- **PyQt6 取消了 QPoint ↔ QPointF 的隐式转换**（PyQt5 有）：``QRectF.contains``
+  只收 ``QPointF`` / ``QRectF`` / ``(float, float)``，传 ``QPoint`` 直接 ``TypeError``
+  —— 在 Qt 事件回调里即进程终止。判据是「已知类型的接收者 + 已知类型的实参」：
+  只认同文件里能追到 ``QRectF(...)`` / ``QRect(...)`` 赋值的属性、局部变量与
+  ``-> QRectF`` 方法，避免把合法的 ``QRect.contains(QPoint)`` 误判。
 """
 
 from __future__ import annotations
@@ -95,6 +100,255 @@ def _iter_py_files():
             yield path
 
 
+#: 只接受 ``QPointF`` 的 ``QRectF`` 方法（传 ``QPoint`` 即 TypeError）。
+_QRECTF_ONLY_METHODS = {
+    "contains",
+    "intersects",
+    "intersected",
+    "united",
+    "moveTo",
+    "moveCenter",
+    "moveTopLeft",
+    "translate",
+    "translated",
+}
+#: 只接受 ``QPointF`` / ``QRectF`` 的 ``QPainterPath`` 方法。
+_QPATH_POINTF_METHODS = {
+    "contains",
+    "intersects",
+    "united",
+    "intersected",
+    "subtracted",
+    "simplified",
+    "moveTo",
+    "lineTo",
+    "arcTo",
+    "quadTo",
+    "cubicTo",
+    "addRect",
+    "addRoundedRect",
+    "addEllipse",
+    "addText",
+    "addPolygon",
+}
+#: 只接受 ``QPoint`` / ``QRect`` 的方法（反向：传 QPointF/QRectF 同样 TypeError）。
+_INT_GEOM_METHODS = {"contains", "intersects", "intersected", "united", "translated"}
+
+#: 参与类型追踪的构造函数（名字 → 类别）。
+_GEOM_KINDS = {
+    "QRectF": "rectf",
+    "QRect": "rect",
+    "QPointF": "pointf",
+    "QPoint": "point",
+    "QPainterPath": "path",
+}
+
+
+def _self_attr_name(target: ast.expr) -> str | None:
+    if (
+        isinstance(target, ast.Attribute)
+        and isinstance(target.value, ast.Name)
+        and target.value.id == "self"
+    ):
+        return target.attr
+    return None
+
+
+def _annotated_name(node: ast.expr) -> str | None:
+    """``X: QRectF`` 里的 ``QRectF``。"""
+    ann = node
+    return ann.id if isinstance(ann, ast.Name) else None
+
+
+def _infer_geom_kind(expr: ast.expr) -> str | None:
+    """从表达式推断几何类型（直接构造 / ``.toPoint()`` / ``.position()`` / ``.rect()``）。
+
+    构造名优先于后缀：``QPointF(event.position().toPoint())`` 是 ``QPointF``，
+    里面那个 ``.toPoint()`` 只是入参。
+    """
+    if isinstance(expr, ast.Call):
+        fn = expr.func
+        if isinstance(fn, ast.Name) and fn.id in _GEOM_KINDS:
+            return _GEOM_KINDS[fn.id]
+    text = ast.unparse(expr)
+    if "QPointF(" in text:
+        return "pointf"
+    if "QRectF(" in text:
+        return "rectf"
+    if "QPoint(" in text:
+        return "point"
+    if "QRect(" in text:
+        return "rect"
+    if ".toPoint()" in text:
+        return "point"
+    if ".position()" in text:
+        return "pointf"
+    if ".rect()" in text or ".geometry()" in text:
+        return "rect"
+    return None
+
+
+def _collect_geom_names(
+    scope: ast.AST, *, attrs_only: bool = False
+) -> dict[str, set[str]]:
+    """收集可证明是 ``QRectF`` / ``QRect`` / ``QPoint`` / ``QPainterPath`` 的名字。
+
+    类作用域只收 ``self.X = ...`` 属性与 ``-> QRectF`` 方法名；函数作用域收局部变量。
+    只认同文件里的直接构造，不做跨模块推断。
+    """
+    names: dict[str, set[str]] = {kind: set() for kind in _GEOM_KINDS.values()}
+    for node in ast.walk(scope):
+        if isinstance(node, ast.Assign):
+            name = None
+            for target in node.targets:
+                attr = _self_attr_name(target)
+                if attr:
+                    name = attr
+                elif isinstance(target, ast.Name) and not attrs_only:
+                    name = target.id
+            kind = _infer_geom_kind(node.value)
+            if name and kind:
+                names[kind].add(name)
+        elif isinstance(node, ast.AnnAssign):
+            name = _self_attr_name(node.target) or (
+                node.target.id
+                if isinstance(node.target, ast.Name) and not attrs_only
+                else None
+            )
+            kind = _annotated_name(node.annotation)
+            if name and kind in _GEOM_KINDS:
+                names[_GEOM_KINDS[kind]].add(name)
+        elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            ret = node.returns
+            kind = ret.id if isinstance(ret, ast.Name) else None
+            if kind in _GEOM_KINDS:
+                names[_GEOM_KINDS[kind]].add(node.name)
+    return names
+
+
+def _receiver_name(call: ast.Call) -> str | None:
+    """``x.f()`` / ``self.x.f()`` / ``f().contains()`` 的接收者名字。"""
+    if not isinstance(call.func, ast.Attribute):
+        return None
+    recv = call.func.value
+    if isinstance(recv, ast.Name):
+        return recv.id
+    if isinstance(recv, ast.Call):
+        inner = recv.func
+        if isinstance(inner, ast.Name):
+            return inner.id
+        return _self_attr_name(inner) if isinstance(inner, ast.Attribute) else None
+    if isinstance(recv, ast.Attribute):
+        return _self_attr_name(recv)
+    return None
+
+
+def _is_qpoint_expr(expr: ast.expr) -> bool:
+    text = ast.unparse(expr)
+    return ".toPoint()" in text or "QPoint(" in text
+
+
+def _is_qpointf_expr(expr: ast.expr) -> bool:
+    text = ast.unparse(expr)
+    if ".toPoint()" in text:
+        return False
+    return "QPointF(" in text or ".position()" in text
+
+
+def _is_qrect_expr(expr: ast.expr) -> bool:
+    """看起来是 ``QRect``（``QRectF(...)`` 折算后不算）。"""
+    text = ast.unparse(expr)
+    if "QRectF(" in text:
+        return False
+    return "QRect(" in text or ".rect()" in text or ".geometry()" in text
+
+
+def _is_named(expr: ast.expr, names: set[str]) -> bool:
+    """实参是不是本作用域里追踪到指定类型的名字（``p`` / ``self._p``）。"""
+    if isinstance(expr, ast.Name):
+        return expr.id in names
+    attr = _self_attr_name(expr)
+    return attr is not None and attr in names
+
+
+def _scan_geometry(tree: ast.Module, label: str) -> list[str]:
+    """QRectF / QPainterPath 收 QPoint/QRect、QRect 收 QPointF/QRectF。"""
+    found: list[str] = []
+    scopes: list[tuple[ast.AST, bool]] = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ClassDef):
+            scopes.append((node, True))
+    scopes.extend(
+        (node, False)
+        for node in tree.body
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+    )
+    for scope, attrs_only in scopes:
+        class_names = _collect_geom_names(scope, attrs_only=attrs_only)
+        if not any(class_names.values()):
+            continue
+        # 类里的方法各自还有局部变量：逐个方法并上类级属性一起判。
+        bodies = (
+            [
+                child
+                for child in ast.walk(scope)
+                if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef))
+            ]
+            if attrs_only
+            else [scope]
+        )
+        for body in bodies:
+            local_names = _collect_geom_names(body)
+            names = {
+                kind: class_names[kind] | local_names[kind]
+                for kind in _GEOM_KINDS.values()
+            }
+            for node in ast.walk(body):
+                if not isinstance(node, ast.Call):
+                    continue
+                name = _receiver_name(node)
+                if name is None or not isinstance(node.func, ast.Attribute):
+                    continue
+                method = node.func.attr
+                args = [*node.args, *[kw.value for kw in node.keywords]]
+                if name in names["rectf"] and method in _QRECTF_ONLY_METHODS:
+                    if any(
+                        _is_qpoint_expr(a)
+                        or _is_qrect_expr(a)
+                        or _is_named(a, names["point"])
+                        or _is_named(a, names["rect"])
+                        for a in args
+                    ):
+                        found.append(
+                            f"{label}:{node.lineno}: QRectF.{method} 收到 QPoint/QRect"
+                            f"（PyQt6 无隐式转换）—— {ast.unparse(node)[:100]}"
+                        )
+                elif name in names["path"] and method in _QPATH_POINTF_METHODS:
+                    if any(
+                        _is_qpoint_expr(a)
+                        or _is_qrect_expr(a)
+                        or _is_named(a, names["point"])
+                        or _is_named(a, names["rect"])
+                        for a in args
+                    ):
+                        found.append(
+                            f"{label}:{node.lineno}: QPainterPath.{method} 收到"
+                            f" QPoint/QRect —— {ast.unparse(node)[:100]}"
+                        )
+                elif name in names["rect"] and method in _INT_GEOM_METHODS:
+                    if any(
+                        _is_qpointf_expr(a)
+                        or _is_named(a, names["pointf"])
+                        or _is_named(a, names["rectf"])
+                        for a in args
+                    ):
+                        found.append(
+                            f"{label}:{node.lineno}: QRect.{method} 收到 QPointF/QRectF"
+                            f" —— {ast.unparse(node)[:100]}"
+                        )
+    return found
+
+
 def _is_enum_truthiness(node: ast.expr) -> bool:
     """节点是否是「拿枚举成员当布尔」的调用（PyQt6 下这类写法必错）。"""
     return (
@@ -129,9 +383,13 @@ def _scan_tree(tree: ast.Module, label: str) -> list[str]:
         elif isinstance(node, (ast.If, ast.While)) and _is_enum_truthiness(node.test):
             found.append(
                 f"{label}:{node.lineno}: {ast.unparse(node.test)} 不能拿枚举成员当布尔"
-                "（它恒为真值；判 0 应写，example: `int(getattr(x, \"value\", x)) != 0`）"
+                '（它恒为真值；判 0 应写，example: `int(getattr(x, "value", x)) != 0`）'
             )
-        elif isinstance(node, ast.UnaryOp) and isinstance(node.op, ast.Not) and _is_enum_truthiness(node.operand):
+        elif (
+            isinstance(node, ast.UnaryOp)
+            and isinstance(node.op, ast.Not)
+            and _is_enum_truthiness(node.operand)
+        ):
             found.append(
                 f"{label}:{node.lineno}: not {ast.unparse(node.operand)} 不能用于枚举真值判断"
             )
@@ -181,6 +439,17 @@ def _sites() -> list[str]:
     return found
 
 
+def _geometry_sites() -> list[str]:
+    found: list[str] = []
+    for path in _iter_py_files():
+        try:
+            tree = ast.parse(path.read_text(encoding="utf-8"))
+        except SyntaxError:  # pragma: no cover - 由 ruff 拦
+            continue
+        found.extend(_scan_geometry(tree, str(path.relative_to(_ROOT))))
+    return found
+
+
 def _count_sites(source: str) -> int:
     return len(_scan_tree(ast.parse(source), "<snippet>"))
 
@@ -226,3 +495,55 @@ class TestNoBindingsLeftovers:
         )
         assert _count_sites(bad) == 9, "坏形状没被抓全"
         assert _count_sites(good) == 0, "安全形状被误报"
+
+
+class TestGeometryImplicitConversions:
+    """PyQt6 取消了 QPoint ↔ QPointF / QRect ↔ QRectF 的隐式转换。
+
+    ``QRectF.contains(QPoint)`` 会抛 ``TypeError``；这种调用几乎都在 Qt 事件回调里
+    （鼠标按下 / 移动），宿主按「未捕获异常 = 进程终止」处理，表现为整个程序退出。
+    """
+
+    def test_no_qpoint_qpointf_mixups(self):
+        offenders = _geometry_sites()
+        assert offenders == [], (
+            "这些调用在 PyQt6 下必抛 TypeError（无隐式转换）：\n"
+            + "\n".join("  " + o for o in offenders)
+            + "\n\nQRectF 收 QPointF：``rectf.contains(event.position())``；"
+            "QRect 收 QPoint：``rect.contains(event.position().toPoint())``。"
+        )
+
+    def test_geometry_scanner_finds_planted_sites(self):
+        bad = (
+            "from PyQt6.QtCore import QPoint, QPointF, QRect, QRectF\n"
+            "class A:\n"
+            "    def __init__(self):\n"
+            "        self._box = QRectF()\n"
+            "    def on_press(self, event):\n"
+            "        self._box.contains(event.position().toPoint())\n"
+            "        path = QPainterPath()\n"
+            "        path.moveTo(QPoint(1, 2))\n"
+            "        inner = QRectF(0, 0, 4, 4)\n"
+            "        inner.intersects(event.rect())\n"
+            "        frame = QRect(0, 0, 4, 4)\n"
+            "        frame.contains(event.position())\n"
+            "        p = event.position().toPoint()\n"
+            "        self._box.contains(p)\n"
+        )
+        good = (
+            "from PyQt6.QtCore import QPoint, QPointF, QRect, QRectF\n"
+            "class A:\n"
+            "    def __init__(self):\n"
+            "        self._box = QRectF()\n"
+            "    def on_press(self, event):\n"
+            "        p = event.position()\n"
+            "        if self._box.contains(p):\n"
+            "            pass\n"
+            "        path = QPainterPath()\n"
+            "        path.addRoundedRect(QRectF(event.rect()), 4, 4)\n"
+            "        frame = QRect(0, 0, 4, 4)\n"
+            "        frame.contains(event.position().toPoint())\n"
+            "        frame.contains(event.rect())\n"
+        )
+        assert len(_scan_geometry(ast.parse(bad), "<snippet>")) == 5, "坏形状没被抓全"
+        assert _scan_geometry(ast.parse(good), "<snippet>") == [], "安全形状被误报"

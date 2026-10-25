@@ -86,8 +86,15 @@ class ChatMessageStore:
         return True
 
     def replace_at(self, index: int, message: ElaChatMessage) -> None:
+        old_id = self.items[index].id
         self.items[index] = message
         self.index[message.id] = message
+        if old_id != message.id:
+            # 换 id 的替换：旧 id 必须摘掉，位置索引整体重建
+            self.index.pop(old_id, None)
+            self.reindex()
+        else:
+            self.positions[message.id] = index
         self.height_meta.pop(message.id, None)
 
     # -- 派生同步 / 高度缓存 ----------------------------------------------

@@ -19,6 +19,7 @@ from __future__ import annotations
 import inspect
 import re
 
+import pytest
 from PyQt6.QtCore import QUrl
 from PyQt6.QtGui import QColor, QPainter, QPixmap
 
@@ -375,6 +376,7 @@ class TestMathMacroExpansionBounded:
 
         assert 1000 <= _MACRO_EXPANSION_LIMIT <= 5_000_000
 
+    @pytest.mark.slow
     def test_formula_with_runaway_macro_does_not_hang_viewer(self, qapp):
 
         v = ElaMarkdownViewer()

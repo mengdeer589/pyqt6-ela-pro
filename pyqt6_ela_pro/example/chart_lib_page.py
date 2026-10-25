@@ -4,7 +4,7 @@
 仪表盘，以及 GraphicsScene / GraphicsView。
 
 **ElaChartWidget 自成一体** —— 它的 10 组图表、采样、交互都在
-「ElaChartWidget 图表引擎」专题页。那一页讲的是本库自己的图表
+「ElaChartWidget 图表工作台」专题页。那一页讲的是本库自己的图表
 引擎，和这里的「接第三方库」是两回事。
 """
 

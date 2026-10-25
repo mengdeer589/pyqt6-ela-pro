@@ -156,10 +156,22 @@ class ChatVirtualizer:
         return bubble
 
     def _dematerialize_virtual_bubble(self, messageId: int) -> None:
-        """从 spacer 列表移除一条已物化消息（保留实测高度）。"""
-        bubble = self._view._bubbles.pop(messageId, None)
+        """从 spacer 列表移除一条已物化消息（保留实测高度）。
+
+        在途回合 / 待答审批 / 用户手动展开的区块**不回收**：销毁气泡会丢掉
+        未落定分片与交互状态（与 ``_dematerialize_shell`` 同一组守卫）。
+        """
+        bubble = self._view._bubbles.get(messageId)
         if bubble is None:
             return
+        if (
+            bubble.isStreaming()
+            or bubble.pendingPermissions()
+            or bubble.hasExpandedSections()
+        ):
+            return
+        self._flush_dirty_before_destroy(messageId, bubble)
+        self._view._bubbles.pop(messageId, None)
         height = bubble.height()
         if height > 0:
             self._view._virtual_heights[messageId] = max(40, height)
@@ -173,6 +185,17 @@ class ChatVirtualizer:
         self._view._suspended_ids.discard(messageId)
         self._view._drop_message_guards(messageId)
         self._view._virtual_prefix_dirty = True
+
+    def _flush_dirty_before_destroy(self, messageId: int, bubble) -> None:
+        """销毁气泡前结算它的未同步分段（否则 ``_dirty_syncs`` 一丢弃就丢数据）。"""
+        if messageId not in self._view._dirty_syncs:
+            return
+        message = self._view._message_index.get(messageId)
+        if message is None:
+            return
+        self._view._update_snapshot(
+            messageId, lambda current: current.withParts(bubble.parts())
+        )
 
     def _scroll_to_virtual_message(self, messageId: int) -> bool:
         """把 spacer 列表滚到指定消息，并按新视口物化。"""
@@ -566,6 +589,7 @@ class ChatVirtualizer:
         if bubble.hasExpandedSections():
             return False
         message = self._view._message_index.get(messageId)
+        self._flush_dirty_before_destroy(messageId, bubble)
         height = bubble.height()
         if height <= 0 and message is not None:
             height = self._view._estimate_shell_height(message)

@@ -67,7 +67,9 @@ def _guarded(callback: Callable) -> Callable:
         try:
             callback(*args, **kwargs)
         except Exception:
-            pass
+            # 槽内异常不能穿回 Qt（0xC0000409），但也不该完全静默 ——
+            # 出问题时把 traceback 留在 debug 日志里。
+            logger.debug("binder 回调异常（已忽略）", exc_info=True)
 
     return _run
 

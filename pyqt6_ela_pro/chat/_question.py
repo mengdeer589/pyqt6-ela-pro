@@ -62,7 +62,7 @@ from PyQt6ElaWidgetTools import (
     eTheme,
 )
 
-from .._internal import _ThemeAwareMixin
+from .._internal import _ThemeAwareMixin, is_deleted, single_shot_on
 from .._styles import ColorText, paintRoundedCard
 from ._theme import (
     accent_color,
@@ -214,15 +214,27 @@ class _AutoGrowEditor(ElaPlainTextEdit):
         return QSize(60, 24)
 
     def _document_height(self) -> int:
-        """按「块数 × 行高」算像素高度。
+        """排版后的像素高度（**含折行**）。
 
-        **别用** ``document().size().height()`` —— 它返回的是**逻辑单位**（就是块
-        数本身：1 行给 1.0、3 行给 3.0），不是像素。当成像素用会永远被
-        ``max(24, …)`` 兜住，三行文本也只显示一行，用户看不见自己敲了什么。
-        ``documentLayout().documentSize()`` 是同一个坑。
+        **别用** ``document().size().height()`` / ``documentLayout().documentSize()``
+        —— 它们返回逻辑单位（块数），不是像素。按块数算则长单段（折行）永远只
+        报一行；``blockBoundingRect`` 是布局后的真实高度（含折行）。
         """
-        lines = max(1, self.document().blockCount())
-        return lines * self.fontMetrics().lineSpacing() + 2 * self.frameWidth() + 4
+        document = self.document()
+        # 文档宽度必须跟视口同步，否则 blockBoundingRect 按旧宽（或不定宽）
+        # 排版，折行高度会被低估（长单段只报一两行）。
+        width = self.viewport().width()
+        if width > 0 and document.textWidth() != width:
+            document.setTextWidth(width)
+        layout = document.documentLayout()
+        total = 0.0
+        block = document.begin()
+        while block.isValid():
+            total += layout.blockBoundingRect(block).height()
+            block = block.next()
+        if total <= 0:
+            total = max(1, document.blockCount()) * self.fontMetrics().lineSpacing()
+        return int(total + 0.5) + 2 * self.frameWidth() + 4
 
 
 class QuestionSegment(_ThemeAwareMixin, QWidget):
@@ -472,6 +484,11 @@ class QuestionOptionCard(QAbstractButton):
                 QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Minimum
             )
             self._editor.textChanged.connect(self._on_editor_changed)
+            # 文档排版完成（折行高度变化）后再同步一次：``textChanged`` 触发时
+            # 布局往往还没更新，只靠那一次会把行高压在旧值上。
+            self._editor.document().documentLayout().documentSizeChanged.connect(
+                lambda *_: self._schedule_height_sync()
+            )
             # 按键语义走编辑器自己的信号（见 _AutoGrowEditor 的说明），
             # 不给这个会被随行销毁的子控件装 Python 事件过滤器。
             self._editor.submitRequested.connect(self.commitEdit)
@@ -487,6 +504,7 @@ class QuestionOptionCard(QAbstractButton):
             self._editor.setFocus()
         self._apply_content()
         self.updateGeometry()
+        self._schedule_height_sync()
         self.contentChanged.emit()
 
     def editorText(self) -> str:  # noqa: N802
@@ -633,6 +651,10 @@ class QuestionOptionCard(QAbstractButton):
             return
         self._apply_content()
         self.updateGeometry()
+        # 行高由内容决定，但布局不会自己重新问 sizeHint（实测 updateGeometry
+        # 在嵌套布局里不生效）。延到下一轮事件循环再定高，避免在 textChanged
+        # 槽里同步改几何（重入布局 = 0xC0000409）。
+        self._schedule_height_sync()
         self.contentChanged.emit()
 
     # -- 外观 --------------------------------------------------------------
@@ -779,9 +801,33 @@ class QuestionOptionCard(QAbstractButton):
 
     def resizeEvent(self, event) -> None:  # noqa: N802
         super().resizeEvent(event)
-        # 宽度变了 → 折行行数可能变 → 让布局重新问 sizeHint（单向 LayoutRequest，
-        # 不在槽里改几何）。
+        # 宽度变了 → 折行行数可能变 → 下一轮按新宽度重算行高。
         self.updateGeometry()
+        self._schedule_height_sync()
+
+    def _schedule_height_sync(self) -> None:
+        """下一轮事件循环把行高钉到 ``sizeHint``（布局不会自己重问）。"""
+        single_shot_on(self, 0, self._sync_height)
+
+    def _sync_height(self) -> None:
+        if is_deleted(self):
+            return
+        if self._editor is not None:
+            if self._editing:
+                # 外层布局不会把编辑器撑到它的 sizeHint（Minimum 策略只保证
+                # 下限），必须显式钉住；否则多行 / 折行答案只露出一部分。
+                editor_height = max(24, self._editor.sizeHint().height())
+                if self._editor.height() != editor_height or (
+                    self._editor.minimumHeight() != editor_height
+                ):
+                    self._editor.setFixedHeight(editor_height)
+            else:
+                self._editor.setMinimumHeight(0)
+                self._editor.setMaximumHeight(16777215)
+        target = max(1, self.sizeHint().height())
+        if target == self.height() and self.minimumHeight() == target:
+            return
+        self.setFixedHeight(target)
 
     def minimumSizeHint(self) -> QSize:  # noqa: N802
         # 宽度给 0：候选行要能换行（说明文案长度不定），横向上不许比 sizeHint 更宽

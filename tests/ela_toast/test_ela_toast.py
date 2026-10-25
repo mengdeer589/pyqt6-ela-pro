@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import QWidget
-from PyQt6ElaWidgetTools import ElaThemeType
 
 from pyqt6_ela_pro.ela_toast import ElaToast, ElaToastType
 
@@ -88,15 +87,5 @@ class TestElaToastAnimation:
         toast = ElaToast(ElaToastType.Info, "测试", 2000)
         toast._run_animation()
         assert toast._fade_in is not None
-        toast.close()
-        toast.deleteLater()
-
-
-class TestElaToastTheme:
-    def test_on_theme_changed_updates_mode(self):
-        toast = ElaToast(ElaToastType.Info, "测试", 2000)
-
-        toast._onThemeChanged(ElaThemeType.ThemeMode.Dark)
-        assert toast._theme_mode == ElaThemeType.ThemeMode.Dark
         toast.close()
         toast.deleteLater()

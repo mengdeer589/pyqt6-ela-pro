@@ -34,6 +34,8 @@ from PyQt6.QtGui import QColor
 
 from PyQt6ElaWidgetTools import eTheme, ElaThemeType
 
+from ._colors import parse_color
+
 __all__ = [
     "ElaStatusRoleType",
     "accent",
@@ -296,22 +298,26 @@ _DEFAULT_SWITCH_CENTER = {
 }
 
 
-def setAccentColor(color: QColor, modes=None) -> None:
-    """换强调色，**并一并派生写入 hover / press / 开关圆点**（换色后不自动重绘，见模块 docstring）。"""
-    if color is None or not isinstance(color, QColor) or not color.isValid():
+def setAccentColor(color, modes=None) -> None:
+    """换强调色，**并一并派生写入 hover / press / 开关圆点**（换色后不自动重绘，见模块 docstring）。
+
+    ``color`` 收 ``QColor`` / hex / ``rgb()`` / ``rgba()``；非法值忽略。
+    """
+    value = parse_color(color)
+    if not value.isValid():
         return
     targets = list(modes) if modes else [_TM.Light, _TM.Dark]
     for mode in targets:
         steps = _ACCENT_STEPS.get(mode, _ACCENT_STEPS[_TM.Light])
-        eTheme.setThemeColor(mode, _TC.PrimaryNormal, QColor(color))
+        eTheme.setThemeColor(mode, _TC.PrimaryNormal, QColor(value))
         for slot, key in (
             (_TC.PrimaryHover, "hover"),
             (_TC.PrimaryPress, "press"),
         ):
             d_s, d_l = steps[key]
-            eTheme.setThemeColor(mode, slot, _shift(color, d_s, d_l))
+            eTheme.setThemeColor(mode, slot, _shift(value, d_s, d_l))
         eTheme.setThemeColor(
-            mode, _TC.ToggleSwitchNoToggledCenter, _shift(color, _SWITCH_CENTER_DS, 0.0)
+            mode, _TC.ToggleSwitchNoToggledCenter, _shift(value, _SWITCH_CENTER_DS, 0.0)
         )
 
 

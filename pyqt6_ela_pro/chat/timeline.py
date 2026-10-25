@@ -255,9 +255,15 @@ class ChatPartTimeline:
         self._bubble._begin_bulk_build()
         self._bubble._stats_batch = True
         try:
+            seen_ids = set()
             for part in parts or ():
                 if part is None:
                     continue
+                # 空 id 由 _restore_one_part 逐段补 uuid，不能当成重复项丢掉
+                if part.id:
+                    if part.id in seen_ids:
+                        continue
+                    seen_ids.add(part.id)
                 maxStep = max(maxStep, int(getattr(part, "step", 1) or 1))
                 # 每段先切到它所属步骤，_step_index 影响新建分段的 step 归属。
                 # 切步必须与 beginStep 一样收口工具分组与当前面板 / 用量段，
@@ -358,12 +364,15 @@ class ChatPartTimeline:
         if not self._bubble._parts_deferred:
             return False
         parts = list(self._bubble._parts)
-        self._bubble._parts_deferred = False
-        self._bubble._deferred_placeholder = None
         groups = self._bubble._stepGroups(parts)
         if len(groups) > STEP_MATERIALIZE_LIMIT:
-            return self._bubble._setPartsWindowed(parts, groups)
-        return self._bubble.setParts(parts)
+            ok = self._bubble._setPartsWindowed(parts, groups)
+        else:
+            ok = self._bubble.setParts(parts)
+        if ok:
+            self._bubble._parts_deferred = False
+            self._bubble._deferred_placeholder = None
+        return ok
 
     def _setPartsWindowed(self, parts, groups) -> bool:
         window = [part for group in groups[-STEP_WINDOW_TAIL:] for part in group]
@@ -459,11 +468,14 @@ class ChatPartTimeline:
             if not callId:
                 return
             current = self._bubble._find_part(callId)
-            if current is not None and current.tool_call != call:
-                self._bubble._replace_part(callId, current.withToolCall(call))
-                card = self._bubble._tool_cards.get(callId)
+            card = self._bubble._tool_cards.get(callId)
+            # 以卡片里的**归一化**快照为准：``addToolCall`` 会给缺失的
+            # ``tool_call.id`` 补上 callId，拿原始 ``call`` 回写会把 id 又抹空。
+            stored = card.toolCall(callId) if card is not None else None
+            if current is not None and stored is not None and current.tool_call != stored:
+                self._bubble._replace_part(callId, current.withToolCall(stored))
                 if isinstance(card, ToolCallCard):
-                    card.setStatus(call.status)
+                    card.setStatus(stored.status)
                 panel = self._bubble._panel_for_call(callId)
                 if panel is not None:
                     if self._bubble._bulk_build:

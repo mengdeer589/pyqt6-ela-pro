@@ -781,3 +781,16 @@ class TestWidgetSteps:
         assert chat.chatView().statsMode() == "none"
         messageId = chat.beginAssistantMessage()
         assert chat.chatView().bubble(messageId).statsMode() == "none"
+
+
+class TestReasoningReopen:
+    def test_reopened_reasoning_part_returns_to_streaming(self, qapp, make):
+        bubble = make(ElaChatBubble, ElaChatRoleType.Assistant)
+        bubble.beginStream()
+        bubble.beginReasoning()
+        bubble.appendReasoning("第一段")
+        bubble.endReasoning(100)
+        assert bubble.parts()[0].status == "done"
+
+        bubble.appendReasoning("第二段")
+        assert bubble.parts()[0].status == "streaming"

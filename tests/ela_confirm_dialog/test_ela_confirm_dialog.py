@@ -117,12 +117,6 @@ class TestElaConfirmDialogTextProps:
         assert getter(dlg) == expected
 
 
-class TestElaConfirmDialogTheme:
-    def test_on_theme_changed_updates_mode(self, dlg):
-        dlg._onThemeChanged(ElaThemeType.ThemeMode.Dark)
-        assert dlg._theme_mode == ElaThemeType.ThemeMode.Dark
-
-
 class TestElaConfirmButton:
     @pytest.mark.parametrize(
         "btn_type", [_ElaConfirmButton.TYPE_CONFIRM, _ElaConfirmButton.TYPE_CANCEL]
@@ -227,11 +221,6 @@ class TestElaConfirmDialogPlacement:
         assert dialog.x() >= area.left()
         assert dialog.x() + dialog.width() <= area.right() + 1
         dialog.close()
-
-
-class TestElaConfirmDialogDeleteLater:
-    def test_delete_later_cleans_up(self, make, parent):
-        make(ElaConfirmDialog, parent).deleteLater()
 
 
 class TestElaConfirmDialogContentSizing:

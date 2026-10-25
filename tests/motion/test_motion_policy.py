@@ -304,7 +304,7 @@ _BLACKLIST = {
         "_render_timer",
         "_suspension_timer",
     ),
-    "chat/blocks.py": ("_flush_timer",),
+    "chat/blocks/collapsible.py": ("_flush_timer",),
     "terminal_view.py": ("_flush_timer", "_filter_timer"),
     "ela_markdown_viewer.py": (
         "_stream_timer",

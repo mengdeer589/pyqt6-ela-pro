@@ -25,6 +25,8 @@ from PyQt6.QtWidgets import (
 )
 from PyQt6ElaWidgetTools import ElaIconType, ElaText
 
+from ._colors import parse_color
+
 
 class EditBorderlessStyle(QProxyStyle):
     """去掉 ``ElaPlainTextEdit`` 原生自绘边框的代理样式。
@@ -74,7 +76,7 @@ def setSolidBackground(widget: QWidget, color) -> None:  # noqa: N802 (Qt 命名
     """给普通控件铺纯色底（palette ``Window`` + 自动填充），替代 QSS ``background-color``。"""
     widget.setAutoFillBackground(True)
     palette = widget.palette()
-    palette.setColor(QPalette.ColorRole.Window, QColor(color))
+    palette.setColor(QPalette.ColorRole.Window, parse_color(color))
     widget.setPalette(palette)
     widget.update()
 
@@ -156,7 +158,7 @@ def setPlainFrame(widget, background, border) -> None:  # noqa: N802 (Qt 命名)
     widget.setFrameShape(QFrame.Shape.Box)
     widget.setFrameShadow(QFrame.Shadow.Plain)
     setSolidBackground(widget, background)
-    widget.setProperty(PlainFrameStyle.BORDER_PROPERTY, QColor(border))
+    widget.setProperty(PlainFrameStyle.BORDER_PROPERTY, parse_color(border))
     widget.setStyle(plainFrameStyle())
     widget.update()
 
@@ -168,7 +170,7 @@ def setTextColor(widget: QWidget, color) -> None:  # noqa: N802 (Qt 命名)
     docstring），那类控件要用 :class:`ColorText` / 它的 ``setTextColor()``。
     """
     palette = widget.palette()
-    palette.setColor(QPalette.ColorRole.WindowText, QColor(color))
+    palette.setColor(QPalette.ColorRole.WindowText, parse_color(color))
     widget.setPalette(palette)
     widget.update()
 
@@ -201,11 +203,11 @@ def setTextBaseColor(widget: QWidget, color=None) -> None:  # noqa: N802 (Qt 命
             viewport.setPalette(viewport_palette)
             viewport.setAutoFillBackground(False)
     else:
-        palette.setColor(QPalette.ColorRole.Base, QColor(color))
+        palette.setColor(QPalette.ColorRole.Base, parse_color(color))
         widget.setPalette(palette)
         if viewport is not None:
             viewport_palette = viewport.palette()
-            viewport_palette.setColor(QPalette.ColorRole.Base, QColor(color))
+            viewport_palette.setColor(QPalette.ColorRole.Base, parse_color(color))
             viewport.setPalette(viewport_palette)
             viewport.setAutoFillBackground(True)
     widget.update()
@@ -489,7 +491,7 @@ class ColorText(ElaText):
 
     def setTextColor(self, color) -> None:  # noqa: N802 (Qt 命名)
         """设置文字色；``None`` 还原为 ``ElaText`` 的主题色行为。"""
-        self._text_color = None if color is None else QColor(color)
+        self._text_color = None if color is None else parse_color(color)
         if self._text_color is not None:
             self._apply_text_color()
         self.update()
@@ -499,7 +501,7 @@ class ColorText(ElaText):
         return None if self._text_color is None else QColor(self._text_color)
 
     def setTextWeight(self, weight) -> None:  # noqa: N802 (Qt 命名)
-        """设置字重（替代 QSS ``font-weight``）；传 ``QFont.Weight`` 或 0-99 数值。"""
+        """设置字重（替代 QSS ``font-weight``）；传 ``QFont.Weight`` 或 1-1000 数值（Qt6 刻度，Normal=400）。"""
         font = self.font()
         font.setWeight(weight)
         self.setFont(font)
@@ -567,7 +569,7 @@ class FlatIconButton(QToolButton):
 
     def setHoverColor(self, color) -> None:  # noqa: N802 (Qt 命名)
         """悬浮底色（``QColor`` / hex 串；全透明表示不画底）。"""
-        self._hover_color = QColor(color)
+        self._hover_color = parse_color(color)
         self.update()
 
     def hoverColor(self) -> QColor:  # noqa: N802 (Qt 命名)
@@ -576,7 +578,7 @@ class FlatIconButton(QToolButton):
 
     def setPressColor(self, color) -> None:  # noqa: N802 (Qt 命名)
         """按下底色。"""
-        self._press_color = QColor(color)
+        self._press_color = parse_color(color)
         self.update()
 
     def pressColor(self) -> QColor:  # noqa: N802 (Qt 命名)

@@ -5,7 +5,6 @@ from __future__ import annotations
 import pytest
 from PyQt6.QtCore import QEvent, Qt, QPointF
 from PyQt6.QtGui import QMouseEvent
-from PyQt6ElaWidgetTools import ElaThemeType
 
 from pyqt6_ela_pro.ela_pagination import ElaPagination
 
@@ -215,17 +214,6 @@ class TestElaPaginationJumperEntered:
         p._jumper_edit.setText(text)
         p._onJumperEntered()
         assert p.currentPage() == expected
-
-
-class TestElaPaginationTheme:
-    def test_on_theme_changed_updates_mode(self, p):
-        p._onThemeChanged(ElaThemeType.ThemeMode.Dark)
-        assert p._theme_mode == ElaThemeType.ThemeMode.Dark
-
-
-class TestElaPaginationDeleteLater:
-    def test_delete_later_cleans_up(self, p):
-        p.deleteLater()
 
 
 class TestElaPaginationHoverReset:

@@ -29,6 +29,7 @@ from PyQt6ElaWidgetTools import (
 )
 
 from ._internal import _draw_button_content, _ThemeAwareMixin
+from ._colors import parse_color
 from ._styles import coerceElaIcon
 from .ela_button import _FACE_INSET
 
@@ -96,7 +97,7 @@ class ElaProgressButton(_ThemeAwareMixin, ElaPushButton):
 
     def setProgressColor(self, color: QColor) -> None:
         self._custom_progress_color = True
-        self._progress_color = color
+        self._progress_color = parse_color(color)
         self.update()
 
     def progressColor(self) -> QColor:

@@ -236,8 +236,13 @@ class TestFromDictTolerance:
             ElaChatToolStatusType.Aborted,
         ],
     )
-    def test_unsettled_tool_status_survives_restore(self, qapp, status):
-        """恢复不能把「还在跑 / 被中止」悄悄变成「已完成」。"""
+    def test_unsettled_tool_status_is_settled_on_restore(self, qapp, status):
+        """未完成工具恢复时结算成 ``Aborted``（与 ``journal.settleOpen`` 同口径）。
+
+        存储里可能留下崩溃 / 导出瞬间的 ``pending`` / ``running``，恢复后不会再有
+        事件收尾 —— 原样显示就是永久转圈。「不能谎报已完成」这条仍成立：结算目标
+        是 ``Aborted`` 而不是 ``Done``。
+        """
         chat = _chat(qapp)
         data = {
             "id": 0,
@@ -259,9 +264,39 @@ class TestFromDictTolerance:
         messageId = chat.chatView().addMessageFromDict(data)
         qapp.processEvents()
         call = chat.chatView().message(messageId).tool_calls[0]
-        assert call.status == status
+        assert call.status == ElaChatToolStatusType.Aborted
         assert call.result == "部分结果"
         chat.deleteLater()
+        qapp.processEvents()
+
+    def test_unsettled_tool_becomes_error_on_errored_restore(self, qapp):
+        """出错回合里的在途工具结算成 ``Error``（不是 ``Aborted``）。"""
+        chat = _chat(qapp)
+        data = {
+            "id": 0,
+            "role": "assistant",
+            "status": "error",
+            "error": "收尾报错",
+            "parts": [
+                {
+                    "id": "c1",
+                    "kind": "tool",
+                    "tool_call": {
+                        "id": "c1",
+                        "name": "read",
+                        "result": "部分结果",
+                        "status": "running",
+                    },
+                }
+            ],
+        }
+        messageId = chat.chatView().addMessageFromDict(data)
+        qapp.processEvents()
+        call = chat.chatView().message(messageId).tool_calls[0]
+        assert call.status == ElaChatToolStatusType.Error
+        assert call.result == "部分结果"
+        chat.deleteLater()
+        qapp.processEvents()
         qapp.processEvents()
 
     def test_unknown_part_kind_dropped(self):
@@ -301,24 +336,33 @@ class TestFromDictTolerance:
 class TestRestore:
     def test_full_timeline_restored(self, qapp):
         message = _sample_message()
+        # 恢复会把未完成工具结算成 Aborted（``_settle_restored``：不留永久转圈）
+        settled_parts = [
+            part.withToolCall(part.tool_call.withStatus(ElaChatToolStatusType.Aborted))
+            if part.tool_call is not None
+            else part
+            for part in message.parts
+        ]
+        expected = message.withParts(settled_parts)
+
         chat = _chat(qapp)
         messageId = chat.chatView().addMessageFromDict(_load(_dump(message.toDict())))
         qapp.processEvents()
 
         back = chat.chatView().message(messageId)
-        assert back.role == message.role
-        assert back.text == message.text
-        assert back.reasoning == message.reasoning
-        assert back.reasoning_ms == message.reasoning_ms
-        assert back.duration_ms == message.duration_ms
-        assert back.title == message.title
-        assert back.timestamp == message.timestamp
-        assert back.error == message.error
-        assert back.created_at == message.created_at
-        assert back.attachments == message.attachments
-        assert back.tool_calls == message.tool_calls
-        assert back.stats == message.stats
-        assert back.parts == message.parts
+        assert back.role == expected.role
+        assert back.text == expected.text
+        assert back.reasoning == expected.reasoning
+        assert back.reasoning_ms == expected.reasoning_ms
+        assert back.duration_ms == expected.duration_ms
+        assert back.title == expected.title
+        assert back.timestamp == expected.timestamp
+        assert back.error == expected.error
+        assert back.created_at == expected.created_at
+        assert back.attachments == expected.attachments
+        assert back.tool_calls == expected.tool_calls
+        assert back.stats == expected.stats
+        assert back.parts == expected.parts
         chat.deleteLater()
         qapp.processEvents()
 

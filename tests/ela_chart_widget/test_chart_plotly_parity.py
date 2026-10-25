@@ -235,9 +235,7 @@ class TestLegendHoverHighlight:
         assert chart._legend_hover == "S1"
         # 悬停改外观 → 必须进层缓存键（否则贴回旧位图）
         assert chart._series_layer_key() != key_before
-        chart.mouseMoveEvent(
-            _mouse(QEvent.Type.MouseMove, QPointF(5, 5), chart)
-        )
+        chart.mouseMoveEvent(_mouse(QEvent.Type.MouseMove, QPointF(5, 5), chart))
         assert chart._legend_hover is None
 
     def test_leave_clears(self, qapp, make):
@@ -607,7 +605,9 @@ class TestWheelZoomDefault:
         chart.setOption(
             {
                 "animation": False,
-                "series": [{"type": "pie", "name": "P", "data": [{"name": "a", "value": 1}]}],
+                "series": [
+                    {"type": "pie", "name": "P", "data": [{"name": "a", "value": 1}]}
+                ],
             }
         )
         chart.anim.setProgress(1.0)
@@ -628,6 +628,65 @@ class TestWheelZoomDefault:
         comp = chart._component("dataZoom")
         assert comp is not None and getattr(comp, "_wheel_zoom_auto", False)
         assert self._wheel(chart, chart.primaryCoord().plot.center()).isAccepted()
+
+    def test_box_zoom_changes_both_axes(self, qapp, make):
+        chart = _chart(make)
+        comp = chart._component("dataZoom")
+        coord = chart.primaryCoord()
+        before_y = (coord.y_axis.vmin, coord.y_axis.vmax)
+        plot = coord.plot
+        _drag(
+            chart,
+            qapp,
+            QPointF(plot.left() + 40, plot.top() + 40),
+            QPointF(plot.left() + 260, plot.top() + 180),
+        )
+        assert (comp.start, comp.end) != (0.0, 100.0)
+        assert (comp.y_start, comp.y_end) != (0.0, 100.0)
+        assert (coord.y_axis.vmin, coord.y_axis.vmax) != before_y
+        assert coord.y_axis.vmax - coord.y_axis.vmin < before_y[1] - before_y[0]
+
+    def test_wheel_zoom_changes_both_axes(self, qapp, make):
+        chart = _chart(make)
+        comp = chart._component("dataZoom")
+        coord = chart.primaryCoord()
+        before_y = (coord.y_axis.vmin, coord.y_axis.vmax)
+        self._wheel(chart, coord.plot.center())
+        assert comp.end < 100.0
+        assert comp.y_end < 100.0
+        assert coord.y_axis.vmax - coord.y_axis.vmin < before_y[1] - before_y[0]
+
+    def test_zoom_step_and_reset_cover_both_axes(self, qapp, make):
+        chart = _chart(make)
+        comp = chart._component("dataZoom")
+        assert chart.zoomStep(0.5)
+        assert comp.end - comp.start < 100.0
+        assert comp.y_end - comp.y_start < 100.0
+        chart.resetView()
+        assert (comp.start, comp.end) == (0.0, 100.0)
+        assert (comp.y_start, comp.y_end) == (0.0, 100.0)
+
+    def test_explicit_datazoom_also_gets_y_zoom_on_wheel(self, qapp, make):
+        chart = _chart(make, dataZoom=[{"type": "inside", "start": 20, "end": 80}])
+        comp = chart._component("dataZoom")
+        assert not getattr(comp, "_wheel_zoom_auto", False)
+        coord = chart.primaryCoord()
+        before_y = (coord.y_axis.vmin, coord.y_axis.vmax)
+        assert (comp.y_start, comp.y_end) == (0.0, 100.0)
+        self._wheel(chart, coord.plot.center())
+        assert comp.y_end < 100.0
+        assert coord.y_axis.vmax - coord.y_axis.vmin < before_y[1] - before_y[0]
+
+    def test_y_zoom_can_be_disabled_per_datazoom(self, qapp, make):
+        chart = _chart(
+            make, dataZoom=[{"type": "inside", "start": 20, "end": 80, "yZoom": False}]
+        )
+        comp = chart._component("dataZoom")
+        coord = chart.primaryCoord()
+        before_y = (coord.y_axis.vmin, coord.y_axis.vmax)
+        self._wheel(chart, coord.plot.center())
+        assert (comp.y_start, comp.y_end) == (0.0, 100.0)
+        assert (coord.y_axis.vmin, coord.y_axis.vmax) == before_y
 
 
 class TestToolboxElaIconButtons:
@@ -720,7 +779,9 @@ class TestBrushBoxLifecycle:
 
     def _box_drag(self, chart, qapp, fx0=0.25, fx1=0.75):
         plot = chart.primaryCoord().plot
-        start = QPointF(plot.left() + plot.width() * fx0, plot.top() + plot.height() * 0.1)
+        start = QPointF(
+            plot.left() + plot.width() * fx0, plot.top() + plot.height() * 0.1
+        )
         end = QPointF(
             plot.left() + plot.width() * fx1, plot.bottom() - plot.height() * 0.1
         )

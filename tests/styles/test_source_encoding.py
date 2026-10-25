@@ -34,8 +34,6 @@ from __future__ import annotations
 
 import pathlib
 
-import pytest
-
 ROOTS = ("pyqt6_ela_pro", "tests", "example", "tools", "llm_test")
 SKIP_DIRS = {"__pycache__", ".venv", "build", "dist", ".git"}
 
@@ -72,28 +70,35 @@ def test_scan_covers_the_repository():
     assert any(p.name == "__init__.py" for p in FILES)
 
 
-@pytest.mark.parametrize(
-    "path", FILES, ids=lambda p: str(p.relative_to(FILES[0].parents[2]))
-)
-def test_source_is_clean_utf8(path: pathlib.Path):
-    raw = path.read_bytes()
-    try:
-        text = raw.decode("utf-8")
-    except UnicodeDecodeError as exc:  # pragma: no cover - 失败时才到这里
-        pytest.fail(
-            f"{path.name} 不是合法 UTF-8（第 {exc.start} 字节附近）："
-            f"{raw[max(0, exc.start - 20) : exc.start + 8]!r}"
-        )
-    if REPLACEMENT in text:
-        index = text.index(REPLACEMENT)
-        pytest.fail(
-            f"{path.name} 含替换字符 U+FFFD（第 {index} 个字符处）——写入时被写坏了："
-            f"{ascii(text[max(0, index - 40) : index + 20])}"
-        )
-    for number, line in enumerate(text.splitlines(), start=1):
-        if LOST_RUN in line and NOQA_MARK not in line:
-            pytest.fail(
-                f"{path.name}:{number} 含连续问号（疑似非 ASCII 被替换成 '?' 的"
-                f"丢失型损坏，合法 UTF-8 也扫不出来）：{ascii(line.strip()[:90])}\n"
-                f"确属正常用法请在该行行尾加 `# {NOQA_MARK}`。"
+def test_source_is_clean_utf8():
+    """整仓一次扫完，失败时列出全部违规位置。
+
+    逐文件参数化会把同一段检查复制 500+ 份节点（收集与 ``-q`` 输出都被撑满），
+    而失败信息本来就能一次给全 —— 聚合不降低任何覆盖。
+    """
+    problems: list[str] = []
+    for path in FILES:
+        rel = path.relative_to(FILES[0].parents[2])
+        raw = path.read_bytes()
+        try:
+            text = raw.decode("utf-8")
+        except UnicodeDecodeError as exc:  # pragma: no cover - 失败时才到这里
+            problems.append(
+                f"{rel} 不是合法 UTF-8（第 {exc.start} 字节附近）："
+                f"{raw[max(0, exc.start - 20) : exc.start + 8]!r}"
             )
+            continue
+        if REPLACEMENT in text:
+            index = text.index(REPLACEMENT)
+            problems.append(
+                f"{rel} 含替换字符 U+FFFD（第 {index} 个字符处）——写入时被写坏了："
+                f"{ascii(text[max(0, index - 40) : index + 20])}"
+            )
+        for number, line in enumerate(text.splitlines(), start=1):
+            if LOST_RUN in line and NOQA_MARK not in line:
+                problems.append(
+                    f"{rel}:{number} 含连续问号（疑似非 ASCII 被替换成 '?' 的"
+                    f"丢失型损坏，合法 UTF-8 也扫不出来）：{ascii(line.strip()[:90])}\n"
+                    f"确属正常用法请在该行行尾加 `# {NOQA_MARK}`。"
+                )
+    assert not problems, "源码编码损坏：\n" + "\n".join(problems)

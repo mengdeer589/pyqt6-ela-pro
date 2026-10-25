@@ -12,7 +12,7 @@ from PyQt6ElaWidgetTools import ElaThemeType
 
 from pyqt6_ela_pro.chat import ElaChatBubble, ElaChatRoleType
 from pyqt6_ela_pro.chat import _theme as chat_theme
-from pyqt6_ela_pro.chat import blocks as chat_blocks
+from pyqt6_ela_pro.chat.blocks import header as chat_blocks_header
 
 _CJK = "Microsoft YaHei"
 
@@ -20,14 +20,14 @@ _CJK = "Microsoft YaHei"
 @pytest.fixture
 def cjk_system(monkeypatch):
     monkeypatch.setattr(chat_theme, "system_cjk_font_family", lambda: _CJK)
-    monkeypatch.setattr(chat_blocks, "system_cjk_font_family", lambda: _CJK)
+    monkeypatch.setattr(chat_blocks_header, "system_cjk_font_family", lambda: _CJK)
     return _CJK
 
 
 @pytest.fixture
 def non_cjk_system(monkeypatch):
     monkeypatch.setattr(chat_theme, "system_cjk_font_family", lambda: None)
-    monkeypatch.setattr(chat_blocks, "system_cjk_font_family", lambda: None)
+    monkeypatch.setattr(chat_blocks_header, "system_cjk_font_family", lambda: None)
     return None
 
 

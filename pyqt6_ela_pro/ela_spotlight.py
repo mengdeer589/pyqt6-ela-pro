@@ -322,7 +322,7 @@ class ElaSpotlight(ElaThemeWidget):
 
     def mousePressEvent(self, event: QMouseEvent) -> None:
         if self._spotlight_rect.isValid() and not self._spotlight_rect.contains(
-            event.position().toPoint()
+            event.position()
         ):
             if len(self._steps) <= 1:
                 self.finish()

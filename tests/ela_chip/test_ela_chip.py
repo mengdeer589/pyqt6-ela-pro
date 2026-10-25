@@ -208,8 +208,3 @@ class TestElaChipStates:
         chip = make(ElaChip, text="标签")
         chip.setClosable(True)
         assert chip._close_rect().width() >= 20
-
-
-class TestElaChipDeleteLater:
-    def test_delete_later_cleans_up(self, chip):
-        chip.deleteLater()

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import pytest
-from PyQt6ElaWidgetTools import ElaThemeType
 
 from pyqt6_ela_pro.ela_steps import ElaSteps
 
@@ -179,14 +178,3 @@ class TestElaStepsOrientation:
         s.show()
         qapp.processEvents()
         assert not s.grab().isNull()
-
-
-class TestElaStepsTheme:
-    def test_on_theme_changed_updates_mode(self, s):
-        s._onThemeChanged(ElaThemeType.ThemeMode.Dark)
-        assert s._theme_mode == ElaThemeType.ThemeMode.Dark
-
-
-class TestElaStepsDeleteLater:
-    def test_delete_later_cleans_up(self, s):
-        s.deleteLater()

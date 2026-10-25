@@ -5,8 +5,10 @@
 - 装了 ``orjson``：由它序列化（更快、原生 UTF-8）；``allow_nan=False``
   的严格性用一次快速扫描保持与标准库一致（orjson 默认会把 NaN / Infinity
   写成 ``null``，静默丢数据）；
-- 没装：``json.dumps(ensure_ascii=False, separators=(",", ":"))``，
-  两套后端产出**同为紧凑 UTF-8 文本**，可逐字节比对。
+- 没装：``json.dumps(ensure_ascii=False, separators=(",", ":"))``。
+  两套后端产出**同为紧凑 UTF-8 文本**、``allow_nan=False`` 语义一致，但
+  **浮点指数记法可能不同**（标准库 ``1e-07`` / orjson ``1e-7``）——不要拿
+  输出文本做跨机器逐字节比对（解析后的值相同）。
 
 **写入与读取都严格**：两端都拒非有限浮点（写入抛 ``ValueError``，读取按非法 JSON
 拒掉），否则 ``float('inf')`` 会流进整数字段把 ``fromDict`` 打断。

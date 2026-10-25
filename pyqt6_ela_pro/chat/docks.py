@@ -178,6 +178,7 @@ class ElaChatQueueDock(_ThemeAwareMixin, ElaScrollPageArea):
         layout.setSpacing(6)
         label = ColorText(self._row_text(message), row)
         label.setToolTip(message["text"])
+        row._queue_label = label
         layout.addWidget(label, 1)
         send = ElaButton("立即发送", variant="text", size="small", parent=row)
         send.clicked.connect(
@@ -219,9 +220,7 @@ class ElaChatQueueDock(_ThemeAwareMixin, ElaScrollPageArea):
             row = item.widget() if item is not None else None
             if row is None:
                 continue
-            # 按位置反查标签：_build_row 的布局顺序即契约（标签在 index 0）
-            row_layout = row.layout()
-            label = row_layout.itemAt(0).widget() if row_layout is not None else None
+            label = getattr(row, "_queue_label", None)
             if label is not None:
                 label.setTextColor(muted_color(self._theme_mode, 0.8))
                 label.setTextPixelSize(12)

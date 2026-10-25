@@ -33,6 +33,8 @@ viewer.missingGlyphFallbackEnabled()           # 查询
 
 内置 4 套配色：`opencode`（默认）/ `github` / `solarized` / `dracula`，
 按当前浅 / 深主题自动取对应变体；每套含 `semantic`（8 个语义键）与 `syntax`（代码高亮）。
+颜色值接受 `#rgb` / `#rrggbb` / 具名色 / `rgb()` / `rgba()`（`setCodeTokenColors` 与
+`registerMarkdownTheme` 的自定义色同样支持）—— 库内统一过 `_colors.parse_color`。
 正文片段不写显式前景色（颜色由控件 palette 的 `Text` 提供、随主题切换）；
 导出 HTML / PDF 时正文走默认文字色（深色主题下导出不会出现「白字白纸」）。
 

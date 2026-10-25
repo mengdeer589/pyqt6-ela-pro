@@ -16,10 +16,14 @@ from __future__ import annotations
 
 import time
 
+import pytest
+
 from PyQt6.QtTest import QTest
 
 import pyqt6_ela_pro.ela_markdown_viewer as M
 from pyqt6_ela_pro.ela_markdown_viewer import ElaMarkdownViewer
+
+pytestmark = pytest.mark.slow
 
 
 def _count_renders(monkeypatch, qapp, text: str, chunk: int, wait_ms: int = 8):

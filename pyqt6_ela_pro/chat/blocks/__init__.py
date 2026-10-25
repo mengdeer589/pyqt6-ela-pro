@@ -1,0 +1,160 @@
+"""聊天消息内部子块组件（``pyqt6_ela_pro.chat``）。
+
+本包是原 ``blocks.py`` 的结构化拆分：``__init__`` 只做再导出，
+实现按职责分布在同包子模块里（header / collapsible / tool_cards /
+attachments / stats / actions / misc / permission_* / _helpers）。
+"""
+
+from __future__ import annotations
+
+from ._helpers import (
+    AVATAR_DEFAULT_SHAPE,
+    AVATAR_RADIUS,
+    AVATAR_SHAPES,
+    AVATAR_SIZE,
+    CARD_V_PADDING,
+    CONTEXT_TOOLS,
+    DETAIL_COLLAPSED_LINES,
+    DETAIL_MAX_LINE_CHARS,
+    ElaChatAvatarSource,
+    LAYOUT_SPACING,
+    PREVIEW_MAX_CHARS,
+    REASONING_FLUSH_INTERVAL_MS,
+    RETRYABLE_ERROR_TYPES,
+    ROLE_ICONS,
+    SHELL_TOOLS,
+    TOOL_ICONS,
+    _AVATAR_PIXMAP_CACHE,
+    _AVATAR_PIXMAP_CACHE_MAX,
+    _ELIDE_SOURCE_MAX,
+    _HEADING_LINE_LIMIT,
+    _HEADING_PATTERNS,
+    _HeadingScanner,
+    _IMAGE_THUMB_SIZE,
+    _PREVIEW_ITEMS,
+    _SUBTITLE_KEYS,
+    _WRITE_TOOLS,
+    _clean_heading,
+    _clip_detail,
+    _collapsed_detail,
+    _deletionOnly,
+    _elide_source,
+    _iter_heading_matches,
+    _load_avatar_pixmap,
+    _preview_value,
+    avatarPixmap,
+    extractReasoningHeading,
+    formatDuration,
+    normalizeAvatarShape,
+    toolArgumentPairs,
+    toolDefaultOpen,
+    toolDefaultOpenCoding,
+    toolIconName,
+    toolSubtitle,
+    toolSubtitleParts,
+)
+from .header import (
+    MessageHeader,
+    MessageMeta,
+    STATUS_DOT_BREATH_MS,
+    _AvatarBadge,
+    _StatusDot,
+)
+from .collapsible import (
+    ReasoningBlock,
+    ThinkingRow,
+    _CollapsibleBlock,
+)
+from .tool_cards import (
+    ContextToolGroupCard,
+    ToolCallCard,
+    ToolGroupPanel,
+)
+from .attachments import (
+    AttachmentStrip,
+    _ImageAttachmentCard,
+)
+from .stats import (
+    StatsBadge,
+)
+from .actions import (
+    MessageActions,
+)
+from .misc import (
+    CompactionSeparator,
+    ErrorCard,
+    SteerNotice,
+)
+from .permission_card import (
+    PermissionCard,
+)
+from .permission_record import (
+    PermissionRecord,
+)
+
+__all__ = [
+    "AVATAR_DEFAULT_SHAPE",
+    "AVATAR_RADIUS",
+    "AVATAR_SHAPES",
+    "AVATAR_SIZE",
+    "AttachmentStrip",
+    "CARD_V_PADDING",
+    "CONTEXT_TOOLS",
+    "CompactionSeparator",
+    "ContextToolGroupCard",
+    "DETAIL_COLLAPSED_LINES",
+    "DETAIL_MAX_LINE_CHARS",
+    "ElaChatAvatarSource",
+    "ErrorCard",
+    "LAYOUT_SPACING",
+    "MessageActions",
+    "MessageHeader",
+    "MessageMeta",
+    "PREVIEW_MAX_CHARS",
+    "PermissionCard",
+    "PermissionRecord",
+    "REASONING_FLUSH_INTERVAL_MS",
+    "RETRYABLE_ERROR_TYPES",
+    "ROLE_ICONS",
+    "ReasoningBlock",
+    "SHELL_TOOLS",
+    "STATUS_DOT_BREATH_MS",
+    "StatsBadge",
+    "SteerNotice",
+    "TOOL_ICONS",
+    "ThinkingRow",
+    "ToolCallCard",
+    "ToolGroupPanel",
+    "_AVATAR_PIXMAP_CACHE",
+    "_AVATAR_PIXMAP_CACHE_MAX",
+    "_AvatarBadge",
+    "_CollapsibleBlock",
+    "_ELIDE_SOURCE_MAX",
+    "_HEADING_LINE_LIMIT",
+    "_HEADING_PATTERNS",
+    "_HeadingScanner",
+    "_IMAGE_THUMB_SIZE",
+    "_ImageAttachmentCard",
+    "_PREVIEW_ITEMS",
+    "_SUBTITLE_KEYS",
+    "_StatusDot",
+    "_WRITE_TOOLS",
+    "_clean_heading",
+    "_clip_detail",
+    "_collapsed_detail",
+    "_deletionOnly",
+    "_elide_source",
+    "_iter_heading_matches",
+    "_load_avatar_pixmap",
+    "_preview_value",
+    "avatarPixmap",
+    "extractReasoningHeading",
+    "formatDuration",
+    "normalizeAvatarShape",
+    "toolArgumentPairs",
+    "toolDefaultOpen",
+    "toolDefaultOpenCoding",
+    "toolIconName",
+    "toolSubtitle",
+    "toolSubtitleParts",
+]

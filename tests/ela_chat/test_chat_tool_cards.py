@@ -666,3 +666,19 @@ class TestConstructorParentFirst:
         read_card = bubble._tool_cards[bubble.addToolCall("read", '{"path": "a"}')]
         read_card.setStatus(ElaChatToolStatusType.Pending)
         assert read_card.isExpandable() is False
+
+
+class TestHeaderSyncThemeWrites:
+    def test_argument_updates_do_not_reapply_theme(self, qapp, make, mocker):
+        card = make(
+            ToolCallCard,
+            tool_call=ElaChatToolCall(id="t1", name="shell", arguments="{}"),
+        )
+        spy = mocker.spy(card, "_apply_theme")
+        card.setArguments('{"command": "echo a"}')
+        card.setArguments('{"command": "echo ab"}')
+        assert spy.call_count == 0
+
+        # 失败态变化才需要重刷（图标 / 颜色）
+        card.setStatus(ElaChatToolStatusType.Error)
+        assert spy.call_count == 1

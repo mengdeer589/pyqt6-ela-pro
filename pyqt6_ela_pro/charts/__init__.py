@@ -10,18 +10,20 @@ pyqt6_ela_pro.charts：类 ECharts 原生图表引擎（纯 QPainter + Ela 主�
   ``series``/``dataZoom``/``graphic`` 按 id → name → 下标逐项合并）/
   ``getOption``（拷贝查询）/ ``appendData({seriesIndex|seriesName, data})`` /
   ``clear``
-- 控制：``resize`` / ``dispatchAction``（legend* / dataZoom / restore /
-  showTip / hideTip / highlight / downplay / timeline*）/
-  ``setInteractive`` / ``setInteractionEnabled`` / ``showLoading`` /
-  ``hideLoading`` / ``dispose`` / ``isDisposed``
+- 控制：``resize`` / ``dispatchAction``（legend* / dataZoom / select /
+  unselect / toggleSelect / restore / showTip / hideTip / highlight / downplay /
+  timeline*）/ ``setInteractive`` / ``setInteractionEnabled`` / ``showLoading`` /
+  ``hideLoading`` / ``toggleMagicType`` / ``setGroup`` + ``connectCharts`` /
+  ``dispose`` / ``isDisposed``
 - 查询与命中：``seriesRenderers`` / ``coords`` / ``components`` / ``palette`` /
   ``colorForSeries`` / ``primaryCoord`` / ``coordFor`` / ``hitItem`` /
   ``hoverInfo`` / ``convertToPixel`` / ``convertFromPixel`` / ``containPixel`` /
   ``getDataURL`` / ``getWidth`` / ``getHeight`` / ``getDevicePixelRatio``
 - 事件：ECharts 事件名经 ``on(eventName, handler)`` / ``off(...)``
-  （``click`` / ``legendselectchanged`` / ``datazoom`` / ``timelinechanged`` /
-  ``brushselected`` / ``restore`` / ``highlight`` / ``downplay`` / ``finished``），
-  handler 收 ECharts params dict；同时保留 Qt 信号
+  （``click`` / ``mouseover`` / ``mouseout`` / ``mousemove`` / ``globalout`` /
+  ``selectchanged`` / ``legendselectchanged`` / ``datazoom`` /
+  ``timelinechanged`` / ``brushselected`` / ``restore`` / ``highlight`` /
+  ``downplay`` / ``finished``），handler 收 ECharts params dict；同时保留 Qt 信号
   （``itemClicked`` / ``legendToggled`` / ``dataZoomChanged`` /
   ``timelineChanged`` / ``toolboxTriggered`` / ``brushChanged`` / ``finished``）
 - 扩展：``registerSeries`` / ``registerComponent``（同名覆盖会告警）、
@@ -52,7 +54,9 @@ from .core import (
     SimpleLineSeriesRenderer,
     Title,
     Tooltip,
+    connectCharts,
     defaultPalette,
+    disconnectCharts,
     formatValue,
     niceTicks,
     parseDataPoint,
@@ -94,6 +98,8 @@ __all__ = [
     "COMPONENT_REGISTRY",
     "registerSeries",
     "registerComponent",
+    "connectCharts",
+    "disconnectCharts",
     "defaultPalette",
     "niceTicks",
     "formatValue",
@@ -113,7 +119,8 @@ __all__ = [
 #: dataZoom/brush/visualMap/timeline/toolbox）
 from . import series_cartesian as _series_cartesian  # noqa: E402,F401
 from . import series_hierarchy as _series_hierarchy  # noqa: E402,F401
+from . import series_map as _series_map  # noqa: E402,F401
 from . import components as _components  # noqa: E402,F401
 from . import interact as _interact  # noqa: E402,F401
 
-del _series_cartesian, _series_hierarchy, _components, _interact
+del _series_cartesian, _series_hierarchy, _series_map, _components, _interact

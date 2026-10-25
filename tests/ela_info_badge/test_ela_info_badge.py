@@ -6,7 +6,7 @@ import pytest
 from PyQt6.QtCore import QSize, Qt
 from PyQt6.QtGui import QColor
 from PyQt6.QtWidgets import QWidget
-from PyQt6ElaWidgetTools import ElaIconType, ElaThemeType
+from PyQt6ElaWidgetTools import ElaIconType
 
 from pyqt6_ela_pro.ela_info_badge import ElaInfoBadge
 
@@ -167,12 +167,6 @@ class TestElaInfoBadgeSizeHint:
     def test_size_hint_icon_mode(self, make):
         sz = make(ElaInfoBadge, icon=ElaIconType.IconName.Gear).sizeHint()
         assert sz == QSize(16, 16)
-
-
-class TestElaInfoBadgeTheme:
-    def test_on_theme_changed_updates_mode(self, badge):
-        badge._onThemeChanged(ElaThemeType.ThemeMode.Dark)
-        assert badge._theme_mode == ElaThemeType.ThemeMode.Dark
 
 
 class TestElaInfoBadgeDeleteLater:

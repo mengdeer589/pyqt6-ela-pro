@@ -225,6 +225,8 @@ class ElaChatAsyncWorker(QThread):
                 try:
                     await self._rollback_turn(text, attachments)
                 except Exception as exc:
+                    # 回滚失败只上报：本回合仍继续跑（历史一致性由后端子类
+                    # 负责；这里贸然中止会让宿主收到「无回答的完成」）。
                     self.errorOccurred.emit("worker", f"{type(exc).__name__}: {exc}")
                 await self._run_turn(text, attachments, turn)
             elif kind == "reset":
