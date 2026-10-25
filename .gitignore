@@ -31,6 +31,8 @@ PyQt-Fluent-Widgets/
 chart_export.png
 # 本地批处理入口（打开 example / 构建 whl）：只在本机用，不随仓库分发
 /*.bat
+# 本地缺陷 / 下游反馈文档：只留本地，不进仓库
+/bugs/
 # llm_test/ 暂不入库：agents/config.py 里有硬编码的 sk- key，等轮换后再放开这条规则
 /llm_test/
 /Fluent-Qt/
