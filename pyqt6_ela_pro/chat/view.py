@@ -123,7 +123,8 @@ class ElaChatView(
        ``setMessageTitle`` / ``setMessageTimestamp`` / ``setMessageDuration`` /
        ``setMessageError`` / ``setMessageAttachments`` / ``setReasoningStyle`` /
        ``setStatsMode`` / ``setToolGrouping`` / ``setAvatar*`` /
-       ``setCopyNotificationEnabled`` / ``setContentMaxWidth`` / ``exportSession`` /
+       ``setCopyNotificationEnabled`` / ``setWaitingPlaceholderEnabled`` /
+       ``setContentMaxWidth`` / ``exportSession`` /
        ``importSession`` / ``messages`` / ``message`` / ``lastMessage`` / ``count``。
        所有方法 ``messageId`` **首位必填**（唯一一套约定，见 ``ElaChatWidget``）。
     2. **性能开关（内部 / 只在必要时用）**：``beginBatch`` / ``endBatch``
@@ -206,6 +207,7 @@ class ElaChatView(
         self._disclaimer_text = DISCLAIMER_TEXT
         self._disclaimer_visible = True
         self._copy_notification_enabled = True
+        self._waiting_placeholder_enabled = True
         self._jump_threshold = None
         self._scroll_guards: list = []
         self._guards_by_message: dict = {}

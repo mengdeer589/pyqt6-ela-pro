@@ -87,6 +87,7 @@ class ChatPartTimeline:
             self._bubble._parts_layout.addWidget(widget)
         if part.kind != ElaChatPartKindType.Stats:
             self._bubble._move_step_stats_to_end(part.step)
+        self._bubble._sync_waiting_placeholder()
 
     def _move_step_stats_to_end(self, step: int) -> None:
         """把指定步骤的步骤用量徽标移到该步骤内容的末尾。
@@ -301,6 +302,7 @@ class ChatPartTimeline:
         self._bubble.updateGeometry()
         if self._bubble.layout() is not None:
             self._bubble.layout().activate()
+        self._bubble._sync_waiting_placeholder()
         return True
 
     def setPartsDeferred(self, parts) -> bool:
@@ -352,6 +354,7 @@ class ChatPartTimeline:
         self._bubble.updateGeometry()
         if self._bubble.layout() is not None:
             self._bubble.layout().activate()
+        self._bubble._sync_waiting_placeholder()
         return True
 
     def materializeParts(self) -> bool:

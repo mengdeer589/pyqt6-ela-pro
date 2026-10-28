@@ -266,7 +266,7 @@ sys.exit(app.exec())
 | 组件 | 说明 |
 |---|---|
 | **ElaChatWidget** | ChatGPT 风格聊天组件（步骤化消息 + 分层输入区 + 流式 / 停止） |
-| **ElaChatView** | 聊天消息列表（分段时间线 / 贴底跟随 / 空态建议 / 回到底部） |
+| **ElaChatView** | 聊天消息列表（分段时间线 / 贴底跟随 / 等待首 token 骨架 / 空态建议 / 回到底部） |
 | **ElaChatInput** | 分层输入区（补全 / 附件 / 拖放粘贴 / 发送↔停止 / 新建话题与清空上下文） |
 | **ElaChatToolBar** | 可复用聊天工具栏（自定义按钮 / 控件 / 分隔线，两段布局） |
 | **ElaChatBubble** | 步骤化消息气泡（分段：思考 / 正文 / 每步工具面板 / 步骤统计 / 底部操作） |
@@ -283,7 +283,7 @@ sys.exit(app.exec())
 | **ElaChatAvatarSource** | 头像来源（会话里持久化的是它，不是图片路径） |
 | **ElaChatMockChunk / ElaChatMockUsage** | 假后端 `ElaChatMockBackend` 的分片 / 用量构造参数 |
 | **ElaChatMessage** | 一条消息的快照（角色 / 分段时间线 / 派生字段；`message.text` 在流式**结束前**为空是设计，用 `bubble(id).text()` 实时读） |
-| **ElaChatStats** | 单步或整轮用量 / 耗时（`cost_usd` 由宿主算好填入，或用 `stats_cost()`） |
+| **ElaChatStats** | 单步或整轮用量 / 耗时（四路互不重叠：`prompt_tokens` 不含缓存命中，缓存单列 `cache_read_tokens` / `cache_write_tokens`；`contextTokens()` 给四路和；`cost_usd` 由宿主算好填入，或用 `stats_cost()`） |
 | **ElaChatTurnSummary** | 一轮回合的收尾摘要（`binder.finish(turn)` 的返回值） |
 | **ElaChatSessionInfo** | 会话元信息（多话题由宿主管理，一话题一 widget） |
 | **ElaChatToolButton** | 工具栏图标按钮（`ElaIconButton` 子类，可选选中态；带文字的是 `ElaButton`） |
@@ -328,6 +328,7 @@ python -m pyqt6_ela_pro.example
 启动一个 ElaWindow 应用：侧边栏是**两级**结构（可折叠分组 → 页面），
 每个组件标题旁有 `</> 代码` 按钮，弹出该演示方法自身的源码 ——
 语法高亮**按当前主题取亮 / 暗两套调色板**（均按 WCAG 4.5:1 校验）。
+**启动默认深色主题**，工具栏 / AppBar 的「切换主题」可切回浅色。
 
 主窗口同时演示 ElaWindow 的**应用外壳**：右侧停靠区（页面导航 / 运行日志 /
 说明，可拖拽、可合页）、工具栏、状态栏、AppBar 右键菜单、内容区顶栏的页面
@@ -336,7 +337,7 @@ python -m pyqt6_ela_pro.example
 
 | 分组 | 页面 |
 |---|---|
-| 基础组件 | 输入与选择 / 下拉框组件 / 容器与布局 / 视图与列表 / 按钮与菜单 / 进度与反馈 |
+| 基础组件 | 输入与选择 / 下拉框组件 / 容器与布局 / 视图与列表 / 按钮与菜单 / 进度与反馈 / Fluent 与补充组件 |
 | 数据与图表 | 表格（ElaDataTable / ElaParquetTable）/ 图表（第三方库：pyqtgraph / matplotlib / 仪表盘）/ ElaChartWidget 图表工作台 |
 | 内容渲染 | Markdown（文本 / 代码 / 公式 / Mermaid / 流式） |
 | AI 对话 | 总览 / 输入区能力 / Agent 能力 / 会话管理 / 持久化与性能（预填 + 可重播） |

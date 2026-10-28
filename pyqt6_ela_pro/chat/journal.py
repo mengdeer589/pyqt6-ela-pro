@@ -19,6 +19,7 @@ opencode 对这个问题的解法是 journal 每个 ``part_text_accum_delta``（
 消费同一批 worker 信号）::
 
     journal = ElaChatTurnJournal(messageId=chat.beginAssistantMessage())
+    journal.begin()                        # 开始记录（connectWorker 不会替你开）
     journal.connectWorker(worker)          # 与 binder 各连各的，Qt 允许
     ...
     journal.end("done")
@@ -44,10 +45,12 @@ opencode 对这个问题的解法是 journal 每个 ``part_text_accum_delta``（
 
 from __future__ import annotations
 
+import time
 from dataclasses import replace
-from typing import Optional
+from typing import Callable, Optional
 
 from . import _json
+from ._usage import stats_from_usage
 from .message import (
     ElaChatAttachment,
     ElaChatMessage,
@@ -58,8 +61,6 @@ from .message import (
     ElaChatStatusType,
     ElaChatToolCall,
     ElaChatToolStatusType,
-    _as_float,
-    _as_int,
 )
 
 #: 日志行格式版本（与消息的 ``SCHEMA_VERSION`` 独立演进）
@@ -106,19 +107,25 @@ class ElaChatTurnJournal:
         title: str = "",
         timestamp: str = "",
         createdAt: float = 0.0,
+        *,
+        clock: Optional[Callable[[], float]] = None,
     ) -> None:
         self._message_id = _int(messageId, 0)
         self._role = role if role in ElaChatRoleType.All else ElaChatRoleType.Assistant
         self._title = title or ""
         self._timestamp = timestamp or ""
         self._created_at = _float(createdAt, 0.0)
+        self._clock = clock or time.time
         self._events: list = []
         #: 已经通过 :meth:`dumpsNewLines` 落盘的事件数（``dumps()`` 不用它）
         self._dumped = 0
         #: 已 connectWorker 的后端（幂等守卫 / 换绑时先解旧的）
         self._worker = None
-        #: 四个槽的绑定方法实例缓存（连 / 断必须同一批对象，见 ``_bound_slots``）
+        #: 四个基础信号槽的绑定方法缓存（连 / 断必须同一批对象）
         self._worker_slots = None
+        #: 已连接的 ``(signal, slot)`` 列表（连 / 断必须同一批绑定方法，
+        #: 见 ``_connections``）
+        self._worker_connections: Optional[list] = None
 
         # -- 重放状态（从事件构建 parts） --
         self._parts: list = []
@@ -138,6 +145,17 @@ class ElaChatTurnJournal:
         self._rec_compaction: Optional[str] = None
         self._rec_stats = 0
         self._seq = 0
+        #: 当前步骤的 stats part id（同一 step 重复上报要覆盖而不是追加）
+        self._stats_ids: dict = {}
+        #: 尚未开正文段的纯空白分片（与气泡 ``_pending_text_lead`` 同语义）
+        self._pending_text_lead: list = []
+        #: 回合 / 本轮开始时间（秒）；用于 reasoning 与 stats 的时长
+        self._turn_start = 0.0
+        self._round_start = 0.0
+        #: 已收到的 ``llmStarted`` 次数（第 1 轮不切步，镜像 binder）
+        self._llm_round = 0
+        #: 当前思考段开始时间（秒）
+        self._reasoning_start = 0.0
 
     def _reset_state(self) -> None:
         """复位累计状态（复用同一实例开始新回合时调用）。"""
@@ -155,6 +173,12 @@ class ElaChatTurnJournal:
         self._rec_compaction = None
         self._rec_stats = 0
         self._seq = 0
+        self._stats_ids = {}
+        self._pending_text_lead = []
+        self._turn_start = 0.0
+        self._round_start = 0.0
+        self._llm_round = 0
+        self._reasoning_start = 0.0
 
     # ------------------------------------------------------------------ 记录
 
@@ -169,6 +193,9 @@ class ElaChatTurnJournal:
         if messageId is not None:
             self._message_id = _int(messageId, self._message_id)
         self._open = True
+        self._turn_start = self._clock()
+        self._round_start = self._turn_start
+        self._llm_round = 0
         self._push(
             _Ev.Begin,
             id=self._message_id,
@@ -204,19 +231,36 @@ class ElaChatTurnJournal:
         return self
 
     def beginStep(self) -> "ElaChatTurnJournal":
-        """进入下一步骤。"""
+        """进入下一步骤。
+
+        与 ``bubble.beginStep`` 对齐：先收口当前正文段与思考段，再推进步骤。
+        使用 :meth:`connectWorker` 时步骤会跟随 ``llmStarted`` 自动推进，宿主
+        **不要**再手动调用本方法（会多切一步）。
+        """
         if not self._open:
             return self
-        self._rec_text = None
-        self._rec_reasoning = None
+        if self._rec_reasoning is not None:
+            self.endReasoning()
+        self.endText()
         self._push(_Ev.Step)
+        self._round_start = self._clock()
         return self
 
     def text(self, chunk: str) -> "ElaChatTurnJournal":
-        """记录一段正文增量（自动开段）。"""
+        """记录一段正文增量（自动开段）。
+
+        纯空白分片在还没有正文段时先攒着，等首个非空白分片一起开段 ——
+        与 :meth:`ElaChatBubble.appendText` 同语义（中间空白照常保留）。
+        """
         if not self._open or not chunk:
             return self
         if self._rec_text is None:
+            if not chunk.strip():
+                self._pending_text_lead.append(chunk)
+                return self
+            lead = "".join(self._pending_text_lead)
+            self._pending_text_lead.clear()
+            chunk = lead + chunk
             self._rec_text = self._mint()
             self._push(_Ev.Text, id=self._rec_text, step=self._step, text=chunk)
         else:
@@ -224,11 +268,13 @@ class ElaChatTurnJournal:
         return self
 
     def endText(self) -> "ElaChatTurnJournal":
-        """结束当前正文段。"""
+        """结束当前正文段（未开段的纯空白分片一并丢弃）。"""
         if not self._open:
             return self
-        self._push(_Ev.TextEnd, id=self._rec_text or "")
-        self._rec_text = None
+        self._pending_text_lead.clear()
+        if self._rec_text is not None:
+            self._push(_Ev.TextEnd, id=self._rec_text)
+            self._rec_text = None
         return self
 
     def reasoning(self, chunk: str) -> "ElaChatTurnJournal":
@@ -237,6 +283,7 @@ class ElaChatTurnJournal:
             return self
         if self._rec_reasoning is None:
             self._rec_reasoning = self._mint()
+            self._reasoning_start = self._clock()
             self._push(
                 _Ev.Reasoning, id=self._rec_reasoning, step=self._step, text=chunk
             )
@@ -245,21 +292,31 @@ class ElaChatTurnJournal:
         return self
 
     def endReasoning(self, durationMs: Optional[float] = None) -> "ElaChatTurnJournal":
-        """结束当前思考段（``durationMs`` 毫秒）。"""
+        """结束当前思考段（``durationMs`` 省略时按开段以来的实际耗时）。"""
         if not self._open:
             return self
-        self._push(
-            _Ev.ReasoningEnd, id=self._rec_reasoning or "", ms=_float(durationMs, 0.0)
-        )
+        if durationMs is None:
+            elapsed = (
+                max(0.0, (self._clock() - self._reasoning_start) * 1000.0)
+                if self._reasoning_start
+                else 0.0
+            )
+        else:
+            elapsed = _float(durationMs, 0.0)
+        self._push(_Ev.ReasoningEnd, id=self._rec_reasoning or "", ms=elapsed)
         self._rec_reasoning = None
+        self._reasoning_start = 0.0
         return self
 
-    def toolStart(
-        self, callId: str, name: str, arguments: str = ""
-    ) -> "ElaChatTurnJournal":
-        """记录工具调用开始。"""
+    def toolStart(self, callId: str, name: str, arguments="") -> "ElaChatTurnJournal":
+        """记录工具调用开始（``arguments`` 支持 dict / JSON 字符串）。"""
         if not self._open:
             return self
+        if not isinstance(arguments, str):
+            try:
+                arguments = _json.dumps(arguments)
+            except (TypeError, ValueError):
+                arguments = str(arguments)
         self._push(
             _Ev.ToolStart,
             id=callId or self._mint(),
@@ -279,11 +336,25 @@ class ElaChatTurnJournal:
         return self
 
     def stats(self, stats: Optional[ElaChatStats]) -> "ElaChatTurnJournal":
-        """记录当前步骤用量。"""
+        """记录当前步骤用量。
+
+        同一 step 重复上报时复用同一个 part id（重放侧按 id 覆盖），与实时
+        ``setStepStats`` 的「本步用最新值」语义一致；跨 step 各自保留。
+        """
         if not self._open or stats is None:
             return self
-        self._push(_Ev.Stats, n=self._rec_stats, step=self._step, data=stats.toDict())
-        self._rec_stats += 1
+        partId = self._stats_ids.get(self._step)
+        if partId is None:
+            partId = "st%d" % self._rec_stats
+            self._rec_stats += 1
+            self._stats_ids[self._step] = partId
+        self._push(
+            _Ev.Stats,
+            id=partId,
+            n=self._rec_stats,
+            step=self._step,
+            data=stats.toDict(),
+        )
         return self
 
     def setDuration(self, durationMs: float) -> "ElaChatTurnJournal":
@@ -341,9 +412,18 @@ class ElaChatTurnJournal:
     def end(
         self, status: str = ElaChatStatusType.Done, error: str = ""
     ) -> "ElaChatTurnJournal":
-        """结束记录（``status`` 见 :class:`ElaChatStatusType`）。"""
+        """结束记录（``status`` 见 :class:`ElaChatStatusType`）。
+
+        与 ``endAssistantMessage`` 对齐：先收口仍打开的正文 / 思考段；没有显式
+        :meth:`setDuration` 时按 ``begin → end`` 的墙钟补一次消息级耗时。
+        """
         if not self._open:
             return self
+        if self._rec_reasoning is not None:
+            self.endReasoning()
+        self.endText()
+        if not self._duration_ms and self._turn_start:
+            self.setDuration(max(0.0, (self._clock() - self._turn_start) * 1000.0))
         self._push(_Ev.End, status=status, error=error or "")
         self._open = False
         return self
@@ -666,13 +746,22 @@ class ElaChatTurnJournal:
         stats = ElaChatStats.fromDict(event.get("data"))
         if stats is None:
             return
+        partId = _str(event.get("id"))
+        if not partId:
+            # 旧日志没有 id：按 n 生成，保持旧行为（无法判断同 step 重复上报）
+            partId = "st%d" % _int(event.get("n"), 0)
+        step = _int(event.get("step"), self._step)
+        existing = self._find(partId)
+        if existing is not None and existing.kind == ElaChatPartKindType.Stats:
+            self._replace(existing, existing.withStats(stats))
+            return
         self._append(
             ElaChatPart(
-                id="st%d" % _int(event.get("n"), 0),
+                id=partId,
                 kind=ElaChatPartKindType.Stats,
                 stats=stats,
                 status=ElaChatStatusType.Done,
-                step=_int(event.get("step"), self._step),
+                step=step,
             )
         )
 
@@ -791,25 +880,36 @@ class ElaChatTurnJournal:
 
         与 :class:`~pyqt6_ela_pro.chat.binder.ElaChatStreamBinder` 连的是同一批
         信号，**两者可以并存**（Qt 允许多个接收方），所以加崩溃恢复不用改
-        现有接线。幂等：重复绑定同一后端直接返回；换绑其他后端先解旧的。
+        现有接线。后端提供 ``llmStarted`` 时也会自动跟随它切步（第 1 轮不切，
+        与 binder 一致）—— 此时宿主**不要**再手动调 :meth:`beginStep`。
+        幂等：重复绑定同一后端直接返回；换绑其他后端先解旧的。
         """
         if worker is self._worker:
             return self
         if self._worker is not None:
             self.disconnectWorker(self._worker)
         self._worker = worker
-        signals = (
-            worker.chunkReceived,
-            worker.toolStarted,
-            worker.toolEnded,
-            worker.statsReady,
-        )
-        for signal, slot in zip(signals, self._bound_slots()):
+        self._worker_connections = self._connections(worker)
+        for signal, slot in self._worker_connections:
             signal.connect(slot)
         return self
 
+    def _connections(self, worker) -> list:
+        """当前 worker 的 ``(signal, slot)`` 连接表（连 / 断共用同一批对象）。"""
+        chunk, toolStart, toolEnd, stats = self._bound_slots()
+        pairs = [
+            (worker.chunkReceived, chunk),
+            (worker.toolStarted, toolStart),
+            (worker.toolEnded, toolEnd),
+            (worker.statsReady, stats),
+        ]
+        llmStarted = getattr(worker, "llmStarted", None)
+        if llmStarted is not None:
+            pairs.insert(0, (llmStarted, self._on_llm_started))
+        return pairs
+
     def _bound_slots(self):
-        """四个槽的**绑定方法实例**（连 / 断必须用同一批对象）。
+        """四个基础信号槽的**绑定方法实例**（连 / 断必须用同一批对象）。
 
         ``disconnect`` 要拿到**同一个可调用对象**：lambda / ``functools.partial``
         断不掉（只打 RuntimeWarning，连接实际还在）。所以缓存一次复用。
@@ -831,19 +931,31 @@ class ElaChatTurnJournal:
         """
         if worker is None or worker is not self._worker:
             return self
-        signals = (
-            worker.chunkReceived,
-            worker.toolStarted,
-            worker.toolEnded,
-            worker.statsReady,
-        )
-        for signal, slot in zip(signals, self._bound_slots()):
+        connections = self._worker_connections or self._connections(worker)
+        for signal, slot in connections:
             try:
                 signal.disconnect(slot)
             except (TypeError, RuntimeError):
                 pass
+        self._worker_connections = None
         self._worker = None
         return self
+
+    def _on_llm_started(self) -> None:
+        """后端每次 LLM 调用开始：第 2 轮起切步（与 binder.beginRound 一致）。
+
+        上一轮没有任何分段时不切步（对齐 ``bubble.beginStep`` 的「空步骤不递增」）。
+        """
+        if not self._open:
+            return
+        self._round_start = self._clock()
+        self._llm_round += 1
+        if self._llm_round <= 1:
+            return
+        if self._rec_reasoning is not None:
+            self.endReasoning()
+        if any(part.step == self._step for part in self._parts):
+            self.beginStep()
 
     def _on_chunk(self, chunk) -> None:
         reasoning = getattr(chunk, "reasoning_content", "") or ""
@@ -851,8 +963,9 @@ class ElaChatTurnJournal:
         if reasoning:
             self.reasoning(reasoning)
         if answer:
-            # 正文一开始，思考段就真的结束了（与 binder 的 _endReasoning 同）
-            if self._rec_reasoning is not None:
+            # 只有非空白正文才结束思考段（与 binder.answer 的 text.strip() 同）；
+            # 纯空白交给 text() 攒成 pending，不会开出一个空正文段。
+            if answer.strip() and self._rec_reasoning is not None:
                 self.endReasoning()
             self.text(answer)
 
@@ -879,35 +992,12 @@ class ElaChatTurnJournal:
     def _on_stats(self, usage, ttftMs: float = 0.0, tps: float = 0.0) -> None:
         if usage is None:
             return
-        if isinstance(usage, ElaChatStats):
-            stats = usage
-            if ttftMs and not stats.ttft_ms:
-                stats = replace(stats, ttft_ms=_as_float(ttftMs))
-            if tps and not stats.tps:
-                stats = replace(stats, tps=_as_float(tps))
-        else:
-            # 与 binder.stats 同一套四路映射（见那里的说明）
-            details = getattr(usage, "prompt_tokens_details", None)
-            completion_details = getattr(usage, "completion_tokens_details", None)
-            cache_read = getattr(usage, "prompt_cache_hit_tokens", 0) or getattr(
-                details, "cached_tokens", 0
-            )
-            cache_write = getattr(usage, "cache_creation_input_tokens", 0) or getattr(
-                details, "cache_write_tokens", 0
-            )
-            reasoning = getattr(usage, "reasoning_tokens", 0) or getattr(
-                completion_details, "reasoning_tokens", 0
-            )
-            stats = ElaChatStats(
-                prompt_tokens=_as_int(getattr(usage, "prompt_tokens", 0)),
-                completion_tokens=_as_int(getattr(usage, "completion_tokens", 0)),
-                total_tokens=_as_int(getattr(usage, "total_tokens", 0)),
-                reasoning_tokens=_as_int(reasoning),
-                cache_read_tokens=_as_int(cache_read),
-                cache_write_tokens=_as_int(cache_write),
-                ttft_ms=_as_float(ttftMs),
-                tps=_as_float(tps),
-            )
+        stats = stats_from_usage(usage, ttftMs, tps)
+        duration = 0.0
+        if self._round_start:
+            duration = max(0.0, (self._clock() - self._round_start) * 1000.0)
+        if duration and not stats.duration_ms:
+            stats = replace(stats, duration_ms=duration)
         self.stats(stats)
 
 

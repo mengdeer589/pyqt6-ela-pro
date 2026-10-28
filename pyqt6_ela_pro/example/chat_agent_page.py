@@ -552,7 +552,7 @@ class ChatAgentPage(ExamplePage):
         """
         view = self._chat.chatView()
         roundStats = ElaChatStats(
-            prompt_tokens=15_000,
+            prompt_tokens=3_000,
             completion_tokens=3_000,
             total_tokens=18_000,
             reasoning_tokens=600,

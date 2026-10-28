@@ -89,6 +89,23 @@ class _ViewAppearanceMixin:
         """复制后是否弹成功提示。"""
         return self._copy_notification_enabled
 
+    def setWaitingPlaceholderEnabled(self, on: bool = True) -> None:
+        """设置等待首个 token 期间是否在助手气泡内显示骨架占位（默认开启）。
+
+        骨架是 ``ElaShimmer``，只在 TTFT 阶段出现；收到首个正文 / 思考 / 工具 /
+        审批 / 统计即隐藏。它**不是** ``ElaChatPart``：不进时间线、``exportSession``
+        与会话日志。与复制提示同口径，属应用偏好，不进 bundle 的视图段。
+        历史虚拟化占位（``DeferredPlaceholder``）**不在此列** —— 那里刻意保持
+        零子控件，不会逐条创建 ``ElaShimmer``。
+        """
+        self._waiting_placeholder_enabled = bool(on)
+        for bubble in self._bubbles.values():
+            bubble.setWaitingPlaceholderEnabled(self._waiting_placeholder_enabled)
+
+    def waitingPlaceholderEnabled(self) -> bool:
+        """等待首个 token 期间是否显示骨架占位。"""
+        return self._waiting_placeholder_enabled
+
     def setToolDefaultOpen(self, policy) -> None:
         """注入「哪些工具卡默认展开」的策略（对新旧消息统一生效）。
 

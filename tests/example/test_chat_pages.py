@@ -98,6 +98,11 @@ class TestChatOverviewPage:
         assert view.avatarShape() == "square"
         page._on_avatar_shape("rounded")
 
+        page._on_waiting_placeholder(False)
+        assert view.waitingPlaceholderEnabled() is False
+        page._on_waiting_placeholder(True)
+        assert view.waitingPlaceholderEnabled() is True
+
     def test_appearance_dropdown_checks_are_exclusive_and_synced(self, qapp, make):
         """下拉勾选态必须互斥、跟随当前选择，且再点已选项保持勾选（radio 语义）。
 

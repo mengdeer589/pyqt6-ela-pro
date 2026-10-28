@@ -329,6 +329,7 @@ class ChatOverviewPage(ExamplePage):
 
         row.addWidget(self._toggle("免责声明", True, self._on_disclaimer))
         row.addWidget(self._toggle("复制提示", True, self._on_copy_notification))
+        row.addWidget(self._toggle("等待骨架", True, self._on_waiting_placeholder))
         row.addWidget(self._toggle("贴底跟随", True, self._on_stick))
         row.addWidget(self._button("正文限宽 720", self._on_content_width))
         row.addStretch()
@@ -336,11 +337,12 @@ class ChatOverviewPage(ExamplePage):
         return box
 
     def _demo_appearance(self) -> None:
-        """外观：推理形态 / 工具分组 / 统计模式 / 免责声明 / 复制提示 / 头像形状 / 正文限宽。
+        """外观：推理形态 / 工具分组 / 统计模式 / 免责声明 / 复制提示 / 等待骨架 / 头像形状 / 正文限宽。
 
         对应 API：``setReasoningStyle`` / ``setToolGrouping`` / ``setStatsMode`` /
         ``setDisclaimer`` + ``setDisclaimerVisible`` / ``setCopyNotificationEnabled`` /
-        ``setAvatarShape`` / ``setContentMaxWidth`` / ``setStickToBottom``。
+        ``setWaitingPlaceholderEnabled`` / ``setAvatarShape`` / ``setContentMaxWidth`` /
+        ``setStickToBottom``。
 
         两条约定：
 
@@ -353,6 +355,7 @@ class ChatOverviewPage(ExamplePage):
         view.setToolGrouping(True)
         view.setStatsMode("footer")
         view.setCopyNotificationEnabled(True)
+        view.setWaitingPlaceholderEnabled(True)
         view.setAvatarShape("rounded")
         view.setContentMaxWidth(720)
         view.setStickToBottom(True)
@@ -442,6 +445,9 @@ class ChatOverviewPage(ExamplePage):
 
     def _on_copy_notification(self, checked: bool):
         self._chat.chatView().setCopyNotificationEnabled(bool(checked))
+
+    def _on_waiting_placeholder(self, checked: bool):
+        self._chat.chatView().setWaitingPlaceholderEnabled(bool(checked))
 
     def _on_stick(self, checked: bool):
         self._chat.chatView().setStickToBottom(bool(checked))

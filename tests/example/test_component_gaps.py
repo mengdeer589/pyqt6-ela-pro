@@ -16,16 +16,50 @@ from PyQt6.QtWidgets import QLabel, QWidget
 from PyQt6ElaWidgetTools import (
     ElaColorDialog,
     ElaContentDialog,
+    ElaPromotionCard,
+    ElaPromotionView,
+    ElaRibbonBar,
     ElaRoller,
     ElaScrollPage,
     ElaToggleButton,
 )
 
-from pyqt6_ela_pro import ElaTagLineEdit
+from pyqt6_ela_pro import (
+    ElaAvatar,
+    ElaField,
+    ElaSelectorBar,
+    ElaShimmer,
+    ElaTagLineEdit,
+)
 from pyqt6_ela_pro.example.buttons_menus_page import ButtonsMenusPage
 from pyqt6_ela_pro.example.container_layout_page import ContainerLayoutPage
 from pyqt6_ela_pro.example.drawer_tooltip_page import DrawerTooltipPage
+from pyqt6_ela_pro.example.fluent_page import FluentPage
 from pyqt6_ela_pro.example.input_select_page import InputSelectPage
+
+
+class TestFluentPage:
+    """补齐此前 example 从未实例化的 Fluent / 补充组件。"""
+
+    def test_page_contains_all_new_components(self, qapp, make):
+        page = make(FluentPage)
+        assert len(page.findChildren(ElaAvatar)) == 4
+        assert len(page.findChildren(ElaField)) == 3
+        assert len(page.findChildren(ElaSelectorBar)) == 1
+        assert len(page.findChildren(ElaShimmer)) == 3
+        assert len(page.findChildren(ElaPromotionView)) == 1
+        assert len(page.findChildren(ElaRibbonBar)) == 1
+
+    def test_selector_and_ribbon_have_content(self, qapp, make):
+        page = make(FluentPage)
+        bar = page.findChildren(ElaSelectorBar)[0]
+        assert bar.itemCount() == 3
+        assert bar.selectedIndex() == 1
+        ribbon = page.findChildren(ElaRibbonBar)[0]
+        assert ribbon.getCurrentRibbonPage() == "通用操作"
+        view = page.findChildren(ElaPromotionView)[0]
+        assert view.getIsAutoScroll() is True
+        assert len(view.findChildren(ElaPromotionCard)) == 3
 
 
 # ================================================================ ElaTagLineEdit

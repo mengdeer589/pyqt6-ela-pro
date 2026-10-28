@@ -123,6 +123,7 @@ class _ViewMessagesMixin:
                 streaming=False,
                 messageId=messageId,
                 emitAdded=False,
+                snapshot=message,
             )
             if not self._bubbles[messageId].setParts(message.parts):
                 raise ValueError("addMessageFromDict: 助手消息分段重建失败")
@@ -138,6 +139,7 @@ class _ViewMessagesMixin:
             streaming=False,
             messageId=messageId,
             emitAdded=False,
+            snapshot=message,
         )
         self._apply_message_fields(messageId, message)
         self.messageAdded.emit(messageId, message.role)
@@ -517,6 +519,7 @@ class _ViewMessagesMixin:
         bubble.setDisclaimer(self._disclaimer_text)
         bubble.setDisclaimerVisible(self._disclaimer_visible)
         bubble.setCopyNotificationEnabled(self._copy_notification_enabled)
+        bubble.setWaitingPlaceholderEnabled(self._waiting_placeholder_enabled)
         has_previous = bool(self._messages) and not (
             len(self._messages) == 1 and self._messages[0].id == messageId
         )
@@ -848,11 +851,31 @@ class _ViewMessagesMixin:
 
         快照里的 ``text`` 只含**已落定**内容（``part.text`` 的语义），所以流式期间读到
         空串、回合结束才是完整正文 —— 要实时预览请读 ``bubble(messageId).text()``。
+
+        **无 parts、但有消息级派生字段**（``stats`` / ``tool_calls`` /
+        ``reasoning``）的旧格式消息不参与同步：``withParts(())`` 会把这些字段
+        全部抹掉，而气泡那边只有纯文本（`setText` 不会补出 Tool/Stats 段）。
         """
         bubble = self._bubbles.get(messageId)
         if bubble is None or bubble.role() != ElaChatRoleType.Assistant:
             return
+        if self._is_legacy_derived(self._store.message(messageId)):
+            return
         self._dirty_syncs.add(messageId)
+
+    @staticmethod
+    def _is_legacy_derived(message) -> bool:
+        """是否「无 parts、派生字段只存在消息级」的旧格式助手消息。"""
+        return bool(
+            message is not None
+            and not message.parts
+            and (
+                message.stats is not None
+                or message.tool_calls
+                or message.reasoning
+                or message.reasoning_ms
+            )
+        )
 
     def _flush_pending_syncs(self) -> None:
         """结算全部待同步的分段快照。
@@ -868,6 +891,8 @@ class _ViewMessagesMixin:
                 continue
             bubble = self._bubbles.get(message.id)
             if bubble is None or bubble.role() != ElaChatRoleType.Assistant:
+                continue
+            if self._is_legacy_derived(message):
                 continue
             updated = message.withParts(bubble.parts())
             self._store.replace_at(index, updated)

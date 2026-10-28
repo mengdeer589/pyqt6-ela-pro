@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import pytest
 from PyQt6.QtCore import QRectF
-from PyQt6.QtGui import QColor, QPainter, QPixmap
+from PyQt6.QtGui import QColor, QPainter, QPalette, QPixmap
 
 from pyqt6_ela_pro._motion import ElaMotionModeType, motion
 from pyqt6_ela_pro._theme import blend, surface
@@ -395,6 +395,23 @@ class TestThemeSwitch:
             assert light.lightness() > dark.lightness() + 30
         finally:
             eTheme.setThemeMode(previous)
+
+
+class TestCanvasColor:
+    def test_canvas_uses_widget_palette_window(self, make):
+        """画布优先取控件 palette 的 Window —— 消息区是 BasicPress，不是 WindowBase。"""
+        shimmer = make(ElaShimmer)
+        palette = shimmer.palette()
+        palette.setColor(QPalette.ColorRole.Window, QColor("#123456"))
+        shimmer.setPalette(palette)
+        assert shimmer._canvas_color().name() == "#123456"
+
+    def test_transparent_window_falls_back_to_theme_surface(self, make):
+        shimmer = make(ElaShimmer)
+        palette = shimmer.palette()
+        palette.setColor(QPalette.ColorRole.Window, QColor(0, 0, 0, 0))
+        shimmer.setPalette(palette)
+        assert shimmer._canvas_color().name() == surface(eTheme.getThemeMode()).name()
 
 
 class TestPaintSafety:

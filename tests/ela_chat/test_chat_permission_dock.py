@@ -582,6 +582,56 @@ class TestLayoutContract:
                 f"候选行 {row.height()}px 比内容 {content}px 多出太多"
             )
 
+    def test_question_rows_have_stable_height(self, qapp, make):
+        """同题多行候选的高度必须一致，且等于各自的 sizeHint。
+
+        回归：示范页「插入 3 题向导」的第一题在 Windows 字体度量下曾出现
+        77 / 77 / 59 / 43px 的阶梯行高 —— 首行比其它行高出一倍，文字跨到
+        下一张卡里。根因是 ``sizeHint`` 用布局当前高度反推内容高度：行被钉高
+        后标签被拉伸，下一次又问出更大的高度，永远缩不回去。
+        """
+        chat = make(ElaChatWidget)
+        chat.resize(1300, 700)
+        chat.show()
+        mid = _turn(chat)
+        card = _ask(
+            chat,
+            mid,
+            ElaChatPermission(
+                request_id="r1",
+                action="question",
+                questions=(
+                    ElaChatQuestion(
+                        key="q0",
+                        header="下一步",
+                        question="这次想在 elawidgettools 上做什么？",
+                        options=(
+                            ElaChatOption(
+                                "规划这批未提交改动的收尾",
+                                "梳理新增组件、补齐文档与回归测试",
+                            ),
+                            ElaChatOption(
+                                "新增/修改某个具体组件",
+                                "你指定组件，我先读代码再给方案",
+                            ),
+                            ElaChatOption(
+                                "修 bug 或做性能优化",
+                                "我来定位问题、给最小改动 + 补丁",
+                            ),
+                        ),
+                    ),
+                ),
+            ),
+        )
+        for _ in range(5):
+            qapp.processEvents()
+        heights = [row.height() for row in card._option_buttons]
+        assert len(set(heights)) == 1, f"候选行高度不一致：{heights}"
+        assert all(
+            row.height() == row.sizeHint().height() for row in card._option_buttons
+        )
+        assert card.height() >= card.sizeHint().height() - 1
+
     def test_long_description_grows_row(self, qapp, make):
         """说明折行时行高跟着长（修复「第二行被裁」的已知缺陷）。
 

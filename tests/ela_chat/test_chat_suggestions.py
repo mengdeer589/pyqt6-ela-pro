@@ -5,7 +5,7 @@ from __future__ import annotations
 import os
 
 from PyQt6.QtCore import QMimeData, Qt, QUrl
-from PyQt6.QtGui import QColor, QImage, QPainter
+from PyQt6.QtGui import QColor, QImage
 from PyQt6.QtTest import QTest
 from PyQt6.QtWidgets import QApplication
 
@@ -187,11 +187,11 @@ class TestShellModeRemoved:
         for removed in ("setMode", "mode", "shellToggle", "modeChanged"):
             assert not hasattr(widget, removed), removed
 
-    def test_upload_button_always_enabled(self, qapp, make):
+    def test_add_file_button_always_enabled(self, qapp, make):
         widget = make(ElaChatInput)
         widget.show()
         qapp.processEvents()
-        assert widget.uploadButton().isEnabled() is True
+        assert widget.addFileButton().isEnabled() is True
 
 
 class TestPasteAndAttachments:

@@ -9,7 +9,7 @@
    而下为：附件条（文件 ``ElaChip`` / 图片缩略卡；支持拖放、粘贴图片、去重）
    → 编辑框（``ElaPlainTextEdit`` **无边框形态**：边框 / 底色 / 聚焦态由卡片
    统一接管；高度自适应，默认 3~8 行）→ 工具栏（``ElaChatToolBar``：左侧
-   回形针（上传）+ 扫帚（清空上下文，发 ``clearRequested``）+ **上下文占用
+   回形针（添加文件）+ 扫帚（清空上下文，发 ``clearRequested``）+ **上下文占用
    圆环**（默认常驻，见 :meth:`ElaChatInput.setContextUsage`）+ 右侧发送 /
    停止按钮；宿主可用 :meth:`ElaChatInput.toolBar` 继续添加自定义按钮）。
 
@@ -328,7 +328,7 @@ class _ContextUsageRing(ElaThemeWidget):
 
     三档配色：< 60% 弱化、60~85% 警示、> 85% 危险。
 
-    **默认常驻**（与旁边的新建话题 / 上传 / 清空同地位）：没有数据时画一个
+    **默认常驻**（与旁边的新建话题 / 添加文件 / 清空同地位）：没有数据时画一个
     空底环（0%），显隐由 :meth:`ElaChatInput.setContextUsageVisible` 控制。
 
     **可点击（当按钮用）**：左键点按发 :attr:`clicked`（组件自身不做任何
@@ -350,7 +350,7 @@ class _ContextUsageRing(ElaThemeWidget):
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         self.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self.setAccessibleName("上下文占用")
-        # 刻意**不**在这里 hide()：它是工具栏的默认组件（与新建话题 / 上传 /
+        # 刻意**不**在这里 hide()：它是工具栏的默认组件（与新建话题 / 添加文件 /
         # 清空同排），无数据时画空底环（0%）。显隐走 setContextUsageVisible。
 
     # -- 数据 --------------------------------------------------------------
@@ -438,7 +438,7 @@ class _ContextUsageRing(ElaThemeWidget):
     # -- 内部 --------------------------------------------------------------
 
     def _sync(self) -> None:
-        # 默认常驻（与旁边的新建话题 / 上传 / 清空同地位）：显隐只由
+        # 默认常驻（与旁边的新建话题 / 添加文件 / 清空同地位）：显隐只由
         # ``ElaChatInput.setContextUsageVisible`` 控制，数据有无只影响画多少
         # 百分比 —— 没数据时画空底环（0%）。
         # 输入区贴在窗口最底部 → tooltip 朝上弹，别往输入卡片上盖
@@ -505,8 +505,8 @@ class ElaChatInput(ElaThemeWidget):
     #: 本地文件进入输入区（拖放；粘贴「复制的文件」；或大段文本转附件。
     #: 参数：本地文件路径列表，已自动加入附件）
     filesAdded = pyqtSignal(list)
-    #: 点击「上传文件」按钮
-    uploadRequested = pyqtSignal()
+    #: 点击「添加文件」按钮
+    addFileRequested = pyqtSignal()
     #: 剪贴板图片被粘贴（参数：``QImage``；已自动加入附件）
     imagePasted = pyqtSignal(QImage)
     #: ``@`` 引用被选中（参数：引用 id、展示文本）
@@ -580,7 +580,7 @@ class ElaChatInput(ElaThemeWidget):
         self._normal_font = QFont(self._edit.font())
         surface_layout.addWidget(self._edit)
 
-        # 卡片内 ③：工具栏（左：新建话题 / 上传 / 清空上下文 + 自定义；右：发送 / 停止）
+        # 卡片内 ③：工具栏（左：新建话题 / 添加文件 / 清空上下文 + 自定义；右：发送 / 停止）
         self._toolbar = ElaChatToolBar(self._surface)
         # 新建话题：组件只发信号，会话 / 话题由宿主创建（对齐「清空上下文」的分工）
         self._new_topic_button = self._toolbar.addButton(
@@ -589,11 +589,11 @@ class ElaChatInput(ElaThemeWidget):
             key="new_topic",
             callback=self._on_new_topic_clicked,
         )
-        self._upload_button = self._toolbar.addButton(
+        self._add_file_button = self._toolbar.addButton(
             icon=ElaIconType.IconName.Paperclip,
-            tooltip="上传文件 (Ctrl+U)",
-            key="upload",
-            callback=self._on_upload_clicked,
+            tooltip="添加文件 (Ctrl+U)",
+            key="add_file",
+            callback=self._on_add_file_clicked,
         )
         # 清空上下文：输入区常驻的会话级动作（唯一入口，确认弹框见 requestClear）
         self._clear_button = self._toolbar.addButton(
@@ -627,7 +627,7 @@ class ElaChatInput(ElaThemeWidget):
         self._button_icon = ElaIconType.IconName.ArrowUp
         # 工具栏控件不抢焦点：点按钮时编辑框保持聚焦（卡片维持强调色边框）
         for control in (
-            self._upload_button,
+            self._add_file_button,
             self._clear_button,
             self._new_topic_button,
             self._button,
@@ -720,17 +720,17 @@ class ElaChatInput(ElaThemeWidget):
         """获取工具栏（用于添加自定义工具按钮 / 控件）。"""
         return self._toolbar
 
-    def uploadButton(self) -> ElaChatToolButton:
-        """获取内置「上传文件」按钮句柄。"""
-        return self._upload_button
+    def addFileButton(self) -> ElaChatToolButton:
+        """获取内置「添加文件」按钮句柄。"""
+        return self._add_file_button
 
-    def setUploadVisible(self, on: bool) -> None:
-        """显示 / 隐藏内置「上传文件」按钮。"""
-        self._upload_button.setVisible(bool(on))
+    def setAddFileVisible(self, on: bool) -> None:
+        """显示 / 隐藏内置「添加文件」按钮。"""
+        self._add_file_button.setVisible(bool(on))
 
-    def uploadVisible(self) -> bool:
-        """内置「上传文件」按钮是否可见（``isHidden`` 判据，父链未显示时也准确）。"""
-        return not self._upload_button.isHidden()
+    def addFileVisible(self) -> bool:
+        """内置「添加文件」按钮是否可见（``isHidden`` 判据，父链未显示时也准确）。"""
+        return not self._add_file_button.isHidden()
 
     def clearButton(self) -> ElaChatToolButton:
         """获取内置「清空上下文」按钮句柄。"""
@@ -756,7 +756,7 @@ class ElaChatInput(ElaThemeWidget):
         :class:`~pyqt6_ela_pro.chat.message.ElaChatStats` —— 那个字段的
         ``merge()`` 是**各步求和**语义，而上下文占用是**当前值**，求和是错的。
 
-        圆环是工具栏的**默认组件**（与新建话题 / 上传 / 清空同排，默认显示；
+        圆环是工具栏的**默认组件**（与新建话题 / 添加文件 / 清空同排，默认显示；
         显隐走 :meth:`setContextUsageVisible`）；没有数据时画空底环。
 
         :param used: 已占用词元
@@ -811,12 +811,12 @@ class ElaChatInput(ElaThemeWidget):
         """自定义文件选择器（返回本地路径列表；``None`` 恢复默认对话框）。"""
         self._file_picker = picker
 
-    def _on_upload_clicked(self) -> None:
+    def _on_add_file_clicked(self) -> None:
         picker = self._file_picker or self._default_file_picker
         paths = picker() or []
         if paths:
             self.addAttachments(paths)
-        self.uploadRequested.emit()
+        self.addFileRequested.emit()
 
     def _default_file_picker(self) -> list:
         files, _ = QFileDialog.getOpenFileNames(self, "选择文件")
@@ -1205,7 +1205,7 @@ class ElaChatInput(ElaThemeWidget):
                 return True
 
         if key == Qt.Key.Key_U and modifiers & Qt.KeyboardModifier.ControlModifier:
-            self._on_upload_clicked()
+            self._on_add_file_clicked()
             return True
 
         if key == Qt.Key.Key_G and modifiers & Qt.KeyboardModifier.ControlModifier:

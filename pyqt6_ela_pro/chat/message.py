@@ -366,11 +366,14 @@ class ElaChatStats:
     :meth:`merge` 把各步求和为**整轮汇总**（各轮分别计费，求和即该轮
     实际计费量）。
 
-    **四路词元对齐 opencode 的用量模型**：``prompt`` / ``completion``（含
-    ``reasoning``）/ ``cache_read`` / ``cache_write``；「当前上下文占用」
-    的口径（最后一条有 tokens 的助手消息的四路和）由
-    ``ElaChatView.sessionStats()`` 聚合，不靠这里的 ``total_tokens``
-    （那是服务端原始值）。
+    **四路词元互不重叠**（对齐 opencode 的用量模型）：``prompt`` 只含**未命中
+    缓存**的输入 / ``completion``（含 ``reasoning``）/ ``cache_read`` /
+    ``cache_write``。OpenAI / DeepSeek 的 ``prompt_tokens`` 包含缓存命中，
+    ``chat._usage.stats_from_usage`` 会先扣掉；宿主直接构造本类时同样要按
+    「不含缓存」填，否则 ``sessionStats()`` 的四路和与 ``stats_cost()`` 会把
+    缓存算两遍。「当前上下文占用」的口径（最后一条有 tokens 的助手消息的四路
+    和）由 ``ElaChatView.sessionStats()`` 聚合，不靠这里的 ``total_tokens``
+    （那是服务端原始值，可能包含缓存，别拿它和四路混算）。
     """
 
     #: 输入词元
@@ -433,6 +436,16 @@ class ElaChatStats:
             ttft_ms=float(ttft),
             tps=float(tps),
             cost_usd=sum(item.cost_usd for item in values),
+        )
+
+    def contextTokens(self) -> int:
+        """四路词元和（``prompt`` 已不含缓存；``reasoning`` 已含在 completion 里）。"""
+        return max(
+            0,
+            _as_int(self.prompt_tokens)
+            + _as_int(self.completion_tokens)
+            + _as_int(self.cache_read_tokens)
+            + _as_int(self.cache_write_tokens),
         )
 
     def tooltip(self, durationLabel: str = "耗时") -> str:

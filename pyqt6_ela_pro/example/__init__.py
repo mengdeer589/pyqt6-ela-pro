@@ -9,7 +9,7 @@
 一级分组                页面
 ======================  ====================================================
 基础组件                输入与选择 / 下拉框组件 / 容器与布局 / 视图与列表 /
-                        按钮与菜单 / 进度与反馈
+                        按钮与菜单 / 进度与反馈 / Fluent 与补充组件
 数据与图表              表格 / 图表（第三方库）/ ElaChartWidget 图表工作台
 内容渲染                Markdown 渲染
 AI 对话                  聊天组件总览 / 输入区能力 / Agent 能力 / 会话管理 /
@@ -45,6 +45,7 @@ from .container_layout_page import ContainerLayoutPage
 from .data_table_page import DataTablePage
 from .drawer_tooltip_page import DrawerTooltipPage
 from .embed_page import EmbedPage
+from .fluent_page import FluentPage
 from .input_select_page import InputSelectPage
 from .markdown_page import MarkdownPage
 from .progress_feedback_page import ProgressFeedbackPage
@@ -62,6 +63,7 @@ __all__ = [
     "ViewsListPage",
     "ButtonsMenusPage",
     "ProgressFeedbackPage",
+    "FluentPage",
     # 数据与图表
     "DataTablePage",
     "ChartLibPage",

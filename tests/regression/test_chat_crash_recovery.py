@@ -46,6 +46,19 @@ def _chat(qapp) -> ElaChatWidget:
     return chat
 
 
+class _Clock:
+    """可推进的假时钟（秒）。"""
+
+    def __init__(self, now: float = 1000.0) -> None:
+        self.now = now
+
+    def __call__(self) -> float:
+        return self.now
+
+    def advance(self, ms: float) -> None:
+        self.now += ms / 1000.0
+
+
 # ------------------------------------------------------------------ 崩溃恢复
 class TestCrashRecovery:
     def test_content_received_before_crash_survives(self, qapp):
@@ -224,6 +237,48 @@ class TestSteps:
         assert [part.step for part in message.parts] == [2, 3, 4]
 
 
+class TestStatsReplay:
+    def test_repeated_stats_in_same_step_replaces(self, qapp):
+        """同一 step 多次上报用量时只保留最后一个（实时 setStepStats 同语义）。"""
+        journal = ElaChatTurnJournal(messageId=1).begin(1)
+        journal.stats(ElaChatStats(prompt_tokens=100, completion_tokens=10))
+        journal.stats(ElaChatStats(prompt_tokens=200, completion_tokens=20))
+        journal.end("done")
+
+        message = ElaChatTurnJournal.fromLines([journal.dumps()]).message()
+        stats_parts = [
+            part for part in message.parts if part.kind == ElaChatPartKindType.Stats
+        ]
+        assert len(stats_parts) == 1
+        assert stats_parts[0].stats.prompt_tokens == 200
+        assert message.stats.prompt_tokens == 200
+
+    def test_stats_across_steps_are_kept(self, qapp):
+        journal = ElaChatTurnJournal(messageId=1).begin(1)
+        journal.text("一")
+        journal.stats(ElaChatStats(prompt_tokens=100))
+        journal.beginStep()
+        journal.text("二")
+        journal.stats(ElaChatStats(prompt_tokens=200))
+        journal.end("done")
+
+        message = ElaChatTurnJournal.fromLines([journal.dumps()]).message()
+        stats_parts = [
+            part for part in message.parts if part.kind == ElaChatPartKindType.Stats
+        ]
+        assert [(part.step, part.stats.prompt_tokens) for part in stats_parts] == [
+            (1, 100),
+            (2, 200),
+        ]
+
+    def test_tool_start_dict_arguments_are_json(self, qapp):
+        journal = ElaChatTurnJournal(messageId=1).begin(1)
+        journal.toolStart("t1", "read", {"path": "a.txt"})
+        journal.end("done")
+        message = ElaChatTurnJournal.fromLines([journal.dumps()]).message()
+        assert message.tool_calls[0].arguments == '{"path":"a.txt"}'
+
+
 # ------------------------------------------------------------------ 与实时一致
 class TestJournalMatchesLive:
     def test_replay_equals_live_streaming_message(self, qapp):
@@ -366,6 +421,7 @@ class TestWorkerWiring:
         def __init__(self):
 
             class Emitter(QObject):
+                llmStarted = pyqtSignal()
                 chunkReceived = pyqtSignal(object)
                 toolStarted = pyqtSignal(dict)
                 toolEnded = pyqtSignal(dict, str)
@@ -377,13 +433,16 @@ class TestWorkerWiring:
             return getattr(self._emitter, name)
 
     def test_chunk_dispatch(self, qapp):
+        clock = _Clock()
         worker = self._Worker()
-        journal = ElaChatTurnJournal(messageId=1).begin(1)
+        journal = ElaChatTurnJournal(messageId=1, clock=clock).begin(1)
         journal.connectWorker(worker)
 
+        clock.advance(50)
         worker.chunkReceived.emit(
             SimpleNamespace(reasoning_content="想", answer_content="")
         )
+        clock.advance(125)
         worker.chunkReceived.emit(
             SimpleNamespace(reasoning_content="", answer_content="答")
         )
@@ -392,7 +451,7 @@ class TestWorkerWiring:
         message = journal.message()
         assert message.reasoning == "想"
         assert message.text == "答"
-        assert message.reasoning_ms == 0.0
+        assert message.reasoning_ms == pytest.approx(125.0)
 
     def test_reasoning_settles_when_answer_starts(self, qapp):
         """正文一开始，思考段就真的结束了（与 binder 同一语义）。"""
@@ -457,7 +516,8 @@ class TestWorkerWiring:
         worker.statsReady.emit(usage, 120.0, 30.0)
         journal.end("done")
         stats = journal.message().stats
-        assert stats.prompt_tokens == 11
+        # OpenAI 的 prompt_tokens 含缓存命中，归一化成「未命中缓存」的输入
+        assert stats.prompt_tokens == 8
         assert stats.completion_tokens == 7
         assert stats.total_tokens == 18
         assert stats.cache_read_tokens == 3
@@ -471,6 +531,61 @@ class TestWorkerWiring:
         worker.statsReady.emit(ElaChatStats(prompt_tokens=5), 0.0, 0.0)
         journal.end("done")
         assert journal.message().stats.prompt_tokens == 5
+
+    def test_llm_started_advances_step(self, qapp):
+        """connectWorker 自动跟随轮次：第 1 次不切步，第 2 次切。"""
+        worker = self._Worker()
+        journal = ElaChatTurnJournal(messageId=1).begin(1)
+        journal.connectWorker(worker)
+        worker.llmStarted.emit()
+        journal.text("第一步")
+        worker.llmStarted.emit()
+        journal.text("第二步")
+        journal.end("done")
+
+        message = journal.message()
+        assert [part.step for part in message.parts] == [1, 2]
+        assert message.text == "第一步第二步"
+
+    def test_stats_duration_uses_round_start(self, qapp):
+        clock = _Clock()
+        worker = self._Worker()
+        journal = ElaChatTurnJournal(messageId=1, clock=clock).begin(1)
+        journal.connectWorker(worker)
+        worker.llmStarted.emit()
+        clock.advance(300)
+        worker.statsReady.emit(
+            SimpleNamespace(prompt_tokens=10, completion_tokens=5, total_tokens=15),
+            0.0,
+            0.0,
+        )
+        journal.end("done")
+        assert journal.message().stats.duration_ms == pytest.approx(300.0)
+
+    def test_whitespace_answer_does_not_open_text_part(self, qapp):
+        worker = self._Worker()
+        journal = ElaChatTurnJournal(messageId=1).begin(1)
+        journal.connectWorker(worker)
+        worker.chunkReceived.emit(
+            SimpleNamespace(reasoning_content="思考", answer_content="")
+        )
+        worker.chunkReceived.emit(
+            SimpleNamespace(reasoning_content="", answer_content="\n\n")
+        )
+        message = journal.message()
+        assert [part.kind for part in message.parts] == [ElaChatPartKindType.Reasoning]
+        assert message.parts[0].status == ElaChatStatusType.Streaming
+
+        worker.chunkReceived.emit(
+            SimpleNamespace(reasoning_content="", answer_content="正文")
+        )
+        journal.end("done")
+        message = journal.message()
+        assert message.text == "\n\n正文"
+        assert [part.kind for part in message.parts] == [
+            ElaChatPartKindType.Reasoning,
+            ElaChatPartKindType.Text,
+        ]
 
     def test_disconnect_is_idempotent(self, qapp):
         worker = self._Worker()

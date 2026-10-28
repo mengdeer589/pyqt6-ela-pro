@@ -191,7 +191,7 @@ class ChatVirtualizer:
         if messageId not in self._view._dirty_syncs:
             return
         message = self._view._message_index.get(messageId)
-        if message is None:
+        if message is None or self._view._is_legacy_derived(message):
             return
         self._view._update_snapshot(
             messageId, lambda current: current.withParts(bubble.parts())

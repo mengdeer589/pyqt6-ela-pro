@@ -45,7 +45,7 @@ from __future__ import annotations
 from typing import Optional
 
 from PyQt6.QtCore import QRectF, QSize, Qt, pyqtSignal
-from PyQt6.QtGui import QColor, QFont, QPainter
+from PyQt6.QtGui import QColor, QFont, QPainter, QPalette
 from PyQt6.QtWidgets import (
     QAbstractButton,
     QFrame,
@@ -500,6 +500,10 @@ class QuestionOptionCard(QAbstractButton):
         self._editing = editing
         if self._editor is not None:
             self._editor.setVisible(editing)
+            # 首次 show 时 Qt 会把 ``ElaPlainTextEdit`` 的 widget palette 重置成
+            # app 调色板（本地轮在 showEvent 里补回主题色），这里再按卡片配色
+            # 补一次 muted 文字色 —— 否则这行只在主题切换时才生效。
+            self._apply_editor_theme(self._colors)
         if editing:
             self._editor.setFocus()
         self._apply_content()
@@ -710,12 +714,17 @@ class QuestionOptionCard(QAbstractButton):
         ``QPlainTextEdit`` 不像 ``ElaText`` 那样在 ``paintEvent`` 里重置 palette，
         所以这里设的色**能留住**（实测 ``setPlainText`` 之后仍是同一个值），
         不需要 ``ColorText`` 那套绘制前自愈。
+
+        注意：编辑器首次 ``show`` 时上游会把 widget palette 重置成 app 调色板
+        （本地轮已在 ``ElaPlainTextEdit::showEvent`` 补回主题色），所以
+        :meth:`setEditing` 里 show 之后要再补一次，否则 muted 色被主题色顶掉。
         """
         if self._editor is None:
             return
         palette = self._editor.palette()
-        role = self._editor.foregroundRole()
-        palette.setColor(role, colors["muted"])
+        # **必须显式写 ``Text``**：``QPlainTextEdit.foregroundRole()`` 是
+        # ``WindowText``（Qt 默认），写它不会影响正文颜色。
+        palette.setColor(QPalette.ColorRole.Text, colors["muted"])
         self._editor.setPalette(palette)
 
     def paintEvent(self, _event) -> None:  # noqa: N802
@@ -780,24 +789,53 @@ class QuestionOptionCard(QAbstractButton):
         fm = self._label.fontMetrics()
         return round(fm.height() * 2.0) + CARD_PADDING[1] + CARD_PADDING[3]
 
+    def _text_width(self) -> int:
+        """候选行文字的可用宽度（扣掉卡片内边距 + 标记 + 间距）。"""
+        width = self.width()
+        if width <= 0:
+            width = self._label.width()
+        if width <= 0:
+            width = 320
+        mark = self._mark.sizeHint().width() or self._mark.width()
+        return max(
+            1,
+            int(width) - CARD_PADDING[0] - CARD_PADDING[2] - int(mark) - MARK_GAP,
+        )
+
+    def _content_height(self) -> int:
+        """按**当前文字宽度**算自然内容高度（不读取当前控件高度）。
+
+        不能沿用 ``super().sizeHint()`` / 布局当前尺寸：行先被钉到一个偏大的
+        fixed height 后，标签会被拉伸变大，下一次 ``sizeHint`` 又把偏大的高度
+        当成内容高度，行高会永远缩不回去（表现为第一题选项文字跨到下一行）。
+        """
+        width = self._text_width()
+        label_height = self._label.heightForWidth(width)
+        if label_height <= 0:
+            label_height = self._label.sizeHint().height()
+        content = label_height
+        if self._desc.isVisible() or self._description:
+            desc_height = self._desc.heightForWidth(width)
+            if desc_height <= 0:
+                desc_height = self._desc.sizeHint().height()
+            content += self._texts_layout.spacing() + desc_height
+        content = max(content, self._mark.sizeHint().height())
+        content += CARD_PADDING[1] + CARD_PADDING[3]
+        if self._editor is not None and self._editing:
+            content += self._editor.sizeHint().height()
+        return max(content, self._comfortable_minimum())
+
     def sizeHint(self) -> QSize:  # noqa: N802
-        """行高 = 折行后的自然高（有下限保底）+ （编辑态）编辑器高度。
+        """行高 = 按当前文字宽度折行后的自然高（有下限保底）+ 编辑器高度。
 
-        ``QAbstractButton`` 不把 ``heightForWidth`` 转发给自己的布局，光靠 Qt
-        只会在首次（行宽还是 0）按「一行」定死，说明折两行时第二行被裁 ——
-        所以 ``resizeEvent`` 里发 ``updateGeometry()``，行宽一确定就让布局
-        重新问一次（``sizeHint`` 里的自然高取自布局/子标签，此时宽度已知）。
-        高度变化不会反过来改宽度，不会震荡。
-
-        **必须显式把编辑器算进来**：``QAbstractButton.sizeHint()`` 只认 Qt 自己
-        的 ``text + icon`` 尺寸，完全看不见布局里那个 ``_AutoGrowEditor``，
-        于是父布局不会为它让位，用户用 Shift+Enter 敲的第二行被裁掉。
+        ``QAbstractButton`` 不把 ``heightForWidth`` 转发给自己的布局；更重要
+        的是**不能用布局当前高度反推内容高度**（行被钉高后标签会被拉伸，
+        再读一次就永远缩不回去）。这里显式用 ``ColorText.heightForWidth``
+        按宽度算，``resizeEvent`` 里发 ``updateGeometry()`` / ``_sync_height``
+        让布局在宽度确定后重新问一次。
         """
         hint = super().sizeHint()
-        base = max(hint.height(), self._comfortable_minimum())
-        if self._editor is not None and self._editing:
-            base += self._editor.sizeHint().height()
-        return QSize(hint.width(), base)
+        return QSize(hint.width(), self._content_height())
 
     def resizeEvent(self, event) -> None:  # noqa: N802
         super().resizeEvent(event)

@@ -169,8 +169,8 @@ class TestFullTurn:
             )
             for s in stats_parts
         ] == [
-            (10, 3, 0, 0),
-            (20, 7, 4, 2),
+            (7, 3, 0, 0),
+            (11, 7, 4, 2),
         ]
         assert stats_parts[0].stats.ttft_ms == 120.0
         assert stats_parts[0].stats.tps == 42.0

@@ -1591,6 +1591,10 @@ class ElaMarkdownViewer(ElaThemeWidget):
         # 大文档分块渲染状态
         self._large_render_chunks: list[str] = []
         self._large_render_index = 0
+        # 分块路径的滚动语义（document.clear() 之后 bar 已被夹到 0，必须在
+        # 清空前捕获）：与 _render 的三分支策略对齐。
+        self._large_render_reset = False
+        self._large_render_scroll = (0, 0)
         self._large_render_timer = QTimer(self)
         self._large_render_timer.setSingleShot(True)
         self._large_render_timer.timeout.connect(self._render_large_step)
@@ -1657,11 +1661,15 @@ class ElaMarkdownViewer(ElaThemeWidget):
         self._cancel_large_render()
         self._expanded_code_blocks.clear()
         self._expanded_folds.clear()
-        self._source = text or ""
+        text = text or ""
+        # 阅读语义（stick=False）：换内容回顶部；同内容重渲保留位置。
+        # 聊天语义（stick=True）走 ``_render`` 的贴底判定，不受这个标志影响。
+        reset_position = (not self._stick_to_bottom) and (text != self._source)
+        self._source = text
         if len(self._source) > _LARGE_RENDER_CHARS:
-            self._begin_large_render()
+            self._begin_large_render(reset_position)
         else:
-            self._render()
+            self._render(reset_position=reset_position)
 
     def markdown(self) -> str:
         """当前 Markdown 内容（与传入的文本一致）。"""
@@ -2324,8 +2332,13 @@ class ElaMarkdownViewer(ElaThemeWidget):
     def _finish_pending_render(self) -> None:
         """把在途分块渲染 / 懒渲染一口气做完（读取与导出前调用）。"""
         if self._large_render_chunks:
+            # 分块期间文档已被清空，_render() 读到的旧值是 0：先存下分块
+            # 路径捕获的状态，渲染完再按同一策略落点（同内容重渲保留位置）。
+            old_value, old_max = self._large_render_scroll
+            reset_position = self._large_render_reset
             self._cancel_large_render()
             self._render()
+            self._apply_render_scroll(old_value, old_max, reset_position)
             return
         if self._needs_render and self._source:
             self._needs_render = False
@@ -2336,8 +2349,18 @@ class ElaMarkdownViewer(ElaThemeWidget):
         return self._stream_active
 
     def setStickToBottom(self, on: bool) -> None:
-        """贴底时是否自动跟随滚动（``True`` = 内容在底部则追加后自动滚到底）。"""
+        """贴底时是否自动跟随滚动，并决定 ``setMarkdown`` 换内容后的落点。
+
+        ``True``（默认，聊天 / 流式语义）：内容在底部时追加后自动滚到底；
+        ``False``（阅读语义）：``setMarkdown`` 换新内容后回到顶部，同内容重渲
+        （切主题 / 表格样式 / 字号等）保留当前位置。内容可以先于控件首次显示
+        设置，首次显示仍从顶部开始。
+        """
         self._stick_to_bottom = bool(on)
+        if not self._stick_to_bottom:
+            # 兜住宿主「先 setMarkdown 再关贴底」的顺序：那次渲染按贴底跳过
+            # 了光标复位，否则首次布局照样跳到文末。
+            self._reset_cursor_for_first_layout()
 
     def stickToBottom(self) -> bool:
         """是否贴底自动跟随。"""
@@ -2399,8 +2422,13 @@ class ElaMarkdownViewer(ElaThemeWidget):
             start = end
         return chunks
 
-    def _begin_large_render(self) -> None:
+    def _begin_large_render(self, reset_position: bool = False) -> None:
         """启动分块渲染：清空文档后按时间片逐块提交。"""
+        bar = self._text_browser.verticalScrollBar()
+        self._large_render_reset = reset_position
+        # 必须在 document.clear() 之前捕获：清空会把 bar 夹到 0，
+        # 之后无从判断「同内容重渲保留位置」的旧位置。
+        self._large_render_scroll = (bar.value(), bar.maximum())
         self._large_render_chunks = self._split_large_chunks(self._source)
         self._large_render_index = 0
         self._render_issues = []
@@ -2452,12 +2480,16 @@ class ElaMarkdownViewer(ElaThemeWidget):
         self.renderingProgress.emit(100)
         self._sync_code_buttons()
         self._schedule_layout_refresh()
+        old_value, old_max = self._large_render_scroll
+        self._apply_render_scroll(old_value, old_max, self._large_render_reset)
         self.renderingFinished.emit()
 
     def _cancel_large_render(self) -> None:
         self._large_render_timer.stop()
         self._large_render_chunks = []
         self._large_render_index = 0
+        self._large_render_reset = False
+        self._large_render_scroll = (0, 0)
 
     def _stream_flush(self) -> None:
         """流式刷新：提交新稳定段并替换未稳定尾部。
@@ -2950,13 +2982,47 @@ class ElaMarkdownViewer(ElaThemeWidget):
 
     # -- 渲染 --------------------------------------------------------------
 
-    def _render(self) -> None:
-        """按当前主题全量渲染 ``_source``。"""
+    def _apply_render_scroll(
+        self, old_value: int, old_max: int, reset_position: bool
+    ) -> None:
+        """按滚动语义落点：贴底跟随 / 换内容回顶部 / 其余保留旧位置。"""
+        bar = self._text_browser.verticalScrollBar()
+        if self._stick_to_bottom and old_value >= old_max - _SCROLL_MARGIN:
+            bar.setValue(bar.maximum())
+        elif reset_position and not self._stick_to_bottom:
+            bar.setValue(0)
+        else:
+            bar.setValue(min(old_value, bar.maximum()))
+        self._reset_cursor_for_first_layout()
+
+    def _reset_cursor_for_first_layout(self) -> None:
+        """首次布局前把 widget 光标放回文首，避免 Qt 布局滚到文末光标。
+
+        整体替换文档（``document.setMarkdown`` / 外部 ``QTextCursor`` 插入）会把
+        浏览器自己的光标推到文末；控件还没布局过时，首次布局会
+        ``ensureCursorVisible`` 到该光标并覆盖 ``bar.setValue(0)``。
+
+        只在阅读语义且**尚无滚动范围**（= 内容还没被真实布局过）时动：
+        ``setTextCursor`` 会把已布局控件直接滚到光标；聊天贴底也依赖光标在文末。
+        """
+        if self._stick_to_bottom:
+            return
+        browser = self._text_browser
+        if browser.verticalScrollBar().maximum() > 0:
+            return
+        browser.setTextCursor(QTextCursor(browser.document()))
+
+    def _render(self, reset_position: bool = False) -> None:
+        """按当前主题全量渲染 ``_source``。
+
+        ``reset_position`` 只由 :meth:`setMarkdown` 在阅读语义（``stickToBottom``
+        为 False）且内容真的变化时传入：无视旧滚动位置回到顶部。其余渲染
+        （主题 / 表格样式 / 字号）一律保留用户当前位置。
+        """
         browser = self._text_browser
         document = browser.document()
         bar = browser.verticalScrollBar()
         old_value, old_max = bar.value(), bar.maximum()
-        at_bottom = old_value >= old_max - _SCROLL_MARGIN
 
         browser.setUpdatesEnabled(False)
         try:
@@ -2976,10 +3042,7 @@ class ElaMarkdownViewer(ElaThemeWidget):
             self._stream_committed = 0
             self._stream_tail_pos = 0
             self._stream_cut_from = 0
-        if at_bottom:
-            bar.setValue(bar.maximum())
-        else:
-            bar.setValue(min(old_value, bar.maximum()))
+        self._apply_render_scroll(old_value, old_max, reset_position)
         browser.viewport().update()
         self._sync_code_buttons()
         self._sync_embedded_height()

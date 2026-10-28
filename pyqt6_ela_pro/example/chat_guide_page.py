@@ -604,7 +604,7 @@ binder 和窗口（本页示例里 `worker` 就是这个角色）。
 | 层 | 宿主 API（可以依赖） | 内部协议 / 性能开关（别依赖） |
 |---|---|---|
 | `ElaChatWidget` | 回合（`beginAssistantMessage` / `endAssistantMessage` / `stopGeneration` / `setMessageError`）、提交与排队、dock、`setCurrentSessionId`（纯标记） | —— （内容方法已全部移除，见上面的提示） |
-| `ElaChatView` | 建 / 改 / 读消息：`addMessage` / `addMessageFromDict` / `restoreMessages` / `removeMessage` / `appendText` / `addToolCall` / `setStepStats` / `setMessageTitle` / `setMessageError` / `messageError` / `clearMessageError` …；agent 能力：`beginPermission` / `resolvePermission` / `pendingPermissions` / `beginCompaction` / `appendCompactionSummary` / `endCompaction` / `addSteerNotice`；外观：`setReasoningStyle` / `setStatsMode` / `setToolGrouping` / `setToolDefaultOpen` / `setAvatar*` / `setCopyNotificationEnabled` / `setContentMaxWidth`；持久化：`exportSession` / `importSession`；虚拟化：`materializeMessage` / `scrollToMessage` / `setVirtualPartsEnabled` / `setShellVirtualizationEnabled` / `setVirtualListEnabled` | **性能开关**：`beginBatch` / `endBatch`（历史骨架 + 渐进渲染）、`setViewportSuspension`（视口外挂起）、`setResizeReflowDeferred`（交互 resize 延迟重排）；**渲染内部**：`bubble` / `contentWidget` / `holdFollow` / `jumpThreshold` / `isBatchActive` / `guardNestedScroll`。单条消息的延迟渲染（`setRenderDeferred` / `flushRender` / `hasPendingRender`）**只在 `bubble` 上**，view 仅在批量路径内部调用 |
+| `ElaChatView` | 建 / 改 / 读消息：`addMessage` / `addMessageFromDict` / `restoreMessages` / `removeMessage` / `appendText` / `addToolCall` / `setStepStats` / `setMessageTitle` / `setMessageError` / `messageError` / `clearMessageError` …；agent 能力：`beginPermission` / `resolvePermission` / `pendingPermissions` / `beginCompaction` / `appendCompactionSummary` / `endCompaction` / `addSteerNotice`；外观：`setReasoningStyle` / `setStatsMode` / `setToolGrouping` / `setToolDefaultOpen` / `setAvatar*` / `setCopyNotificationEnabled` / `setWaitingPlaceholderEnabled` / `setContentMaxWidth`；持久化：`exportSession` / `importSession`；虚拟化：`materializeMessage` / `scrollToMessage` / `setVirtualPartsEnabled` / `setShellVirtualizationEnabled` / `setVirtualListEnabled` | **性能开关**：`beginBatch` / `endBatch`（历史骨架 + 渐进渲染）、`setViewportSuspension`（视口外挂起）、`setResizeReflowDeferred`（交互 resize 延迟重排）；**渲染内部**：`bubble` / `contentWidget` / `holdFollow` / `jumpThreshold` / `isBatchActive` / `guardNestedScroll`。单条消息的延迟渲染（`setRenderDeferred` / `flushRender` / `hasPendingRender`）**只在 `bubble` 上**，view 仅在批量路径内部调用 |
 | `ElaChatBubble` | 取子控件与形态：`actions()` / `footer()` / `meta()` / `header()` / `text()` / `parts()` / `markdownViewer()` / `inlineReasoningViewer()` / `statsBadge()` / `toolPanels()` / `setAvatarShape()` / `setActionsHoverReveal()` | 其余 `beginText` / `appendText` / `addToolCall` / `setParts` / `setPartsDeferred` / `materializeParts` / `partsDeferred` / `partsWindowed` / `expandParts` / `setStatus` / `setStepStats` / `setRenderDeferred` … 是 **view ↔ bubble 内部协议**：宿主改消息请走 view 层，否则会绕过 `_sync_parts` 派生结算与 `_dirty_syncs` 防抖 |
 
 ## Input（输入区，经 `chatInput()` 调用）
@@ -634,6 +634,7 @@ binder 和窗口（本页示例里 `worker` 就是这个角色）。
 | `setReasoningStyle(style)` / `setToolGrouping(on)` / `setStatsMode(mode)` | 展示形态，立即对已有消息生效 |
 | `setDisclaimer(text)` / `setDisclaimerVisible(on)` | 助手消息底部的「内容由 AI 生成，仅供参考」提示（默认开启；流式期间随整行隐藏）；`DISCLAIMER_TEXT` 是默认文案 |
 | `setCopyNotificationEnabled(on)` | 点击消息底部「复制」后是否弹 `ElaMessageBar`「已复制到剪贴板」成功提示（默认开启，立即对已有消息生效；应用偏好，不进 `exportSession`） |
+| `setWaitingPlaceholderEnabled(on)` | 等待首个 token（TTFT）期间是否在助手气泡内显示 `ElaShimmer` 骨架（默认开启，立即对已有消息生效）。骨架不是 part：不进 `parts` / 导出 / journal；收到首个正文 / 思考 / 工具 / 审批 / 统计即隐藏。应用偏好，不进 `exportSession` |
 | `setUserAvatar(source)` / `setAssistantAvatar(source)` / `setAvatarShape(shape)` | 头像自定义：SVG / 路径 / `QPixmap` / `QImage` / `QIcon` / `bytes` 等（含已存在与后续消息）；形状 `"circle"`（默认）/ `"rounded"`（**带圆角的矩形**）/ `"square"`，非法值回落圆形 |
 | `setToolDefaultOpen(policy)` | 注入工具卡展开策略（`policy(name, args, ok) -> bool`），只影响**之后新建**的卡片 |
 | `registerToolRenderer(name, factory, *, subtitle, groupable, replace=False)` | **工具结果富渲染**（模块级函数）：`factory(ToolRenderContext) -> QWidget` 只替换卡片**内容区**，头部 / 折叠 / 错误竖线 / 忙碌环 / 展开策略仍由 `ToolCallCard` 负责。可选实现 `updateToolResult(result, status)` 收推送。`subtitle(args) -> (键, 值)` 的键自动从参数摘要排除。`replace=False` 时注册同名渲染器直接报错（防静默覆盖）。库内不内置任何渲染器 |
@@ -645,7 +646,7 @@ binder 和窗口（本页示例里 `worker` 就是这个角色）。
 | `setScrollBarPolicy(policy)` / `scrollBar()` | 垂直滚动条策略（默认 `ScrollBarAsNeeded`，仅溢出时显示）与滚动条句柄；手动拖动把手会自动退出贴底跟随 |
 | `setStrictIds(on)` | 严格模式：对**不存在的消息**抛 `KeyError`（默认关闭，迟到事件静默忽略） |
 | `messages()` / `message(id)` / `lastMessage()` | 读快照（读取时才结算派生字段） |
-| `sessionStats(limit=0)` | 会话级用量汇总（`ElaChatSessionStats`）：计数 / 当前上下文四路词元与合计 / 使用率 / 累计成本 / 最后活动 / **工具调用统计**（`tool_calls` 次数、`tool_rounds` 轮数 = 有工具调用的步骤数、`tool_errors` / `tool_aborted` / `tool_unsettled` 状态分档、`tool_counts` 按名计数）/ `reasoning_ms` 思考耗时合计；口径对齐 opencode `getSessionContext`（最后一条有 tokens 的助手消息的最后一步）。`total_tokens` / `total_cost_usd` 可直接喂输入区圆环 |
+| `sessionStats(limit=0)` | 会话级用量汇总（`ElaChatSessionStats`）：计数 / 当前上下文四路词元与合计 / 使用率 / 累计成本 / 最后活动 / **工具调用统计**（`tool_calls` 次数、`tool_rounds` 轮数 = 有工具调用的步骤数、`tool_errors` / `tool_aborted` / `tool_unsettled` 状态分档、`tool_counts` 按名计数）/ `reasoning_ms` 思考耗时合计；口径对齐 opencode `getSessionContext`（最后一条有 tokens 的助手消息的最后一步）。**输入词元不含缓存命中**（OpenAI / DeepSeek 的 `prompt_tokens` 含缓存，binder / journal 落库前已扣掉；Anthropic 的 `input_tokens` 原样），四路互不重叠。`total_tokens` / `total_cost_usd` 可直接喂输入区圆环 |
 | `parts()` / `text()` / `reasoning()` | 纯读取；`part.text` 只含**已落定**内容，可直接序列化落库 |
 
 ## 持久化与崩溃恢复
@@ -653,7 +654,7 @@ binder 和窗口（本页示例里 `worker` 就是这个角色）。
 | API | 说明 |
 |---|---|
 | `message.toDict()` / `ElaChatMessage.fromDict()` | 成对序列化，纯 JSON 类型（`allow_nan=False` 可写）；`fromDict` 一律容错 |
-| `ElaChatTurnJournal` | 回合的**追加写事件流**（`dumps()` 一行一条），崩了最多丢最后一行 |
+| `ElaChatTurnJournal` | 回合的**追加写事件流**（`dumps()` 一行一条），崩了最多丢最后一行。`connectWorker(worker)` 自动跟随 `llmStarted` 切步（第 1 轮不切，别手动 `beginStep`）；同一 step 的 stats 按最新值覆盖；正文 / 思考 / 步骤时长自动记录 |
 | `journal.replayInto(...)` / `ElaChatTurnJournal.fromLines(...)` | 重放 / 读回（跳过未知事件、结算未完成工具） |
 
 ## 问答型审批（逐题向导）

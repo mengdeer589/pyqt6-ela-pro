@@ -251,49 +251,50 @@ class TestToolBarExtension:
         )
         button.click()
         assert clicks == [1]
-        # 内置按钮顺序：新建话题 → 上传 → 清空上下文 → 上下文占用圆环，
+        # 内置按钮顺序：新建话题 → 添加文件 → 清空上下文 → 上下文占用圆环，
         # 宿主自定义接在其后
         assert widget.toolBar().keys() == [
             "new_topic",
-            "upload",
+            "add_file",
             "clear",
             "usage",
             "widget-1",
             "custom",
         ]
 
-    def test_upload_button_and_picker(self, qapp, tmp_path, make):
+    def test_add_file_button_and_picker(self, qapp, tmp_path, make):
         widget = make(ElaChatInput)
-        assert widget.uploadButton() is widget.toolBar().toolButton("upload")
+        assert widget.addFileButton() is widget.toolBar().toolButton("add_file")
+        assert widget.addFileButton().toolTip() == "添加文件 (Ctrl+U)"
         file_path = tmp_path / "说明.txt"
         file_path.write_text("hello", encoding="utf-8")
         requests = []
-        widget.uploadRequested.connect(lambda: requests.append(1))
+        widget.addFileRequested.connect(lambda: requests.append(1))
         widget.setFilePicker(lambda: [str(file_path)])
-        widget.uploadButton().click()
+        widget.addFileButton().click()
         assert requests == [1]
         attachments = widget.attachments()
         assert len(attachments) == 1
         assert attachments[0].name == "说明.txt"
         assert attachments[0].size == 5
 
-    def test_upload_visibility(self, qapp, make):
+    def test_add_file_visibility(self, qapp, make):
         widget = make(ElaChatInput)
         widget.show()
         qapp.processEvents()
-        assert widget.uploadVisible()
-        widget.setUploadVisible(False)
-        assert not widget.uploadVisible()
+        assert widget.addFileVisible()
+        widget.setAddFileVisible(False)
+        assert not widget.addFileVisible()
 
     def test_toolbar_has_no_menu_or_shell_controls(self, qapp, make):
-        """工具栏只剩「上传 / 清空上下文 / 新建话题」+ 宿主自定义：
+        """工具栏只剩「添加文件 / 清空上下文 / 新建话题」+ 宿主自定义：
 
         `+` 菜单与 Shell 开关已彻底移除。
         """
         widget = make(ElaChatInput)
         widget.show()
         qapp.processEvents()
-        assert widget.uploadVisible()
+        assert widget.addFileVisible()
         assert widget.clearVisible()
         assert widget.newTopicVisible()
         toolbar = widget.toolBar()
@@ -533,9 +534,9 @@ class TestBuiltinButtonState:
     def test_visible_getters_report_intent(self, qapp, make):
         """未 show 时也要如实报告：判据是 isHidden 而非父链可见的 isVisible。"""
         widget = make(ElaChatInput)
-        assert widget.uploadVisible() is True
-        widget.setUploadVisible(False)
-        assert widget.uploadVisible() is False
+        assert widget.addFileVisible() is True
+        widget.setAddFileVisible(False)
+        assert widget.addFileVisible() is False
         widget.setClearVisible(False)
         assert widget.clearVisible() is False
         widget.setNewTopicVisible(False)

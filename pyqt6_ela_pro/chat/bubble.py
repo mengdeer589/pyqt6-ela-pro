@@ -67,6 +67,7 @@ from PyQt6ElaWidgetTools import ElaIconType, ElaMenu, ElaText, ElaThemeType
 
 from .._styles import ColorText, setTextColor
 from ..ela_markdown_viewer import ElaMarkdownViewer
+from ..ela_shimmer import ElaShimmer, ElaShimmerTemplateType
 from ..widget_base import ElaThemeWidget
 from ._theme import accent_color, base_color, blend, muted_color, text_color
 from .bubble_misc import _BubbleMiscMixin
@@ -311,6 +312,9 @@ class ElaChatBubble(
         self._content_max_width = 0
         self._parts_container: Optional[QWidget] = None
         self._parts_layout: Optional[QVBoxLayout] = None
+        #: TTFT 等待骨架（惰性创建的 ``ElaShimmer``；不属于任何 part）
+        self._waiting_shimmer: Optional[ElaShimmer] = None
+        self._waiting_placeholder_enabled = True
         self._timeline = ChatPartTimeline(self)
         #: 分段是否只存数据、尚未建控件（批量加载时按需物化）
         self._parts_deferred = False
@@ -482,6 +486,38 @@ class ElaChatBubble(
             self._content_layout.addWidget(self._parts_container)
             row.addWidget(self._content, 1)
         return row
+
+    def _ensure_waiting_shimmer(self) -> Optional[ElaShimmer]:
+        """惰性创建等待首 token 的骨架（只用于助手消息）。
+
+        骨架不是分段：它直接挂在 ``_content_layout`` 的分段容器之前，隐藏后
+        不占布局；收到首个内容后由 ``_sync_waiting_placeholder`` 收掉。
+        """
+        shimmer = self._waiting_shimmer
+        if shimmer is not None:
+            if is_deleted(shimmer):
+                self._waiting_shimmer = None
+            else:
+                return shimmer
+        if self._role != ElaChatRoleType.Assistant or self._content is None:
+            return None
+        if self._content_layout is None:
+            return None
+        shimmer = ElaShimmer(self._content)
+        shimmer.setObjectName("ElaChatWaitingShimmer")
+        shimmer.setAccessibleName("正在等待回答")
+        shimmer.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+        shimmer.setTemplate(ElaShimmerTemplateType.TextBlock)
+        shimmer.setFixedHeight(72)
+        shimmer.setMaximumWidth(520)
+        shimmer.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        index = self._content_layout.indexOf(self._parts_container)
+        if index < 0:
+            index = 0
+        self._content_layout.insertWidget(index, shimmer)
+        shimmer.hide()
+        self._waiting_shimmer = shimmer
+        return shimmer
 
     def _build_footer_row(self) -> QHBoxLayout:
         row = QHBoxLayout()

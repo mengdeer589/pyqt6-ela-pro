@@ -50,7 +50,8 @@ from typing import Callable, Optional
 from PyQt6.QtCore import QEvent, QObject
 
 from . import _json
-from .message import ElaChatStats, ElaChatStatusType, _as_float, _as_int
+from ._usage import stats_from_usage
+from .message import ElaChatStatusType, _as_float
 from .widget import ElaChatWidget
 
 logger = logging.getLogger(__name__)
@@ -454,36 +455,7 @@ class ElaChatStreamBinder:
         """
         if usage is None or not self.isOpen():
             return
-        if isinstance(usage, ElaChatStats):
-            stats = usage
-            if ttftMs and not stats.ttft_ms:
-                stats = replace(stats, ttft_ms=_as_float(ttftMs))
-            if tps and not stats.tps:
-                stats = replace(stats, tps=_as_float(tps))
-        else:
-            # 四路明细尽力映射（OpenAI 兼容 / Anthropic 两种常见命名），取不到
-            # 一律 0；宿主也可以直接构造 ElaChatStats 填任意口径。
-            details = getattr(usage, "prompt_tokens_details", None)
-            completion_details = getattr(usage, "completion_tokens_details", None)
-            cache_read = getattr(usage, "prompt_cache_hit_tokens", 0) or getattr(
-                details, "cached_tokens", 0
-            )
-            cache_write = getattr(usage, "cache_creation_input_tokens", 0) or getattr(
-                details, "cache_write_tokens", 0
-            )
-            reasoning = getattr(usage, "reasoning_tokens", 0) or getattr(
-                completion_details, "reasoning_tokens", 0
-            )
-            stats = ElaChatStats(
-                prompt_tokens=_as_int(getattr(usage, "prompt_tokens", 0)),
-                completion_tokens=_as_int(getattr(usage, "completion_tokens", 0)),
-                total_tokens=_as_int(getattr(usage, "total_tokens", 0)),
-                reasoning_tokens=_as_int(reasoning),
-                cache_read_tokens=_as_int(cache_read),
-                cache_write_tokens=_as_int(cache_write),
-                ttft_ms=_as_float(ttftMs),
-                tps=_as_float(tps),
-            )
+        stats = stats_from_usage(usage, ttftMs, tps)
         durationMs = 0.0
         if self._round_start is not None:
             durationMs = _as_float((self._clock() - self._round_start) * 1000.0)

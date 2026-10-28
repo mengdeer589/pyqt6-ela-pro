@@ -11,7 +11,9 @@
    显式摆好静态态，否则「停掉」会留下半条扫光。
 
 配色沿用 Fluent 的推导式（画布明度决定深浅两套，**高亮都是白色、只有 alpha 不同**），
-但画布换成 ``_theme.surface(mode)`` 语义令牌而不是硬编码的 ``#F3F3F3``/``#202020``。
+但画布取控件自身 palette 的 ``Window``（``ElaThemeWidget`` 默认 ``BasicPress``，
+与消息区 / 滚动页底色一致），取不到时回落 ``_theme.surface(mode)`` —— 不再硬编码
+``#F3F3F3``/``#202020``。
 """
 
 from __future__ import annotations
@@ -29,6 +31,7 @@ from PyQt6.QtGui import (
     QPainter,
     QPainterPath,
     QPaintEvent,
+    QPalette,
     QPen,
 )
 
@@ -587,6 +590,18 @@ class ElaShimmer(ElaThemeWidget):
         super()._onThemeChanged(mode)
         self.update()
 
+    def _canvas_color(self) -> QColor:
+        """骨架所在表面色：优先取控件 palette 的 ``Window``，缺失时用主题表面。
+
+        ``ElaThemeWidget`` 的默认表面就是 ``BasicPress``（消息区 / 滚动页底色），
+        比固定用 ``surface(None)``（``WindowBase``）更贴合实际画布 —— 亮色下
+        ``WindowBase`` 会算出一档偏深的骨架。
+        """
+        color = self.palette().color(QPalette.ColorRole.Window)
+        if color.isValid() and color.alpha() > 0:
+            return color
+        return surface(None)
+
     def paintEvent(self, event: QPaintEvent) -> None:  # noqa: N802
         self._ensureLayout()
         painter = QPainter(self)
@@ -595,7 +610,7 @@ class ElaShimmer(ElaThemeWidget):
         paintShimmer(
             painter,
             self._elements,
-            shimmerPalette(surface(None), enabled),
+            shimmerPalette(self._canvas_color(), enabled),
             self._progress,
             animated=enabled and self._active and self.isAnimationRunning(),
         )

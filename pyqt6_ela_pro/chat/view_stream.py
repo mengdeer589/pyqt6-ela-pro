@@ -77,6 +77,7 @@ class _ViewStreamMixin:
         if bubble is None:
             return None
         step = bubble.beginStep()
+        self._sync_parts(messageId)
         self.messageUpdated.emit(messageId)
         return step
 

@@ -805,7 +805,7 @@ class ChatInputPage(ExamplePage):
 
         - ``chat.chatInput().setContextUsage(used, window, costUsd)`` —— 圆环挂在
           **输入区工具栏**（经 ``chatInput()`` 访问），是**默认常驻**组件
-          （与新建话题 / 上传 / 清空同排，无数据时画空底环）；``window <= 0``
+          （与新建话题 / 添加文件 / 清空同排，无数据时画空底环）；``window <= 0``
           按 0% 显示（换话题 / 清空后宿主可这样重置）；显隐走
           ``setContextUsageVisible``；
         - 三档配色：``<60%`` 弱化 / ``60~85%`` 警示 / ``>=85%`` 危险（红色 +

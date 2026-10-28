@@ -97,6 +97,10 @@ setDefaultMarkdownTheme("github")            # 改「之后新建实例」的默
 ## 引用回复与流式
 
 - `markdownSelection()` / `selectionQuoted`：把选中内容还原为 Markdown 源（引用回复用）；
+- 滚动语义：`setStickToBottom(True)`（默认，聊天 / 流式）贴底时自动跟随；
+  `setStickToBottom(False)`（阅读器）让 `setMarkdown` 换新内容后回到顶部，同内容
+  重渲（切主题 / 表格样式 / 字号）保留当前位置。内容可以在控件首次显示前设置
+  （宿主 `show()` 前预载），首次显示仍从顶部开始；大文档分块渲染遵循同一语义；
 - 流式追加：`appendMarkdown` / `endStream`，贴底自动跟随、末尾打字光标；
 - 嵌入模式 `setEmbeddedMode(True)`：透明背景、隐藏滚动条、高度随文档自适应
   （聊天正文 / 内联思考默认启用，`setEmbeddedTrimBottom(True)` 让文末段距不计入高度）；

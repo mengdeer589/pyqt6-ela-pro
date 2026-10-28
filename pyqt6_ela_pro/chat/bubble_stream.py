@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from .._internal import is_deleted
 from .bubble_shared import _STATUS_TEXTS
 
 
@@ -121,6 +122,37 @@ class _BubbleStreamMixin:
         """获取消息状态（见 :class:`~pyqt6_ela_pro.chat.message.ElaChatStatusType`）。"""
         return self._status
 
+    def setWaitingPlaceholderEnabled(self, on: bool) -> None:
+        """设置等待首个 token（TTFT）期间是否显示骨架占位（默认开启）。"""
+        self._waiting_placeholder_enabled = bool(on)
+        self._sync_waiting_placeholder()
+
+    def waitingPlaceholderEnabled(self) -> bool:
+        """等待首个 token 期间是否显示骨架占位。"""
+        return self._waiting_placeholder_enabled
+
+    def _sync_waiting_placeholder(self) -> None:
+        """按派生状态显隐等待骨架。
+
+        只在「流式中、还没有任何分段、也还没收到首个输出」时显示；骨架**不是**
+        分段，因此 ``parts`` / 导出 / journal 都看不到它。
+        """
+        wanted = (
+            self._waiting_placeholder_enabled
+            and self._role == ElaChatRoleType.Assistant
+            and self._status == ElaChatStatusType.Streaming
+            and not self._generation_started
+            and not self._parts
+        )
+        shimmer = self._waiting_shimmer
+        if not wanted:
+            if shimmer is not None and not is_deleted(shimmer):
+                shimmer.hide()
+            return
+        shimmer = self._ensure_waiting_shimmer()
+        if shimmer is not None and shimmer.isHidden():
+            shimmer.show()
+
     def setStatus(self, status: str) -> None:
         """设置消息状态（同步头部状态提示、底部行与用量徽标的显隐）。
 
@@ -138,6 +170,7 @@ class _BubbleStreamMixin:
         if self._status != ElaChatStatusType.Streaming:
             # 流式期间徽标被收起（见 _apply_stats_mode），回合结束再按模式摆出来
             self._apply_stats_mode()
+        self._sync_waiting_placeholder()
 
     def _sync_footer(self) -> None:
         """底部行（复制 / 重新生成 / 用量 / 耗时）只在回合有结果之后出现。
@@ -175,3 +208,4 @@ class _BubbleStreamMixin:
         self._generation_started = True
         if self._status == ElaChatStatusType.Streaming:
             self._sync_header_status()
+        self._sync_waiting_placeholder()

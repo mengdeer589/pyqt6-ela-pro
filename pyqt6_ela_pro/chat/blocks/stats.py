@@ -22,6 +22,7 @@ from .._theme import (
 )
 from ..message import (
     ElaChatStats,
+    _as_int,
 )
 
 
@@ -57,8 +58,16 @@ class StatsBadge(ElaThemeWidget):
     ) -> None:
         """``setStats`` 的内部实现；历史批量回放时只填数据、不显示。"""
         self._stats = stats
+        context_total = stats.contextTokens() if stats is not None else 0
+        total = _as_int(stats.total_tokens) if stats is not None else 0
+        total = total or context_total
         if stats is None or not (
-            stats.total_tokens or stats.prompt_tokens or stats.completion_tokens
+            total
+            or context_total
+            or stats.prompt_tokens
+            or stats.completion_tokens
+            or stats.cache_read_tokens
+            or stats.cache_write_tokens
         ):
             self._apply_tooltip()
             self.hide()
@@ -66,7 +75,7 @@ class StatsBadge(ElaThemeWidget):
         parts = [
             f"↑{stats.prompt_tokens}",
             f"↓{stats.completion_tokens}",
-            f"总计 {stats.total_tokens}",
+            f"总计 {total}",
         ]
         if stats.cache_read_tokens:
             parts.append(f"缓存读 {stats.cache_read_tokens}")

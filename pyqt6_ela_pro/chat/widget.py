@@ -2,7 +2,7 @@
 聊天组件组装（``pyqt6_ela_pro.chat``）。
 
 :class:`ElaChatWidget` = :class:`ElaChatView` + :class:`ElaChatInput`
-（工具栏常驻「新建话题 / 上传 / 清空上下文」，清空走 :class:`ElaConfirmDialog`
+（工具栏常驻「新建话题 / 添加文件 / 清空上下文」，清空走 :class:`ElaConfirmDialog`
 二次确认）。
 
 **分工（重要）**：本层只管**输入区 + 回合编排**，对外只有这几类：

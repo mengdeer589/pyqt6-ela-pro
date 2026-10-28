@@ -513,6 +513,45 @@ class TestRestore:
         chat.deleteLater()
         qapp.processEvents()
 
+    def test_parts_less_assistant_keeps_message_level_fields(self, qapp):
+        """无 parts 的旧格式助手消息：stats / reasoning / tool_calls 不能丢。"""
+        chat = _chat(qapp)
+        view = chat.chatView()
+        data = {
+            "id": 0,
+            "role": "assistant",
+            "text": "旧格式回答",
+            "status": "done",
+            "stats": ElaChatStats(
+                prompt_tokens=5, completion_tokens=2, total_tokens=7
+            ).toDict(),
+            "reasoning": "旧思考",
+            "reasoning_ms": 12.0,
+            "tool_calls": [
+                ElaChatToolCall(
+                    id="t1", name="read", status=ElaChatToolStatusType.Done
+                ).toDict()
+            ],
+        }
+        messageId = view.addMessageFromDict(data)
+        qapp.processEvents()
+        # 多读几次，确认同步路径不会把消息级字段抹掉
+        message = view.message(messageId)
+        message = view.message(messageId)
+
+        assert message.text == "旧格式回答"
+        assert message.stats.prompt_tokens == 5
+        assert message.reasoning == "旧思考"
+        assert message.reasoning_ms == pytest.approx(12.0)
+        assert [call.name for call in message.tool_calls] == ["read"]
+
+        session = view.sessionStats()
+        assert session.tool_calls == 1
+        assert session.tool_rounds == 1
+        assert session.reasoning_ms == pytest.approx(12.0)
+        chat.deleteLater()
+        qapp.processEvents()
+
     def test_message_id_preserved_and_advances_counter(self, qapp):
         chat = _chat(qapp)
         data = _sample_message().toDict()

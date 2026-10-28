@@ -23,7 +23,7 @@
 结构设计：
 
 - **输入区** 分三层：附件 chips 行 → ``ElaPlainTextEdit`` →
-  工具栏（左：上传 + 清空上下文 + 自定义工具；右：自定义 + 发送 / 停止）；
+  工具栏（左：添加文件 + 清空上下文 + 自定义工具；右：自定义 + 发送 / 停止）；
   工具栏支持 ``addButton`` / ``addWidget`` / ``addSeparator`` 三种扩展入口；
   **大段粘贴自动转附件**（临时文件走同一附件管线，见 ``ElaChatInput`` 的说明）；
 - **消息** 分四层：头部（头像 + 名称 + 时间 / 状态）→ 内容分段
@@ -117,7 +117,8 @@
     from pyqt6_ela_pro.chat import ElaChatTurnJournal
 
     journal = ElaChatTurnJournal(messageId=chat.beginAssistantMessage())
-    journal.connectWorker(worker)          # 与 binder 并行，不改现有接线
+    journal.begin()                        # 开始记录（connectWorker 不会替你开）
+    journal.connectWorker(worker)          # 自动跟随 llmStarted 切步；别再手动 beginStep
     ...
     journal.end("done")
     fh.write(journal.dumpsNewLines())       # 追加写；崩了最多丢最后一行

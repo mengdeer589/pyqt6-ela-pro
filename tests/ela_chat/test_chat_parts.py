@@ -465,6 +465,18 @@ class TestBubbleParts:
         assert docked_badge.stats().total_tokens == 6
         assert inline_badge.stats().total_tokens == 5
 
+    def test_footer_total_falls_back_to_four_way(self, qapp, make):
+        """服务端没给 total_tokens（Anthropic 形态）时，总计用四路和。"""
+        bubble = make(ElaChatBubble, ElaChatRoleType.Assistant)
+        bubble.setStepStats(
+            ElaChatStats(
+                prompt_tokens=200,
+                completion_tokens=100,
+                cache_read_tokens=800,
+            )
+        )
+        assert "总计 1100" in bubble.statsBadge()._label.text()
+
     def test_end_stream_docks_merged_badge_to_footer(self, qapp, make):
         """footer 模式回合结束后只有一个底部徽标，数值为整轮汇总。"""
         bubble = make(ElaChatBubble, ElaChatRoleType.Assistant)
@@ -690,6 +702,14 @@ class TestViewParts:
         view.updateMessage(messageId, "**bye**")
         assert view.message(messageId).text == "**bye**"
         assert len(view.message(messageId).parts) == 1
+
+    def test_begin_step_syncs_snapshot(self, qapp, make):
+        """切步会结束当前正文段：快照要立刻拿到已落定文本。"""
+        view = make(ElaChatView)
+        messageId = view.beginMessage(ElaChatRoleType.Assistant)
+        view.appendText(messageId, "第一段")
+        view.beginStep(messageId)
+        assert view.message(messageId).text == "第一段"
 
     def test_compat_aliases(self, qapp, make):
         view = make(ElaChatView)

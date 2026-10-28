@@ -18,6 +18,7 @@ from pyqt6_ela_pro.chat import (
     ElaChatView,
 )
 from pyqt6_ela_pro.chat.blocks import ToolCallCard
+from pyqt6_ela_pro.ela_shimmer import ElaShimmer
 
 
 def _tool_part(message_id: int, step: int) -> ElaChatPart:
@@ -164,6 +165,18 @@ class TestDeferredShells:
         assert len(view.message(1).parts) == 1
         assert len(view.exportSession()["messages"]) == 100
         assert len(view._shell_placeholders) > 0
+
+    def test_placeholders_stay_childless(self, qapp, make):
+        """历史虚拟化占位保持零子控件 —— 不能逐条换成 ElaShimmer 控件。"""
+        view = make(ElaChatView)
+        view.resize(640, 480)
+        view.show()
+        qapp.processEvents()
+        view.importSession(_bundle(100, steps=1))
+        qapp.processEvents()
+
+        assert len(view._shell_placeholders) > 0
+        assert view.findChildren(ElaShimmer) == []
 
     def test_materialize_shell_and_remove(self, qapp, make):
         view = make(ElaChatView)

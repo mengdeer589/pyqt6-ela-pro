@@ -106,12 +106,17 @@ def _stats_total(stats) -> int:
     ``reasoning_tokens`` **不计入** —— 它是 ``completion_tokens`` 的子集
     （见 :class:`~pyqt6_ela_pro.chat.message.ElaChatStats`），再加一遍就是双计。
     """
-    four = (
-        _as_int(getattr(stats, "prompt_tokens", 0))
-        + _as_int(getattr(stats, "completion_tokens", 0))
-        + _as_int(getattr(stats, "cache_read_tokens", 0))
-        + _as_int(getattr(stats, "cache_write_tokens", 0))
-    )
+    context = getattr(stats, "contextTokens", None)
+    if callable(context):
+        four = max(0, _as_int(context()))
+    else:
+        four = max(
+            0,
+            _as_int(getattr(stats, "prompt_tokens", 0))
+            + _as_int(getattr(stats, "completion_tokens", 0))
+            + _as_int(getattr(stats, "cache_read_tokens", 0))
+            + _as_int(getattr(stats, "cache_write_tokens", 0)),
+        )
     if four > 0:
         return four
     return max(0, _as_int(getattr(stats, "total_tokens", 0)))
@@ -128,6 +133,26 @@ def _message_cost(message) -> float:
         if part_stats is not None:
             cost += _as_float(getattr(part_stats, "cost_usd", 0.0))
     return cost
+
+
+def _add_tool_call(call, tool_counts: dict) -> tuple[int, int, int, int]:
+    """把一个工具调用计入统计，返回 ``(总数, 失败, 中止, 在途)`` 的增量。"""
+    name = _as_str(getattr(call, "name", "")).lower()
+    if name:
+        tool_counts[name] = tool_counts.get(name, 0) + 1
+    status = getattr(call, "status", "")
+    return (
+        1,
+        int(status == ElaChatToolStatusType.Error),
+        int(status == ElaChatToolStatusType.Aborted),
+        int(
+            status
+            in (
+                ElaChatToolStatusType.Pending,
+                ElaChatToolStatusType.Running,
+            )
+        ),
+    )
 
 
 @dataclass(frozen=True)
@@ -222,31 +247,48 @@ class ElaChatSessionStats:
                 assistant_messages += 1
             total_cost += _message_cost(item)
             steps_with_tools: set = set()
+            saw_tool = False
+            saw_reasoning = False
             for part in getattr(item, "parts", ()) or ():
                 kind = getattr(part, "kind", "")
                 if kind == ElaChatPartKindType.Reasoning:
+                    saw_reasoning = True
                     reasoning_ms += _as_float(getattr(part, "duration_ms", 0.0))
                 elif kind == ElaChatPartKindType.Tool:
+                    saw_tool = True
                     call = getattr(part, "tool_call", None)
                     if call is None:
                         # 坏数据（存储里缺 tool_call）：不是一次能数的调用，跳过
                         continue
-                    tool_calls += 1
+                    count, errors, aborted, unsettled = _add_tool_call(
+                        call, tool_counts
+                    )
+                    tool_calls += count
+                    tool_errors += errors
+                    tool_aborted += aborted
+                    tool_unsettled += unsettled
                     steps_with_tools.add(max(1, _as_int(getattr(part, "step", 1), 1)))
-                    name = _as_str(getattr(call, "name", "")).lower()
-                    if name:
-                        tool_counts[name] = tool_counts.get(name, 0) + 1
-                    status = getattr(call, "status", "")
-                    if status == ElaChatToolStatusType.Error:
-                        tool_errors += 1
-                    elif status == ElaChatToolStatusType.Aborted:
-                        tool_aborted += 1
-                    elif status in (
-                        ElaChatToolStatusType.Pending,
-                        ElaChatToolStatusType.Running,
-                    ):
-                        tool_unsettled += 1
             tool_rounds += len(steps_with_tools)
+            # 旧格式（只有消息级字段、没有分段）：回退到 message.tool_calls /
+            # message.reasoning_ms。没有 step 信息，工具按「一条消息一轮」计。
+            if not saw_tool:
+                legacy_calls = getattr(item, "tool_calls", ()) or ()
+                legacy_any = False
+                for call in legacy_calls:
+                    if call is None:
+                        continue
+                    legacy_any = True
+                    count, errors, aborted, unsettled = _add_tool_call(
+                        call, tool_counts
+                    )
+                    tool_calls += count
+                    tool_errors += errors
+                    tool_aborted += aborted
+                    tool_unsettled += unsettled
+                if legacy_any:
+                    tool_rounds += 1
+            if not saw_reasoning:
+                reasoning_ms += _as_float(getattr(item, "reasoning_ms", 0.0))
 
         latest = None
         latest_message = None

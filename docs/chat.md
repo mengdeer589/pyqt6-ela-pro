@@ -117,8 +117,13 @@
   `tool_unsettled`（按状态分档，`unsettled` = pending + running）、
   `tool_counts`（工具名小写归一 -> 次数）、`reasoning_ms`（思考耗时合计）。
   口径对齐 opencode `getSessionContext`（取**最后一条有 tokens 的助手消息的
-  最后一步**，不是全会话求和）。省事可以直接把 `total_tokens` /
-  `total_cost_usd` 喂给上面的上下文圆环
+  最后一步**，不是全会话求和）。**四路词元互不重叠：输入只含未命中缓存的
+  部分** —— OpenAI / DeepSeek 的 `prompt_tokens` 包含缓存命中，`binder` /
+  `journal` 落库前会扣掉（`chat/_usage.py`），Anthropic 的 `input_tokens`
+  本身不含、原样使用；直接构造 `ElaChatStats` 时也要按这个口径填。四路和用
+  `ElaChatStats.contextTokens()`（reasoning 不重复加；服务端缺 `total_tokens`
+  时用量徽标的「总计」也回退到它）。省事可以
+  直接把 `total_tokens` / `total_cost_usd` 喂给上面的上下文圆环
 - **成本（`ElaChatStats.cost_usd` / `ModelPricing` / `stats_cost`）** —
   定价表不烤进库（价格会变、还分上下文长度阶梯），库只提供换算纯函数：
   `output` 与 `reasoning` 同价、按输入侧总量选阶梯档、最后除以 1e6。
@@ -151,12 +156,12 @@
   随附件对象流转 —— 消息气泡与撤回回填都有缩略图，**不序列化**，落库 /
   恢复历史后回退为文件 chip）；
   多行输入（默认 3–8 行，`Enter` 发送 / `Shift+Enter` 换行，IME 安全）；
-  工具栏左组 = 新建话题 + 上传（`Ctrl+U`，回形针）+ 清空上下文，右组 =
+  工具栏左组 = 新建话题 + 添加文件（`Ctrl+U`，回形针）+ 清空上下文，右组 =
   发送 / 停止；三个左组按钮各自可隐（`setNewTopicVisible` /
-  `setUploadVisible` / `setClearVisible`，文件选择走 `setFilePicker`）；
+  `setAddFileVisible` / `setClearVisible`，文件选择走 `setFilePicker`）；
   **发送 / 停止同按钮**：流式中草稿为空才显示「停止」，有草稿仍为「发送」
   （默认交由宿主排队，`setQueueEnabled` 可关）；`Esc` / `Ctrl+G` 停止；
-  上传路径：`attachments()` 快照（含 `path`）/ `attachmentPaths()` 路径列表 /
+  文件进入输入区的通道：`attachments()` 快照（含 `path`）/ `attachmentPaths()` 路径列表 /
   `attachmentsChanged` 信号 / 提交时 `messageSubmittedFull(text, attachments)`
 - **ElaChatToolBar / ElaChatToolButton** — 可复用水平工具栏：
   `leading` / `trailing` 两段，追加 `addButton` / `addWidget` /
@@ -192,6 +197,9 @@
   `actions()` 是否存在 + `isEnabled()`；复制落定弹 `ElaMessageBar`
   确认，默认开、`setCopyNotificationEnabled` 可关）；助手流式
   `beginStream` / `appendText` / `endStream`（`streamFinished` 信号），
+  **等待首个 token（TTFT）期间默认在气泡内显示 `ElaShimmer` 文本骨架** ——
+  它不是 `ElaChatPart`，不进 `parts` / 导出 / journal；收到首个正文 / 思考 /
+  工具 / 审批 / 统计即隐藏，`setWaitingPlaceholderEnabled(False)` 可关；
   `parts()` 返回当前分段快照；免责提示可单条改
   （`setDisclaimer` / `setDisclaimerVisible`，用户气泡恒不显示）
 - **ElaChatQueueDock / ElaChatInputDock / ElaChatPermissionDock** — 输入区
@@ -256,12 +264,16 @@
   `view.addMessageFromDict()`（保留 id）或 `view.restoreMessages(items,
   preserveIds=True)`（批量渐进渲染：先渲染最新的一屏，更早的消息在滚动到顶部时
   分页补齐；`batchRenderFinished` 在首批排空时发出，未渲染消息的
-  `renderDeferred()` 仍为 True，数据用 `message()` 快照读）；整会话
+  `renderDeferred()` 仍为 True，数据用 `message()` 快照读）；无 parts 的旧格式
+  助手消息（`stats` / `reasoning` / `tool_calls` 只在消息级）也会原样保留；
+  整会话
   `view.exportSession(session, extra)` / `view.importSession(bundle,
   clear=True)`（bundle = session 元数据 + messages + 外观选项，clear 时保留
   原 id）；`ElaChatSessionInfo` 提供会话元数据快照 + `toDict/fromDict`；
   回合中途崩溃用 `ElaChatTurnJournal` 追加写事件流恢复（示例见
-  `chat/__init__.py` docstring）
+  `chat/__init__.py` docstring）；`connectWorker()` 会自动跟随 `llmStarted`
+  切步（第 1 轮不切，此时别再手动 `beginStep`），同一步重复上报的用量按
+  最新值覆盖，正文 / 思考 / 步骤时长自动记录
 - **历史会话虚拟化** — 批量恢复时首屏之外的消息只保存 `parts` 数据、
   不建工具卡 / 思考块 / 查看器（`bubble.partsDeferred()` 为 True）；滚动到
   附近时按页物化，也可显式 `view.materializeMessage(id)` /

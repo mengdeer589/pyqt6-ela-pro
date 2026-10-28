@@ -24,13 +24,14 @@ from pyqt6_ela_pro.chat import (
 )
 
 
-def _assistant(mid, parts=(), created_at=0.0, stats=None):
+def _assistant(mid, parts=(), created_at=0.0, stats=None, **fields):
     return ElaChatMessage(
         id=mid,
         role=ElaChatRoleType.Assistant,
         created_at=created_at,
         stats=stats,
         parts=tuple(parts),
+        **fields,
     )
 
 
@@ -158,6 +159,35 @@ class TestFromMessages:
         parts_only = _assistant(2, [_step(1, ElaChatStats(cost_usd=0.25))])
         stats = ElaChatSessionStats.fromMessages([with_stats, parts_only])
         assert stats.total_cost_usd == pytest.approx(0.75)
+
+    def test_context_tokens_helper_excludes_reasoning(self):
+        stats = ElaChatStats(
+            prompt_tokens=200,
+            completion_tokens=100,
+            total_tokens=1100,
+            reasoning_tokens=80,
+            cache_read_tokens=800,
+            cache_write_tokens=50,
+        )
+        assert stats.contextTokens() == 1150
+
+    def test_parts_less_message_falls_back_to_message_fields(self):
+        """旧格式只有消息级字段：工具与思考耗时要照样统计。"""
+        message = _assistant(
+            1,
+            tool_calls=(
+                ElaChatToolCall(
+                    id="t1", name="Read", status=ElaChatToolStatusType.Done
+                ),
+            ),
+            reasoning="想",
+            reasoning_ms=12.0,
+        )
+        stats = ElaChatSessionStats.fromMessages([message])
+        assert stats.tool_calls == 1
+        assert stats.tool_rounds == 1
+        assert stats.tool_counts == {"read": 1}
+        assert stats.reasoning_ms == pytest.approx(12.0)
 
     def test_percent_needs_limit(self):
         message = _assistant(
