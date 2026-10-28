@@ -37,6 +37,13 @@ class ElaDialogBase(ElaContentDialog):
         dlg.setTitle("退出")
         dlg.setParamWidget(my_content_widget)
         dlg.exec()
+
+    .. note::
+
+        ``leftButtonClicked`` / ``middleButtonClicked`` / ``rightButtonClicked`` 都是
+        **0ms 延迟**发出的（关闭动画之后）。``exec()`` 返回后 Qt 会自动取消回调，
+        所以依赖这些信号的宿主必须在 ``exec()`` 之后继续持有对话框引用（例如存成员
+        变量）；只读 ``exec()`` 的返回值（``Accepted`` / ``Rejected``）则不需要。
     """
 
     def __init__(

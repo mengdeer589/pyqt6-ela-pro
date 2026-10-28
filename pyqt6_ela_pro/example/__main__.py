@@ -92,6 +92,7 @@ from pyqt6_ela_pro.example import (
     DataTablePage,
     DrawerTooltipPage,
     EmbedPage,
+    FluentPage,
     InputSelectPage,
     MarkdownPage,
     ProgressFeedbackPage,
@@ -112,6 +113,10 @@ _NAV_MODES = (
 )
 _NAV_MODE_TEXTS = ("自动", "最大", "紧凑", "最小")
 _MOTION_TEXTS = ("完整", "精简", "关闭")
+#: 示例启动默认主题（工具栏 / AppBar 的「切换主题」随时可切回浅色）
+_DEFAULT_THEME_MODE = ElaThemeType.ThemeMode.Dark
+#: 外壳设置「窗口背景渐变」的启动默认值（设置弹框里可关，即时生效）
+_DEFAULT_BACKGROUND_ENABLED = True
 #: ``ElaDialogBase`` 中间按钮的 ``done`` 码（`middleButtonClicked` → `done(2)`）
 _DIALOG_MIDDLE_BUTTON = 2
 
@@ -143,7 +148,7 @@ class ExampleWindow(ElaWindow):
         self._about_key = ""
         self._settings_key = ""
         self._close_confirm_enabled = True
-        self._background_enabled = False
+        self._background_enabled = _DEFAULT_BACKGROUND_ENABLED
 
         try:
             self._buildSidebar()
@@ -156,6 +161,9 @@ class ExampleWindow(ElaWindow):
         self._buildStatusBar()
         self._buildAppBarMenu()
         self._installCloseGuard()
+        # 外壳设置里的「窗口背景渐变」默认开：在窗口显示前就把亮 / 暗两张位图装好，
+        # 首帧即是渐变（设置弹框里仍可随时关掉）。
+        self._set_background_enabled(self._background_enabled)
         self.navigationNodeClicked.connect(self._on_navigation_node_clicked)
         # Python 页面无法被 C++ ``QMetaObject::newInstance()`` 复制：
         # 右键「在新窗口中打开」改发请求信号，由宿主建窗（见 ``page_window.py``）。
@@ -182,6 +190,9 @@ class ExampleWindow(ElaWindow):
         )
         self._addPage(
             "基础组件", "进度与反馈", ProgressFeedbackPage(self), basic, icon.Gauge
+        )
+        self._addPage(
+            "基础组件", "Fluent 与补充组件", FluentPage(self), basic, icon.Circle
         )
         self.expandNavigationNode(basic)
 
@@ -785,12 +796,19 @@ def _prepare_qpa_platform() -> None:
         os.environ.setdefault("QT_QPA_PLATFORM", "windows:nodirectwrite")
 
 
+def _apply_default_theme() -> None:
+    """应用示例启动主题（须在 ``eApp.init()`` 之后调用）。"""
+    eTheme.setThemeMode(_DEFAULT_THEME_MODE)
+
+
 if __name__ == "__main__":
     # Win7 上 DirectWrite 路径会在部分字体组合下崩 / 卡；GDI 引擎更稳。
     # 必须在 QApplication 之前设置。
     _prepare_qpa_platform()
     app = QApplication(sys.argv)
     eApp.init()
+    # 示例默认深色；再早于 splash，启动屏也是同一套配色。
+    _apply_default_theme()
     #
     splash = ElaSplashScreen()
     splash.setTitle("pyqt6_ela_pro")

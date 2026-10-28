@@ -416,9 +416,13 @@ class DrawerTooltipPage(ExamplePage):
         basic_btn.setFixedWidth(160)
 
         def _on_open_basic():
-            dlg = ElaContentDialog(self)
+            # 左 / 右按钮信号是 0ms 延迟发出的：宿主必须保留引用，否则 exec()
+            # 返回后 PyQt 立刻析构对话框、延迟信号被取消（见 AGENTS.md「对话框基座」）。
+            self._content_dialog = dlg = ElaContentDialog(self)
             dlg.setWindowTitle("内容对话框")
-            dlg.setCentralWidget(ElaText("这里是 setCentralWidget 放进去的内容",12, self))
+            dlg.setCentralWidget(
+                ElaText("这里是 setCentralWidget 放进去的内容", 12, self)
+            )
             dlg.leftButtonClicked.connect(lambda: (print("左键"), dlg.accept()))
             dlg.rightButtonClicked.connect(lambda: (print("右键"), dlg.accept()))
             dlg.exec()
@@ -430,9 +434,10 @@ class DrawerTooltipPage(ExamplePage):
         three_btn.setFixedWidth(160)
 
         def _on_open_three():
-            dlg = ElaContentDialog(self)
+            # 同上：保留引用才能收到三个延迟信号；只取 exec() 返回值则不需要。
+            self._content_dialog = dlg = ElaContentDialog(self)
             dlg.setWindowTitle("三个按钮槽位")
-            dlg.setCentralWidget(ElaText("左键 / 中键 / 右键三个槽位",12, self))
+            dlg.setCentralWidget(ElaText("左键 / 中键 / 右键三个槽位", 12, self))
             dlg.setLeftButtonText("左")
             dlg.setMiddleButtonText("中")
             dlg.setRightButtonText("右")

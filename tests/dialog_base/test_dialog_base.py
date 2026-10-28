@@ -2,12 +2,19 @@
 
 from __future__ import annotations
 
+import pathlib
+import subprocess
+import sys
+
 from PyQt6.QtCore import QCoreApplication, QEvent
 from PyQt6.QtGui import QColor
-from PyQt6.QtWidgets import QWidget
+from PyQt6.QtWidgets import QPushButton, QWidget
 
+from _qthelpers import wait_until
 from pyqt6_ela_pro.dialog_base import ElaDialogBase
 from PyQt6 import sip
+
+_ROOT = pathlib.Path(__file__).resolve().parents[2]
 
 
 class TestElaDialogBase:
@@ -155,3 +162,128 @@ class TestElaDialogBase:
         assert dlg._paramLay.indexOf(content) != -1
         dlg.deleteLater()
         parent.deleteLater()
+
+
+class TestButtonClickLifetime:
+    """真实点击路径：左 / 右按钮信号是 0ms 延迟发出的，必须绑对话框生命周期。
+
+    无主定时器（``QTimer::singleShot(0, nullptr, ...)``）在 PyQt 里会打穿已析构的
+    对话框：``exec()`` 返回后宿主丢掉引用 → C++ 对象立刻销毁 → 回调仍在
+    ``QMetaObject::activate`` 里读 ``sender->d_ptr``（Win7 上是 ``Qt6Core!0xe1ea5``
+    处的 AV）。
+    """
+
+    @staticmethod
+    def _button(dialog: ElaDialogBase, text: str) -> QPushButton:
+        for button in dialog.findChildren(QPushButton):
+            if button.text() == text:
+                return button
+        raise AssertionError(f"button {text!r} not found")
+
+    def test_click_emits_signal_when_dialog_is_alive(self, qapp):
+        """宿主保留引用时，延迟信号照常发出（修复不能把信号改没）。"""
+        parent = QWidget()
+        parent.resize(400, 300)
+        parent.show()
+        dlg = ElaDialogBase(parent=parent)
+        fired: list[int] = []
+        dlg.leftButtonClicked.connect(lambda: fired.append(1))
+        dlg.show()
+        qapp.processEvents()
+
+        self._button(dlg, "取消").click()
+
+        assert wait_until(qapp, lambda: bool(fired)), "leftButtonClicked 未发出"
+        dlg.deleteLater()
+        parent.deleteLater()
+
+    def test_closed_dialog_can_be_shown_again(self, qapp):
+        """关闭后 ``show()`` 仍可复用（去掉 ``windowHandle()->close()`` 后不残留）。"""
+        parent = QWidget()
+        parent.resize(400, 300)
+        parent.show()
+        dlg = ElaDialogBase(parent=parent)
+        dlg.show()
+        qapp.processEvents()
+
+        self._button(dlg, "取消").click()
+        assert wait_until(qapp, lambda: not dlg.isVisible())
+
+        dlg.show()
+        assert wait_until(qapp, dlg.isVisible), "关闭后二次 show() 没有显示"
+        dlg.deleteLater()
+        parent.deleteLater()
+
+    def test_close_does_not_reenter_event_loop(self, qapp):
+        """``_doCloseAnimation`` 不许 ``processEvents()``：关闭时不得处理无关事件。
+
+        旧实现在 ``reject()`` 后重入事件循环，再取 ``windowHandle()`` 就是 use-after-free
+        （与 AppBar 关闭 UAF 同型）。这里用一个待处理的 0ms 定时器当探针。
+        """
+        from PyQt6.QtCore import QTimer
+
+        parent = QWidget()
+        parent.resize(400, 300)
+        parent.show()
+        dlg = ElaDialogBase(parent=parent)
+        dlg.show()
+        qapp.processEvents()
+
+        fired: list[int] = []
+        QTimer.singleShot(0, lambda: fired.append(1))
+        self._button(dlg, "取消").click()
+
+        assert fired == [], (
+            "关闭路径重入了事件循环（_doCloseAnimation 里的 processEvents 又回来了）"
+        )
+        qapp.processEvents()
+        assert fired == [1]
+        dlg.deleteLater()
+        parent.deleteLater()
+
+    def test_stale_close_signal_is_not_delivered_to_next_dialog(self):
+        """关闭后立刻释放对话框：陈旧的 0ms 回调不得落到新对话框上。
+
+        走子进程：修复前这个形状可能直接 AV（读已释放的 ``sender->d_ptr``），
+        在本进程里会把 pytest worker 一起带走。
+        """
+        script = """
+import gc
+from PyQt6.QtWidgets import QApplication, QPushButton, QWidget
+from PyQt6ElaWidgetTools import eApp
+from pyqt6_ela_pro.dialog_base import ElaDialogBase
+
+app = QApplication(["stale-signal"])
+eApp.init()
+parent = QWidget()
+parent.resize(400, 300)
+parent.show()
+app.processEvents()
+
+dlg = ElaDialogBase(parent=parent)
+dlg.show()
+app.processEvents()
+next(b for b in dlg.findChildren(QPushButton) if b.text() == "\\u53d6\\u6d88").click()
+del dlg
+gc.collect()
+
+dlg2 = ElaDialogBase(parent=parent)
+seen = []
+dlg2.leftButtonClicked.connect(lambda: seen.append(1))
+dlg2.show()
+for _ in range(3):
+    app.processEvents()
+assert not seen, "陈旧信号被发到了新对话框上"
+print("OK", flush=True)
+"""
+        proc = subprocess.run(
+            [sys.executable, "-c", script],
+            cwd=_ROOT,
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
+        assert proc.returncode == 0, (
+            f"子进程崩溃或被陈旧信号污染：\nstdout={proc.stdout}\nstderr={proc.stderr}"
+        )
+        assert "OK" in proc.stdout
