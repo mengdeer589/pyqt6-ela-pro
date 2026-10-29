@@ -273,7 +273,9 @@ def _guide_doc() -> str:
 GUIDE_SECTIONS = {
     "Binder（回合生命周期，宿主主入口）": "pyqt6_ela_pro.chat:ElaChatStreamBinder",
     "Widget（宿主行为）": "pyqt6_ela_pro.chat:ElaChatWidget",
+    "Input（输入区，经 `chatInput()` 调用）": "pyqt6_ela_pro.chat:ElaChatInput",
     "View（消息内容层，经 `chatView()` 调用）": "pyqt6_ela_pro.chat:ElaChatView",
+    "Mock 后端（无模型服务跑通全链路）": "pyqt6_ela_pro.chat:ElaChatMockBackend",
 }
 
 #: 挂在别处的东西：自由函数、模块级常量、bubble 层 / view 内部协议
@@ -400,6 +402,10 @@ class TestChatGuideApiTable:
             f"「{title}」小节里这些名字在 {cls.__name__} 上不存在（文档过期）："
             + ", ".join(sorted(set(missing)))
         )
+
+    def test_journal_documents_incremental_append(self):
+        """追加落盘必须提 `dumpsNewLines()`：`dumps()` 是整份历史，append 会重复重放。"""
+        assert "dumpsNewLines()" in _guide_doc()
 
     def test_binder_auto_connects_exactly_six_signals(self, qapp):
         """文档写「自动接 6 条机械信号」，且括号里要**列全**那 6 个。"""

@@ -570,6 +570,9 @@ binder 和窗口（本页示例里 `worker` 就是这个角色）。
 | `cancel()` | 记录停止 + 收尾思考段；之后 `finish(turn)` 自动按 `Stopped` |
 | `finish(turn, status=None)` | 补整轮耗时 + 结束消息，返回 `ElaChatTurnSummary`。**`turn` 必填**（`startTurn` / `beginTurn` 的返回值）：认不出的**迟到收尾直接丢弃并返回 `None`** —— 后端 `cancel()` 是异步的，旧回合的 `turnFinished` 可能在新回合开起来之后才到，收掉它等于把新回合的分片全丢弃（用户看到「发出去了、正文全空」）。`worker.turnFinished.connect(binder.finish)` 写法自带 token，无需转发 |
 | `abortTurn(cancelBackend=True)` | **作废当前回合**（删除 / 关闭话题）：默认连后端一起 `worker.cancel()`、收尾为 `Stopped`、**不续发排队消息**；回合外返回 `None` |
+| `beginTurn(turn=None)` / `beginRound()` | 手动驱动回合一：宿主自己 `ask()` 后把回合 token 交给 `beginTurn`；`beginRound` 由 worker 的 `llmStarted` 自动驱动（自动接线已接，别手动调） |
+| `isOpen()` / `roundIndex()` | 是否有回合在跑 / 当前回合内的 LLM 轮次（1 起） |
+| `shutdownWorker(timeoutMs=None)` | 后端收尾（`shutdownOnClose` 内部用的就是它；`timeoutMs=None` = 不等线程退出） |
 | `shutdownOnClose(window)` | 关窗 / 销毁时自动 `worker.shutdown()`（免写 `closeEvent`） |
 | `stream(chunk)` / `toolCallStarted(tc)` / `toolCallEnded(tc, r)` | worker 信号直连（自动接线的底层） |
 
@@ -594,6 +597,11 @@ binder 和窗口（本页示例里 `worker` 就是这个角色）。
 | `requestClear()` | 主动走「ElaConfirmDialog 确认 → `clear()`」链路（空会话不弹框） |
 | `setMessageError(message, messageId=None, errorType="")` | 标记某条消息出错（只影响生成态与 widget 独占状态）。`errorType` 单独存字段而不是拼进文案 —— 错误卡靠它决定是否点亮「重试」 |
 | `removeMessage(id)` | 删除单条消息（维护 widget 侧状态） |
+| `inputDock()` / `permissionDock()` / `queueDock()` / `setDockWidget(widget, replace=True, *, ownership=Borrowed)` / `clearDock()` / `clearPermissionDock()` / `pendingPermissionCards()` | 三个常驻 dock 的句柄 + 输入区上方「替换输入区」内容。`setDockWidget` 默认 **Borrowed（不删除）**，要组件负责销毁必须显式 `ownership=ElaWidgetOwnershipType.Owned`；审批 dock 一次只放一张卡（后续请求进 `queued`，落定后自动接上），`pendingPermissionCards()` 给宿主看队列 |
+| `enqueueMessage(text, attachments=None)` / `queuedMessages()` / `queueCount()` / `dequeueMessage(id)` / `editQueuedMessage(id)` / `clearQueue()` / `queueChanged(list)` | 排队队列的增删改查；`editQueuedMessage` 把该条回填输入框并出队（再提交就是普通发送） |
+| `generationStarted(id)` / `generationFinished(id, status)` / `messageUpdated(id)` / `messageActionTriggered(id, action)` / `sessionChanged(id)` / `attachmentsChanged(list)` / `batchRenderFinished()` | 状态 / 遥测信号：生成开始 / 结束（`status` 是字符串枚举）、消息快照更新、消息操作按钮、会话标记、附件变化、批量恢复的首批排空（**不是**「全部渲染完」） |
+| `setUserName(name)` / `setAssistantName(name)` / `setPlaceholderText(text)` / `setMentionProvider(fn)` / `mentions()` / `sendUserMessage(text, attachments=None, messageId=None)` / `addMessage(role, text)` | 外壳与程序化消息：名字作用于已有与后续消息；`@` 引用 `provider(query) -> list`，提交时用 `mentions()` 取有效 id；`sendUserMessage` 建用户消息 + 进生成态（返回 id），`addMessage` 只建消息不提交 |
+| `setGenerating(on)` / `isGenerating()` / `streamingMessageId()` | 生成态与当前流式消息 id（`stopGeneration()` 见「三层边界」） |
 
 > **widget 不再转发 view 的细粒度接口** —— `addToolCall()` / `beginText()` /
 > `setReasoningStyle()` 等一律在 `chatView()` 上，`messageId` 也在那里**首位必填**。
@@ -619,6 +627,14 @@ binder 和窗口（本页示例里 `worker` 就是这个角色）。
 | `newTopicButton()` / `setNewTopicVisible(on)` | 内置「新建话题」按钮句柄 / 显隐（默认显示） |
 | `acceptsMime(mime)` / `attachMime(mime)` | 「这个 mime 收不收」/「收下并入附件」——组件各处拖放判定都走这两个，宿主自定义放置点时可复用 |
 | `setContextUsage(used, window, costUsd)` | 底部工具栏里的上下文占用圆环（与「清空上下文」同排的**默认组件**；无数据时画空底环、`window<=0` 按 0%；`<60%` 弱化 / `60~85%` 警示 / `>85%` 危险），hover 显示花费 / 百分比 / 词元数。数据全由宿主提供；**圆环可点击**（发 `contextUsageClicked`，弹什么面板归宿主）；显隐走 `setContextUsageVisible(on)` |
+| `setContextUsageVisible(on)` / `contextUsage()` / `contextUsagePercent()` | 上下文圆环显隐 / 读取（`contextUsage()` 返回 `(used, window, costUsd)`）/ 百分比 |
+| `setSendOnEnter(on)` / `sendOnEnter()` | 回车发送（默认开）；关掉后回车插入换行，发送只走按钮 / `submit()` |
+| `setSendText(text)` / `setStopText(text)` / `setPlaceholderText(text)` / `setMaxLines(n)` / `setMinLines(n)` | 发送 / 停止按钮文案、占位文案与编辑框高度（`maxLines` 是自增上限，超过后内部滚动） |
+| `setAttachments(list)` / `addAttachments(paths)` / `addAttachment(name, path="", size=0)` / `attachments()` / `attachmentPaths()` / `clearAttachments()` | 附件条的程序化入口（拖放 / 粘贴之外）；`attachments()` 是快照，`attachmentPaths()` 只给有本地路径的项 |
+| `setMentionProvider(fn)` / `mentions()` / `clearMentions()` / `mentionSelected(text, value)` | `@` 引用：候选由宿主给；提交时用 `mentions()` 或 `mentionSelected` 拿有效 id |
+| `addFileButton()` / `setAddFileVisible(on)` / `clearButton()` / `setClearVisible(on)` / `setFilePicker(fn)` | 工具栏按钮句柄 / 显隐；`setFilePicker` 可把系统文件框换成宿主自己的选择器 |
+| `setQueueEnabled(on)` / `queueEnabled()` | 生成中是否允许排队（默认开；关掉时发送键置灰、回车不被吞） |
+| `submit()` / `text()` / `setText(text)` / `clear()` | 程序化提交 / 读写草稿（`submit()` 走与回车相同的校验与信号） |
 
 ## View（消息内容层，经 `chatView()` 调用）
 
@@ -645,6 +661,9 @@ binder 和窗口（本页示例里 `worker` 就是这个角色）。
 | `setContentMaxWidth(px)` | 气泡宽度约束。限的是**整列**（正文 + 附件条 + 底部行），宽窗口下右边缘对齐；不限宽时行为完全不变 |
 | `setScrollBarPolicy(policy)` / `scrollBar()` | 垂直滚动条策略（默认 `ScrollBarAsNeeded`，仅溢出时显示）与滚动条句柄；手动拖动把手会自动退出贴底跟随 |
 | `setStrictIds(on)` | 严格模式：对**不存在的消息**抛 `KeyError`（默认关闭，迟到事件静默忽略） |
+| `setEmptyTitle(text)` / `setEmptySubtitle(text)` / `setSuggestions(list)` | 空态标题 / 副标题 / 建议按钮（元素是字符串，点击发 `suggestionClicked`） |
+| `setAvatarVisible(on)` / `setUserBubbleMaxWidth(ratio)` | 全局头像显隐 / 用户气泡最大宽度比例（0.1~1.0） |
+| `scrollToBottom()` / `setStickToBottom(on)` / `setJumpThreshold(px)` | 主动回底 / 自动贴底开关 / 「回到底部」按钮的显示阈值（`None` 恢复动态阈值） |
 | `messages()` / `message(id)` / `lastMessage()` | 读快照（读取时才结算派生字段） |
 | `sessionStats(limit=0)` | 会话级用量汇总（`ElaChatSessionStats`）：计数 / 当前上下文四路词元与合计 / 使用率 / 累计成本 / 最后活动 / **工具调用统计**（`tool_calls` 次数、`tool_rounds` 轮数 = 有工具调用的步骤数、`tool_errors` / `tool_aborted` / `tool_unsettled` 状态分档、`tool_counts` 按名计数）/ `reasoning_ms` 思考耗时合计；口径对齐 opencode `getSessionContext`（最后一条有 tokens 的助手消息的最后一步）。**输入词元不含缓存命中**（OpenAI / DeepSeek 的 `prompt_tokens` 含缓存，binder / journal 落库前已扣掉；Anthropic 的 `input_tokens` 原样），四路互不重叠。`total_tokens` / `total_cost_usd` 可直接喂输入区圆环 |
 | `parts()` / `text()` / `reasoning()` | 纯读取；`part.text` 只含**已落定**内容，可直接序列化落库 |
@@ -654,8 +673,26 @@ binder 和窗口（本页示例里 `worker` 就是这个角色）。
 | API | 说明 |
 |---|---|
 | `message.toDict()` / `ElaChatMessage.fromDict()` | 成对序列化，纯 JSON 类型（`allow_nan=False` 可写）；`fromDict` 一律容错 |
-| `ElaChatTurnJournal` | 回合的**追加写事件流**（`dumps()` 一行一条），崩了最多丢最后一行。`connectWorker(worker)` 自动跟随 `llmStarted` 切步（第 1 轮不切，别手动 `beginStep`）；同一 step 的 stats 按最新值覆盖；正文 / 思考 / 步骤时长自动记录 |
+| `ElaChatTurnJournal` | 回合的**追加写事件流**：每片用 **`dumpsNewLines()`**（只给新增行，一行一条）追加到文件；`dumps()` 返回**整份历史**，只用于整体导出（原样 append 会重复重放）。崩了最多丢最后一行。`connectWorker(worker)` 自动跟随 `llmStarted` 切步（第 1 轮不切，别手动 `beginStep`）；同一 step 的 stats 按最新值覆盖；正文 / 思考 / 步骤时长自动记录 |
 | `journal.replayInto(...)` / `ElaChatTurnJournal.fromLines(...)` | 重放 / 读回（跳过未知事件、结算未完成工具） |
+
+## 统计与上下文占用
+
+| API | 说明 |
+|---|---|
+| `ElaChatStats` | 单次 / 单步用量：`prompt_tokens`（**不含**缓存命中）/ `completion_tokens`（含 reasoning）/ `reasoning_tokens` / `cache_read_tokens` / `cache_write_tokens` / `ttft_ms` / `tps` / `duration_ms` / `cost_usd`；`contextTokens()` 是四路和，`merge()` 合并多步，`tooltip()` 生成悬浮提示文本 |
+| `binder.stats(usage, ttftMs=0.0, tps=0.0)` / `view.setStepStats(messageId, stats)` | 写入单步统计（`statsReady` 自动接线已覆盖；手动驱动回合时才需要直接调） |
+| `chatInput().setContextUsage(stats.contextTokens(), window, stats.cost_usd)` | 喂输入区圆环：used = 四路和、window = 模型上下文窗口、cost = 累计美元 |
+| `view.sessionStats(limit=0)` | 会话级汇总（`ElaChatSessionStats`）；`limit>0` 只看最近 N 条消息 |
+
+## Mock 后端（无模型服务跑通全链路）
+
+| API | 说明 |
+|---|---|
+| `ElaChatMockBackend(parent, tickMs=40)` | 假后端：QTimer 按 `tickMs` 吐流式分片，`ready` 异步发出 |
+| `setTickMs(ms)` / `tickMs()` | 分片间隔；`0` = 不经定时器（事件循环里尽快跑完，测试用） |
+| `setReplyProvider(fn)` / `setThinkLevel(level)` / `thinkLevel()` | 自定义回答 `fn(question) -> str`；思考强度档位 `off` / `normal` / `deep` |
+| `turnAttachments()` | 最近一次回合收到的附件快照（断言 / 回滚用） |
 
 ## 问答型审批（逐题向导）
 
