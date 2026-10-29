@@ -346,7 +346,7 @@ class TestHighlightColor:
 
 class TestGutterWidth:
     def test_gutter_width_follows_font_size(self, make, qapp):
-        """?????**????**?_gutter_font????? gutter ??????"""
+        """行号槽宽按**绘制字体**（_gutter_font）量，不是 gutter 的继承字体。"""
         from PyQt6.QtGui import QFontMetrics
 
         from pyqt6_ela_pro.terminal_view import _GUTTER_MIN_WIDTH, _GUTTER_PAD

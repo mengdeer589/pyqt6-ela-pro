@@ -459,7 +459,7 @@ class TestElaGhostBoxFooterOrder:
         return [type(row.itemAt(i).widget()).__name__ for i in range(row.count())]
 
     def test_custom_widget_stays_after_buttons_when_added_first(self, make, box):
-        """???????????????????????????"""
+        """先设自定义控件、后加按钮：按钮仍要排在自定义控件之前。"""
         box.addPopupFooterButton("A", key="a")
         box.setPopupFooterWidget(make(QWidget))
         assert self._row_types(box) == ["_GhostFooterButton", "QWidget"]

@@ -78,9 +78,9 @@ class ElaTagMultiBox(_TagBoxThemeMixin, _TagBoxAnimMixin, ElaMultiSelectComboBox
         super().hidePopup()
 
     def setCurrentSelection(self, selection: Union[str, list[str], None]) -> None:
-        """???????? **None / ????? / ?????**?? ElaSearchMultiBox??
+        """设置选中项；接受 **None / 单个字符串 / 字符串列表**（同 ElaSearchMultiBox）。
 
-        `None` ????????????????**??**????????
+        `None` 与空列表等价（清空选择）；字符串**不会**被拆成单个字符。
         """
         if selection is None:
             selection = []
@@ -89,13 +89,13 @@ class ElaTagMultiBox(_TagBoxThemeMixin, _TagBoxAnimMixin, ElaMultiSelectComboBox
         self._currentSelection = list(selection)
         if self._mark_animation.state() == QAbstractAnimation.State.Running:
             self._mark_animation.stop()
-        # ?? C++ ??????????? ?? ????????????????
+        # 先写 C++ 选中，再算底部标记宽度 —— 反了会拿旧选中算出一个错的目标宽
         super().setCurrentSelection(self._currentSelection)
         self._expand_mark_width = _get_target_mark_width(self)
         self.update()
 
     def currentSelection(self) -> list[str]:
-        """??????? C++ ??????"""
+        """当前选中项（读 C++ 实际选中）。"""
         return list(super().getCurrentSelection())
 
     def paintEvent(self, _event: QPaintEvent) -> None:

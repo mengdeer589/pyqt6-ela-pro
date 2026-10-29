@@ -266,7 +266,7 @@ class ElaSearchMultiBox(_SearchComboMixin, _ThemeAwareMixin, ElaMultiSelectCombo
         self._isRestoringSelection = False
         self._pinyin_cache: dict[str, tuple[str, str]] = {}
         self._popup_search_visible = True
-        self._search_placeholder = "??..."
+        self._search_placeholder = "搜索..."
 
     @property
     def items(self) -> list[str]:
@@ -294,7 +294,7 @@ class ElaSearchMultiBox(_SearchComboMixin, _ThemeAwareMixin, ElaMultiSelectCombo
         super().setCurrentSelection(self._currentSelection)
 
     def currentSelection(self) -> list[str]:
-        """??????? C++ ??????????????????"""
+        """当前选中项（读 C++ 实际选中，弹层里刚点完也立即准确）。"""
         return list(super().getCurrentSelection())
 
     def showPopup(self) -> None:
@@ -361,7 +361,7 @@ class ElaSearchBox(_SearchComboMixin, _ThemeAwareMixin, ElaComboBox):
         self._searchWidget: Optional[QWidget] = None
         self._pinyin_cache: dict[str, tuple[str, str]] = {}
         self._popup_search_visible = True
-        self._search_placeholder = "??..."
+        self._search_placeholder = "搜索..."
 
     @property
     def items(self) -> list[str]:

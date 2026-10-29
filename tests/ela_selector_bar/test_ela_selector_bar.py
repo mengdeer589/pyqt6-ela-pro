@@ -789,7 +789,7 @@ class TestNoQss:
 
 class TestItemFontMetrics:
     def test_item_width_uses_item_font(self, make):
-        """?????**????**??setItemPixelSize ?????????"""
+        """条目宽度按**条目字体**量（setItemPixelSize 后仍要覆盖文本）。"""
         bar = make(ElaSelectorBar)
         bar.addItem("Hello")
         bar.setItemPixelSize(20)

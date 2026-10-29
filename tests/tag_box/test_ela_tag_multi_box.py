@@ -73,7 +73,7 @@ class TestElaTagMultiBoxSelection:
         assert box.currentSelection() == ["B"]
 
     def test_mark_width_uses_new_selection(self, box):
-        """?? C++ ????????????????????????????"""
+        """先写 C++ 选中再算标记宽度（旧实现拿旧选中算，标记宽度停在旧值）。"""
         box.addItems(["A", "B", "C", "D"])
         box.resize(240, 30)
         box.setCurrentSelection(["A", "B"])

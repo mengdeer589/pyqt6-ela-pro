@@ -181,7 +181,7 @@ class TestElaInfoBadgeDeleteLater:
 
 class TestElaInfoBadgeSizeHintFont:
     def test_value_width_uses_widget_font(self, badge):
-        """sizeHint ? widget ??????????? self.font()??"""
+        """sizeHint 按 widget 自己的字体量（绘制也是 self.font()）。"""
         from PyQt6.QtGui import QFont, QFontMetrics
 
         font = QFont("Consolas")
