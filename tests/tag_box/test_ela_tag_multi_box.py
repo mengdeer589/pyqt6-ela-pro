@@ -58,3 +58,23 @@ class TestElaTagMultiBoxHelpers:
     def test_pre_init_popup_runs_safely(self, box):
         """_pre_init_popup 必须在未创建弹层时也不报错。"""
         _pre_init_popup(box)
+
+
+class TestElaTagMultiBoxSelection:
+    def test_set_none_clears(self, box):
+        box.addItems(["A", "B"])
+        box.setCurrentSelection(["A"])
+        box.setCurrentSelection(None)
+        assert box.currentSelection() == []
+
+    def test_current_selection_reads_cpp_state(self, box):
+        box.addItems(["A", "B"])
+        box.setCurrentSelection("B")
+        assert box.currentSelection() == ["B"]
+
+    def test_mark_width_uses_new_selection(self, box):
+        """?? C++ ????????????????????????????"""
+        box.addItems(["A", "B", "C", "D"])
+        box.resize(240, 30)
+        box.setCurrentSelection(["A", "B"])
+        assert box._expand_mark_width == pytest.approx(_get_target_mark_width(box))

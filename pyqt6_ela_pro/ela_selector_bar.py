@@ -51,6 +51,7 @@ from PyQt6.QtCore import (
 from PyQt6.QtGui import (
     QColor,
     QFont,
+    QFontMetrics,
     QKeyEvent,
     QMouseEvent,
     QPainter,
@@ -536,7 +537,9 @@ class ElaSelectorBar(ElaThemeWidget):
 
     def _itemNaturalWidth(self, item: SelectorBarItem) -> float:  # noqa: N802
         width = float(_Metrics.horizontalPadding * 2)
-        width += self.fontMetrics().horizontalAdvance(item.text or "")
+        # 用**条目字体**量：绘制是 _itemFont()（setItemPixelSize 可改），
+        # 用 self.fontMetrics() 会在改字号后算窄、文字被裁
+        width += QFontMetrics(self._itemFont()).horizontalAdvance(item.text or "")
         if item.icon is not None:
             width += _Metrics.iconSize + _Metrics.iconGap
         return max(

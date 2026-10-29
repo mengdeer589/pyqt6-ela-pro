@@ -66,6 +66,47 @@ class TestElaTagLineEdit:
 
         edit.deleteLater()
 
+    def test_untitled_has_no_dead_left_padding(self):
+        """没有标题就不能留「标题宽度」的缩进。
+
+        旧实现按 ``"" + 20 + 3`` 也设 23px 左边距，无标题输入框的 placeholder
+        会比普通 ``ElaLineEdit`` 明显右移。
+        """
+        edit = ElaTagLineEdit()
+        assert edit.textMargins().left() == 0
+        edit.deleteLater()
+
+    def test_title_margin_uses_title_font_not_widget_font(self):
+        """标题宽度按 ``_title_font_size`` 量，不按输入框字号量。
+
+        旧实现用 ``QFontMetrics(self.font())``（13px）量、用 12px 画，
+        标题与输入文字之间会多空出一截。
+        """
+        from PyQt6.QtGui import QFont, QFontMetrics
+
+        title = "用户名"
+        edit = ElaTagLineEdit(title=title)
+        edit.setTitleFontSize(12)
+
+        title_font = QFont(edit.font())
+        title_font.setPixelSize(12)
+        expected = QFontMetrics(title_font).horizontalAdvance(title)
+        assert edit.textMargins().left() == expected + edit._TITLE_GAP
+        # 比用输入框字号（13px）量出来的窄
+        assert edit.textMargins().left() <= (
+            QFontMetrics(edit.font()).horizontalAdvance(title) + edit._TITLE_GAP
+        )
+        edit.deleteLater()
+
+    def test_title_margin_grows_with_title_font_size(self):
+        """字号变大 → 左边距跟着变大（setTitleFontSize 会重算）。"""
+        edit = ElaTagLineEdit(title="用户名")
+        edit.setTitleFontSize(12)
+        narrow = edit.textMargins().left()
+        edit.setTitleFontSize(20)
+        assert edit.textMargins().left() > narrow
+        edit.deleteLater()
+
     def test_notify_invalid_input_sets_error(self):
         """Test notifyInvalidInput sets error state."""
         edit = ElaTagLineEdit()

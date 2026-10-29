@@ -245,7 +245,7 @@ class ElaInfoBadge(ElaThemeWidget):
                 if self._value <= self._max_value
                 else f"{self._max_value}+"
             )
-            font = QFont()
+            font = self.font()
             font.setPixelSize(10)
             font.setBold(True)
             fm = QFontMetrics(font)

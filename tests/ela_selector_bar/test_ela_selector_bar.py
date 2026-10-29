@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import pytest
 from PyQt6.QtCore import QEvent, QPoint, Qt, QPointF
-from PyQt6.QtGui import QKeyEvent
+from PyQt6.QtGui import QFontMetrics, QKeyEvent
 
 from pyqt6_ela_pro._motion import ElaMotionModeType, motion
 from pyqt6_ela_pro.ela_selector_bar import (
@@ -785,3 +785,18 @@ class TestNoQss:
 
         source = pathlib.Path(mod.__file__).read_text(encoding="utf-8")
         assert ".setStyleSheet(" not in source
+
+
+class TestItemFontMetrics:
+    def test_item_width_uses_item_font(self, make):
+        """?????**????**??setItemPixelSize ?????????"""
+        bar = make(ElaSelectorBar)
+        bar.addItem("Hello")
+        bar.setItemPixelSize(20)
+        item = bar.items()[0]
+        text_w = QFontMetrics(bar._itemFont()).horizontalAdvance("Hello")
+        expected = max(
+            float(_Metrics.minItemWidth),
+            min(float(_Metrics.maxItemWidth), _Metrics.horizontalPadding * 2 + text_w),
+        )
+        assert bar._itemNaturalWidth(item) == pytest.approx(expected)

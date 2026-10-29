@@ -177,3 +177,21 @@ class TestElaInfoBadgeDeleteLater:
         badge.attachTo(target)
         badge.deleteLater()
         target.deleteLater()
+
+
+class TestElaInfoBadgeSizeHintFont:
+    def test_value_width_uses_widget_font(self, badge):
+        """sizeHint ? widget ??????????? self.font()??"""
+        from PyQt6.QtGui import QFont, QFontMetrics
+
+        font = QFont("Consolas")
+        font.setPixelSize(13)
+        badge.setFont(font)
+        badge.setBadgeMode(ElaInfoBadge.ElaBadgeModeType.Value)
+        badge.setValue(123)
+
+        text_font = badge.font()
+        text_font.setPixelSize(10)
+        text_font.setBold(True)
+        expected = max(16, QFontMetrics(text_font).horizontalAdvance("123") + 8)
+        assert badge.sizeHint().width() == expected

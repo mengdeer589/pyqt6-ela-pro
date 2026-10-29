@@ -136,6 +136,18 @@ class _TagBoxAnimMixin:
     def title(self) -> str:
         return self._title_text
 
+    def setTitleFontSize(self, size: int) -> None:  # noqa: N802
+        """设置标题字号（px）；只影响标题，不改变值文本。"""
+        size = max(1, int(size))
+        if size == self._title_font_size:
+            return
+        self._title_font_size = size
+        self.update()  # type: ignore[attr-defined]
+
+    def titleFontSize(self) -> int:  # noqa: N802
+        """返回标题字号（px）。"""
+        return self._title_font_size
+
     def _onThemeChanged(self, _mode=None) -> None:  # type: ignore[attr-defined]
         self._theme_mode = eTheme.getThemeMode()
         self.update()  # type: ignore[attr-defined]
@@ -205,6 +217,11 @@ def _get_target_mark_width(widget) -> float:
 #: ``_shadowBorderWidth`` 收到 1px，见 ``ElaComboBoxStyle.cpp``）。
 _TAG_FACE_INSET = 1
 
+#: 标题起点（与标题/值文本共用的左侧基线）
+_TAG_TITLE_PAD = 10
+#: 标题文字与值文字之间的可见间距
+_TAG_TITLE_GAP = 9
+
 
 class _TagBoxWidgetProtocol(Protocol):
     """_draw_tag_background 所需的 widget 接口约束"""
@@ -258,9 +275,25 @@ def _draw_tag_title(
     text_color: QColor,
     font,
 ) -> QRect:
-    """绘制标题文本，返回标题区域 QRect。"""
-    metrics = QFontMetrics(font)
-    title_width = metrics.horizontalAdvance(title_text) + 20
+    """绘制标题文本，返回标题区域 QRect。
+
+    宽度按**标题字号**量（不是 widget 字号），无标题时只保留左侧基线 ——
+    否则值文本会被推到 ``left + 19`` 的空位上。
+    """
+    title_font = QFont(font)
+    title_font.setPixelSize(title_font_size)
+
+    if not title_text:
+        # right() = left + width - 1；值文本从 right() 起画 → 与标题起点同一条基线
+        return QRect(
+            content_rect.left(),
+            content_rect.top(),
+            _TAG_TITLE_PAD + 1,
+            content_rect.height(),
+        )
+
+    text_width = QFontMetrics(title_font).horizontalAdvance(title_text)
+    title_width = _TAG_TITLE_PAD + text_width + _TAG_TITLE_GAP + 1
 
     title_rect = QRect(
         content_rect.left(),
@@ -273,12 +306,10 @@ def _draw_tag_title(
     title_option.setAlignment(
         Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft
     )
-    title_font = QFont(font)
-    title_font.setPixelSize(title_font_size)
     painter.setFont(title_font)
     painter.setPen(text_color)
     painter.drawText(
-        QRectF(title_rect.adjusted(10, 0, -10, 0)),
+        QRectF(title_rect.adjusted(_TAG_TITLE_PAD, 0, -(_TAG_TITLE_GAP + 1), 0)),
         title_text,
         title_option,
     )
@@ -339,6 +370,13 @@ def _draw_tag_mark(
         painter.drawPath(mark_path)
 
 
+def _elide_value(painter: QPainter, text: str, width: int) -> str:
+    """把值文本省略到可用宽度（宽度不足时返回空串）。"""
+    if width <= 0:
+        return ""
+    return painter.fontMetrics().elidedText(text, Qt.TextElideMode.ElideRight, width)
+
+
 def _draw_single_value_text(
     painter: QPainter,
     content_rect: QRect,
@@ -360,10 +398,12 @@ def _draw_single_value_text(
     )
     text_option = QTextOption()
     text_option.setWrapMode(QTextOption.WrapMode.NoWrap)
-    text_option.setAlignment(
-        Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft
+    text_option.setAlignment(Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft)
+    painter.drawText(
+        QRectF(text_rect),
+        _elide_value(painter, current_text, text_width),
+        text_option,
     )
-    painter.drawText(QRectF(text_rect), current_text, text_option)
 
 
 def _draw_multi_value_text(
@@ -392,10 +432,12 @@ def _draw_multi_value_text(
     )
     text_option = QTextOption()
     text_option.setWrapMode(QTextOption.WrapMode.NoWrap)
-    text_option.setAlignment(
-        Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft
+    text_option.setAlignment(Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft)
+    painter.drawText(
+        QRectF(text_rect),
+        _elide_value(painter, display_text, text_width),
+        text_option,
     )
-    painter.drawText(QRectF(text_rect), display_text, text_option)
 
 
 def _paint_tag_single(painter: QPainter, widget) -> None:

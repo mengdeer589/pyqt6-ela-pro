@@ -9,7 +9,8 @@
 - **分组选项**：``addGroup(label)`` 插入分组标题行（不可选中、不可点击），
   搜索过滤时标题行随「组内是否还有可见项」自动显隐；
 - **弹层底部固定区**：``addPopupFooterButton`` 追加多个固定按钮，
-  ``setPopupFooterWidget`` 可放任意自定义控件；底栏停靠在列表下方，
+  ``setPopupFooterWidget`` 可放任意自定义控件（默认 **Borrowed**：不删除，
+  替换 / 清空 / 组件销毁时只 ``setParent(None)`` 交还）；底栏停靠在列表下方，
   不随列表滚动移动。
 
 用法::
@@ -57,8 +58,9 @@ from PyQt6.QtWidgets import (
 )
 from PyQt6ElaWidgetTools import ElaIcon, ElaIconType, ElaThemeType, eTheme
 
-from ._internal import POPUP_FOOTER_OBJECT_NAME, hideComboboxPopup
+from ._internal import POPUP_FOOTER_OBJECT_NAME, hideComboboxPopup, is_deleted
 from ._motion import Duration, Easing, start_transition
+from ._ownership import ElaWidgetOwnershipType, releaseWidget
 from .combo_box import ElaSearchBox, _match_item, _split_keyword
 
 _GROUP_HEADER_ROLE = Qt.ItemDataRole.UserRole + 100
@@ -248,6 +250,29 @@ class _GhostFooterButton(QWidget):
         )
 
 
+def _release_custom_widget(widget, ownership, original) -> None:
+    """安全释放自定义控件（原 parent 可能已经先被销毁）。"""
+    try:
+        releaseWidget(widget, ownership, original)
+    except (RuntimeError, TypeError):
+        pass
+
+
+def _release_footer_custom_on_destroy(widget, ownership, original, _obj=None) -> None:
+    """footer 析构前把 Borrowed / Reparented 的自定义控件摘出来。
+
+    Qt 会连带删除子控件；不摘的话「借来的」控件也会被一起删掉。
+    用 ``partial`` 把控件信息带进槽：footer 析构时 PyQt 给的是新包装器
+    （Python 属性已丢），不能靠 ``obj._custom_widget`` 读。
+    """
+    if widget is None or is_deleted(widget):
+        return
+    if ownership == ElaWidgetOwnershipType.Owned:
+        # 本来就会随父控件删除，不要在这里再碰
+        return
+    _release_custom_widget(widget, ownership, original)
+
+
 class _GhostPopupFooter(QWidget):
     """弹层底部固定区：1px 分隔线 + 一行按钮 / 自定义控件。"""
 
@@ -272,6 +297,9 @@ class _GhostPopupFooter(QWidget):
 
         self._buttons: list[_GhostFooterButton] = []
         self._custom_widget: Optional[QWidget] = None
+        self._custom_ownership = ElaWidgetOwnershipType.Borrowed
+        self._custom_original_parent: Optional[QWidget] = None
+        self._destroy_slot = None
 
     def hasContent(self) -> bool:
         """底栏是否还有内容（按钮或自定义控件）。"""
@@ -294,7 +322,17 @@ class _GhostPopupFooter(QWidget):
     def addButton(self, button: _GhostFooterButton) -> None:
         self._buttons.append(button)
         button.setParent(self._row_widget)
-        self._row.addWidget(button)
+        # 自定义控件约定排在按钮之后：先设 custom widget 再补按钮时，
+        # 直接 addWidget 会把按钮塞到它后面（顺序反了）
+        index = (
+            self._row.indexOf(self._custom_widget)
+            if self._custom_widget is not None
+            else -1
+        )
+        if index >= 0:
+            self._row.insertWidget(index, button)
+        else:
+            self._row.addWidget(button)
 
     def removeButton(self, button: _GhostFooterButton) -> bool:
         if button not in self._buttons:
@@ -309,17 +347,62 @@ class _GhostPopupFooter(QWidget):
         """返回当前自定义底栏控件。"""
         return self._custom_widget
 
-    def setCustomWidget(self, widget: Optional[QWidget]) -> None:
-        if self._custom_widget is not None and self._custom_widget is not widget:
+    def _update_destroy_slot(self) -> None:
+        """按当前控件 / 所有权重挂 footer 析构前的释放回调（partial 持控件引用）。"""
+        if self._destroy_slot is not None:
+            try:
+                self.destroyed.disconnect(self._destroy_slot)
+            except (TypeError, RuntimeError):
+                pass
+            self._destroy_slot = None
+        if (
+            self._custom_widget is not None
+            and self._custom_ownership != ElaWidgetOwnershipType.Owned
+        ):
+            self._destroy_slot = partial(
+                _release_footer_custom_on_destroy,
+                self._custom_widget,
+                self._custom_ownership,
+                self._custom_original_parent,
+            )
+            self.destroyed.connect(self._destroy_slot)
+
+    def setCustomWidget(
+        self,
+        widget: Optional[QWidget],
+        ownership=ElaWidgetOwnershipType.Borrowed,
+    ) -> None:
+        try:
+            ownership = ElaWidgetOwnershipType(ownership)
+        except ValueError:
+            ownership = ElaWidgetOwnershipType.Borrowed
+
+        if widget is self._custom_widget:
+            # 同一个控件只换所有权策略，不重复 reparent
+            self._custom_ownership = ownership
+            self._update_destroy_slot()
+            return
+
+        if self._custom_widget is not None:
             old = self._custom_widget
+            old_ownership = self._custom_ownership
+            old_parent = self._custom_original_parent
             self._custom_widget = None
+            self._custom_ownership = ElaWidgetOwnershipType.Borrowed
+            self._custom_original_parent = None
+            self._update_destroy_slot()
             self._row.removeWidget(old)
-            old.setParent(None)
-            old.deleteLater()
-        self._custom_widget = widget
+            _release_custom_widget(old, old_ownership, old_parent)
+
         if widget is not None:
+            self._custom_original_parent = widget.parentWidget()
+            self._custom_ownership = ownership
+            if widget.isWindow():
+                widget.setWindowFlags(widget.windowFlags() | Qt.WindowType.Widget)
             widget.setParent(self._row_widget)
             self._row.addWidget(widget, 1)
+            self._custom_widget = widget
+            self._update_destroy_slot()
 
 
 class ElaGhostBox(ElaSearchBox):
@@ -565,10 +648,20 @@ class ElaGhostBox(ElaSearchBox):
         button.setVisible(on)
         return True
 
-    def setPopupFooterWidget(self, widget: Optional[QWidget]) -> None:  # noqa: N802
-        """设置底栏自定义控件（放在按钮之后；传 ``None`` 移除，旧控件会被销毁）。"""
+    def setPopupFooterWidget(  # noqa: N802
+        self,
+        widget: Optional[QWidget],
+        *,
+        ownership=ElaWidgetOwnershipType.Borrowed,
+    ) -> None:
+        """设置底栏自定义控件（放在按钮之后；传 ``None`` 移除）。
+
+        ``ownership`` 与库内 ``_ownership`` 协议一致：默认 **Borrowed**
+        （移除 / 替换 / 组件销毁时只 ``setParent(None)`` 交还，不删除）；
+        ``Owned`` 才 ``deleteLater()``；``Reparented`` 放回原 parent。
+        """
         footer = self._ensure_footer()
-        footer.setCustomWidget(widget)
+        footer.setCustomWidget(widget, ownership)
         self._sync_footer_visibility()
 
     def popupFooter(self) -> QWidget:  # noqa: N802 (Qt 命名)

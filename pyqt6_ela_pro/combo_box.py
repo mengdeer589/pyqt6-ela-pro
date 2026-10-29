@@ -5,7 +5,6 @@ ComboBox 组件模块。
 
 - ``ElaSearchBox``：基于 ``ElaComboBox`` 的可搜索单选下拉框
 - ``ElaSearchMultiBox``：基于 ``ElaMultiSelectComboBox`` 的可搜索多选下拉框
-- ``ElaSearchProxyModel``：独立的拼音过滤代理模型
 
 搜索同时匹配选项原文、全拼与拼音首字母（``"bei"`` / ``"bj"`` 均可命中“北京”），
 空格分隔的多个关键词需全部命中。所有组件均支持主题适配，自动跟随应用程序的
@@ -16,7 +15,6 @@ from __future__ import annotations
 
 from typing import Optional
 
-from PyQt6.QtCore import QModelIndex, QSortFilterProxyModel
 from PyQt6.QtGui import QColor, QPalette
 from PyQt6.QtWidgets import QBoxLayout, QLineEdit, QVBoxLayout, QWidget
 from PyQt6ElaWidgetTools import (
@@ -152,6 +150,16 @@ class _SearchComboMixin:
         """返回弹窗顶部搜索框是否可见（默认 ``True``）。"""
         return self._popup_search_visible
 
+    def setSearchPlaceholderText(self, text: str) -> None:  # noqa: N802
+        """设置弹层搜索框占位文案（弹层已打开时立即生效）。"""
+        self._search_placeholder = str(text)
+        if getattr(self, "_searchEdit", None) is not None:
+            self._searchEdit.setPlaceholderText(self._search_placeholder)
+
+    def searchPlaceholderText(self) -> str:  # noqa: N802
+        """返回弹层搜索框占位文案。"""
+        return self._search_placeholder
+
     def _popup_extra_heights(self) -> tuple[int, int]:
         """返回弹层上下两端附件占用的高度 ``(top, bottom)``。"""
         return (_SEARCH_WIDGET_HEIGHT if self.searchVisible() else 0, 0)
@@ -186,7 +194,7 @@ class _SearchComboMixin:
             return
         if self._searchWidget is None:
             self._searchWidget, self._searchEdit = _build_search_widget(
-                self._onSearchTextChanged
+                self._onSearchTextChanged, self._search_placeholder
             )
         elif self._searchWidget.parent() is not None:
             self._searchWidget.setParent(None)
@@ -204,6 +212,7 @@ class _SearchComboMixin:
 
 def _build_search_widget(
     text_changed_callback,
+    placeholder: str = "搜索...",
 ) -> tuple[QWidget, QLineEdit]:
     """创建弹窗内搜索框组件，返回 ``(searchWidget, searchEdit)``。"""
     search_widget = QWidget()
@@ -215,7 +224,7 @@ def _build_search_widget(
     search_layout.setSpacing(0)
 
     search_edit = QLineEdit()
-    search_edit.setPlaceholderText("搜索...")
+    search_edit.setPlaceholderText(placeholder)
     search_edit.setFixedHeight(28)
     search_edit.textChanged.connect(text_changed_callback)
     _apply_search_edit_palette(search_edit)
@@ -241,41 +250,6 @@ def _apply_search_edit_palette(search_edit: QLineEdit) -> None:
     search_edit.setPalette(palette)
 
 
-class ElaSearchProxyModel(QSortFilterProxyModel):
-    """支持拼音过滤的代理模型。
-
-    过滤时同时匹配汉字原文、全拼（``"bei"``）与拼音首字母（``"bj"``），
-    空格分隔的多个关键词需全部命中（AND）。
-    """
-
-    def __init__(self, parent: Optional[QWidget] = None) -> None:
-        super().__init__(parent)
-        self._keyword: str = ""
-        self._tokens: list[str] = []
-        self._pinyin_cache: dict[str, tuple[str, str]] = {}
-
-    def setKeyword(self, keyword: str) -> None:
-        self._keyword = keyword.lower()
-        self._tokens = _split_keyword(keyword)
-        self.invalidateFilter()
-
-    def clearPinyinCache(self) -> None:
-        """清空拼音缓存（选项文本批量变更后可调用）。"""
-        self._pinyin_cache.clear()
-
-    def filterAcceptsRow(self, source_row: int, source_parent: QModelIndex) -> bool:
-        if not self._tokens:
-            return True
-        src_model = self.sourceModel()
-        if src_model is None:
-            return False
-        index = src_model.index(source_row, 0, source_parent)
-        text = index.data()
-        if not isinstance(text, str):
-            return False
-        return _match_item(text, self._tokens, self._pinyin_cache)
-
-
 class ElaSearchMultiBox(_SearchComboMixin, _ThemeAwareMixin, ElaMultiSelectComboBox):
     """可搜索多选下拉框。
 
@@ -292,6 +266,7 @@ class ElaSearchMultiBox(_SearchComboMixin, _ThemeAwareMixin, ElaMultiSelectCombo
         self._isRestoringSelection = False
         self._pinyin_cache: dict[str, tuple[str, str]] = {}
         self._popup_search_visible = True
+        self._search_placeholder = "??..."
 
     @property
     def items(self) -> list[str]:
@@ -319,7 +294,8 @@ class ElaSearchMultiBox(_SearchComboMixin, _ThemeAwareMixin, ElaMultiSelectCombo
         super().setCurrentSelection(self._currentSelection)
 
     def currentSelection(self) -> list[str]:
-        return list(self._currentSelection)
+        """??????? C++ ??????????????????"""
+        return list(super().getCurrentSelection())
 
     def showPopup(self) -> None:
         """显示下拉弹窗，在弹窗顶部插入搜索框。"""
@@ -385,6 +361,7 @@ class ElaSearchBox(_SearchComboMixin, _ThemeAwareMixin, ElaComboBox):
         self._searchWidget: Optional[QWidget] = None
         self._pinyin_cache: dict[str, tuple[str, str]] = {}
         self._popup_search_visible = True
+        self._search_placeholder = "??..."
 
     @property
     def items(self) -> list[str]:

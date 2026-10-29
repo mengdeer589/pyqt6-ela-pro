@@ -342,3 +342,29 @@ class TestHighlightColor:
                 it += 1
             block = block.next()
         assert found, f"文档里找不到用高亮色 {view._highlight.name()} 涂的片段"
+
+
+class TestGutterWidth:
+    def test_gutter_width_follows_font_size(self, make, qapp):
+        """?????**????**?_gutter_font????? gutter ??????"""
+        from PyQt6.QtGui import QFontMetrics
+
+        from pyqt6_ela_pro.terminal_view import _GUTTER_MIN_WIDTH, _GUTTER_PAD
+
+        view = make(ElaTerminalView)
+        view.resize(700, 300)
+        view.show()
+        _drain(qapp)
+        narrow = view._gutter.width()
+
+        view.setFontSize(24)
+        _drain(qapp)
+
+        digits = len(str(max(1, view.maxLines() or 9999)))
+        expected = max(
+            _GUTTER_MIN_WIDTH,
+            _GUTTER_PAD * 2
+            + QFontMetrics(view._gutter_font).horizontalAdvance("8") * digits,
+        )
+        assert view._gutter.width() == expected
+        assert view._gutter.width() > narrow

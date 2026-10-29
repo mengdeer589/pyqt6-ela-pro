@@ -97,3 +97,21 @@ class TestElaTagSearchMultiBoxPinyinSearch:
 
         assert view.isRowHidden(0) is False
         assert view.isRowHidden(1) is True
+
+
+class TestElaTagSearchMultiBoxSelectionEdge:
+    @pytest.fixture
+    def filled(self, make):
+        box = make(ElaTagSearchMultiBox, title="标题")
+        box.addItems(["Python", "C++"])
+        return box
+
+    def test_set_none_clears(self, filled):
+        filled.setCurrentSelection(["Python"])
+        filled.setCurrentSelection(None)
+        assert filled.currentSelection() == []
+
+    def test_mark_width_uses_new_selection(self, filled):
+        filled.resize(240, 30)
+        filled.setCurrentSelection(["Python", "C++"])
+        assert filled._expand_mark_width == pytest.approx(_get_target_mark_width(filled))

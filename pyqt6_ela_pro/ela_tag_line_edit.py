@@ -41,6 +41,12 @@ class ElaTagLineEdit(_ThemeAwareMixin, ElaLineEdit):
         edit.notifyInvalidInput()   # 错误态；clearError() 撤销
     """
 
+    #: 标题文字与输入文字之间的可见间距
+    _TITLE_GAP = 8
+    #: 标题绘制区左右内边距（标题起点与输入文字落在同一条 13px 基线）
+    _TITLE_PAD_LEFT = 10
+    _TITLE_PAD_RIGHT = 10
+
     def __init__(
         self,
         parent: Optional[QWidget] = None,
@@ -85,9 +91,25 @@ class ElaTagLineEdit(_ThemeAwareMixin, ElaLineEdit):
         self.update()
 
     def _updateMargins(self) -> None:
-        metrics = QFontMetrics(self.font())
-        title_width = metrics.horizontalAdvance(self._title_text) + 20
-        self.setTextMargins(title_width + 3, 0, 10, 0)
+        if not self._title_text:
+            # 没有标题就不能留「标题宽度」的空位：曾经无标题也会左缩进 23px
+            self.setTextMargins(0, 0, 10, 0)
+            return
+        self.setTextMargins(self._titleTextWidth() + self._TITLE_GAP, 0, 10, 0)
+
+    def _titleFont(self) -> QFont:
+        font = QFont(self.font())
+        font.setPixelSize(self._title_font_size)
+        return font
+
+    def _titleTextWidth(self) -> int:
+        """标题按**标题字号**量宽（不是输入框字号）。
+
+        旧实现用 ``QFontMetrics(self.font())`` 量、再用 ``_title_font_size`` 画：
+        ``setTitleFontSize(12)`` 时字号 13 的度量多算一截，加上左右各 10px 的
+        死 padding，标题与输入文字之间会空出 28px。
+        """
+        return QFontMetrics(self._titleFont()).horizontalAdvance(self._title_text)
 
     def _onTextChanged(self, _text: str) -> None:
         self.update()
@@ -119,11 +141,16 @@ class ElaTagLineEdit(_ThemeAwareMixin, ElaLineEdit):
         )
 
     def _drawTitle(self, painter: QPainter) -> None:
-        metrics = QFontMetrics(self.font())
-        title_width = metrics.horizontalAdvance(self._title_text) + 20
+        if not self._title_text:
+            return
         title_height = self.height()
-
-        title_rect = QRect(3, 0, title_width, title_height)
+        text_width = self._titleTextWidth()
+        title_rect = QRect(
+            3,
+            0,
+            self._TITLE_PAD_LEFT + text_width + self._TITLE_PAD_RIGHT,
+            title_height,
+        )
 
         option = QTextOption()
         option.setWrapMode(QTextOption.WrapMode.NoWrap)
@@ -131,14 +158,17 @@ class ElaTagLineEdit(_ThemeAwareMixin, ElaLineEdit):
             Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft
         )
 
-        title_font = QFont(self.font())
-        title_font.setPixelSize(self._title_font_size)
-
         painter.save()
-        painter.setFont(title_font)
+        painter.setFont(self._titleFont())
         painter.setPen(self._getTitleColor())
         painter.drawText(
-            QRectF(title_rect.adjusted(10, 0, -10, 0)), self._title_text, option
+            QRectF(
+                title_rect.adjusted(
+                    self._TITLE_PAD_LEFT, 0, -self._TITLE_PAD_RIGHT, 0
+                )
+            ),
+            self._title_text,
+            option,
         )
         painter.restore()
 

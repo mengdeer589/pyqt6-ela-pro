@@ -1,10 +1,10 @@
-"""Tests for combo_box module: ElaSearchBox, ElaSearchMultiBox, ElaSearchProxyModel."""
+"""Tests for combo_box module: ElaSearchBox, ElaSearchMultiBox."""
 
 from __future__ import annotations
 
 from unittest.mock import MagicMock
 
-from PyQt6.QtCore import Qt, QPoint, QRect, QStringListModel, QModelIndex
+from PyQt6.QtCore import Qt, QPoint, QRect
 from PyQt6.QtWidgets import QApplication, QWidget
 from PyQt6ElaWidgetTools import ElaComboBox
 
@@ -13,7 +13,6 @@ from _qthelpers import wait_until as _wait_until
 
 from pyqt6_ela_pro._internal import hideComboboxPopup
 from pyqt6_ela_pro.combo_box import (
-    ElaSearchProxyModel,
     ElaSearchMultiBox,
     ElaSearchBox,
 )
@@ -21,115 +20,6 @@ from pyqt6_ela_pro.ela_tag_box import ElaTagBox
 from pyqt6_ela_pro.ela_tag_multi_box import ElaTagMultiBox
 from pyqt6_ela_pro.ela_tag_search_box import ElaTagSearchBox
 from pyqt6_ela_pro.ela_tag_search_multi_box import ElaTagSearchMultiBox
-
-
-class TestElaSearchProxyModel:
-    """Test cases for ElaSearchProxyModel."""
-
-    def test_initialization(self):
-        """Test proxy model initializes with empty keyword."""
-        proxy = ElaSearchProxyModel()
-        assert proxy._keyword == ""
-        assert proxy._tokens == []
-
-    def test_set_keyword_lowercase(self):
-        """Test setKeyword converts keyword to lowercase."""
-        proxy = ElaSearchProxyModel()
-        proxy.setKeyword("TEST")
-        assert proxy._keyword == "test"
-
-    def test_filter_accepts_row_without_keyword(self):
-        """Test filterAcceptsRow returns True when keyword is empty."""
-        proxy = ElaSearchProxyModel()
-        assert proxy.filterAcceptsRow(0, QModelIndex()) is True
-
-    def test_filter_accepts_row_with_matching_text(self):
-        """Test filterAcceptsRow matches text directly."""
-        proxy = ElaSearchProxyModel()
-        source_model = QStringListModel(["北京", "上海", "广州"])
-
-        proxy.setSourceModel(source_model)
-        proxy.setKeyword("北京")
-
-        assert proxy.filterAcceptsRow(0, QModelIndex()) is True
-        assert proxy.filterAcceptsRow(1, QModelIndex()) is False
-
-    def test_filter_accepts_row_with_pinyin(self):
-        """Test filterAcceptsRow matches full pinyin."""
-        proxy = ElaSearchProxyModel()
-        source_model = QStringListModel(["北京", "上海", "广州"])
-
-        proxy.setSourceModel(source_model)
-        proxy.setKeyword("sh")
-
-        assert proxy.filterAcceptsRow(1, QModelIndex()) is True
-
-    def test_filter_accepts_row_with_pinyin_initials(self):
-        """Test filterAcceptsRow matches pinyin initials (bj -> 北京)."""
-        proxy = ElaSearchProxyModel()
-        source_model = QStringListModel(["北京", "上海", "广州"])
-
-        proxy.setSourceModel(source_model)
-        proxy.setKeyword("bj")
-
-        assert proxy.filterAcceptsRow(0, QModelIndex()) is True
-        assert proxy.filterAcceptsRow(1, QModelIndex()) is False
-
-    def test_filter_accepts_row_with_full_pinyin_substring(self):
-        """Test filterAcceptsRow matches a full pinyin substring."""
-        proxy = ElaSearchProxyModel()
-        source_model = QStringListModel(["北京", "上海"])
-
-        proxy.setSourceModel(source_model)
-        proxy.setKeyword("beij")
-
-        assert proxy.filterAcceptsRow(0, QModelIndex()) is True
-        assert proxy.filterAcceptsRow(1, QModelIndex()) is False
-
-    def test_filter_requires_all_space_separated_tokens(self):
-        """Test multiple tokens are ANDed."""
-        proxy = ElaSearchProxyModel()
-        source_model = QStringListModel(["北京", "上海", "北京上海"])
-
-        proxy.setSourceModel(source_model)
-        proxy.setKeyword("bj sh")
-
-        assert proxy.filterAcceptsRow(0, QModelIndex()) is False
-        assert proxy.filterAcceptsRow(1, QModelIndex()) is False
-        assert proxy.filterAcceptsRow(2, QModelIndex()) is True
-
-    def test_filter_is_case_insensitive(self):
-        """Test filter is case insensitive."""
-        proxy = ElaSearchProxyModel()
-        source_model = QStringListModel(["测试"])
-
-        proxy.setSourceModel(source_model)
-        proxy.setKeyword("ce")
-
-        assert proxy.filterAcceptsRow(0, QModelIndex()) is True
-
-    def test_filter_matches_ignoring_punctuation(self):
-        """Test compact matching ignores punctuation (gpt4o -> gpt-4o)."""
-        proxy = ElaSearchProxyModel()
-        source_model = QStringListModel(["gpt-4o", "claude-3"])
-
-        proxy.setSourceModel(source_model)
-        proxy.setKeyword("gpt4o")
-
-        assert proxy.filterAcceptsRow(0, QModelIndex()) is True
-        assert proxy.filterAcceptsRow(1, QModelIndex()) is False
-
-    def test_pinyin_cache_filled_and_reused(self):
-        """Test pinyin cache stores (full, initials) and is reused."""
-        proxy = ElaSearchProxyModel()
-        proxy.setSourceModel(QStringListModel(["北京"]))
-
-        proxy.setKeyword("bj")
-        assert proxy.filterAcceptsRow(0, QModelIndex()) is True
-        assert proxy._pinyin_cache["北京"] == ("beijing", "bj")
-
-        proxy.clearPinyinCache()
-        assert proxy._pinyin_cache == {}
 
 
 class TestElaSearchMultiBox:
@@ -246,6 +136,20 @@ class TestElaSearchMultiBox:
         box.showPopup()
         box.hidePopup()  # 关闭 Popup：残留的活动弹出窗口会拦截后续测试的鼠标事件
         box.deleteLater()
+
+    def test_search_placeholder_roundtrip(self, make, qapp):
+        """搜索框占位文案可配置，弹层已打开时立即生效。"""
+        box = make(ElaSearchMultiBox, make(QWidget))
+        box.addItems(["a", "b"])
+        box.resize(240, 30)
+        box.show()
+        qapp.processEvents()
+        box.setSearchPlaceholderText("过滤")
+        box.showPopup()
+        qapp.processEvents()
+        assert box._searchEdit.placeholderText() == "过滤"
+        box.hidePopup()
+        qapp.processEvents()
 
     def test_set_search_visible_roundtrip(self, make):
         """Test search visibility toggle roundtrip."""
@@ -461,6 +365,23 @@ class TestElaSearchBox:
         assert box.searchVisible() is True
         box.setSearchVisible(False)
         assert box.searchVisible() is False
+
+    def test_search_placeholder_roundtrip(self, make, qapp):
+        """搜索框占位文案可配置，弹层已打开时立即生效。"""
+        box = make(ElaSearchBox, make(QWidget))
+        box.addItem("a")
+        box.resize(240, 28)
+        box.show()
+        qapp.processEvents()
+        box.setSearchPlaceholderText("过滤")
+        assert box.searchPlaceholderText() == "过滤"
+        box.showPopup()
+        qapp.processEvents()
+        assert box._searchEdit.placeholderText() == "过滤"
+        box.setSearchPlaceholderText("再改")
+        assert box._searchEdit.placeholderText() == "再改"
+        box.hidePopup()
+        qapp.processEvents()
 
     def test_disable_search_skips_widget(self, make, qapp):
         """Test disabled search is not created in the popup."""

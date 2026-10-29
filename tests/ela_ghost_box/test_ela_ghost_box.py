@@ -3,13 +3,15 @@
 from __future__ import annotations
 
 import pytest
-from PyQt6.QtCore import QEvent, Qt, QPointF
+from PyQt6 import sip
+from PyQt6.QtCore import QCoreApplication, QEvent, Qt, QPointF
 from PyQt6.QtGui import QMouseEvent, QPixmap
 from PyQt6.QtTest import QTest
 from PyQt6.QtWidgets import QWidget
 from PyQt6ElaWidgetTools import ElaIconType
 from _qthelpers import wait_until
 
+from pyqt6_ela_pro._ownership import ElaWidgetOwnershipType
 from pyqt6_ela_pro.ela_ghost_box import ElaGhostBox
 
 
@@ -448,3 +450,56 @@ class TestElaGhostBoxPopupGeometry:
             timeout_ms=2000,
             use_qwait=True,
         )
+
+
+class TestElaGhostBoxFooterOrder:
+    @staticmethod
+    def _row_types(box):
+        row = box._footer._row
+        return [type(row.itemAt(i).widget()).__name__ for i in range(row.count())]
+
+    def test_custom_widget_stays_after_buttons_when_added_first(self, make, box):
+        """???????????????????????????"""
+        box.addPopupFooterButton("A", key="a")
+        box.setPopupFooterWidget(make(QWidget))
+        assert self._row_types(box) == ["_GhostFooterButton", "QWidget"]
+
+    def test_custom_widget_stays_after_late_buttons(self, make, box):
+        box.setPopupFooterWidget(make(QWidget))
+        box.addPopupFooterButton("B", key="b")
+        assert self._row_types(box) == ["_GhostFooterButton", "QWidget"]
+
+
+class TestElaGhostBoxFooterOwnership:
+    def test_borrowed_widget_is_released_not_deleted(self, make, box):
+        widget = make.track(QWidget())
+        box.setPopupFooterWidget(widget)
+        box.setPopupFooterWidget(None)
+        assert not sip.isdeleted(widget)
+        assert widget.parent() is None
+
+    def test_reparented_widget_returns_to_original_parent(self, make, box):
+        parent = make.track(QWidget())
+        widget = make.track(QWidget())
+        widget.setParent(parent)
+        box.setPopupFooterWidget(widget, ownership=ElaWidgetOwnershipType.Reparented)
+        box.setPopupFooterWidget(None)
+        assert not sip.isdeleted(widget)
+        assert widget.parent() is parent
+
+    def test_owned_widget_is_deleted(self, make, box, qapp):
+        widget = make.track(QWidget())
+        box.setPopupFooterWidget(widget, ownership=ElaWidgetOwnershipType.Owned)
+        box.setPopupFooterWidget(None)
+        QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+        qapp.processEvents()
+        assert sip.isdeleted(widget)
+
+    def test_combo_destruction_releases_borrowed_widget(self, make, qapp):
+        widget = make.track(QWidget())
+        box = ElaGhostBox()
+        box.setPopupFooterWidget(widget)
+        sip.delete(box)
+        qapp.processEvents()
+        assert not sip.isdeleted(widget)
+        assert widget.parent() is None

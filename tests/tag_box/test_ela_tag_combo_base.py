@@ -2,11 +2,13 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock, patch
 from PyQt6.QtCore import QRect
-from PyQt6.QtGui import QColor, QPainter, QFont
+from PyQt6.QtGui import QColor, QPainter, QFont, QFontMetrics, QPixmap
 from PyQt6.QtWidgets import QComboBox
 from PyQt6ElaWidgetTools import ElaThemeType
 
 from pyqt6_ela_pro.ela_tag_combo_base import (
+    _TAG_TITLE_GAP,
+    _TAG_TITLE_PAD,
     _TagBoxThemeMixin,
     _TagBoxAnimMixin,
     _pre_init_popup,
@@ -17,6 +19,7 @@ from pyqt6_ela_pro.ela_tag_combo_base import (
     _draw_tag_mark,
     _draw_single_value_text,
     _draw_multi_value_text,
+    _elide_value,
 )
 
 
@@ -212,6 +215,33 @@ class TestDrawTagTitle:
         assert result.left() == content_rect.left()
         assert result.top() == content_rect.top()
 
+    def test_untitled_keeps_only_left_baseline(self):
+        """无标题时值文本从左侧基线起步（旧实现留了 19px 空位）。"""
+        painter = QPainter()
+        content_rect = QRect(3, 3, 94, 32)
+        result = _draw_tag_title(
+            painter, content_rect, "", 13, QColor(0, 0, 0), QFont()
+        )
+        assert result.right() == content_rect.left() + _TAG_TITLE_PAD
+
+    def test_title_width_uses_title_font(self):
+        """标题按 ``title_font_size`` 量，不按 widget 字号量。"""
+        widget_font = QFont()
+        widget_font.setPixelSize(20)
+        title_font = QFont(widget_font)
+        title_font.setPixelSize(13)
+        content_rect = QRect(1, 1, 200, 30)
+        result = _draw_tag_title(
+            QPainter(), content_rect, "用户名", 13, QColor(0, 0, 0), widget_font
+        )
+        expected = (
+            content_rect.left()
+            + _TAG_TITLE_PAD
+            + QFontMetrics(title_font).horizontalAdvance("用户名")
+            + _TAG_TITLE_GAP
+        )
+        assert result.right() == expected
+
 
 class TestDrawTagArrow:
     def test_draw_tag_arrow_runs_without_error(self):
@@ -272,3 +302,40 @@ class TestDrawMultiValueText:
         _draw_multi_value_text(
             painter, content_rect, title_rect, ["A", "B"], max_show=3
         )
+
+
+class TestTagTitleFontSize:
+    def test_title_font_size_roundtrip(self):
+        host = AnimMixinHost()
+        host._tag_box_init("T")
+        assert host.titleFontSize() == 13
+        host.setTitleFontSize(20)
+        assert host.titleFontSize() == 20
+        host.deleteLater()
+
+    def test_title_font_size_is_clamped(self):
+        host = AnimMixinHost()
+        host._tag_box_init("T")
+        host.setTitleFontSize(0)
+        assert host.titleFontSize() == 1
+        host.deleteLater()
+
+
+class TestElideValue:
+    def test_short_text_is_unchanged(self):
+        pixmap = QPixmap(120, 30)
+        painter = QPainter(pixmap)
+        try:
+            assert _elide_value(painter, "ab", 200) == "ab"
+        finally:
+            painter.end()
+
+    def test_long_text_is_elided(self):
+        pixmap = QPixmap(120, 30)
+        painter = QPainter(pixmap)
+        try:
+            assert _elide_value(painter, "a very long value text", 24).endswith(
+                "\u2026"
+            )
+        finally:
+            painter.end()

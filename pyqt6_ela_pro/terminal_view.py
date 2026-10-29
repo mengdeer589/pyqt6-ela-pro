@@ -52,6 +52,7 @@ from PyQt6.QtCore import (
 from PyQt6.QtGui import (
     QColor,
     QFont,
+    QFontMetrics,
     QPainter,
     QPainterPath,
     QPen,
@@ -1002,9 +1003,11 @@ class _Gutter(QWidget):
         self.setFixedWidth(_GUTTER_MIN_WIDTH)
 
     def syncWidth(self) -> None:  # noqa: N802 (Qt 命名)
-        """按最大行号位数调整槽宽。"""
+        """按最大行号位数 + 绘制字体重算槽宽（跟随终端字号 / 字体族）。"""
         digits = len(str(max(1, self._view.maxLines() or 9999)))
-        advance = self.fontMetrics().horizontalAdvance("8") * digits
+        advance = (
+            QFontMetrics(self._view._gutter_font).horizontalAdvance("8") * digits
+        )
         self.setFixedWidth(max(_GUTTER_MIN_WIDTH, _GUTTER_PAD * 2 + advance))
         self.update()
 
@@ -1049,7 +1052,9 @@ class ElaTerminalView(ElaThemeWidget):
     支持 ANSI 色彩、行号槽、自动滚动跟随、搜索过滤与高亮、右键菜单、导出到
     文件、保留行数上限。**组件不执行任何命令**，输出由宿主 ``append`` 喂入。
     中文系统默认对主字体缺字形的字符套单族符号字体（只改字体族、不改文本；
-    ``setMissingGlyphFallbackEnabled(False)`` 可关，bug #20）。
+    ``setMissingGlyphFallbackEnabled(False)`` 可关，bug #20）。**主字体是比例字体**：
+    做进度条别混用缺字形字符（如 ``░``）与主字体覆盖的 ``█`` —— 前者会走符号字体
+    兜底、字宽不同，条会随填充变短；用同一字符配颜色，或背景色空格。
 
     :param maxLines: 保留行数上限，``0`` 表示不限
     :param paletteName: 调色板名称（见 :func:`terminalThemes`）

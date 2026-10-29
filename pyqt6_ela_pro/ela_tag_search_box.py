@@ -18,7 +18,7 @@ from .ela_tag_combo_base import (
     _TagBoxAnimMixin,
     _paint_tag_single,
 )
-from ._internal import _adjust_combobox_popup, hideComboboxPopup
+from ._internal import hideComboboxPopup
 
 
 class ElaTagSearchBox(_TagBoxThemeMixin, _TagBoxAnimMixin, ElaSearchBox):
@@ -51,7 +51,6 @@ class ElaTagSearchBox(_TagBoxThemeMixin, _TagBoxAnimMixin, ElaSearchBox):
             return
         self._animate_popup_open()
         super().showPopup()
-        _adjust_combobox_popup(self)
 
         if self._searchEdit:
             self._applySearchEditPalette()

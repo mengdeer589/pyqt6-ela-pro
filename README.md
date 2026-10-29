@@ -189,7 +189,6 @@ sys.exit(app.exec())
 | **ElaPasswordEdit** | 密码输入框（可见切换，继承 ElaLineEdit） |
 | **ElaRatingControl** | 星级评分（支持半星，可悬停预览） |
 | **ElaUploadArea** | 文件上传区域（拖拽+点击，后缀/大小/数量校验） |
-| **ElaSearchProxyModel** | 搜索框的过滤代理模型（中文原文 / 全拼 / 首字母匹配，由 `ElaSearchBox` 系列内部使用） |
 | **ElaField** | 表单字段外壳：标题 + 必填 `*` + 编辑器槽（走 `ElaWidgetOwnershipType` 三态）+ 辅助文字 + 三态校验行（Error / Warning / Success） |
 | **ElaFieldStatusType** | 校验状态：`None_` / `Error` / `Warning` / `Success` |
 | **ElaSelectorBar** | 分段控件：三关键帧「压扁-移动-绽开」的动画指示器、溢出时两端箭头滚动或「更多」按钮、键盘可达、RTL 全量镜像 |

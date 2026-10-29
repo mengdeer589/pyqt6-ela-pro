@@ -176,9 +176,13 @@ class TerminalPage(ExamplePage):
             percent = min(100, progress_state["percent"] + random.randint(3, 11))
             progress_state["percent"] = percent
             filled = percent // 5
-            bar = "█" * filled + "░" * (20 - filled)
+            # 同一字符 + 颜色区分：混用 █ / ░ 时 ░ 在雅黑里缺字形、会走符号字体
+            # 兜底（13px vs 9px），进度条会随填充变短；同字符的字宽恒一致。
+            bar = (
+                "\x1b[36m" + "━" * filled + "\x1b[90m" + "━" * (20 - filled) + "\x1b[0m"
+            )
             # \r 整行重绘：不追加 \n，当前行实时上屏；只有结束才收口
-            view.append(f"\r\x1b[36m{bar}\x1b[0m {percent:3d}%")
+            view.append(f"\r{bar} {percent:3d}%")
             if percent >= 100:
                 stop_timers()
                 view.append("\n\x1b[32m√\x1b[0m 下载完成\n")

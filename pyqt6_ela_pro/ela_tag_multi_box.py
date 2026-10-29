@@ -77,15 +77,26 @@ class ElaTagMultiBox(_TagBoxThemeMixin, _TagBoxAnimMixin, ElaMultiSelectComboBox
             return
         super().hidePopup()
 
-    def setCurrentSelection(self, selection: Union[str, list[str]]) -> None:
-        if isinstance(selection, str):
+    def setCurrentSelection(self, selection: Union[str, list[str], None]) -> None:
+        """???????? **None / ????? / ?????**?? ElaSearchMultiBox??
+
+        `None` ????????????????**??**????????
+        """
+        if selection is None:
+            selection = []
+        elif isinstance(selection, str):
             selection = [selection]
         self._currentSelection = list(selection)
         if self._mark_animation.state() == QAbstractAnimation.State.Running:
             self._mark_animation.stop()
+        # ?? C++ ??????????? ?? ????????????????
+        super().setCurrentSelection(self._currentSelection)
         self._expand_mark_width = _get_target_mark_width(self)
         self.update()
-        super().setCurrentSelection(self._currentSelection)
+
+    def currentSelection(self) -> list[str]:
+        """??????? C++ ??????"""
+        return list(super().getCurrentSelection())
 
     def paintEvent(self, _event: QPaintEvent) -> None:
         painter = QPainter(self)
