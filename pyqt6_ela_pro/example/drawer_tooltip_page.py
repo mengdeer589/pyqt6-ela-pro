@@ -188,7 +188,10 @@ class DrawerTooltipPage(ExamplePage):
                 "04. ela_ext - ElaStateToolTip 状态提示", self._demoStateTooltip
             )
         )
-        self._addInfoText("显示加载状态、成功/失败状态的提示", parent_layout)
+        self._addInfoText(
+            "显示加载中 / 完成两种状态（完成后 1 秒自动淡出），宽度随内容自适应",
+            parent_layout,
+        )
         btn_layout = QHBoxLayout()
         btn_layout.setSpacing(15)
         loading_btn = ElaPushButton("显示加载中", self)
@@ -218,16 +221,14 @@ class DrawerTooltipPage(ExamplePage):
             if self._checkValid(self._stateTooltip):
                 self._stateTooltip.setTitle(title)
                 self._stateTooltip.setContent(content)
-                if is_done:
-                    self._stateTooltip.setState(True)
+                self._stateTooltip.setState(is_done)
                 return
             self._stateTooltip = ElaStateToolTip(title, content, self)
             self._stateTooltip.closed.connect(self._onStateTooltipClosed)
             pos = self._stateTooltip.getSuitablePos()
             self._stateTooltip.move(pos)
             self._stateTooltip.show()
-            if is_done:
-                self._stateTooltip.setState(True)
+            self._stateTooltip.setState(is_done)
         except Exception:
             print(traceback.format_exc())
 
@@ -337,33 +338,36 @@ class DrawerTooltipPage(ExamplePage):
             )
         )
         self._addInfoText(
-            "全 QPainter 自绘的确认对话框，支持 bottom（下方）和 top（上方）弹出位置",
+            "Ela 原生拼装的轻量确认弹框（PopupBase 表面 + 文字按钮），"
+            "支持 bottom（下方）和 top（上方）弹出位置",
             parent_layout,
         )
         btn_layout = QHBoxLayout()
         btn_layout.setSpacing(15)
+
+        def _show(btn, position):
+            result = ElaConfirmDialog.show(
+                btn,
+                "提示",
+                f"确定要执行此操作吗？（{position}）",
+                position=position,
+            )
+            if result:
+                print("用户点击了确认")
+            else:
+                print("用户点击了取消")
+
         btn_bottom = ElaPushButton("下方弹出", self)
         btn_bottom.setFixedWidth(100)
-        btn_bottom.clicked.connect(
-            lambda: self._onShowConfirmDialog(btn_bottom, "bottom")
-        )
+        btn_bottom.clicked.connect(lambda: _show(btn_bottom, "bottom"))
         btn_layout.addWidget(btn_bottom)
         btn_top = ElaPushButton("上方弹出", self)
         btn_top.setFixedWidth(100)
-        btn_top.clicked.connect(lambda: self._onShowConfirmDialog(btn_top, "top"))
+        btn_top.clicked.connect(lambda: _show(btn_top, "top"))
         btn_layout.addWidget(btn_top)
         btn_layout.addStretch()
         parent_layout.addLayout(btn_layout)
         parent_layout.addSpacing(20)
-
-    def _onShowConfirmDialog(self, btn, position="bottom"):
-        result = ElaConfirmDialog.show(
-            btn, "提示", f"确定要执行此操作吗？（{position}）", position=position
-        )
-        if result:
-            print("用户点击了确认")
-        else:
-            print("用户点击了取消")
 
     def _demoElaDialog(self, parent_layout):
         parent_layout.addLayout(

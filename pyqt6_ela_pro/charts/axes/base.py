@@ -156,6 +156,15 @@ class AxisModel:
         self.vmin = 0.0
         self.vmax = 1.0
         self._ticks = [0.0, 1.0]
+        #: 数据真实全量范围（由渲染器 ``_fix_value_axis`` 写入）。dataZoom
+        #: 用它当「全量」而不是 ``vmin/vmax`` —— 后者在缩放后只是窗口子集，
+        #: 而 ``setSeries`` 给的又可能是「未修正」的范围（横向柱 / 堆叠 /
+        #: K 线 / 箱线的真实范围要到系列 layout 才算得出来）。
+        self._data_extent = None
+        #: ``_data_extent`` 的代次（dataZoom 用它判断「全量范围变了没有」）
+        self._extent_epoch = 0
+        #: 当前是否处于 dataZoom 窗口态（``setWindow`` 维护）
+        self._windowed = False
 
     @staticmethod
     def _parse_boundary_gap(raw) -> bool:
@@ -443,8 +452,15 @@ class AxisModel:
             new_step = max_iv
         if abs(new_step - step) < 1e-12:
             return
+        if not math.isfinite(new_step) or new_step <= 0.0:
+            # maxInterval 极小 / 下溢：不能拿 0 当步长（count 会除零）。
+            return
         start = math.floor(self.vmin / new_step) * new_step
         end = math.ceil(self.vmax / new_step) * new_step
+        if not math.isfinite(start) or not math.isfinite(end):
+            # maxInterval 极小（1e-320）时 vmin/step 溢出成 inf，随后
+            # int(round(inf)) 抛 OverflowError（setOption 调用方直接崩）。
+            return
         count = int(round((end - start) / new_step))
         if count > _MAX_TICKS:
             # **maxInterval 只把 step 变小、不限制刻度总数**，所以 count 直接
@@ -595,6 +611,9 @@ class AxisModel:
             return
         start = max(0.0, min(100.0, float(start)))
         end = max(start, min(100.0, float(end)))
+        # 全量窗口 = 非窗口态：渲染器可以按数据真实范围重设轴（横向柱 /
+        # 堆叠 / K 线 / 箱线的真实范围只有系列 layout 才算得出来）。
+        self._windowed = start > 1e-9 or end < 100.0 - 1e-9
         if self.is_time:
             span = hi - lo
             a = lo + span * start / 100.0
@@ -618,12 +637,34 @@ class AxisModel:
                 self.vmax = self.vmin * self.log_base
             self._ticks = _log_ticks(self.vmin, self.vmax, self.log_base)
             return
+        # 与 ``setExtent`` 同口径：全正取 0 基线、全负顶取 0（``scale`` 可关），
+        # 用户 ``min`` / ``max`` 优先。少了这一步，横向柱 / K 线的全量窗口
+        # 会把 0 基线排除在外（柱子基线被裁）。
+        user_lo = _opt_bound(self.min)
+        user_hi = _opt_bound(self.max)
+        if user_lo is None and lo > 0 and not self.scale:
+            lo = 0.0
+        if user_hi is None and hi < 0 and not self.scale:
+            hi = 0.0
+        if user_lo is not None:
+            lo = user_lo
+        if user_hi is not None:
+            hi = user_hi
+        if hi <= lo:
+            hi = lo + 1.0
         span = hi - lo
         self.vmin = lo + span * start / 100.0
         self.vmax = lo + span * end / 100.0
         if self.vmax <= self.vmin:
             self.vmax = self.vmin + max(1e-6, span * 0.01)
-        _, _, self._ticks = niceTicks(self.vmin, self.vmax)
+        try:
+            segments = max(1, int(self.opt.get("splitNumber", 5)))
+        except (TypeError, ValueError, OverflowError):
+            segments = 5
+        # **只取刻度，不用 niceTicks 的扩展端点**：它会向外扩到 step 边界
+        # （20000~180000 配 step=50000 → 0~200000），窗口就被抹平成全量。
+        _, _, self._ticks = niceTicks(self.vmin, self.vmax, segments)
+        self._apply_interval_constraints()
 
     def bandWidth(self, start: float, end: float) -> float:
         """category 轴单个 band 的像素宽度（value 轴返回 0）。"""
@@ -643,7 +684,10 @@ class AxisModel:
             return self.categories.index(s)
         all_cats = getattr(self, "_all_categories", None) or []
         if s in all_cats:
-            return all_cats.index(s)  # 窗外类别：全量下标（越界）
+            # 窗外类别返回**窗口内**越界下标（左侧为负、右侧 ≥ n），由各系列
+            # 的 clipRect 裁掉；原先返回全量下标，窗口之前的类别会被当成
+            # 窗口内前半段、折线直接横穿绘图区。
+            return all_cats.index(s) - self.windowOffset()
         return 0
 
     @property

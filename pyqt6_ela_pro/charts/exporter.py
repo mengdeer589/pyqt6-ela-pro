@@ -83,9 +83,18 @@ class ChartExporter:
             return ""
         if want_svg:
             return self._save_svg(str(target))
+        suffix = str(target).lower()
+        want_jpeg = (
+            str(format or "").lower() in ("jpeg", "jpg")
+            or suffix.endswith(".jpg")
+            or suffix.endswith(".jpeg")
+        )
         try:
-            image = self._render_image()
-            if not image.isNull() and image.save(str(target), "PNG"):
+            # JPEG 没有 alpha：先压到主题底，再按扩展名写对应格式
+            # （原先一律写 PNG，`chart.jpg` 里其实是 PNG 字节）。
+            image = self._render_image(opaque=want_jpeg)
+            fmt = "JPEG" if want_jpeg else "PNG"
+            if not image.isNull() and image.save(str(target), fmt):
                 return str(target)
         except Exception:
             pass
@@ -131,7 +140,11 @@ class ChartExporter:
         ``"transparent"`` 时不铺主题底 —— PNG 就是真正的透明背景。
         """
         export_bg = self._option_color((opts or {}).get("backgroundColor"))
-        chart_bg = self._option_color(self._chart.getOption().get("backgroundColor"))
+        # **只读内部 option，绝不调 ``getOption()``**：后者会深拷贝整份数据
+        # （40 万点 [x,y] 实测 1.0s，占整次导出 88%），而这里只需要一个键。
+        chart_bg = self._option_color(
+            self._chart._option_ref().get("backgroundColor")
+        )
         if export_bg is None and chart_bg is None:
             export_bg = QColor(T("color.bg.base"))
         return export_bg, chart_bg

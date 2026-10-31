@@ -298,6 +298,9 @@ class ElaChatToolCall:
     result: str = ""
     #: 状态（见 :class:`ElaChatToolStatusType`）
     status: str = ElaChatToolStatusType.Running
+    #: 结构化附加数据（文件变更 / shell 状态 / 诊断等，JSON 安全）。
+    #: 由宿主填写，库只在渲染器上下文里原样交出（不做校验 / 不解释）。
+    metadata: dict = field(default_factory=dict)
 
     @property
     def isRunning(self) -> bool:
@@ -326,6 +329,10 @@ class ElaChatToolCall:
         """返回替换状态后的新快照（用于回合终止时结算未完成的调用）。"""
         return replace(self, status=status)
 
+    def withMetadata(self, metadata) -> "ElaChatToolCall":
+        """返回替换结构化附加数据后的新快照（非字典按空字典处理）。"""
+        return replace(self, metadata=dict(metadata) if isinstance(metadata, dict) else {})
+
     # -- 持久化 ------------------------------------------------------------
 
     def toDict(self) -> dict:
@@ -336,6 +343,7 @@ class ElaChatToolCall:
             "arguments": self.arguments,
             "result": self.result,
             "status": self.status,
+            "metadata": dict(self.metadata or {}),
         }
 
     @classmethod
@@ -355,6 +363,9 @@ class ElaChatToolCall:
             arguments=_as_str(data.get("arguments")),
             result=_as_str(data.get("result")),
             status=status or ElaChatToolStatusType.Running,
+            metadata=dict(data.get("metadata"))
+            if isinstance(data.get("metadata"), dict)
+            else {},
         )
 
 
@@ -536,9 +547,57 @@ class ElaChatPartKindType(StrEnum):
     Compaction = "compaction"
     #: 工具审批段（等用户确认；结构化数据在 :attr:`ElaChatPart.permission`）
     Permission = "permission"
+    #: 时间线通知段（模型 / agent / 目录切换、中断、指令更新、重启）。
+    #: 语义标签在 :attr:`ElaChatPart.notice_type`，文案在 ``text`` / ``detail``。
+    Notice = "notice"
 
     #: 全部合法类型（非枚举成员）
-    All = nonmember((Reasoning, Text, Tool, Stats, Synthetic, Compaction, Permission))
+    All = nonmember(
+        (
+            Reasoning,
+            Text,
+            Tool,
+            Stats,
+            Synthetic,
+            Compaction,
+            Permission,
+            Notice,
+        )
+    )
+
+
+class ElaChatNoticeType(StrEnum):
+    """时间线通知类型（``kind == Notice`` 的语义标签）。
+
+    通知是**弱化的分隔行**，不是一个可展开卡片：模型切换 / agent 切换 /
+    工作目录切换 / 回合被中断 / 指令更新 / 进程重启。文案与副值由宿主提供，
+    库只负责排版与持久化（不翻译、不推断语义）。
+    """
+
+    #: 模型切换（``detail`` 放模型名）
+    ModelSwitched = "model-switched"
+    #: agent 切换（``detail`` 放 agent 名）
+    AgentSwitched = "agent-switched"
+    #: 工作目录切换（``detail`` 放目录）
+    LocationSwitched = "location-switched"
+    #: 回合被中断（``detail`` 可放原因）
+    Interrupted = "interrupted"
+    #: 指令 / 规则文件更新（``detail`` 可放文件列表）
+    InstructionsUpdated = "instructions-updated"
+    #: 进程重启后继续
+    Restart = "restart"
+
+    #: 全部合法类型（非枚举成员）
+    All = nonmember(
+        (
+            ModelSwitched,
+            AgentSwitched,
+            LocationSwitched,
+            Interrupted,
+            InstructionsUpdated,
+            Restart,
+        )
+    )
 
 
 class ElaChatReasoningStyleType(StrEnum):
@@ -803,6 +862,42 @@ class ElaChatPermission:
 
 
 @dataclass(frozen=True)
+class ElaChatMention:
+    """用户文本里的一个 ``@`` 引用区间（用于消息内高亮）。
+
+    偏移量按 Python ``str`` 下标计、**左闭右开**，与编辑器里的选区一致。
+    越界 / 反序的区间在渲染时直接跳过（宿主数据脏了不该让整条消息消失）。
+    """
+
+    #: 起始下标（含）
+    start: int = 0
+    #: 结束下标（不含）
+    end: int = 0
+    #: 类型（``file`` / ``agent`` / 其它宿主自定义）
+    kind: str = ""
+
+    @property
+    def isValid(self) -> bool:
+        """区间是否有效（非负且 start < end）。"""
+        return 0 <= self.start < self.end
+
+    def toDict(self) -> dict:
+        """转为纯 JSON 字典。"""
+        return {"start": _as_int(self.start), "end": _as_int(self.end), "kind": _as_str(self.kind)}
+
+    @classmethod
+    def fromDict(cls, data) -> Optional["ElaChatMention"]:
+        """从字典还原；``None`` / 非字典返回 ``None``。"""
+        if not isinstance(data, dict):
+            return None
+        return cls(
+            start=_as_int(data.get("start")),
+            end=_as_int(data.get("end")),
+            kind=_as_str(data.get("kind")),
+        )
+
+
+@dataclass(frozen=True)
 class ElaChatPart:
     """助手消息的内容分段快照（按加入顺序构成消息时间线）。"""
 
@@ -824,6 +919,14 @@ class ElaChatPart:
     duration_ms: float = 0.0
     #: 所属步骤序号（从 1 开始）
     step: int = 1
+    #: 通知类型（``kind == Notice``，见 :class:`ElaChatNoticeType`）
+    notice_type: str = ""
+    #: 通知副值（模型名 / 目录 / 原因等；``kind == Notice``）
+    detail: str = ""
+    #: 压缩掉的历史条数（``kind == Compaction``；``0`` = 不知道，不是「压了 0 条」）
+    history_count: int = 0
+    #: 截止时间（epoch 毫秒；``kind == Notice`` 的 Retry 预留，暂未使用）
+    deadline: float = 0.0
 
     def withText(self, text: str) -> "ElaChatPart":
         """返回替换文本后的新快照。"""
@@ -849,6 +952,10 @@ class ElaChatPart:
         """返回替换耗时后的新快照。"""
         return replace(self, duration_ms=float(durationMs or 0.0))
 
+    def withHistoryCount(self, count: int) -> "ElaChatPart":
+        """返回替换压缩历史条数后的新快照。"""
+        return replace(self, history_count=max(0, _as_int(count)))
+
     # -- 持久化 ------------------------------------------------------------
 
     def toDict(self) -> dict:
@@ -863,6 +970,10 @@ class ElaChatPart:
             "permission": self.permission.toDict() if self.permission else None,
             "duration_ms": _as_float(self.duration_ms),
             "step": _as_int(self.step, 1),
+            "notice_type": _as_str(self.notice_type),
+            "detail": _as_str(self.detail),
+            "history_count": max(0, _as_int(self.history_count)),
+            "deadline": _as_float(self.deadline),
         }
 
     @classmethod
@@ -893,6 +1004,10 @@ class ElaChatPart:
             permission=ElaChatPermission.fromDict(data.get("permission")),
             duration_ms=_as_float(data.get("duration_ms")),
             step=max(1, _as_int(data.get("step"), 1)),
+            notice_type=_as_str(data.get("notice_type")),
+            detail=_as_str(data.get("detail")),
+            history_count=max(0, _as_int(data.get("history_count"))),
+            deadline=_as_float(data.get("deadline")),
         )
 
 
@@ -931,8 +1046,19 @@ class ElaChatMessage:
     created_at: float = 0.0
     #: 显示名（用户 / 助手 / 模型名），空则用角色默认
     title: str = ""
+    #: agent 名（历史消息的「谁在说话」；空则不显示）
+    agent: str = ""
+    #: 模型名（历史消息的「哪个模型」；空则不显示）
+    model: str = ""
+    #: 模型变体（思考强度 / 档位；空则不显示）
+    model_variant: str = ""
     #: 显示用时间文本（由宿主提供，空则不显示）
     timestamp: str = ""
+    #: 投递方式（``steer`` = 插话；空 = 普通发送 / 队列）。
+    #: 仅用户消息有意义；``status == Queued`` 时表示「还没送达」。
+    delivery: str = ""
+    #: 用户文本里的 @ 引用区间（仅用户消息；空 = 不做高亮）
+    mentions: Tuple[ElaChatMention, ...] = field(default_factory=tuple)
     #: 思考过程文本（思考层）
     reasoning: str = ""
     #: 思考耗时（毫秒，0 表示未统计）
@@ -1030,6 +1156,11 @@ class ElaChatMessage:
         """是否仍在流式生成。"""
         return self.status == ElaChatStatusType.Streaming
 
+    @property
+    def isInterrupted(self) -> bool:
+        """是否被用户停止（用于 meta 行的「已中断」标记）。"""
+        return self.status == ElaChatStatusType.Stopped
+
     def withText(self, text: str) -> "ElaChatMessage":
         """返回替换文本后的新快照。"""
         return replace(self, text=text)
@@ -1041,6 +1172,37 @@ class ElaChatMessage:
     def withTitle(self, title: str) -> "ElaChatMessage":
         """返回替换显示名后的新快照。"""
         return replace(self, title=title or "")
+
+    def withIdentity(
+        self,
+        agent: Optional[str] = None,
+        model: Optional[str] = None,
+        modelVariant: Optional[str] = None,
+    ) -> "ElaChatMessage":
+        """返回替换 agent / 模型 / 变体后的新快照（``None`` 表示保持原值）。"""
+        return replace(
+            self,
+            agent=self.agent if agent is None else str(agent or ""),
+            model=self.model if model is None else str(model or ""),
+            model_variant=(
+                self.model_variant
+                if modelVariant is None
+                else str(modelVariant or "")
+            ),
+        )
+
+    def withMentions(self, mentions) -> "ElaChatMessage":
+        """返回替换 @ 引用区间后的新快照（只保留有效区间）。"""
+        items = []
+        for item in mentions or ():
+            value = item if isinstance(item, ElaChatMention) else ElaChatMention.fromDict(item)
+            if value is not None and value.isValid:
+                items.append(value)
+        return replace(self, mentions=tuple(items))
+
+    def withDelivery(self, delivery: str) -> "ElaChatMessage":
+        """返回替换投递方式后的新快照。"""
+        return replace(self, delivery=_as_str(delivery))
 
     def withTimestamp(self, timestamp: str) -> "ElaChatMessage":
         """返回替换时间文本后的新快照。"""
@@ -1114,7 +1276,12 @@ class ElaChatMessage:
             "status": self.status,
             "created_at": _as_float(self.created_at),
             "title": self.title,
+            "agent": self.agent,
+            "model": self.model,
+            "model_variant": self.model_variant,
             "timestamp": self.timestamp,
+            "delivery": self.delivery,
+            "mentions": [item.toDict() for item in self.mentions],
             "reasoning": self.reasoning,
             "reasoning_ms": _as_float(self.reasoning_ms),
             "duration_ms": _as_float(self.duration_ms),
@@ -1145,7 +1312,16 @@ class ElaChatMessage:
             ),
             created_at=_as_float(data.get("created_at")),
             title=_as_str(data.get("title")),
+            agent=_as_str(data.get("agent")),
+            model=_as_str(data.get("model")),
+            model_variant=_as_str(data.get("model_variant")),
             timestamp=_as_str(data.get("timestamp")),
+            delivery=_as_str(data.get("delivery")),
+            mentions=tuple(
+                item
+                for item in _as_tuple_of(data.get("mentions"), ElaChatMention.fromDict)
+                if item is not None and item.isValid
+            ),
             duration_ms=_as_float(data.get("duration_ms")),
             attachments=_as_tuple_of(
                 data.get("attachments"), ElaChatAttachment.fromDict

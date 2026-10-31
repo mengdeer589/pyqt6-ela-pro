@@ -162,7 +162,12 @@ class TestGapBreaks:
         chart.setOption(_option(t, y))
         r = _render(chart)
         assert _none_count(r) == 1, "可见的记录中断未断开"
-        assert -1 in r._point_idx, "断点占位下标未插入"
+        # 断点占位必须保持 _point_idx 升序（valueAtIndex 用二分查最近点）；
+        # 占位是「重复前一下标 + 对应 None 点」。
+        assert r._point_idx == sorted(r._point_idx), "断点占位破坏了 _point_idx 升序"
+        gap = r._points.index(None)
+        assert 0 < gap < len(r._point_idx)
+        assert r._point_idx[gap] == r._point_idx[gap - 1]
 
     def test_subpixel_gap_kept_connected(self, make):
         """10s 中断在全景里 <1px → 数据侧检测到但屏幕侧不断开。"""

@@ -76,7 +76,11 @@ def _match_option_index(new_item, old_list: list, index: int) -> int:
             for i, old in enumerate(old_list):
                 if isinstance(old, dict) and old.get("name") == new_name:
                     return i
-    return index if 0 <= index < len(old_list) else -1
+    # 序号回退只认 dict 旧项：``None`` / 数字是「空洞」，交给调用方填洞，
+    # 否则 ``_deep_merge(None, ...)`` 直接抛 TypeError（JSON 里的 null 可达）。
+    if 0 <= index < len(old_list) and isinstance(old_list[index], dict):
+        return index
+    return -1
 
 
 def _merge_option_array(old_list: list, new_list: list) -> list:
@@ -92,15 +96,26 @@ def _merge_option_array(old_list: list, new_list: list) -> list:
     if any(not isinstance(item, dict) for item in new_list):
         # 标量数组无法逐项合并 → 整体替换（逐项按引用持有，见 ``_hold_value``）。
         return [_hold_value(i) for i in new_list]
-    result = [_hold_value(i) for i in old_list]
+    # **旧项一律按引用复用、匹配项就地合并**：``old_list`` 就是 ``_option``
+    # 里的内部列表（首次写入时已经深拷贝过），再拷一遍纯属浪费 —— 而
+    # ``[x,y]`` 形式的结构化数据（时间序列 / 散点 / 热力）不走
+    # ``ElaNumericBuffer``，这里每拷一次就是百万级 Python 对象的复制。
+    # 实测 500k 点：原先「旧列表一次 + 匹配项一次 + 新数据一次」共 3 份，
+    # 合并一次 1834ms；改为按引用后只剩新数据这一份。
+    result = list(old_list)
     used = set()
     for i, new_item in enumerate(new_list):
         idx = _match_option_index(new_item, old_list, i)
         if idx >= 0 and idx not in used:
-            merged = _hold_value(old_list[idx])
+            merged = old_list[idx]
             _deep_merge(merged, new_item)
             result[idx] = _normalize_series_entry(merged)
             used.add(idx)
+        elif i < len(result) and not isinstance(result[i], dict) and i not in used:
+            # 旧项是 ``None`` / 数字（JSON 里的 ``null`` 很常见）：填洞而不是
+            # 追加，否则 ``series`` 里会多出一个被 ``_rebuild`` 丢掉的空位。
+            result[i] = _copy_series_entry(new_item)
+            used.add(i)
         else:
             result.append(_copy_series_entry(new_item))
     return result

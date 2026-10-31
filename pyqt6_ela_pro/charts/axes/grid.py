@@ -303,12 +303,16 @@ class GridCoord(Coord):
                     xs[xi].append(float(x))
         for i, axis in enumerate(self.y_axes):
             if axis.type in ("value", "log"):
+                # 新数据到了：上一轮的「真实全量」作废，等系列 layout 重算
+                # （``_fix_value_axis`` 会写入含堆叠 / 高低价的正确范围）。
+                axis._data_extent = None
                 vals = ys[i]
                 axis.setExtent(min(vals), max(vals)) if vals else axis.setExtent(
                     0.0, 1.0
                 )
         for i, axis in enumerate(self.x_axes):
             if axis.type in ("value", "log"):
+                axis._data_extent = None
                 vals = xs[i]
                 axis.setExtent(min(vals), max(vals)) if vals else axis.setExtent(
                     0.0, 1.0
@@ -628,12 +632,12 @@ class GridCoord(Coord):
                 if horizontal:
                     py = axis.map(tv, self.plot.bottom(), self.plot.top())
                     out.append(
-                        (self.plot.left(), py, axis.formatTickLabel(tv, i), tv)
+                        (self.plot.left(), py, axis.formatTickLabel(tv, i), i)
                     )
                 else:
                     px = axis.map(tv, self.plot.left(), self.plot.right())
                     out.append(
-                        (px, self.plot.bottom(), axis.formatTickLabel(tv, i), tv)
+                        (px, self.plot.bottom(), axis.formatTickLabel(tv, i), i)
                     )
         return out
 
@@ -799,17 +803,37 @@ class GridCoord(Coord):
                 rotate = 0.0
             line = self._axis_line_pos(axis, False)
             top_side = axis.position == "top"
-            for px, py, label, idx in self._axis_positions(
-                axis, False, self._interval_step(axis, False, "axisLabel")
-            ):
+            positions = list(
+                self._axis_positions(
+                    axis, False, self._interval_step(axis, False, "axisLabel")
+                )
+            )
+            # 标签框宽度按**实测文本宽**算，上限取相邻刻度间距（否则会压到
+            # 相邻标签）。原先固定 80px，长日期标签两端被硬裁、且无省略号。
+            spacing = 80.0
+            if len(positions) >= 2:
+                xs = sorted({round(pos[0], 3) for pos in positions})
+                gaps = [b - a for a, b in zip(xs, xs[1:]) if b > a]
+                if gaps:
+                    spacing = min(gaps)
+            for px, py, label, idx in positions:
                 if not axis.labelShownAt(idx, label):
                     continue
                 p.setPen(color)
                 if abs(rotate) < 1e-6:
+                    text_w = fm.horizontalAdvance(label)
+                    box_w = max(20.0, min(max(40.0, text_w + 4.0), spacing))
+                    text = (
+                        label
+                        if text_w <= box_w - 2.0
+                        else fm.elidedText(
+                            label, Qt.TextElideMode.ElideRight, int(box_w - 2.0)
+                        )
+                    )
                     rect = (
-                        QRectF(px - 40, line - 5 - fm.height(), 80, fm.height())
+                        QRectF(px - box_w / 2, line - 5 - fm.height(), box_w, fm.height())
                         if top_side
-                        else QRectF(px - 40, line + 5, 80, fm.height())
+                        else QRectF(px - box_w / 2, line + 5, box_w, fm.height())
                     )
                     p.drawText(
                         rect,
@@ -819,7 +843,7 @@ class GridCoord(Coord):
                             if top_side
                             else Qt.AlignmentFlag.AlignTop
                         ),
-                        label,
+                        text,
                     )
                 else:
                     center_y = (
@@ -827,11 +851,12 @@ class GridCoord(Coord):
                         if top_side
                         else line + 5 + fm.height() / 2
                     )
+                    box_w = max(120.0, fm.horizontalAdvance(label) + 4.0)
                     p.save()
                     p.translate(px, center_y)
                     p.rotate(rotate)
                     p.drawText(
-                        QRectF(-60, -fm.height() / 2, 120, fm.height()),
+                        QRectF(-box_w / 2, -fm.height() / 2, box_w, fm.height()),
                         Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignVCenter,
                         label,
                     )

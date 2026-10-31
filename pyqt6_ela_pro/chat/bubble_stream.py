@@ -165,6 +165,7 @@ class _BubbleStreamMixin:
         self._status = (
             status if status in ElaChatStatusType.All else ElaChatStatusType.Done
         )
+        self._meta.setInterrupted(self._status == ElaChatStatusType.Stopped)
         self._sync_header_status()
         self._sync_footer()
         if self._status != ElaChatStatusType.Streaming:
@@ -194,6 +195,10 @@ class _BubbleStreamMixin:
         ``Streaming``（"生成中…"）。``Queued`` 只是展示态，气泡与分段的
         ``_status`` 始终是 ``Streaming``（持久化 / journal 语义不变）。
         """
+        if getattr(self, "_pending_delivery", ""):
+            suffix = " · 插话" if self._pending_delivery == "steer" else ""
+            self._header.setStatusText(f"待发送{suffix}", ElaChatStatusType.Queued)
+            return
         if self._status == ElaChatStatusType.Streaming and not self._generation_started:
             self._header.setStatusText(
                 _STATUS_TEXTS[ElaChatStatusType.Queued], ElaChatStatusType.Queued

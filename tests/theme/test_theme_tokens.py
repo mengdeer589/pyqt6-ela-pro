@@ -318,13 +318,14 @@ class TestShadowHelpers:
             qapp.processEvents()
 
     def test_confirm_dialog_window_includes_margin(self, qapp):
-        from pyqt6_ela_pro.ela_confirm_dialog import ElaConfirmDialog
+        from pyqt6_ela_pro.ela_confirm_dialog import _BOX_WIDTH, ElaConfirmDialog
 
         dlg = ElaConfirmDialog()
         try:
             sm = dlg._shadow_margin
             assert sm > 0
-            assert dlg.minimumWidth() == 280 + sm * 2
+            assert dlg.width() == _BOX_WIDTH + sm * 2
+            assert dlg.width() - 2 * sm == _BOX_WIDTH
         finally:
             dlg.deleteLater()
             qapp.processEvents()

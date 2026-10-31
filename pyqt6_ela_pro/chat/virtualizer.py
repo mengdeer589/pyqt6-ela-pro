@@ -19,6 +19,7 @@ from .view_metrics import (
     _SUSPEND_INTERVAL_MS,
     _SUSPEND_MARGIN_VIEWPORTS,
     _VIRTUAL_MATERIALIZE_BUDGET,
+    _VIRTUAL_MATERIALIZE_BUDGET_MS,
     _VIRTUAL_WINDOW_MARGIN_RATIOS,
 )
 from .view_parts import DeferredPlaceholder
@@ -77,21 +78,27 @@ class ChatVirtualizer:
             self._view._virtual_order
         ) == len(self._view._messages):
             return
-        order = []
+        if self._view._virtual_order_dirty or len(self._view._virtual_order) != len(
+            self._view._messages
+        ):
+            order = []
+            index_by_id = {}
+            for index, message in enumerate(self._view._messages):
+                order.append(message.id)
+                index_by_id[message.id] = index
+            self._view._virtual_order = order
+            self._view._virtual_index = index_by_id
+            self._view._virtual_order_dirty = False
+        order = self._view._virtual_order
         prefix = []
         total = 0
-        for index, message in enumerate(self._view._messages):
+        for index, messageId in enumerate(order):
             if index:
                 total += _MESSAGE_SPACING
-            order.append(message.id)
             prefix.append(total)
-            total += self._view._virtual_height(message.id)
+            total += self._view._virtual_height(messageId)
         prefix.append(total)
-        self._view._virtual_order = order
         self._view._virtual_prefix = prefix
-        self._view._virtual_index = {
-            messageId: index for index, messageId in enumerate(order)
-        }
         self._view._virtual_prefix_dirty = False
 
     def _init_virtual_spacers(self) -> None:
@@ -132,6 +139,8 @@ class ChatVirtualizer:
             False,
             deferred,
             insert_index=1 + position,
+            identity=(message.agent, message.model, message.model_variant),
+            mentions=message.mentions,
         )
         self._view._virtual_bubble_ids.insert(position, messageId)
         if message.parts:
@@ -297,46 +306,47 @@ class ChatVirtualizer:
                     self._view._dematerialize_virtual_bubble(messageId)
                 mat_first, mat_last = core_first, core_first - 1
             budget = _VIRTUAL_MATERIALIZE_BUDGET
-            while budget > 0 and mat_first > core_first:
-                candidate = mat_first - 1
+            deadline = time.perf_counter() + _VIRTUAL_MATERIALIZE_BUDGET_MS / 1000.0
+            timed_out = False
+
+            def _materialize(candidate: int) -> bool:
+                nonlocal budget, timed_out
                 bubble = self._view._materialize_virtual_bubble(
                     self._view._virtual_order[candidate]
                 )
                 if bubble is None:
+                    return False
+                budget -= 1
+                if time.perf_counter() >= deadline:
+                    timed_out = True
+                return True
+
+            while budget > 0 and not timed_out and mat_first > core_first:
+                candidate = mat_first - 1
+                if not _materialize(candidate):
                     break
                 mat_first = candidate
-                budget -= 1
-            while budget > 0 and mat_last < core_last:
+            while budget > 0 and not timed_out and mat_last < core_last:
                 candidate = mat_last + 1
-                bubble = self._view._materialize_virtual_bubble(
-                    self._view._virtual_order[candidate]
-                )
-                if bubble is None:
+                if not _materialize(candidate):
                     break
                 mat_last = candidate
-                budget -= 1
-            while budget > 0 and (mat_first > first or mat_last < last):
+            while (
+                budget > 0 and not timed_out and (mat_first > first or mat_last < last)
+            ):
                 if mat_first > first:
                     candidate = mat_first - 1
-                    bubble = self._view._materialize_virtual_bubble(
-                        self._view._virtual_order[candidate]
-                    )
-                    if bubble is None:
+                    if not _materialize(candidate):
                         break
                     mat_first = candidate
-                    budget -= 1
-                if budget > 0 and mat_last < last:
+                if budget > 0 and not timed_out and mat_last < last:
                     candidate = mat_last + 1
-                    bubble = self._view._materialize_virtual_bubble(
-                        self._view._virtual_order[candidate]
-                    )
-                    if bubble is None:
+                    if not _materialize(candidate):
                         break
                     mat_last = candidate
-                    budget -= 1
-            if budget <= 0 and (mat_first > first or mat_last < last):
-                # 预算用完但窗口还没铺满：下一帧继续（没铺满时不会连发，
-                # 避免物化失败时变成 0ms 空转）
+            if (budget <= 0 or timed_out) and (mat_first > first or mat_last < last):
+                # 条数 / 时间预算用完但窗口还没铺满：下一帧继续（没铺满时不会
+                # 连发，避免物化失败时变成 0ms 空转）
                 self._view._virtual_window_timer.start(0)
             for messageId in list(self._view._virtual_bubble_ids):
                 bubble = self._view._bubbles.get(messageId)
@@ -433,6 +443,8 @@ class ChatVirtualizer:
             False,
             deferred,
             insert_index=index,
+            identity=(message.agent, message.model, message.model_variant),
+            mentions=message.mentions,
         )
         if placeholder is not None:
             self._view._content_layout.removeWidget(placeholder)

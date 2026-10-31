@@ -167,6 +167,8 @@ class ElaChartWidget(
         self._host_components: list = []
         #: 选中态：系列名 → 数据下标集合（ECharts ``selectedMode``）
         self._selection: dict = {}
+        #: 图例隐藏的数据项（饼 / 漏斗按数据项开关）：name → visible
+        self._item_state: dict = {}
         #: 选中态版本（进系列层缓存键）
         self._selection_epoch = 0
         #: 上次 dataZoom option 段的快照：用于判断用户是否显式改了窗口
@@ -222,18 +224,40 @@ class ElaChartWidget(
         elif names is not None:
             names = [str(names)]
         else:
-            names = [r.name for r in self._series]
+            # 无 name = 全部图例条目（饼 / 漏斗按数据项，其余按系列名）
+            names = []
+            for r in self._series:
+                getter = getattr(r, "legendItems", None)
+                if callable(getter):
+                    names.extend([name for name, _ in getter()])
+                else:
+                    names.append(r.name)
         if not names:
             return False
         for name in names:
+            is_series = any(r.name == name for r in self._series)
             if action == "legendSelect":
-                self._setSeriesVisible(name, True)
+                if is_series:
+                    self._setSeriesVisible(name, True)
+                else:
+                    self._setDataItemVisible(name, True)
             elif action == "legendUnSelect":
-                self._setSeriesVisible(name, False)
+                if is_series:
+                    self._setSeriesVisible(name, False)
+                else:
+                    self._setDataItemVisible(name, False)
             elif action == "legendAllSelect":
-                self._setSeriesVisible(name, True)
+                if is_series:
+                    self._setSeriesVisible(name, True)
+                else:
+                    self._setDataItemVisible(name, True)
             elif action == "legendInverseSelect":
-                self._setSeriesVisible(name, not self._seriesVisible(name))
+                if is_series:
+                    self._setSeriesVisible(name, not self._seriesVisible(name))
+                else:
+                    self._setDataItemVisible(
+                        name, not bool(self._item_state.get(name, True))
+                    )
             else:  # legendToggleSelect
                 self._legendSelectToggle(name)
         if action != "legendToggleSelect":
@@ -243,7 +267,12 @@ class ElaChartWidget(
             # 取消选中后宿主 UI 只更新了一项」。
             # ``legendToggleSelect`` 走 ``_legendSelectToggle``，它自己发。
             for name in names:
-                self.legendToggled.emit(name, self._seriesVisible(name))
+                visible = (
+                    self._seriesVisible(name)
+                    if any(r.name == name for r in self._series)
+                    else bool(self._item_state.get(name, True))
+                )
+                self.legendToggled.emit(name, visible)
         self.update()
         return True
 
@@ -421,6 +450,7 @@ class ElaChartWidget(
         opts：``type``（``"png"`` / ``"jpeg"``）/ ``pixelRatio`` /
         ``backgroundColor``；``excludeComponents`` 暂不支持（忽略）。
         """
+        self._ensure_alive()
         opts = dict(opts or {})
         return self._exporter.data_url(opts)
 
@@ -428,8 +458,10 @@ class ElaChartWidget(
         """保存当前图表（``path=None`` 弹保存对话框）。
 
         格式按 ``format`` 或扩展名判定：``svg`` → 矢量导出（``QSvgGenerator``，
-        矢量图元 + 位图符号内嵌）；其余走 PNG。返回实际保存路径，未保存返回 ``""``。
+        矢量图元 + 位图符号内嵌）；``jpg`` / ``jpeg`` → JPEG（自动压到主题底）；
+        其余走 PNG。返回实际保存路径，未保存返回 ``""``。
         """
+        self._ensure_alive()
         target = path
         return self._exporter.save_image(target, format=format)
 
@@ -467,6 +499,16 @@ class ElaChartWidget(
         """实例是否已 dispose。"""
         return bool(self._disposed)
 
+    def _ensure_alive(self) -> None:
+        """公开 API 的 dispose 守卫（对齐 ECharts：已销毁实例再调用直接报错）。
+
+        ``dispose()`` 之后控件仍在 ``deleteLater`` 队列里，若继续 ``setOption``
+        会重建 Title / Legend / DataZoom 并往待删控件上装事件过滤器 ——
+        「看起来还活着」的假象比抛错更难排查。
+        """
+        if self._disposed:
+            raise RuntimeError("ElaChartWidget 已 dispose，不能再调用图表 API")
+
     def _option_ref(self) -> dict:
         """当前 option 的内部引用（无拷贝；仅包内部热路径使用）。"""
         return self._option
@@ -477,12 +519,17 @@ class ElaChartWidget(
         self._series_state[name] = bool(visible)
         # 回写 option：_rebuild 每次都会重放 legend.selected，若不同步，用户点了
         # 图例之后一次常规的数据刷新（setOption({"series": ...}) 合并）就会把
-        # 显隐状态悄悄还原成旧值。
+        # 显隐状态悄悄还原成旧值。**dict / 数组两种写法都要写**（多图例是
+        # 公开支持的写法，只认 dict 时用户开关会被下一次 setOption 静默还原）。
         legend_opt = self._option.get("legend")
-        if isinstance(legend_opt, dict) and isinstance(
-            legend_opt.get("selected"), dict
-        ):
-            legend_opt["selected"][name] = bool(visible)
+        legend_entries = (
+            legend_opt
+            if isinstance(legend_opt, list)
+            else ([legend_opt] if isinstance(legend_opt, dict) else [])
+        )
+        for entry in legend_entries:
+            if isinstance(entry, dict) and isinstance(entry.get("selected"), dict):
+                entry["selected"][name] = bool(visible)
         for r in self._series:
             if r.name == name:
                 r.visible = bool(visible)
@@ -499,8 +546,14 @@ class ElaChartWidget(
         return bool(self._series_state.get(str(name), True))
 
     def _legendSelectToggle(self, name: str) -> None:
-        """图例点击：切换单个系列（selectedMode=single 时互斥）。"""
+        """图例点击：切换单个系列（selectedMode=single 时互斥）。
+
+        饼 / 漏斗的图例条目是**数据项名**，不走系列显隐，而是切换数据项。
+        """
         name = str(name)
+        if not any(r.name == name for r in self._series):
+            self._toggleDataItem(name)
+            return
         new_visible = not self._seriesVisible(name)
         if new_visible and self.legend.selectedMode() == "single":
             for r in self._series:
@@ -509,6 +562,45 @@ class ElaChartWidget(
         self._setSeriesVisible(name, new_visible)
         self.legendToggled.emit(name, new_visible)
         self.update()
+
+    def _toggleDataItem(self, name: str) -> None:
+        """切换饼 / 漏斗的数据项显隐（图例按数据项名开关）。"""
+        name = str(name)
+        self._setDataItemVisible(name, not bool(self._item_state.get(name, True)))
+
+    def _setDataItemVisible(self, name: str, visible: bool) -> None:
+        """设置饼 / 漏斗数据项显隐（不切换）。"""
+        name = str(name)
+        self._item_state[name] = bool(visible)
+        self._write_legend_selected(name, visible)
+        hidden = {
+            str(item)
+            for item, shown in self._item_state.items()
+            if not shown
+        }
+        for renderer in self._series:
+            setter = getattr(renderer, "setHiddenItems", None)
+            if not callable(setter):
+                continue
+            try:
+                setter(hidden)
+            except Exception:
+                pass
+        self._layout_key = None
+        self.update()
+        self.legendToggled.emit(name, bool(visible))
+
+    def _write_legend_selected(self, name: str, visible: bool) -> None:
+        """把单项显隐写回 ``legend.selected``（dict / 数组两种写法）。"""
+        legend_opt = self._option.get("legend")
+        entries = (
+            legend_opt
+            if isinstance(legend_opt, list)
+            else ([legend_opt] if isinstance(legend_opt, dict) else [])
+        )
+        for entry in entries:
+            if isinstance(entry, dict) and isinstance(entry.get("selected"), dict):
+                entry["selected"][name] = bool(visible)
 
     # ------------------------------------------------------------ 交互开关
     #: 可开关的交互功能（与组件 optionKey 对齐；tooltip / legend 由核心实现）

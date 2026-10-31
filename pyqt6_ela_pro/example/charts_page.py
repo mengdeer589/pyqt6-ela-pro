@@ -330,6 +330,11 @@ class ChartsPage(ExamplePage):
             workspace["built"] = True
             getattr(self, workspace["builder"])(workspace["layout"])
             workspace["layout"].addStretch()
+            # 惰性新建的工作区要继承全局「动效」开关（否则在概览里关掉后
+            # 切到尚未构建的画廊，27 张图仍照常播入场动画）。
+            if not self._anim_enabled:
+                for chart in self._active_charts():
+                    chart.setOption({"animation": False})
         self._stack.setCurrentIndex(index)
         if self._pivot.getCurrentIndex() != index:
             self._pivot_syncing = True
@@ -384,18 +389,20 @@ class ChartsPage(ExamplePage):
 
     def _buildWorkspaceGallery(self, layout):
         self._createSectionHeader("=== 系列画廊 ===").hide()
-        methods = (
-            self._demoGalleryCartesian,
-            self._demoGalleryPoints,
-            self._demoGalleryDistribution,
-            self._demoGalleryProportion,
-            self._demoGalleryHierarchy,
-            self._demoGalleryCoordinates,
-        )
-        for position, method in enumerate(methods):
-            method(layout)
-            if position + 1 < len(methods):
-                layout.addSpacing(24)
+        # 显式逐个调用（不要用元组 + for 循环）：示例页的「节标题守卫」只沿
+        # Call 节点展开，元组里的 bound method 不是 Call，六个节标题会整段
+        # 漏检（重复 / 撞号都发现不了）。
+        self._demoGalleryCartesian(layout)
+        layout.addSpacing(24)
+        self._demoGalleryPoints(layout)
+        layout.addSpacing(24)
+        self._demoGalleryDistribution(layout)
+        layout.addSpacing(24)
+        self._demoGalleryProportion(layout)
+        layout.addSpacing(24)
+        self._demoGalleryHierarchy(layout)
+        layout.addSpacing(24)
+        self._demoGalleryCoordinates(layout)
 
     def _buildWorkspaceInteraction(self, layout):
         self._createSectionHeader("=== 交互 ===").hide()
@@ -1277,14 +1284,32 @@ class ChartsPage(ExamplePage):
 
     def _onRandomChart(self, chart):
         """按各系列类型随机化 data 并播放过渡插值动画（setOption 合并语义）。"""
+        # 大数据图有自己的生成 / 降采样控制；`getOption()` 会把百万点物化
+        # 一遍（5M 点约十几秒），这里直接跳过。
+        if chart is getattr(self, "_bigChart", None):
+            return
         opt = chart.getOption()
         series = opt.get("series") or []
         for s in series:
             if isinstance(s, dict):
-                self._randomizeSeries(s)
+                self._randomizeSeries(s, chart)
         chart.setOption({"series": series})
 
-    def _randomizeSeries(self, s: dict) -> None:
+    def _visual_max(self, chart, default: float) -> float:
+        """取图表 visualMap.max（随机值要对齐色带，否则整片顶色）。"""
+        try:
+            vm = chart._option_ref().get("visualMap")
+        except Exception:
+            vm = None
+        if isinstance(vm, dict):
+            raw = vm.get("max")
+            try:
+                return max(1.0, float(raw))
+            except (TypeError, ValueError, OverflowError):
+                pass
+        return float(default)
+
+    def _randomizeSeries(self, s: dict, chart=None) -> None:
         t = str(s.get("type") or "line")
         data = s.get("data")
         if not isinstance(data, list) or not data:
@@ -1324,9 +1349,10 @@ class ChartsPage(ExamplePage):
         elif t == "boxplot":
             s["data"] = [sorted(random.randint(1, 30) for _ in range(5)) for _ in data]
         elif t == "map":
+            vmax = max(1, int(self._visual_max(chart, 300)))
             for it in data:
                 if isinstance(it, dict):
-                    it["value"] = random.randint(1, 300)
+                    it["value"] = random.randint(1, vmax)
         elif t == "themeRiver":
             s["data"] = [[d[0], random.randint(3, 20), d[2]] for d in data]
         elif t == "sankey":
@@ -1355,13 +1381,24 @@ class ChartsPage(ExamplePage):
                 if isinstance(row, (list, tuple))
             ]
         elif t == "heatmap":
+            vmax = max(1, int(self._visual_max(chart, 24)))
             out = []
             for d in data:
                 if isinstance(d, dict):
-                    # 日历热力的 {value: [日期, 值]}：形状认不出就原样留着
-                    out.append(d)
+                    # 日历热力的 {value: [日期, 值]}：只重掷值，保留日期与样式
+                    v = d.get("value")
+                    if isinstance(v, (list, tuple)) and len(v) >= 2:
+                        out.append(
+                            {
+                                **d,
+                                "value": [v[0], random.randint(0, vmax)]
+                                + list(v[2:]),
+                            }
+                        )
+                    else:
+                        out.append(d)
                 elif isinstance(d, (list, tuple)) and len(d) >= 2:
-                    out.append([d[0], d[1], random.randint(0, 24)])
+                    out.append([d[0], d[1], random.randint(0, vmax)])
             if out:
                 s["data"] = out
         elif t == "lines":
@@ -1416,6 +1453,11 @@ class ChartsPage(ExamplePage):
         on = bool(chart.interactiveEnabled())
         chart.setInteractive(not on)
         btn.setText("交互: 关" if on else "交互: 开")
+        # 同一工作区里点某张图的按钮时，顶部总开关也要跟着同步（它读的是
+        # charts[0] 的状态；原先只在切工作区时刷新）。
+        charts = self._active_charts()
+        if charts and chart is charts[0]:
+            self._interact_btn.setText("交互: 关" if on else "交互: 开")
         if not on and chart is getattr(self, "_interactChart", None):
             for _key, box in getattr(self, "_feature_boxes", ()):
                 box.setChecked(True)
@@ -2556,7 +2598,9 @@ class ChartsPage(ExamplePage):
             ]
             series.append({"type": "line", "name": f"曲线{j + 1}", "data": data})
         self._big_series = series
-        self._bigChart.setOption(self._bigOption())
+        # **必须 notMerge**：合并语义会保留未匹配的旧系列（3 条改 1 条后
+        # 另外两条仍在），而这里 `_bigOption()` 是自包含的整份配置。
+        self._bigChart.setOption(self._bigOption(), notMerge=True)
         self._updateBigStatus()
 
     def _updateBigStatus(self):
@@ -2567,6 +2611,12 @@ class ChartsPage(ExamplePage):
         )
         if r is None:
             return
+        get_stats = getattr(r, "samplingStats", None)
+        stats = (
+            get_stats()
+            if callable(get_stats)
+            else {"dataLen": 0, "drawn": 0, "sampled": False}
+        )
         # 当前 x 轴显示范围（真实值域）与 dataZoom 百分比窗口
         coord = self._bigChart.primaryCoord()
         range_text = ""
@@ -2583,8 +2633,8 @@ class ChartsPage(ExamplePage):
             zoom_text = f" · 窗口 {dz.start:.0f}%~{dz.end:.0f}%"
         text = (
             f"{len(self._bigChart.seriesRenderers)} 条曲线 · "
-            f"首条原始 {r._data_len} 点 → 绘制 {len(r._points)} 点"
-            + ("（已降采样）" if r._sampled else "（全量）")
+            f"首条原始 {stats['dataLen']} 点 → 绘制 {stats['drawn']} 点"
+            + ("（已降采样）" if stats["sampled"] else "（全量）")
             + range_text
             + zoom_text
         )
@@ -2847,6 +2897,10 @@ class ChartsPage(ExamplePage):
 
     def _onExportDataUrl(self):
         """getDataURL 演示：导出为文件并提示尺寸。"""
+        import base64
+        import os
+        import tempfile
+
         from PyQt6.QtCore import QBuffer, QIODevice
         from PyQt6.QtGui import QImage
 
@@ -2856,14 +2910,22 @@ class ChartsPage(ExamplePage):
         payload = url.split(",", 1)[-1]
         image = QImage()
         buffer = QBuffer()
-        buffer.setData(__import__("base64").b64decode(payload))
+        buffer.setData(base64.b64decode(payload))
         buffer.open(QIODevice.OpenModeFlag.ReadOnly)
         image.loadFromData(buffer.data())
         buffer.close()
         if image.isNull():
             return
-        target = "chart_dataurl.png"
-        image.save(target, "PNG")
+        # 写到临时目录（进程 CWD 可能只读）；save 的返回值必须判，
+        # 失败不能谎报「已保存」。
+        target = os.path.join(tempfile.gettempdir(), "chart_dataurl.png")
+        try:
+            saved = image.save(target, "PNG")
+        except Exception:
+            saved = False
+        if not saved:
+            self._interactChart.setToolTip("getDataURL 保存失败（目标目录不可写）")
+            return
         self._interactChart.setToolTip(f"getDataURL 已保存：{target}")
 
     # ── 09 Plotly 对齐的交互 ─────────────────────────────────────────────
@@ -2982,17 +3044,23 @@ class ChartsPage(ExamplePage):
         chart.itemClicked.connect(_on_item)
 
         def _export_svg() -> None:
-            """getDataURL(type="svg") → 落盘为 chart_dataurl.svg（矢量）。"""
+            """getDataURL(type="svg") → 落盘为临时目录里的 chart_dataurl.svg。"""
             import base64
             import pathlib
+            import tempfile
 
             url = chart.getDataURL({"type": "svg"})
             if not url:
                 status.setText("导出 SVG：失败（QtSvg 不可用）")
                 return
-            payload = base64.b64decode(url.split(",", 1)[-1])
-            target = pathlib.Path("chart_dataurl.svg")
-            target.write_bytes(payload)
+            try:
+                payload = base64.b64decode(url.split(",", 1)[-1])
+                target = pathlib.Path(tempfile.gettempdir()) / "chart_dataurl.svg"
+                target.write_bytes(payload)
+            except Exception as exc:  # noqa: BLE001
+                # 槽内未捕获异常会穿出 Qt 边界（0xC0000409）；只读目录可达。
+                status.setText(f"导出 SVG：失败（{exc}）")
+                return
             status.setText(f"getDataURL(type=svg)：{len(payload)} 字节 → {target}")
 
         controls = QHBoxLayout()

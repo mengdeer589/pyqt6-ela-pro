@@ -265,8 +265,12 @@ class _BubbleTextMixin:
     def setText(self, text: str) -> None:
         """设置消息文本（助手消息整体替换当前正文段并走 Markdown 渲染）。"""
         if self._role != ElaChatRoleType.Assistant:
+            self._user_text = str(text or "")
             if self._label is not None:
-                self._label.setText(text)
+                if self._role == ElaChatRoleType.User:
+                    self._render_user_text()
+                else:
+                    self._label.setText(self._user_text)
                 self._update_max_width()
             return
         self._ensure_parts_materialized()
@@ -309,8 +313,12 @@ class _BubbleTextMixin:
         if not chunk:
             return
         if self._role != ElaChatRoleType.Assistant:
+            self._user_text += chunk
             if self._label is not None:
-                self._label.setText(self._label.text() + chunk)
+                if self._role == ElaChatRoleType.User:
+                    self._render_user_text()
+                else:
+                    self._label.setText(self._user_text)
                 self._update_max_width()
             return
         if self._current_text_id is None:

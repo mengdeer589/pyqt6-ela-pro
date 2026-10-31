@@ -9,6 +9,7 @@ from uuid import uuid4
 
 from .blocks import (
     CompactionSeparator,
+    ElaChatNotice,
     SteerNotice,
 )
 from .message import (
@@ -20,6 +21,35 @@ from .message import (
 
 class _BubbleMiscMixin:
     """方法组 mixin：状态由 ``ElaChatBubble.__init__`` 建立。"""
+
+    def addNotice(
+        self,
+        noticeType: str,
+        text: str = "",
+        detail: str = "",
+        partId: Optional[str] = None,
+    ) -> str:
+        """追加一条时间线通知（模型 / agent / 目录切换、中断等），返回分段 id。"""
+        self._ensure_parts_materialized()
+        partId = partId or uuid4().hex[:12]
+        widget = ElaChatNotice(
+            noticeType,
+            text,
+            detail,
+            self._parts_container or self._content or self,
+        )
+        part = ElaChatPart(
+            id=partId,
+            kind=ElaChatPartKindType.Notice,
+            text=text or "",
+            status=ElaChatStatusType.Done,
+            notice_type=noticeType or "",
+            detail=detail or "",
+            step=self._step_index,
+        )
+        self._append_part(part, widget)
+        self._apply_part_visibility(partId)
+        return partId
 
     def addSteerNotice(self, text: str, partId: Optional[str] = None) -> str:
         """追加一条插话回执，返回分段 id。
@@ -43,7 +73,11 @@ class _BubbleMiscMixin:
         return partId
 
     def beginCompaction(
-        self, reason: str = "auto", partId: Optional[str] = None
+        self,
+        reason: str = "auto",
+        partId: Optional[str] = None,
+        *,
+        queued: bool = False,
     ) -> str:
         """开始一次上下文压缩，返回分段 id。
 
@@ -56,12 +90,13 @@ class _BubbleMiscMixin:
         self._ensure_parts_materialized()
         self._mark_generation_started()
         partId = partId or uuid4().hex[:12]
+        status = ElaChatStatusType.Queued if queued else ElaChatStatusType.Streaming
         widget = CompactionSeparator(self._parts_container or self._content or self)
-        widget.setCompactionStatus(ElaChatStatusType.Streaming)
+        widget.setCompactionStatus(status)
         part = ElaChatPart(
             id=partId,
             kind=ElaChatPartKindType.Compaction,
-            status=ElaChatStatusType.Streaming,
+            status=status,
             step=self._step_index,
         )
         self._append_part(part, widget)
@@ -80,18 +115,27 @@ class _BubbleMiscMixin:
             widget.setSummary(part.text + chunk)
 
     def endCompaction(
-        self, partId: str, status: str = ElaChatStatusType.Done, historyCount: int = 0
+        self,
+        partId: str,
+        status: str = ElaChatStatusType.Done,
+        historyCount: int = 0,
+        *,
+        stats=None,
     ) -> None:
-        """结束压缩（``status`` 非 Done 时视为失败，摘要就地落定）。"""
+        """结束压缩（``status`` 非 Done 时视为失败 / 取消，摘要就地落定）。"""
         if not partId:
             return
         part = self._find_part(partId)
         if part is None or part.kind != ElaChatPartKindType.Compaction:
             return
         self._materialize_part(partId)
-        self._replace_part(partId, part.withStatus(status))
+        part = part.withStatus(status).withHistoryCount(historyCount)
+        if stats is not None:
+            part = part.withStats(stats)
+        self._replace_part(partId, part)
         widget = self._part_widgets.get(partId)
         if isinstance(widget, CompactionSeparator):
             widget.setSummary(part.text)
             widget.setHistoryCount(historyCount)
             widget.setCompactionStatus(status)
+            widget.setStats(stats)

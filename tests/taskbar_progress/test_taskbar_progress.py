@@ -70,7 +70,7 @@ def window(make):
 @pytest.fixture
 def unavailable():
     """模拟「没有 comtypes / COM 创建失败」：不建对象、不挂接。"""
-    with patch.object(tp, "_create_taskbar", return_value=None):
+    with patch.object(tp, "_create_taskbar", return_value=(None, "测试不可用")):
         yield
 
 
@@ -78,7 +78,7 @@ def unavailable():
 def attached(make, window):
     """已挂接状态：COM 层替换为 FakeTaskbar，hwnd 固定为 4242。"""
     fake = FakeTaskbar()
-    with patch.object(tp, "_create_taskbar", return_value=fake):
+    with patch.object(tp, "_create_taskbar", return_value=(fake, "")):
         tb = make(ElaTaskbarProgress, window)
         tb._ensure_attached()
         tb._attach_handle(FakeHandle())
@@ -139,7 +139,9 @@ def test_property_defaults(make, window, prop, expected):
 
 
 @pytest.mark.parametrize("method", NOOP_METHODS)
-def test_public_methods_create_nothing_when_unavailable(make, window, unavailable, method):
+def test_public_methods_create_nothing_when_unavailable(
+    make, window, unavailable, method
+):
     """COM 不可用时不建对象、不起轮询定时器（空操作可断言）。
 
     「未改动状态就不碰 COM」的早退路径（同值 setValue / 未暂停 resume / 已隐藏
@@ -183,7 +185,7 @@ def test_ensure_attached_without_handle_starts_polling(make, window):
 
     窗口 show() 之前调 setter 不能抛 AttributeError，改用轮询重试挂接。
     """
-    with patch.object(tp, "_create_taskbar", return_value=FakeTaskbar()):
+    with patch.object(tp, "_create_taskbar", return_value=(FakeTaskbar(), "")):
         tb = make(ElaTaskbarProgress, window)
         tb.setRange(0, 100)
         tb.setValue(5)
@@ -196,7 +198,7 @@ def test_ensure_attached_without_handle_starts_polling(make, window):
 
 
 def test_on_window_handle_created_attaches_and_stops_polling(make, window):
-    with patch.object(tp, "_create_taskbar", return_value=FakeTaskbar()):
+    with patch.object(tp, "_create_taskbar", return_value=(FakeTaskbar(), "")):
         tb = make(ElaTaskbarProgress, window)
         tb.setRange(0, 100)
         tb.setValue(5)
@@ -316,7 +318,7 @@ def test_push_errors_are_swallowed(attached):
 
 
 def test_delete_later_stops_timer(make, window):
-    with patch.object(tp, "_create_taskbar", return_value=FakeTaskbar()):
+    with patch.object(tp, "_create_taskbar", return_value=(FakeTaskbar(), "")):
         tb = make(ElaTaskbarProgress, window)
         tb.setRange(0, 100)
         tb.setValue(5)
@@ -325,3 +327,123 @@ def test_delete_later_stops_timer(make, window):
         tb.deleteLater()
 
         assert tb._attach_timer is None
+
+
+class TestAvailability:
+    """「静默失效」是历史 bug：不可用必须能查、能收信号、能打日志。"""
+
+    def test_available_true_when_taskbar_created(self, make, window):
+        with patch.object(tp, "_create_taskbar", return_value=(FakeTaskbar(), "")):
+            tb = make(ElaTaskbarProgress, window)
+            assert tb.available() is True
+            assert tb.initialize() is True
+            assert tb.unavailableReason() == ""
+            assert tb.isUnavailable() is False
+
+    def test_available_false_reports_reason_once(self, make, window):
+        with patch.object(tp, "_create_taskbar", return_value=(None, "no comtypes")):
+            tb = make(ElaTaskbarProgress, window)
+            seen = []
+            tb.unavailable.connect(seen.append)
+            assert tb.available() is False
+            assert tb.available() is False  # 第二次不再重复上报
+        assert tb.unavailableReason() == "no comtypes"
+        assert tb.isUnavailable() is True
+        assert seen == ["no comtypes"]
+
+    def test_unavailable_signal_is_pyqt_signal(self):
+        assert isinstance(ElaTaskbarProgress.unavailable, pyqtSignal)
+
+    def test_noop_methods_still_work_when_unavailable(self, make, window):
+        with patch.object(tp, "_create_taskbar", return_value=(None, "nope")):
+            tb = make(ElaTaskbarProgress, window)
+            tb.setRange(0, 100)
+            tb.setValue(50)
+            tb.show()
+            tb.pause()
+            tb.resume()
+            tb.stop()
+            tb.reset()
+            tb.hide()
+        assert tb.isVisible is False
+
+
+class TestAttachContract:
+    """挂接的目标必须是**顶层窗口**的真实 HWND，且在窗口重建后重挂。"""
+
+    def test_child_widget_resolves_top_level(self, make):
+        parent = make(QWidget)
+        child = make(QWidget, parent)
+        parent.windowHandle = lambda: FakeHandle(777)
+        with patch.object(tp, "_create_taskbar", return_value=(FakeTaskbar(), "")):
+            tb = make(ElaTaskbarProgress, child)
+            tb.setRange(0, 100)
+        assert tb._hwnd == 777
+
+    def test_reattach_when_hwnd_changes(self, make):
+        window = make(QWidget)
+        handle = FakeHandle(100)
+        window.windowHandle = lambda: handle
+        fake = FakeTaskbar()
+        with patch.object(tp, "_create_taskbar", return_value=(fake, "")):
+            tb = make(ElaTaskbarProgress, window)
+            tb.setRange(0, 100)
+            tb.show()
+            assert tb._hwnd == 100
+
+            handle._win_id = 200  # 窗口重建后 HWND 变了
+            tb.setValue(10)
+
+        assert tb._hwnd == 200
+        assert fake.values[-1][0] == 200
+        assert fake.states[-1] == (200, _TBPF_NORMAL)
+
+
+@pytest.mark.skipif(not tp._COMTYPES_AVAILABLE, reason="comtypes 未安装（可选依赖）")
+class TestInterfaceFallback:
+    """先要 ITaskbarList4，失败再回退 ITaskbarList3（有的系统只认 v4 的 IID）。"""
+
+    class _FakeCom:
+        def HrInit(self) -> int:  # noqa: N802
+            return 0
+
+    def test_prefers_v4(self, monkeypatch):
+        calls = []
+
+        def fake_create(clsid, interface=None, clsctx=None):
+            calls.append(interface.__name__)
+            return self._FakeCom()
+
+        monkeypatch.setattr(tp.comtypes, "CoCreateInstance", fake_create)
+        taskbar, reason = tp._create_taskbar()
+        assert taskbar is not None
+        assert reason == ""
+        assert calls == ["_ITaskbarList4"]
+
+    def test_falls_back_to_v3(self, monkeypatch):
+        calls = []
+
+        def fake_create(clsid, interface=None, clsctx=None):
+            calls.append(interface.__name__)
+            if interface.__name__ == "_ITaskbarList4":
+                raise OSError(0x80004002, "no interface")
+            return self._FakeCom()
+
+        monkeypatch.setattr(tp.comtypes, "CoCreateInstance", fake_create)
+        taskbar, reason = tp._create_taskbar()
+        assert taskbar is not None
+        assert reason == ""
+        assert calls == ["_ITaskbarList4", "_ITaskbarList3"]
+
+    def test_all_fail_returns_reason(self, monkeypatch):
+        def fake_create(clsid, interface=None, clsctx=None):
+            exc = OSError("no interface")
+            exc.winerror = 0x80004002
+            raise exc
+
+        monkeypatch.setattr(tp.comtypes, "CoCreateInstance", fake_create)
+        taskbar, reason = tp._create_taskbar()
+        assert taskbar is None
+        assert "ITaskbarList4" in reason
+        assert "ITaskbarList3" in reason
+        assert "0x80004002" in reason

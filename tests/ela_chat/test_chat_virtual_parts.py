@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import bisect
+import time
 
 from _qthelpers import wait_until as _wait_until
 
@@ -281,6 +282,34 @@ class TestVirtualList:
         assert indices, "可见区间内至少要物化一条消息"
         assert indices == list(range(min(indices), max(indices) + 1))
 
+    def test_materialize_respects_time_budget(self, qapp, make, monkeypatch):
+        """单帧物化受时间预算约束：重型消息不会一帧叠好几条。"""
+        view = make(ElaChatView)
+        view.resize(640, 400)
+        view.show()
+        qapp.processEvents()
+        view.importSession(_bundle(300, steps=1))
+        qapp.processEvents()
+        view._virtual_window_timer.stop()
+
+        calls = []
+        original = view._materialize_virtual_bubble
+
+        def slow(messageId):
+            calls.append(messageId)
+            time.sleep(0.01)
+            return original(messageId)
+
+        monkeypatch.setattr(view, "_materialize_virtual_bubble", slow)
+        bar = view._scroll.verticalScrollBar()
+        bar.setValue(bar.maximum() // 2)
+        view._refresh_virtual_window()
+
+        # 10ms 的单条物化已经超过 8ms 预算：本次刷新只应做一条，其余排下一帧。
+        assert len(calls) == 1
+        assert view._virtual_window_timer.isActive() is True
+        assert _wait_until(qapp, lambda: not view._virtual_window_timer.isActive())
+
     def test_materialize_budget_fills_viewport_first(self, qapp, make):
         """视口区间优先铺满；预算用完的下一帧继续，最终覆盖整个视口。"""
         view = make(ElaChatView)
@@ -384,6 +413,7 @@ class TestVirtualListNewMessage:
         qapp.processEvents()
         view._refresh_virtual_window(at_bottom=True)
         qapp.processEvents()
+        assert _wait_until(qapp, lambda: not view._virtual_window_timer.isActive())
 
         bubble = view.bubble(mid)
         assert bubble is not None

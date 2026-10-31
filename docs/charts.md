@@ -8,7 +8,7 @@
 
 | 方法 | 说明 |
 |---|---|
-| `setOption(option, notMerge=False, lazyUpdate=False)` | **默认合并**（ECharts 语义）：dict 深合并；`series` / `dataZoom` / `graphic` 按 `id` → `name` → 下标逐项合并（未匹配旧项保留、新项追加）；**`xAxis` / `yAxis` / `singleAxis` 按下标逐项合并**（轴名不是身份）；其余 list 整体替换。`notMerge=True` 全量替换并重置图例选择；`lazyUpdate=True` 延迟到下一事件循环重建。返回 self |
+| `setOption(option, notMerge=False, lazyUpdate=False)` | **默认合并**（ECharts 语义）：dict 深合并；`series` / `dataZoom` / `graphic` 按 `id` → `name` → 下标逐项合并（未匹配旧项保留、新项追加）；**`xAxis` / `yAxis` / `singleAxis` 按下标逐项合并**（轴名不是身份）；其余 list 整体替换。`notMerge=True` 全量替换、重置图例选择**与 dataZoom 窗口**；`lazyUpdate=True` 延迟到下一事件循环重建（重建时使系列层位图失效，不会贴回旧数据）。返回 self |
 | `updateAxis(axis, patch, axisIndex=0)` | 只更新一条轴（深合并；`axis` = `"x"` / `"y"` / `"single"`），其余轴原样保留。多轴场景改轴标签 / 刻度 / 样式用它，别手写整个轴数组。`radar` 不支持（维度在 `series.indicator`，且本库不读顶层 `radar` 组件） |
 | `updateSeries(patch, *, seriesIndex/seriesName/seriesId)` | 只更新一个系列（按 `id` → `name` → 下标定位，深合并）；保留用户缩放窗口 |
 | `setAxisLabelFormatter(axis, formatter, axisIndex=0)` | 设置轴标签 formatter（字符串模板或 `callable(value, index)`；**index 是刻度下标**） |
@@ -39,9 +39,9 @@
 | `setGroup(name)` / `connectCharts(group)` / `disconnectCharts(group)` | 图表组跨图联动（dataZoom / legend / axis tooltip）；`connectCharts` 从包顶层导入 |
 | `toggleMagicType()` | 折线 → 柱状 → 堆叠柱状 → 折线循环（toolbox 的 `magicType` 按钮调用） |
 | `getDataURL(opts=None)` | 导出 `data:image/png;base64,…`（`type` / `pixelRatio` / `backgroundColor`）。底色与 ECharts 同序：`backgroundColor`（导出参数）在最底层 → 图表自身 `backgroundColor` 覆盖其上 → 都没给用主题底；任一层传 `"transparent"` 得透明 PNG（JPEG 自动压到主题底上）。离屏重绘，工具条按钮等子控件不入镜 |
-| `saveImage(path=None)` | 文件版导出 PNG / SVG（扩展；`path=None` 弹保存对话框）。底色规则同上（SVG 同样吃图表 `backgroundColor`） |
+| `saveImage(path=None)` | 文件版导出 PNG / JPEG / SVG（按 `format` 或扩展名判定；`path=None` 弹保存对话框）。底色规则同上（SVG 同样吃图表 `backgroundColor`；JPEG 自动压到主题底） |
 | `clear()` | 清空（等价 `setOption({}, notMerge=True)`） |
-| `dispose()` / `isDisposed()` | 销毁（停定时器 / 断主题 / deleteLater）与状态查询 |
+| `dispose()` / `isDisposed()` | 销毁（停定时器 / 断主题 / deleteLater）与状态查询。**销毁后再调用 `setOption` / `getOption` / `dispatchAction` / `appendData` / `resize` / 导出等公开 API 会抛 `RuntimeError`**（ECharts 语义） |
 
 **事件**
 
@@ -127,6 +127,8 @@ chart.setOption({
   `"Consolas"`；含中文时请给单个中文字体（如默认雅黑）。
 - `calendar.dayLabel.nameMap` / `monthLabel.nameMap` 支持数组（星期按 ECharts
   约定 **0 = 周日**；月份按 1 月起）与 dict。
+- `calendar.range` 支持年份（`2026` / `"2026"`）、月份（`"2026-01"`）、
+  单日期与 `[start, end]`（元素可为年份 / 月份 / 日期）；非法值回退当前年。
 - `series.label.rotate`（度，绕文字中心旋转）与 `label.align`（`left` /
   `center` / `right`，按数据点调整水平锚点）已在直角系列（line / bar /
   scatter / heatmap）生效；旋转后的命中框取外接矩形。
@@ -144,7 +146,8 @@ chart.setOption({
   - `legend`：每个元素一个图例（各自 `data` 白名单 / `top` / `bottom` /
     `orient` / `selected`）；同侧按数组顺序向外堆叠。`chart.legend` 是第一个，
     完整列表是 `chart.legends`；悬停 / 点击按坐标路由到命中的那个
-    （`chart.legendAt(pos)`）。
+    （`chart.legendAt(pos)`）。**未写 `legend` 键时默认不显示图例**（ECharts
+    语义）；要显示必须显式给 `legend: {}` 或具体配置。
   - `grid`：每个元素一块网格，显式给 `left` / `top` / `right` / `bottom` /
     `width` / `height`（数值 px 或 `"N%"`）；轴用 `gridIndex` 归属网格，
     系列用 `xAxisIndex` / `yAxisIndex` 选轴（轴归属哪个网格，系列就画在哪）：
@@ -280,6 +283,7 @@ chart.setOption({
 | **坐标轴标签 / 刻度 / 网格线** | `interval: 'auto'`：按「标签宽度 ÷ 每类目像素」跳着画（显式 `axisLabel.interval` 优先）。1M 个类目的轴不再画 1M 个标签 |
 | **数据点符号** | 抽稀清单在布局期算好，按「至少每 10px 一个」控制数量；绘制走预渲染位图（`QPainterPath` 合并反而慢 50 倍） |
 | **散点** | 与折线同一套窗口 + 抽稀（`_LOD_POINTS_PER_PX` = 4） |
+| **采样统计** | `LineSeriesRenderer.samplingStats()` → `{"dataLen", "drawn", "sampled"}`（原始点数 / 实际绘制点数 / 是否降采样）；宿主做状态栏 / 诊断时用它，别读 `_data_len` / `_points` 私有字段 |
 
 实测（1400×800，离屏；2026-10-18 在「窗口快路径 + 连续副本 + 采样 LRU」之后重测）：折线 1M 帧 **9.4ms**、category 1M 9.4ms、散点 1M 9.4ms；悬停 0.8ms。**同窗口重复缩放**（缓存命中）≈ 一帧 + 映射；**进入新窗口**（真实重采样）折线 1M ≈12ms、category ≈20ms、散点 ≈38ms；**缩回全景** 折线 ≈33ms、category ≈45ms。冲击 / 振动形态（显式时间戳 + 记录中断）：**单通道 5M** 帧 3.0ms、新窗口 8.3ms、缩回全景 10.4ms；**三通道 3×2M** 帧 6.4ms、新窗口 19.2ms。复跑：`tools/perf/bench_charts.py`（`zoom新窗口` / `缩回全景` 两列专门覆盖缓存效应）。
 
@@ -361,7 +365,7 @@ chart.setOption({
 | **图例分页** | 条目自动换行（最多 3 行，`legend.maxRows` 可调）；`legend.type: "scroll"` 单行分页（‹ › + 页码） |
 | **缩放状态保留** | `setOption` / `appendData` 不再把用户窗口打回 option 初始值；`getOption()` 返回实时 `dataZoom.start/end` 与 `legend.selected`；`notMerge` 才复位 |
 | **时间轴** | `xAxis.type: "time"`：日期字符串 / `datetime` / 毫秒时间戳；自动时间刻度（秒→年）与标签；`min/max` 接受日期字符串；tooltip 标题按日期显示 |
-| **折线专项** | `endLabel`、`smoothMonotone`、`step: [start, end]`、`areaStyle.origin`、`symbolRotate`、`showAllSymbol`、`lineStyle.opacity/cap/join`；`stackStrategy` 默认 `samesign`（正负分开堆叠） |
+| **折线专项** | `endLabel`、`smoothMonotone`、`step: [start, end]`、`areaStyle.origin`、`symbolRotate`、`showAllSymbol`、`lineStyle.opacity/cap/join`；`stackStrategy` 默认 `samesign`（正负分开堆叠）。**堆叠按 x / 类别值对齐**（不是数组下标），两条系列的 x 顺序不同也不会错位 |
 | **mark 扩展** | `markLine.data[].coord` 任意两点、`lineStyle`、`symbol`；`markPoint.symbol/symbolSize`；`markArea.data[].coord` |
 | **跨图联动** | `chart.setGroup(name)` + `connectCharts(name)`：dataZoom、图例选择、axis tooltip 同步；`disconnectCharts(name)` 断开 |
 | **工具条** | `magicType`（折线/柱状/堆叠循环）、`saveAsImage` / `saveAsSvg` / `dataZoom` / `restore` / `zoomIn` / `zoomOut` |

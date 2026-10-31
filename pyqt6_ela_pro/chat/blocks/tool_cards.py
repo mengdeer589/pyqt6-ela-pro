@@ -282,6 +282,7 @@ class ToolCallCard(_CollapsibleBlock):
             status=call.status,
             isError=call.status == ElaChatToolStatusType.Error,
             allowOpenWhilePending=self._allow_open_while_pending,
+            metadata=dict(call.metadata or {}),
         )
 
     def _build_renderer_body(self) -> bool:

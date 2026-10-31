@@ -96,9 +96,9 @@ class ThemeRiverSeriesRenderer(SeriesRenderer):
         if not self._streams:
             return
         p.save()
-        # 覆盖兜底 grid 轴线背景
+        # 覆盖兜底 grid 轴线背景（跟随图表 backgroundColor）
         p.setPen(Qt.PenStyle.NoPen)
-        p.setBrush(QColor(T("color.bg.base")))
+        p.setBrush(self.chart._background_color())
         p.drawRect(
             QRectF(
                 self._area.left() - 24,

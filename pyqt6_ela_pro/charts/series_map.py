@@ -280,7 +280,7 @@ class MapSeriesRenderer(SeriesRenderer):
             if hovered is not None and data_index is not None:
                 if data_index == hovered:
                     fill = parse_color(fill).lighter(112)
-                else:
+                elif self.blursOtherItems():
                     fill = with_alpha(parse_color(fill), 150)
             p.setPen(border)
             p.setBrush(fill)

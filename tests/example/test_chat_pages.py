@@ -22,15 +22,20 @@ from _qthelpers import wait_until as _wait_until
 
 from pyqt6_ela_pro.chat import ElaChatReasoningStyleType
 from pyqt6_ela_pro.example.chat_agent_page import ChatAgentPage
+from pyqt6_ela_pro.example.chat_files_page import ChatFilesPage
 from pyqt6_ela_pro.example.chat_input_page import ChatInputPage
 from pyqt6_ela_pro.example.chat_overview_page import ChatOverviewPage
 from pyqt6_ela_pro.example.chat_persist_page import ChatPersistPage
 from pyqt6_ela_pro.example.chat_session_page import ChatSessionPage
+from pyqt6_ela_pro.example.chat_timeline_page import ChatTimelinePage
+from pyqt6_ela_pro.example.chat_workbench_page import ChatWorkbenchPage
 
 CHAT_PAGES = [
     (ChatOverviewPage, "聊天组件总览"),
     (ChatInputPage, "输入区能力"),
     (ChatAgentPage, "Agent 能力"),
+    (ChatFilesPage, "文件与 Diff"),
+    (ChatTimelinePage, "时间线与检索"),
     (ChatSessionPage, "会话管理"),
     (ChatPersistPage, "持久化与性能"),
 ]
@@ -40,6 +45,38 @@ CHAT_PAGES = [
 def test_page_constructs_with_title(cls, title, qapp, make):
     page = make(cls)
     assert page.PAGE_TITLE == title
+
+
+# ================================================================ 工作台
+class TestChatWorkbenchPage:
+    def test_has_all_workspaces(self, qapp, make):
+        page = make(ChatWorkbenchPage)
+        assert page.PAGE_TITLE == "AI 组件工作台"
+        titles = list(page._pivot.getPivotTitle())
+        assert titles == [name for name, _desc, _cls in page.WORKSPACES]
+        assert page._stack.count() == len(page.WORKSPACES)
+
+    def test_only_first_workspace_built_on_start(self, qapp, make):
+        """与图表工作台一致：首屏只建概览，其余工作区首次切换才实例化。"""
+        page = make(ChatWorkbenchPage)
+        assert page._workspaces[0]["page"] is not None
+        assert all(item["page"] is None for item in page._workspaces[1:])
+
+    def test_switch_builds_workspace_lazily(self, qapp, make):
+        page = make(ChatWorkbenchPage)
+        page._activate_workspace(3)
+        assert page._stack.currentIndex() == 3
+        assert page._workspaces[3]["page"] is not None
+        assert page._workspaces[3]["page"].PAGE_TITLE == "文件与 Diff"
+        # 未切到的工作区仍未构建
+        assert page._workspaces[5]["page"] is None
+
+    def test_every_workspace_builds(self, qapp, make):
+        page = make(ChatWorkbenchPage)
+        for index in range(len(page.WORKSPACES)):
+            page._activate_workspace(index)
+            assert page._workspaces[index]["page"] is not None
+            assert page._stack.currentIndex() == index
 
 
 # ================================================================ 总览
@@ -152,7 +189,7 @@ class TestChatOverviewPage:
 class TestChatInputPage:
     def test_all_sections_present(self, qapp, make):
         page = make(ChatInputPage)
-        assert sorted(page._section_notes) == [1, 2, 3, 4, 5, 6, 7]
+        assert sorted(page._section_notes) == [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
 
     def test_safe_callbacks_run(self, qapp, make):
         """逐个点名调用**无副作用**的回调（避开模态的清空确认）。"""
@@ -218,6 +255,14 @@ class TestChatInputPage:
         page._on_regenerate_last()
         qapp.processEvents()
 
+    def test_queue_advanced_ops(self, qapp, make):
+        page = make(ChatInputPage)
+        page._on_queue_advanced()
+        page._on_queue_undo()
+        page._on_pending_steer()
+        qapp.processEvents()
+        assert page._chat.steerCount() >= 1
+
 
 # ================================================================ Agent
 class TestChatAgentPage:
@@ -248,6 +293,51 @@ class TestChatAgentPage:
         assert labels and all(label.text for label in labels), (
             "某一节的回调没写进自己的说明行"
         )
+
+
+# ================================================================ 文件与 Diff
+class TestChatFilesPage:
+    def test_prefilled_and_callbacks(self, qapp, make):
+        page = make(ChatFilesPage)
+        assert page._chat.chatView().count() >= 1
+        for _label, method in page._sections:
+            page._fire(method)()
+            qapp.processEvents()
+        assert page._chat.chatView().count() >= 6
+
+    def test_multi_file_and_long_diff(self, qapp, make):
+        page = make(ChatFilesPage)
+        page._demo_multi_file()
+        page._demo_long_diff()
+        qapp.processEvents()
+        messages = page._chat.chatView().messages()
+        calls = [call for message in messages for call in message.tool_calls]
+        assert any(call.name == "patch" for call in calls)
+
+
+# ================================================================ 时间线与检索
+class TestChatTimelinePage:
+    def test_sample_and_status_callbacks(self, qapp, make):
+        page = make(ChatTimelinePage)
+        assert page._chat.chatView().count() >= 2
+        page._demo_notices()
+        page._demo_retry()
+        page._demo_activity()
+        page._demo_density()
+        page._demo_disclosure()
+        page._demo_pending()
+        page._demo_identity()
+        qapp.processEvents()
+        assert page._chat.chatView().count() >= 3
+
+    def test_search_and_pending(self, qapp, make):
+        page = make(ChatTimelinePage)
+        page._demo_search()
+        assert page._chat.chatView().searchHits()
+        page._demo_pending()
+        assert page._pending_id is not None
+        page._resolve_pending()
+        assert page._pending_id is None
 
 
 class _FakeLabel:
@@ -341,3 +431,14 @@ class TestChatPersistPage:
         page._on_batch()
         page._on_load_30()
         assert view.count() > 1
+
+    def test_view_state_bundle(self, qapp, make):
+        page = make(ChatPersistPage)
+        page._demo_view_state()
+        assert page._view_bundle is not None
+        options = page._view_bundle["view"]
+        assert options["timeline_detail"]["thinking"]["placement"] == "expanded"
+        assert options["disclosure"]
+        assert page._chat.draftState()["text"]
+        page._on_inspect_state()
+        assert "timeline_detail" in page._notes["state"].text()

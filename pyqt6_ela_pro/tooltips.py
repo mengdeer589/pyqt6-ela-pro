@@ -4,7 +4,7 @@
 提供两种提示组件：
 
 - ``ElaToolTip``：悬浮提示组件，支持 8 种显示位置
-- ``ElaStateToolTip``：带状态指示的提示组件，支持加载中/成功/失败等状态
+- ``ElaStateToolTip``：带状态指示的提示卡片，加载中 / 完成两种状态
 
 ``set_tooltip`` 和 ``remove_tooltip`` 函数用于为任意 ``QWidget`` 绑定或解除
 悬浮提示，使用弱引用字典管理，不会阻止 widget 被垃圾回收。
@@ -31,6 +31,8 @@ from PyQt6.QtCore import (
 from ._colors import parse_color
 from ._internal import is_deleted, single_shot_on
 from ._motion import Duration, start_idle_loop, start_transition
+from ._styles import SHADOW_MARGIN, ColorText, paintOverlayShadow, paintRoundedCard
+from ._theme import ElaStatusRoleType, accent, border, statusColor, surfacePopup
 from .widget_base import ElaThemeWidget
 from PyQt6.QtGui import (
     QPainter,
@@ -40,13 +42,10 @@ from PyQt6.QtGui import (
     QPaintEvent,
     QHideEvent,
     QShowEvent,
-    QMouseEvent,
-    QPen,
-    QPainterPath,
 )
-from PyQt6.QtWidgets import QApplication, QWidget, QLabel, QGraphicsDropShadowEffect
+from PyQt6.QtWidgets import QApplication, QWidget, QLabel, QGraphicsOpacityEffect
 
-from PyQt6ElaWidgetTools import eTheme, ElaThemeType, ElaIconType, ElaText
+from PyQt6ElaWidgetTools import eTheme, ElaThemeType, ElaIconType, ElaIconButton
 
 
 TOOLTIP_BORDER_RADIUS: int = 8
@@ -60,17 +59,23 @@ TOOLTIP_AUTO_CLOSE_DELAY: int = 1000
 TOOLTIP_ROTATE_TIMER_INTERVAL: int = 50
 TOOLTIP_ROTATE_ANGLE_DELTA: int = 20
 
-STATETOOLTIP_BORDER_RADIUS: int = 10
+STATETOOLTIP_BORDER_RADIUS: int = 8
 STATETOOLTIP_TITLE_FONT_SIZE: int = 14
 STATETOOLTIP_CONTENT_FONT_SIZE: int = 13
-STATETOOLTIP_MIN_WIDTH: int = 200
+#: 卡片最小 / 最大宽度（不含两侧阴影边距）—— 短文案收紧、长文案折行
+STATETOOLTIP_MIN_WIDTH: int = 240
 STATETOOLTIP_MAX_WIDTH: int = 360
 STATETOOLTIP_HEIGHT: int = 56
 STATETOOLTIP_CLOSE_BUTTON_SIZE: int = 20
 STATETOOLTIP_ICON_SIZE: int = 16
-STATETOOLTIP_ACCENT_WIDTH: int = 4
-STATETOOLTIP_SUCCESS_COLOR_LIGHT: str = "#4CAF50"
-STATETOOLTIP_SUCCESS_COLOR_DARK: str = "#66BB6A"
+#: 状态卡片内部布局（左内边距 / 图标列 / 图标与文字 / 文字与关闭键 / 右内边距）
+_ST_LEFT_PAD: int = 14
+_ST_RIGHT_PAD: int = 10
+_ST_PAD_Y: int = 10
+_ST_ICON_BOX: int = 20
+_ST_ICON_GAP: int = 10
+_ST_TEXT_GAP: int = 8
+_ST_TITLE_GAP: int = 2
 
 
 class ElaToolTipPositionType(Enum):
@@ -532,7 +537,11 @@ def remove_tooltip(widget: QWidget) -> None:
 
 
 class ElaStateToolTip(ElaThemeWidget):
-    """带状态指示的提示组件：加载中（旋转图标）/ 完成（对勾），带淡出动画与 ``closed`` 信号。"""
+    """带状态指示的提示卡片：加载中（旋转图标）/ 完成（对勾）。
+
+    表面与 :class:`ElaToast` 同材质（``PopupBase`` + ``PopupBorder`` + 阴影边距），
+    宽度随内容自适应（240~360），完成 1s 后淡出并发出 ``closed``。
+    """
 
     closed = pyqtSignal()
 
@@ -549,33 +558,49 @@ class ElaStateToolTip(ElaThemeWidget):
         self._currentTheme = eTheme.getThemeMode()
         self._isClosing = False
         self._destroyed = False
-        self._closeBtnHovered = False
+        #: 子控件淡出用的透明度效果（懒建 —— ``windowOpacity`` 只对顶层窗口有效）
+        self._opacityEffect: Optional[QGraphicsOpacityEffect] = None
+        #: 完成态的自动关闭定时器（换回加载态时要取消，否则会迟到关闭）
+        self._autoCloseTimer: Optional[QTimer] = None
 
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         self._animation = QPropertyAnimation(self, b"windowOpacity")
         self._rotateTimer = QTimer(self)
+        self._iconFont = QFont("ElaAwesome")
+        self._iconFont.setPixelSize(STATETOOLTIP_ICON_SIZE)
 
-        self._titleLabel = ElaText(title, self)
-        self._contentLabel = ElaText(content, self)
+        self._titleLabel = ColorText(self)
+        self._titleLabel.setTextPixelSize(STATETOOLTIP_TITLE_FONT_SIZE)
+        self._titleLabel.setTextWeight(QFont.Weight.DemiBold)
+        self._titleLabel.setTextFormat(Qt.TextFormat.PlainText)
+        self._titleLabel.setWordWrap(False)
 
-        shadow = QGraphicsDropShadowEffect(self)
-        shadow.setColor(QColor(0, 0, 0, 40))
-        shadow.setOffset(0, 4)
-        shadow.setBlurRadius(20)
-        self.setGraphicsEffect(shadow)
+        self._contentLabel = ColorText(self)
+        self._contentLabel.setTextPixelSize(STATETOOLTIP_CONTENT_FONT_SIZE)
+        self._contentLabel.setTextFormat(Qt.TextFormat.PlainText)
+        self._contentLabel.setWordWrap(True)
+        self._contentLabel.setAlignment(
+            Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop
+        )
 
-        self.setMouseTracking(True)
+        self._closeBtn = ElaIconButton(
+            ElaIconType.IconName.Xmark,
+            12,
+            STATETOOLTIP_CLOSE_BUTTON_SIZE,
+            STATETOOLTIP_CLOSE_BUTTON_SIZE,
+            self,
+        )
+        self._closeBtn.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self._closeBtn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._closeBtn.setAccessibleName("关闭")
+        self._closeBtn.clicked.connect(self._onCloseButtonClicked)
+
         self._setup_ui()
         self._connectSignals()
 
     def _setup_ui(self) -> None:
         self._rotateTimer.timeout.connect(self._rotateTimerFlow)
-
-        self._contentLabel.setMinimumWidth(STATETOOLTIP_MIN_WIDTH)
-        self._contentLabel.setWordWrap(True)
-        self._contentLabel.setMaximumWidth(STATETOOLTIP_MAX_WIDTH)
-
         self._updateContent()
-        self._updateSizeAndPositions()
 
     def _connectSignals(self) -> None:
         # 持续动效：Reduced/Disabled 下不转。角度冻结在当前值 —— 仍是一段可见的
@@ -588,84 +613,78 @@ class ElaStateToolTip(ElaThemeWidget):
 
     def _getAccentColor(self) -> QColor:
         if self._isDone:
-            mode = self._currentTheme
-            return (
-                QColor(STATETOOLTIP_SUCCESS_COLOR_DARK)
-                if mode == ElaThemeType.ThemeMode.Dark
-                else QColor(STATETOOLTIP_SUCCESS_COLOR_LIGHT)
-            )
-        return eTheme.getThemeColor(
-            self._currentTheme, ElaThemeType.ThemeColor.PrimaryNormal
-        )
-
-    def _drawCloseButton(self, painter: QPainter) -> None:
-        btn_size = STATETOOLTIP_CLOSE_BUTTON_SIZE
-        btn_x = self.width() - btn_size - 12
-        btn_y = 8
-        btn_rect = QRect(btn_x, btn_y, btn_size, btn_size)
-
-        if self._closeBtnHovered:
-            hover_bg = eTheme.getThemeColor(
-                self._currentTheme, ElaThemeType.ThemeColor.BasicHover
-            )
-            painter.save()
-            painter.setBrush(hover_bg)
-            painter.setPen(Qt.PenStyle.NoPen)
-            painter.drawEllipse(btn_rect)
-            painter.restore()
-
-        painter.save()
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-        text_color = eTheme.getThemeColor(
-            self._currentTheme, ElaThemeType.ThemeColor.BasicText
-        )
-        line_pen = QPen(text_color, 2, Qt.PenStyle.SolidLine)
-        painter.setPen(line_pen)
-
-        margin = 6
-        painter.drawLine(
-            btn_x + margin,
-            btn_y + margin,
-            btn_x + btn_size - margin,
-            btn_y + btn_size - margin,
-        )
-        painter.drawLine(
-            btn_x + btn_size - margin,
-            btn_y + margin,
-            btn_x + margin,
-            btn_y + btn_size - margin,
-        )
-        painter.restore()
+            return statusColor(self._currentTheme, ElaStatusRoleType.Success)
+        return accent(self._currentTheme)
 
     def _updateContent(self) -> None:
-        self._titleLabel.setText(self._title)
+        """按标题 / 正文的实际宽度重算卡片尺寸与子控件几何。"""
+        sm = SHADOW_MARGIN
+        has_title = bool(self._title)
+        has_content = bool(self._content)
+        self._titleLabel.setVisible(has_title)
+        self._contentLabel.setVisible(has_content)
         self._contentLabel.setText(self._content)
 
-        self._titleLabel.setTextPixelSize(STATETOOLTIP_TITLE_FONT_SIZE)
-        self._contentLabel.setTextPixelSize(STATETOOLTIP_CONTENT_FONT_SIZE)
+        title_metrics = self._titleLabel.fontMetrics()
+        content_metrics = self._contentLabel.fontMetrics()
+        title_width = title_metrics.horizontalAdvance(self._title) if has_title else 0
+        content_width = 0
+        if has_content:
+            content_width = max(
+                (
+                    content_metrics.horizontalAdvance(line)
+                    for line in self._content.splitlines()
+                ),
+                default=0,
+            )
 
-        self._titleLabel.adjustSize()
-        self._contentLabel.adjustSize()
-
-        height = max(
-            self._titleLabel.height() + self._contentLabel.height() + 32,
-            STATETOOLTIP_HEIGHT,
+        chrome = (
+            _ST_LEFT_PAD
+            + _ST_ICON_BOX
+            + _ST_ICON_GAP
+            + _ST_TEXT_GAP
+            + STATETOOLTIP_CLOSE_BUTTON_SIZE
+            + _ST_RIGHT_PAD
         )
-        self.setFixedSize(STATETOOLTIP_MAX_WIDTH, height)
+        text_width = max(title_width, content_width)
+        text_width = max(text_width, STATETOOLTIP_MIN_WIDTH - chrome)
+        text_width = min(text_width, STATETOOLTIP_MAX_WIDTH - chrome)
+        card_width = chrome + text_width
 
-        icon_area = 28
-        self._titleLabel.move(STATETOOLTIP_ACCENT_WIDTH + icon_area + 8, 10)
-        self._contentLabel.move(
-            STATETOOLTIP_ACCENT_WIDTH + icon_area + 8,
-            10 + self._titleLabel.height() + 4,
+        self._titleLabel.setFixedWidth(text_width)
+        self._titleLabel.setText(
+            title_metrics.elidedText(
+                self._title,
+                Qt.TextElideMode.ElideRight,
+                text_width,
+            )
         )
-        self._contentLabel.setFixedWidth(
-            STATETOOLTIP_MAX_WIDTH
-            - STATETOOLTIP_ACCENT_WIDTH
-            - icon_area
-            - 8
-            - STATETOOLTIP_CLOSE_BUTTON_SIZE
-            - 12
+
+        title_height = title_metrics.height() if has_title else 0
+        if has_content:
+            self._contentLabel.setFixedWidth(text_width)
+            content_height = self._contentLabel.heightForWidth(text_width)
+            if content_height <= 0:
+                content_height = content_metrics.lineSpacing()
+        else:
+            content_height = 0
+
+        title_gap = _ST_TITLE_GAP if (has_title and has_content) else 0
+        text_height = title_height + title_gap + content_height
+        card_height = max(STATETOOLTIP_HEIGHT, text_height + 2 * _ST_PAD_Y)
+        self.setFixedSize(card_width + 2 * sm, card_height + 2 * sm)
+
+        text_x = sm + _ST_LEFT_PAD + _ST_ICON_BOX + _ST_ICON_GAP
+        text_y = sm + (card_height - text_height) // 2
+        if has_title:
+            self._titleLabel.setGeometry(text_x, text_y, text_width, title_height)
+            text_y += title_height + title_gap
+        if has_content:
+            self._contentLabel.setGeometry(text_x, text_y, text_width, content_height)
+
+        self._closeBtn.move(
+            sm + card_width - _ST_RIGHT_PAD - STATETOOLTIP_CLOSE_BUTTON_SIZE,
+            sm + _ST_PAD_Y,
         )
 
     def _updateSizeAndPositions(self) -> None:
@@ -685,29 +704,46 @@ class ElaStateToolTip(ElaThemeWidget):
         if not self._checkValid():
             return
         self._title = title
-        self._titleLabel.setText(title)
-        self._titleLabel.adjustSize()
         self._updateSizeAndPositions()
 
     def setContent(self, content: str) -> None:
         if not self._checkValid():
             return
         self._content = content
-        self._contentLabel.setText(content)
-        self._contentLabel.adjustSize()
         self._updateSizeAndPositions()
 
     def setState(self, isDone: bool) -> None:
         if not self._checkValid():
             return
-        self._isDone = isDone
+        self._isDone = bool(isDone)
+        if self._isDone:
+            # 完成后 spinner 不再画；继续 20fps 触发 update 全是白烧
+            self._stopRotate()
+            self._cancelAutoClose()
+            self._autoCloseTimer = single_shot_on(
+                self, TOOLTIP_AUTO_CLOSE_DELAY, self._fadeOut
+            )
+        else:
+            # 回到加载态 = 这次不算完成，撤销已排队的自动关闭
+            self._cancelAutoClose()
+            if self.isVisible() and not self._rotateTimer.isActive():
+                start_idle_loop(self._rotateTimer, TOOLTIP_ROTATE_TIMER_INTERVAL)
         self.update()
-        if isDone:
-            single_shot_on(self, TOOLTIP_AUTO_CLOSE_DELAY, self._fadeOut)
 
-    def _stopTimerAndAnimation(self) -> None:
+    def _cancelAutoClose(self) -> None:
+        timer = self._autoCloseTimer
+        if timer is not None:
+            if not is_deleted(timer):
+                timer.stop()
+            self._autoCloseTimer = None
+
+    def _stopRotate(self) -> None:
         if self._rotateTimer.isActive():
             self._rotateTimer.stop()
+
+    def _stopTimerAndAnimation(self) -> None:
+        self._cancelAutoClose()
+        self._stopRotate()
         if self._animation.state() == QPropertyAnimation.State.Running:
             self._animation.stop()
 
@@ -719,6 +755,20 @@ class ElaStateToolTip(ElaThemeWidget):
             return
         self._isClosing = True
         self._stopTimerAndAnimation()
+        # ``windowOpacity`` 只对顶层窗口有效；示例里的状态提示是页面子控件，
+        # 不换成透明度效果的话淡出根本看不见（1s 后直接消失）。
+        if self.isWindow():
+            target, prop = self, b"windowOpacity"
+        else:
+            effect = self._opacityEffect
+            if effect is None:
+                effect = QGraphicsOpacityEffect(self)
+                effect.setOpacity(1.0)
+                self.setGraphicsEffect(effect)
+                self._opacityEffect = effect
+            target, prop = effect, b"opacity"
+        self._animation.setTargetObject(target)
+        self._animation.setPropertyName(prop)
         self._animation.setStartValue(1)
         self._animation.setEndValue(0)
         # 收尾只有一个注册点。之前这里是裸 finished.connect（没有先断开），
@@ -744,51 +794,31 @@ class ElaStateToolTip(ElaThemeWidget):
         self._rotateAngle = (self._rotateAngle + self._deltaAngle) % 360
         self.update()
 
-    def mouseMoveEvent(self, event: QMouseEvent) -> None:
-        btn_size = STATETOOLTIP_CLOSE_BUTTON_SIZE
-        btn_x = self.width() - btn_size - 12
-        btn_y = 8
-        btn_rect = QRect(btn_x, btn_y, btn_size, btn_size)
-        hovered = btn_rect.contains(event.position().toPoint())
-        if hovered != self._closeBtnHovered:
-            self._closeBtnHovered = hovered
-            self.update()
-        super().mouseMoveEvent(event)
-
-    def leaveEvent(self, event: QEvent) -> None:
-        if self._closeBtnHovered:
-            self._closeBtnHovered = False
-            self.update()
-        super().leaveEvent(event)
-
-    def mousePressEvent(self, event: QMouseEvent) -> None:
-        btn_size = STATETOOLTIP_CLOSE_BUTTON_SIZE
-        btn_x = self.width() - btn_size - 12
-        btn_y = 8
-        btn_rect = QRect(btn_x, btn_y, btn_size, btn_size)
-        if event.button() == Qt.MouseButton.LeftButton and btn_rect.contains(
-            event.position().toPoint()
-        ):
-            self._onCloseButtonClicked()
-            return
-        super().mousePressEvent(event)
-
     def showEvent(self, a0: Optional[QShowEvent]) -> None:
         # _rotateTimer 只在 _connectSignals 里启动、hideEvent 里停止。复用同一个
         # tooltip（hide 后再 show，是「连续提示同一个控件」的常规用法）时若不重启，
         # loading spinner 会永久停在最后一个角度。
         super().showEvent(a0)
+        if self._destroyed:
+            return
         # 重新展示 = 上一轮的关闭流程作废。_isClosing 只在 _fadeOut 里置位、
         # 成功路径不复位（那里紧接着就 deleteLater 了），所以中途被 stop 掉的
         # 淡出会把它永久留在 True：不复位的话这个 tooltip 既再也淡不出去，
         # spinner 也永远重启不了。
-        if not self._destroyed:
-            self._isClosing = False
-        if (
-            not self._isClosing
-            and not self._destroyed
-            and not self._rotateTimer.isActive()
-        ):
+        self._stopTimerAndAnimation()
+        self._isClosing = False
+        if self._opacityEffect is not None:
+            # 摘掉半途淡出留下的效果：常驻 QGraphicsOpacityEffect 会让每次
+            # 重绘都多走一遍离屏渲染（spinner 20fps）。
+            self.setGraphicsEffect(None)
+            self._opacityEffect = None
+        if self._isDone:
+            # hide 时取消过自动关闭；重新展示完成态要重新计时
+            self._cancelAutoClose()
+            self._autoCloseTimer = single_shot_on(
+                self, TOOLTIP_AUTO_CLOSE_DELAY, self._fadeOut
+            )
+        elif not self._rotateTimer.isActive():
             start_idle_loop(self._rotateTimer, TOOLTIP_ROTATE_TIMER_INTERVAL)
 
     def hideEvent(self, a0: Optional[QHideEvent]) -> None:
@@ -811,65 +841,46 @@ class ElaStateToolTip(ElaThemeWidget):
         if not self._checkValid():
             return
         painter = QPainter(self)
-        painter.setRenderHints(QPainter.RenderHint.Antialiasing)
-        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setRenderHints(
+            QPainter.RenderHint.Antialiasing | QPainter.RenderHint.TextAntialiasing
+        )
 
-        themeMode = self._currentTheme
-        r = self._borderRadius
-        w, h = self.width(), self.height()
+        mode = self._currentTheme
+        sm = SHADOW_MARGIN
+        radius = self._borderRadius
+        card_width = self.width() - 2 * sm
+        card_height = self.height() - 2 * sm
 
-        bg_color = eTheme.getThemeColor(themeMode, ElaThemeType.ThemeColor.PopupBase)
-        path = QPainterPath()
-        path.addRoundedRect(0, 0, w, h, r, r)
-        painter.fillPath(path, bg_color)
+        paintOverlayShadow(painter, self.rect(), margin=sm, radius=radius)
 
-        accent_color = self._getAccentColor()
+        painter.translate(sm, sm)
+        paintRoundedCard(
+            painter,
+            QRectF(0, 0, card_width, card_height),
+            background=surfacePopup(mode),
+            border=border(mode),
+            radius=radius,
+        )
+
+        # 状态图标：加载中旋转的箭头 / 完成的对勾，颜色取自主题状态令牌
         painter.save()
-        painter.setClipRect(0, 0, w, h)
-        painter.setBrush(accent_color)
-        painter.setPen(Qt.PenStyle.NoPen)
-        painter.drawRoundedRect(0, 0, STATETOOLTIP_ACCENT_WIDTH, h, r, r)
-        painter.drawRect(
-            STATETOOLTIP_ACCENT_WIDTH - 2,
-            0,
-            4,
-            h,
+        painter.translate(_ST_LEFT_PAD + _ST_ICON_BOX / 2, card_height / 2)
+        if not self._isDone:
+            painter.rotate(self._rotateAngle)
+        painter.setFont(self._iconFont)
+        painter.setPen(self._getAccentColor())
+        icon = (
+            ElaIconType.IconName.CircleCheck
+            if self._isDone
+            else ElaIconType.IconName.ArrowRotateRight
+        )
+        half = STATETOOLTIP_ICON_SIZE / 2
+        painter.drawText(
+            QRectF(-half, -half, STATETOOLTIP_ICON_SIZE, STATETOOLTIP_ICON_SIZE),
+            Qt.AlignmentFlag.AlignCenter,
+            chr(icon.value),
         )
         painter.restore()
-
-        text_color = eTheme.getThemeColor(themeMode, ElaThemeType.ThemeColor.BasicText)
-        icon_area_x = STATETOOLTIP_ACCENT_WIDTH + 6
-        icon_area_y = h // 2
-
-        if not self._isDone:
-            painter.save()
-            painter.translate(icon_area_x + 14, icon_area_y)
-            painter.rotate(self._rotateAngle)
-            iconFont = QFont("ElaAwesome")
-            iconFont.setPixelSize(STATETOOLTIP_ICON_SIZE)
-            painter.setFont(iconFont)
-            painter.setPen(text_color)
-            painter.drawText(
-                QRectF(-8, -8, 16, 16),
-                Qt.AlignmentFlag.AlignCenter,
-                chr(ElaIconType.IconName.ArrowRotateRight.value),
-            )
-            painter.restore()
-        else:
-            painter.save()
-            painter.translate(icon_area_x + 14, icon_area_y)
-            iconFont = QFont("ElaAwesome")
-            iconFont.setPixelSize(STATETOOLTIP_ICON_SIZE)
-            painter.setFont(iconFont)
-            painter.setPen(accent_color)
-            painter.drawText(
-                QRectF(-8, -8, 16, 16),
-                Qt.AlignmentFlag.AlignCenter,
-                chr(ElaIconType.IconName.BadgeCheck.value),
-            )
-            painter.restore()
-
-        self._drawCloseButton(painter)
         painter.end()
 
     def getSuitablePos(self) -> QPoint:

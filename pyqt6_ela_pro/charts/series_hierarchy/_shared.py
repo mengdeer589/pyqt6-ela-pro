@@ -62,18 +62,23 @@ def _series_palette_color(chart, index):
 
 
 def _parse_named_values(data):
-    """解析 [{"name","value"}] / 数值 数据 → [(name, value)]（负值剔除）。"""
+    """解析 [{"name","value"}] / 数值 → ``[(原下标, name, value)]``。
+
+    **保留负值与原始下标**：饼图 / 漏斗里负值只应得到 0 角度，不能整条删掉
+    （删掉会让后续项的 ``itemStyle`` / ``dataIndex`` 整体前移，红色画到别的
+    数据上）；仪表盘量程含负值时负值更是正常业务数据。
+    """
     out = []
-    for item in data or []:
+    for index, item in enumerate(data or []):
         if isinstance(item, dict):
             name = str(item.get("name") or "")
             v = item.get("value")
         else:
             name, v = "", item
         fv = _to_float(v, None) if not isinstance(v, bool) else None
-        if fv is None or fv < 0:
+        if fv is None:
             continue
-        out.append((name, fv))
+        out.append((index, name, fv))
     return out
 
 

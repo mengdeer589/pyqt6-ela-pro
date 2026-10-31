@@ -53,6 +53,7 @@ class _ChartPaintMixin:
         opts：``text`` / ``color`` / ``textColor`` / ``maskColor`` /
         ``fontSize`` / ``showSpinner`` / ``spinnerRadius`` / ``lineWidth``。
         """
+        self._ensure_alive()
         self._loading = True
         self._loading_type = str(type or "default")
         self._loading_opts = dict(opts or {})
@@ -64,6 +65,7 @@ class _ChartPaintMixin:
 
     def hideLoading(self) -> None:
         """隐藏加载遮罩（ECharts ``hideLoading``）。"""
+        self._ensure_alive()
         self._spinner_timer.stop()
         self._loading = False
         self._loading_opts = {}

@@ -81,12 +81,8 @@ from pyqt6_ela_pro.example import (
     ButtonsMenusPage,
     ChartLibPage,
     ChartsPage,
-    ChatAgentPage,
     ChatGuidePage,
-    ChatInputPage,
-    ChatOverviewPage,
-    ChatPersistPage,
-    ChatSessionPage,
+    ChatWorkbenchPage,
     ComboBoxPage,
     ContainerLayoutPage,
     DataTablePage,
@@ -218,24 +214,17 @@ class ExampleWindow(ElaWindow):
         )
         self.expandNavigationNode(render)
 
-        # ── AI 对话：按**能力域**切，不按「应用场景」切 ──
-        # 原来分「基础对话 / Agent 能力 / 多话题对话」三页，是按使用场景分的，
-        # 结果同一个组件的能力被打散在三处、每页还各演一遍权限审批。现在改成：
-        # 「长什么样」/「怎么接」/「agent 多了什么」/「多话题」/「落库与性能」，
-        # 五页各自回答一个问题。
+        # ── AI 对话：一个工作台，内部按能力域切七个工作区 ──
+        # 与图表工作台同构：顶部 ElaPivot 切工作区，首次切换才构建。
+        # 七个工作区是「长什么样 / 怎么接 / agent 多了什么 / 改了文件看什么 /
+        # 轨迹状态与检索 / 多话题 / 落库与性能」，各自回答一个问题。
         _, chat = self.addExpanderNode("AI 对话", icon.Comments)
         self._addPage(
-            "AI 对话", "聊天组件总览", ChatOverviewPage(self), chat, icon.Paragraph
-        )
-        self._addPage("AI 对话", "输入区能力", ChatInputPage(self), chat, icon.Comment)
-        self._addPage(
-            "AI 对话", "Agent 能力", ChatAgentPage(self), chat, icon.ShieldHalved
-        )
-        self._addPage(
-            "AI 对话", "会话管理", ChatSessionPage(self), chat, icon.ClipboardList
-        )
-        self._addPage(
-            "AI 对话", "持久化与性能", ChatPersistPage(self), chat, icon.Database
+            "AI 对话",
+            "AI 组件工作台",
+            ChatWorkbenchPage(self),
+            chat,
+            icon.Comments,
         )
         # 默认展开：这是本示例的重点组件，收起来等于把它藏了
         self.expandNavigationNode(chat)

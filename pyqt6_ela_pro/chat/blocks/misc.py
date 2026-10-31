@@ -122,6 +122,7 @@ class CompactionSeparator(_ThemeAwareMixin, ElaScrollPageArea):
         self._summary = ""
         self._count = 0
         self._status = ElaChatStatusType.Done
+        self._stats_text = ""
         self._body_built = False
         # **显式记展开态**，不要从 ``self._body.isVisible()`` 反推：控件还没被
         # show 过时 ``isVisible()`` 恒为 False（跟父链可见性走），反推出来的
@@ -224,8 +225,26 @@ class CompactionSeparator(_ThemeAwareMixin, ElaScrollPageArea):
         return self._count
 
     def setCompactionStatus(self, status: str) -> None:
-        """设置压缩状态（``streaming`` 时标题追加「进行中」）。"""
+        """设置压缩状态（排队 / 进行中 / 失败 / 取消）。"""
         self._status = status or ElaChatStatusType.Done
+        self._sync_label()
+
+    def setStats(self, stats) -> None:
+        """设置压缩请求本身的用量（``ElaChatStats`` 或 ``None``）。"""
+        if stats is None:
+            self._stats_text = ""
+            self._sync_label()
+            return
+        prompt = max(0, int(getattr(stats, "prompt_tokens", 0) or 0)) + max(
+            0, int(getattr(stats, "cache_read_tokens", 0) or 0)
+        ) + max(0, int(getattr(stats, "cache_write_tokens", 0) or 0))
+        output = max(0, int(getattr(stats, "completion_tokens", 0) or 0)) + max(
+            0, int(getattr(stats, "reasoning_tokens", 0) or 0)
+        )
+        if prompt + output <= 0:
+            self._stats_text = ""
+        else:
+            self._stats_text = f"输入 {prompt:,} · 输出 {output:,}"
         self._sync_label()
 
     def setOpened(self, opened: bool) -> None:
@@ -272,10 +291,16 @@ class CompactionSeparator(_ThemeAwareMixin, ElaScrollPageArea):
             if self._count > 0
             else self.LABEL_NO_COUNT
         )
-        if self._status == ElaChatStatusType.Streaming:
+        if self._status == ElaChatStatusType.Queued:
+            text = f"{text} · 已排队"
+        elif self._status == ElaChatStatusType.Streaming:
             text = f"{text} · 压缩中…"
         elif self._status == ElaChatStatusType.Error:
             text = f"{text} · 压缩失败"
+        elif self._status == ElaChatStatusType.Stopped:
+            text = f"{text} · 已取消"
+        if self._stats_text:
+            text = f"{text} · {self._stats_text}"
         self._label.setText(text)
 
     def _apply_theme(self) -> None:

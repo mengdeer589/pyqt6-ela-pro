@@ -147,7 +147,8 @@ class BarSeriesRenderer(SeriesRenderer):
         ):
             if not _finite(y):
                 continue
-            v0 = (pos_bases if y >= 0 else neg_bases).get(i, 0.0)
+            key = self._stack_key(x, i)
+            v0 = (pos_bases if y >= 0 else neg_bases).get(key, 0.0)
             v1 = v0 + y
             if val_axis.type == "log":
                 # log 轴没有 0 基线：底边就是 vmin；负值 / 0 无法映射，跳过。
@@ -204,6 +205,13 @@ class BarSeriesRenderer(SeriesRenderer):
             return max(0.0, band * value)
         return max(0.0, value)
 
+    @staticmethod
+    def _stack_key(x, index):
+        """堆叠对齐键：优先 x（类别名 / 数值），不可哈希时退回下标。"""
+        if isinstance(x, (str, int, float)) and not isinstance(x, bool):
+            return x
+        return index
+
     def _stack_bases(self):
         """同 stack 前序可见 bar 系列的逐点基线 ``(pos, neg)`` 双桶。"""
         pos, neg = {}, {}
@@ -218,11 +226,12 @@ class BarSeriesRenderer(SeriesRenderer):
             if str(r.opt.get("stack") or "") != str(stack):
                 continue
             for i, item in enumerate(r.data()):
-                _, y = parseDataPoint(item, i)
+                x, y = parseDataPoint(item, i)
                 if y is None:
                     continue
+                key = self._stack_key(x, i)
                 bucket = pos if y >= 0 else neg
-                bucket[i] = bucket.get(i, 0.0) + y
+                bucket[key] = bucket.get(key, 0.0) + y
         return pos, neg
 
     @staticmethod

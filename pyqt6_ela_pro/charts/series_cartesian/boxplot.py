@@ -108,6 +108,9 @@ class BoxplotSeriesRenderer(SeriesRenderer):
         p.restore()
 
     def hitTest(self, pos: QPointF):
+        if self._anim_t < 1.0:
+            # 箱体从 mid 向两端生长：终态 high/low 位置此刻还是空白。
+            return None
         coord = self.chart.coordFor(self.opt)
         if not isinstance(coord, GridCoord):
             return None

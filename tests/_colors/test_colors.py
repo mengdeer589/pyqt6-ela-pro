@@ -4,7 +4,7 @@ import re
 
 import pytest
 from PyQt6.QtGui import QColor
-from PyQt6ElaWidgetTools import ElaThemeType
+from PyQt6ElaWidgetTools import ElaThemeType, eTheme
 
 from pyqt6_ela_pro._colors import (
     _COLOR_ALIAS,
@@ -14,11 +14,13 @@ from pyqt6_ela_pro._colors import (
     get_accent_color,
     get_color_scheme,
     state_tint,
+    text_on_color,
 )
 from pyqt6_ela_pro._colors import (
     STATE_HOVER_ALPHA as _HOVER_ALPHA,
     STATE_PRESS_ALPHA as _PRESS_ALPHA,
 )
+from pyqt6_ela_pro._theme import resetAccentColor, setAccentColor
 
 
 class TestColorsPalette:
@@ -180,8 +182,16 @@ class TestColorsGetAccentColor:
         assert color.name() == "#0067c0"
 
     def test_get_accent_color_dark_value(self):
+        """深色档必须与 ``eTheme`` 的 ``PrimaryNormal`` 逐值一致。
+
+        库内固定色板写的是 ``#4cc2ff``，而系统主题实际给的是 ``#4abcf7`` ——
+        两边不一致正是「ElaButton 主题色和 Ela 自带的对不上」的来源。
+        """
         color = get_accent_color("blue", ElaThemeType.ThemeMode.Dark)
-        assert color.name() == "#4cc2ff"
+        live = eTheme.getThemeColor(
+            ElaThemeType.ThemeMode.Dark, ElaThemeType.ThemeColor.PrimaryNormal
+        )
+        assert color.name() == live.name()
 
     def test_get_accent_color_resolves_alias(self):
         direct = get_accent_color("blue", ElaThemeType.ThemeMode.Light)
@@ -192,3 +202,76 @@ class TestColorsGetAccentColor:
         unknown = get_accent_color("nonexistent", ElaThemeType.ThemeMode.Light)
         blue = get_accent_color("blue", ElaThemeType.ThemeMode.Light)
         assert unknown.name() == blue.name()
+
+
+class TestLiveAccent:
+    """主色（primary / blue）跟着 ``eTheme`` 的实时强调色走，与 Ela 自带控件一致。"""
+
+    @pytest.mark.parametrize(
+        "mode",
+        [ElaThemeType.ThemeMode.Light, ElaThemeType.ThemeMode.Dark],
+        ids=["light", "dark"],
+    )
+    def test_primary_matches_theme_accent(self, mode):
+        live = eTheme.getThemeColor(mode, ElaThemeType.ThemeColor.PrimaryNormal)
+        assert get_color_scheme("primary", mode)["accent"].name() == live.name()
+        assert get_color_scheme("blue", mode)["accent"].name() == live.name()
+        assert get_accent_color("primary", mode).name() == live.name()
+
+    def test_primary_follows_set_accent_color(self):
+        """``setAccentColor`` 之后按钮主色要跟着变（旧实现是写死的色板）。"""
+        mode = ElaThemeType.ThemeMode.Light
+        try:
+            setAccentColor("#12ab56", modes=[mode])
+            assert get_color_scheme("primary", mode)["accent"].name() == "#12ab56"
+            assert get_accent_color("blue", mode).name() == "#12ab56"
+        finally:
+            resetAccentColor([mode])
+        assert get_color_scheme("primary", mode)["accent"].name() == "#0067c0"
+
+    def test_other_colors_are_not_affected_by_accent(self):
+        mode = ElaThemeType.ThemeMode.Light
+        try:
+            setAccentColor("#12ab56", modes=[mode])
+            assert get_color_scheme("danger", mode)["accent"].name() == "#ff4d4f"
+        finally:
+            resetAccentColor([mode])
+
+    def test_scheme_returns_copies(self):
+        """调用方就地改返回的 QColor 不能污染缓存（``setAlpha`` 曾污染全局调色板）。"""
+        first = get_color_scheme("primary", ElaThemeType.ThemeMode.Light)
+        first["accent"].setAlpha(0)
+        second = get_color_scheme("primary", ElaThemeType.ThemeMode.Light)
+        assert second["accent"].alpha() == 255
+
+    def test_accent_bg_is_tinted_from_accent(self):
+        """``accentBg`` 由强调色 tint 出来，换色后不再残留出厂蓝底。"""
+        mode = ElaThemeType.ThemeMode.Light
+        try:
+            setAccentColor("#12ab56", modes=[mode])
+            bg = get_color_scheme("primary", mode)["accentBg"]
+            assert bg.green() > bg.red() and bg.green() > bg.blue()
+        finally:
+            resetAccentColor([mode])
+
+
+class TestTextOnColor:
+    """动态底色上的文字色（长按 / 进度填充盖住文字时用）。"""
+
+    def test_dark_background_gets_white(self):
+        assert text_on_color(QColor("#0067c0")).name() == "#ffffff"
+
+    def test_light_background_gets_black(self):
+        assert text_on_color(QColor("#ffd400")).name() == "#000000"
+
+    def test_invalid_color_falls_back_to_black(self):
+        assert text_on_color(QColor()).name() == "#000000"
+
+    @pytest.mark.parametrize("name", ["primary", "danger", "green", "purple"])
+    def test_solid_palette_text_matches_on_color(self, name):
+        """``solidText`` 本来就是按 solid 底算的，两个入口必须一致。"""
+        for mode in (ElaThemeType.ThemeMode.Light, ElaThemeType.ThemeMode.Dark):
+            scheme = get_color_scheme(name, mode)
+            assert (
+                text_on_color(scheme["solid"]).name() == scheme["solidText"].name()
+            ), f"{name}/{mode}"

@@ -68,7 +68,7 @@ opencode 的 ``ToolDisplay`` 用 ``<Dynamic>`` 分发**整个组件**，每个�
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Callable, Optional, Tuple
 
 from . import _json
@@ -113,6 +113,8 @@ class ToolRenderContext:
     isError: bool
     #: ``Pending`` 时是否允许展开（shell 类工具会放开）
     allowOpenWhilePending: bool
+    #: 结构化附加数据（``ElaChatToolCall.metadata`` 原样交出；缺省空字典）
+    metadata: dict = field(default_factory=dict)
 
     def parsedArguments(self) -> dict:
         """解析参数为字典（容错，永不抛异常）。

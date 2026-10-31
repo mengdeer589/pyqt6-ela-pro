@@ -36,15 +36,44 @@ class FunnelSeriesRenderer(SeriesRenderer):
     def __init__(self, chart, opt):
         super().__init__(chart, opt)
         self._layers = []  # [dict(name,value,color,poly=QPolygonF)]
+        #: 图例隐藏的数据项名（漏斗图例按数据项开关）
+        self._hidden_items = set()
+
+    def setHiddenItems(self, names) -> None:
+        """设置被图例隐藏的数据项（按名称）。"""
+        self._hidden_items = {str(n) for n in (names or [])}
+
+    def legendItems(self) -> list:
+        """漏斗图例条目 = 数据项名（不是系列名）。"""
+        out = []
+        for index, item in enumerate(self.data()):
+            if isinstance(item, dict):
+                name = str(item.get("name") or "")
+            else:
+                name = str(item or "")
+            if not name:
+                continue
+            out.append(
+                (
+                    name,
+                    self.itemColor(
+                        index, default=_series_palette_color(self.chart, index)
+                    ),
+                )
+            )
+        return out
 
     def layout(self, rect: QRectF) -> None:
         self._layers = []
-        raw_entries = _parse_named_values(self.data())
+        raw_entries = [
+            entry
+            for entry in _parse_named_values(self.data())
+            if entry[1] not in self._hidden_items
+        ]
         if not raw_entries:
             return
-        entries = [
-            (index, name, value) for index, (name, value) in enumerate(raw_entries)
-        ]
+        # 保留原始 data 下标（负值不再被删，否则后续项的 itemStyle 整体前移）
+        entries = list(raw_entries)
         sort = str(self.opt.get("sort") or "descending")
         if sort == "descending":
             entries.sort(key=lambda e: e[2], reverse=True)
@@ -62,7 +91,7 @@ class FunnelSeriesRenderer(SeriesRenderer):
         h = (rect.height() - gap * (n - 1)) / n
         if h <= 1:
             return
-        vmax = max(value for _, _, value in entries) or 1.0
+        vmax = max((max(value, 0.0) for _, _, value in entries), default=0.0) or 1.0
         min_frac = _clamp(_to_float(self.opt.get("minSize"), 0.12), 0.0, 1.0)
         max_w = max(20.0, rect.width() - margin_l - margin_r)
         cx = rect.left() + margin_l + max_w / 2
@@ -70,14 +99,17 @@ class FunnelSeriesRenderer(SeriesRenderer):
         align = str(self.opt.get("funnelAlign") or "center")
 
         def width_of(v):
-            return max_w * (min_frac + (1 - min_frac) * v / vmax)
+            return max_w * (min_frac + (1 - min_frac) * max(v, 0.0) / vmax)
 
         for slot, (data_index, name, v) in enumerate(entries):
             top_w = width_of(v)
+            # 最后一层收到 ``minSize``（默认 12% 宽），不是「与上一层同宽」——
+            # 原式 ``width_of(v) * min_frac / max(min_frac, 1e-6)`` 在
+            # min_frac>0 时恒等于 width_of(v)，退化成矩形。
             bot_w = (
                 width_of(entries[slot + 1][2])
                 if slot + 1 < n
-                else width_of(v) * min_frac / max(min_frac, 1e-6)
+                else max_w * min_frac
             )
             y0 = rect.top() + slot * (h + gap)
             y1 = y0 + h
@@ -288,6 +320,9 @@ class FunnelSeriesRenderer(SeriesRenderer):
         p.restore()
 
     def hitTest(self, pos: QPointF):
+        if self._anim_t < 1.0:
+            # 入场动画按层展开，终态几何尚未画出：命中会指到空白处。
+            return None
         for layer in self._layers:
             if layer["poly"].containsPoint(pos, Qt.FillRule.OddEvenFill):
                 return {

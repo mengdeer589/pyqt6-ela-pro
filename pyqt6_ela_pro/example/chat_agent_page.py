@@ -11,7 +11,7 @@
    files=[...]」重复。
 2. **工具审批**（``beginPermission``）—— 卡片只负责**画 + 收集 + 发信号**，
    **绝不阻塞**（在 Qt 里挂起等用户点按钮会卡死事件循环）。本节演示批准型
-   （允许一次 / 始终允许 / 拒绝…带反馈）与问答型（候选项单选）。
+   （允许一次 / 始终允许【长按 700ms】/ 拒绝…带反馈）与问答型（候选项单选）。
 3. **steer 插话**（``steerMessage``）—— 生成中把新指令送进**正在跑的这一轮**
    （对齐 opencode 的 ``Delivery = "steer" | "queue"``），投递点是
    ``beginStep`` 之后的安全边界。回执走「``↳`` 旁注」而不是插一条用户气泡。
@@ -35,14 +35,18 @@ from PyQt6ElaWidgetTools import eTheme
 from pyqt6_ela_pro import ElaButton
 from pyqt6_ela_pro._styles import ColorText
 from pyqt6_ela_pro.chat import (
+    ElaChatNoticeType,
     ElaChatOption,
     ElaChatPermission,
     ElaChatQuestion,
+    ElaChatRoleType,
     ElaChatStats,
     ElaChatWidget,
     ModelPricing,
+    installBuiltinToolRenderers,
     registerToolRenderer,
     stats_cost,
+    uninstallBuiltinToolRenderers,
     unregisterToolRenderer,
 )
 from pyqt6_ela_pro.chat._theme import mono_font, muted_color
@@ -173,7 +177,7 @@ class ChatAgentPage(ExamplePage):
                 (("注册渲染器", self._demo_renderer), ("注销", self._demo_unregister)),
                 "registerToolRenderer：渲染器只接管工具卡的内容区，头部 / 折叠 / "
                 "错误竖线 / 忙碌环 / 展开策略仍由卡片负责（所以库内既有工具卡行为"
-                "一条不变）。注册后往上面会话里发一张 patch 卡，展开看 diff。",
+                "一条不变）。注册后往上面会话里发一张 demo_patch 卡，展开看 diff。",
             ),
             (
                 2,
@@ -216,7 +220,7 @@ class ChatAgentPage(ExamplePage):
                 "cost_usd 跟着 ElaChatStats 走，定价表不烤进库；会话级汇总走 "
                 "view.sessionStats(limit)（计数 / 当前上下文四路词元 / 使用率 / "
                 "累计成本，口径对齐 opencode），把 total_tokens / total_cost_usd "
-                "喂给输入区工具栏的圆环（本页输入区隐藏，看效果去「输入区能力」页）。",
+                "喂给输入区工具栏的圆环（本页输入区隐藏，看效果去「输入区」工作区）。",
             ),
             (
                 7,
@@ -225,6 +229,26 @@ class ChatAgentPage(ExamplePage):
                 (("插入错误卡", self._demo_retry),),
                 "错误类型单独存字段，错误卡据此决定是否点亮「重试」"
                 "（限流 / 超时可重试，参数错误 / 鉴权失败 / 内容过滤不给）。",
+            ),
+            (
+                8,
+                "文件变更与 diff",
+                self._demo_file_changes,
+                (
+                    ("安装内置渲染器", self._demo_file_changes),
+                    ("卸载", self._demo_builtin_unregister),
+                ),
+                "installBuiltinToolRenderers 注册 edit / write / patch 的"
+                "文件变更卡与 shell 控制台渲染器（默认不注册，宿主同名实现优先）；"
+                "ElaChatFileChanges 每个文件懒建 ElaDiffView。",
+            ),
+            (
+                9,
+                "通知 / 自动重试 / 活动行",
+                self._demo_timeline_status,
+                (("插入时间线状态", self._demo_timeline_status),),
+                "Notice 是弱化分隔行（不进 message.text）；RetryCard 显示第 N 次 + "
+                "倒计时；WorkingRow 是底部的运行态文案；三者都不阻塞宿主。",
             ),
         )
 
@@ -275,9 +299,20 @@ class ChatAgentPage(ExamplePage):
         if self._active_note is not None:
             self._active_note.setText(text)
 
+    def _open_tool_card(self, messageId, callId):
+        """展开工具面板与指定卡片：演示里让 diff 第一眼可见，不用点两层。"""
+        bubble = self._chat.chatView().bubble(messageId)
+        if bubble is None:
+            return
+        for panel in bubble.toolPanels():
+            panel.setOpened(True)
+        card = bubble._tool_cards.get(callId)
+        if card is not None:
+            card.setOpened(True)
+
     # ================================================================ 演示 1
     def _demo_renderer(self) -> None:
-        """工具结果富渲染：把 ``patch`` / ``edit`` 的内容区换成自己的 diff 视图。
+        """工具结果富渲染：把 ``demo_patch`` / ``demo_edit`` 的内容区换成 diff 视图。
 
         关键点（``chat/renderers.py`` 的 docstring 有完整版）：
 
@@ -309,8 +344,10 @@ class ChatAgentPage(ExamplePage):
             count = len(files) if isinstance(files, list) else 0
             return ("files", f"{count} 个文件" if count else "")
 
-        registerToolRenderer("patch", build, subtitle=subtitle)
-        registerToolRenderer("edit", build, subtitle=subtitle)
+        # 用演示专用工具名，不覆盖内置的 edit / patch：工作台里「文件与 Diff」
+        # 工作区还在用内置渲染器，同名注册会跨工作区串味。
+        registerToolRenderer("demo_patch", build, subtitle=subtitle)
+        registerToolRenderer("demo_edit", build, subtitle=subtitle)
         self._renderers_registered = True
 
         view = self._chat.chatView()
@@ -322,7 +359,7 @@ class ChatAgentPage(ExamplePage):
         view.beginStep(messageId)
         callId = view.addToolCall(
             messageId,
-            "patch",
+            "demo_patch",
             '{"files": [{"path": "src/chat/blocks.py", "add": 18, "del": 4},'
             ' {"path": "src/chat/view.py", "add": 6, "del": 1}], "root": "src/chat"}',
         )
@@ -333,11 +370,12 @@ class ChatAgentPage(ExamplePage):
             ok=True,
         )
         self._chat.endAssistantMessage()
-        self._note("已注册 patch/edit 渲染器 —— 展开上面那张工具卡看 diff")
+        self._open_tool_card(messageId, callId)
+        self._note("已注册 demo_patch / demo_edit 渲染器 —— 上面那张工具卡已展开")
 
     def _demo_unregister(self) -> None:
         """注销渲染器：卡片回落默认的「参数 / 结果」纯文本。"""
-        for name in ("patch", "edit"):
+        for name in ("demo_patch", "demo_edit"):
             unregisterToolRenderer(name)
         self._renderers_registered = False
         self._note("已注销渲染器（已有卡片不受影响，新建卡片回落纯文本）")
@@ -355,8 +393,10 @@ class ChatAgentPage(ExamplePage):
         5. 用户点按钮 → 组件更新卡片并发 ``permissionReplied(...)``；
         6. **宿主按回复恢复 / 中止后端**。
 
-        「始终允许」的规则持久化也归宿主：``resources`` 里的模式串原样交出，
-        怎么匹配、存哪、作用域多大都是产品决策。库不持有任何权限状态。
+        「始终允许」是**长按 700ms** 才生效的 ``ElaLongPressButton``（持久授权
+        误触代价高，短按不算通过）；它的规则持久化也归宿主：``resources`` 里的
+        模式串原样交出，怎么匹配、存哪、作用域多大都是产品决策。库不持有任何
+        权限状态。
         """
         view = self._chat.chatView()
         messageId = view.beginMessage("assistant")
@@ -618,6 +658,61 @@ class ChatAgentPage(ExamplePage):
         view.setMessageError(messageId, "上游返回 502 Bad Gateway", "ServerError")
         self._chat.setGenerating(False)
         self._note("已插入错误卡（ServerError 可重试 → 展开错误卡点「重试」）")
+
+    # ================================================================ 演示 7
+    def _demo_file_changes(self) -> None:
+        """文件变更与 diff：内置渲染器 + ElaChatFileChanges + ElaDiffView。"""
+        installBuiltinToolRenderers()
+        view = self._chat.chatView()
+        messageId = view.beginMessage(ElaChatRoleType.Assistant)
+        patch = (
+            "--- a/demo.py\n+++ b/demo.py\n@@ -1,3 +1,4 @@\n"
+            " import os\n-print('old')\n+print('new')\n+print('done')\n"
+        )
+        callId = view.addToolCall(
+            messageId,
+            "edit",
+            '{"path":"demo.py"}',
+            metadata={
+                "files": [
+                    {
+                        "file": "demo.py",
+                        "patch": patch,
+                        "additions": 2,
+                        "deletions": 1,
+                        "status": "modified",
+                    }
+                ]
+            },
+        )
+        view.setToolCallResult(messageId, callId, "ok", ok=True)
+        view.endMessage(messageId)
+        self._open_tool_card(messageId, callId)
+        self._note("已插入文件变更卡（ElaDiffView 的行号 / 底色 / 折叠已展开）")
+
+    def _demo_builtin_unregister(self) -> None:
+        """卸载内置渲染器（只移除本模块注册且未被宿主覆盖的项）。"""
+        removed = uninstallBuiltinToolRenderers()
+        self._note("已卸载内置渲染器：" + (", ".join(removed) if removed else "无"))
+
+    def _demo_timeline_status(self) -> None:
+        """通知 / 自动重试 / 活动行 / 时间线密度。"""
+        view = self._chat.chatView()
+        messageId = view.beginMessage(ElaChatRoleType.Assistant)
+        view.addNotice(
+            messageId,
+            ElaChatNoticeType.ModelSwitched,
+            "已切换模型",
+            "deepseek-v4",
+        )
+        view.beginText(messageId)
+        view.appendText(messageId, "收到，正在处理……")
+        view.endText(messageId)
+        view.setRetry(messageId, 2, "上游限流，稍后自动重试", 0)
+        view.setActivity("正在探索代码库…")
+        view.setTimelineDetail({"thinking": {"placement": "hidden"}})
+        view.endMessage(messageId)
+        self._note("已插入通知 / 重试卡 / 活动行，并把 thinking 密度设为 hidden")
 
     def _on_retry_requested(self, messageId: int) -> None:
         """宿主侧：同参数重发。**保留消息位置**，清错误并把状态落成 stopped。"""

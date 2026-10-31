@@ -40,6 +40,7 @@ class TestPartModel:
             "synthetic",
             "compaction",
             "permission",
+            "notice",
         }
 
     def test_defaults_and_helpers(self):

@@ -6,10 +6,14 @@ from PyQt6 import sip
 from PyQt6.QtCore import QCoreApplication, QEvent, QObject, QPoint, Qt, pyqtSignal
 from PyQt6.QtGui import QColor, QHelpEvent, QPalette
 from PyQt6.QtWidgets import QApplication, QLabel, QVBoxLayout, QWidget
-from PyQt6ElaWidgetTools import ElaThemeType, eTheme
+from PyQt6ElaWidgetTools import ElaIconButton, ElaThemeType, eTheme
 
 import pyqt6_ela_pro.tooltips as tooltips_module
+from pyqt6_ela_pro._styles import SHADOW_MARGIN
+from pyqt6_ela_pro._theme import ElaStatusRoleType, accent, statusColor, surfacePopup
 from pyqt6_ela_pro.tooltips import (
+    STATETOOLTIP_MAX_WIDTH,
+    STATETOOLTIP_MIN_WIDTH,
     TOOLTIP_BORDER_RADIUS,
     ElaStateToolTip,
     ElaToolTip,
@@ -584,3 +588,106 @@ class TestStateToolTipTimerLifecycle:
         assert tip._rotateTimer.isActive() is False
         tip.deleteLater()
         qapp.processEvents()
+
+
+class TestStateToolTipAppearance:
+    """状态提示与 Ela 浮动层同一套材质 / 控件。
+
+    回归：曾是固定 360px 宽的「横幅」+ 自绘 ✕ + ``QGraphicsDropShadowEffect``，
+    与 toast / tooltip / 确认弹框的 ``PopupBase`` + ``PopupBorder`` 材质和
+    Ela 图标按钮都不一致。
+    """
+
+    @staticmethod
+    def _shown(title="正在加载", content="请稍候"):
+        tip = ElaStateToolTip(title, content)
+        tip.show()
+        QApplication.processEvents()
+        return tip
+
+    def test_no_graphics_shadow_effect(self):
+        tip = ElaStateToolTip("t", "c")
+        assert tip.graphicsEffect() is None
+        tip.deleteLater()
+
+    def test_close_button_is_ela_icon_button(self):
+        tip = ElaStateToolTip("t", "c")
+        assert isinstance(tip._closeBtn, ElaIconButton)
+        assert tip._closeBtn.focusPolicy() == Qt.FocusPolicy.NoFocus
+        assert tip._closeBtn.width() == tip._closeBtn.height()
+        tip.deleteLater()
+
+    def test_text_is_plain_text(self):
+        tip = ElaStateToolTip("t", "c")
+        assert tip._titleLabel.textFormat() == Qt.TextFormat.PlainText
+        assert tip._contentLabel.textFormat() == Qt.TextFormat.PlainText
+        tip.deleteLater()
+
+    def test_surface_uses_popup_base(self, qapp):
+        previous = eTheme.getThemeMode()
+        try:
+            for mode in (ElaThemeType.ThemeMode.Light, ElaThemeType.ThemeMode.Dark):
+                eTheme.setThemeMode(mode)
+                tip = self._shown()
+                image = tip.grab().toImage()
+                sm = SHADOW_MARGIN
+                # 左侧内边距区（文字从内容区 14px 之后开始），避开图标与边框
+                color = image.pixelColor(sm + 2, tip.height() // 2)
+                assert color.name() == surfacePopup(mode).name()
+                tip.deleteLater()
+                qapp.processEvents()
+        finally:
+            eTheme.setThemeMode(previous)
+
+    def test_width_adapts_to_content(self):
+        short = ElaStateToolTip("加载中", "请稍候")
+        long = ElaStateToolTip(
+            "导入完成", "已成功导入 128 个文件，其中 3 个文件因格式不支持而被跳过。"
+        )
+        try:
+            assert short.width() == STATETOOLTIP_MIN_WIDTH + 2 * SHADOW_MARGIN
+            assert long.width() == STATETOOLTIP_MAX_WIDTH + 2 * SHADOW_MARGIN
+            assert long.height() > short.height()
+        finally:
+            short.deleteLater()
+            long.deleteLater()
+
+    def test_state_colors_use_theme_tokens(self):
+        previous = eTheme.getThemeMode()
+        eTheme.setThemeMode(ElaThemeType.ThemeMode.Dark)
+        try:
+            tip = ElaStateToolTip("t", "c")
+            assert (
+                tip._getAccentColor().name()
+                == accent(ElaThemeType.ThemeMode.Dark).name()
+            )
+            tip.setState(True)
+            assert (
+                tip._getAccentColor().name()
+                == statusColor(
+                    ElaThemeType.ThemeMode.Dark, ElaStatusRoleType.Success
+                ).name()
+            )
+            tip.deleteLater()
+        finally:
+            eTheme.setThemeMode(previous)
+
+    def test_set_state_stops_and_restarts_spinner(self, qapp):
+        tip = self._shown()
+        assert tip._rotateTimer.isActive()
+        tip.setState(True)
+        assert not tip._rotateTimer.isActive()
+        tip.setState(False)
+        assert tip._rotateTimer.isActive()
+        assert tip._autoCloseTimer is None
+        tip.close()
+        tip.deleteLater()
+        qapp.processEvents()
+
+    def test_child_fade_uses_opacity_effect(self, make):
+        parent = make(QWidget)
+        tip = make(ElaStateToolTip, "t", "c", parent)
+        tip.show()
+        tip._fadeOut()
+        # 子控件没有 windowOpacity，必须换成透明度效果才看得见淡出
+        assert tip._opacityEffect is not None

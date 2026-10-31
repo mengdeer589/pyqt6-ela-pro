@@ -59,15 +59,15 @@ class DataZoomComponent(QObject):
         entries = opt if isinstance(opt, list) else [opt]
         self.entries = [e for e in entries if isinstance(e, dict)]
         first = self.entries[0] if self.entries else {}
-        self.init_start = _clamp(_to_float(first.get("start"), 0.0) or 0.0, 0, 100)
-        self.init_end = _clamp(_to_float(first.get("end"), 100.0) or 100.0, 0, 100)
+        self.init_start = _clamp(_to_float(first.get("start"), 0.0), 0, 100)
+        self.init_end = _clamp(_to_float(first.get("end"), 100.0), 0, 100)
         if self.init_end < self.init_start:
             self.init_start, self.init_end = self.init_end, self.init_start
         self.start = self.init_start
         self.end = self.init_end
         # y 轴窗口（框选 / 滚轮同时缩放 XY；显式 dataZoom 需给 yAxisIndex 才启用）
-        self.y_init_start = _clamp(_to_float(first.get("yStart"), 0.0) or 0.0, 0, 100)
-        self.y_init_end = _clamp(_to_float(first.get("yEnd"), 100.0) or 100.0, 0, 100)
+        self.y_init_start = _clamp(_to_float(first.get("yStart"), 0.0), 0, 100)
+        self.y_init_end = _clamp(_to_float(first.get("yEnd"), 100.0), 0, 100)
         if self.y_init_end < self.y_init_start:
             self.y_init_start, self.y_init_end = self.y_init_end, self.y_init_start
         self.y_start = self.y_init_start
@@ -98,6 +98,16 @@ class DataZoomComponent(QObject):
         self.has_slider = any(str(e.get("type")) == "slider" for e in self.entries)
         if not self.has_inside and not self.has_slider and self.entries:
             self.has_inside = True  # 未指明类型时按 inside 处理
+        # 全量范围缓存：``apply`` 懒捕 / ``captureExtent`` 重捕都会写这里。
+        # 必须在构造时初始化 —— host 自动滚轮组件在 ``_rebuild`` 的捕获循环
+        # 之后才创建，首次 ``refreshValueExtent`` 可能早于 ``captureExtent``。
+        self._full_cats = {}
+        self._full_range = {}
+        self._full_y_cats = {}
+        self._full_y_range = {}
+        self._applied_cats_window = {}
+        self._applied_y_cats_window = {}
+        self._extent_epochs = {}
         self._x_axis_indices = None
         for entry in self.entries:
             if entry.get("xAxisIndex") is not None:
@@ -203,6 +213,7 @@ class DataZoomComponent(QObject):
         self._full_y_range = {}
         self._applied_cats_window = {}
         self._applied_y_cats_window = {}
+        self._extent_epochs = {}
         for index, axis in self._axes():
             if axis.type == "category":
                 full = list(
@@ -211,7 +222,11 @@ class DataZoomComponent(QObject):
                 if full:
                     self._full_cats[index] = full
             else:
-                self._full_range[index] = (float(axis.vmin), float(axis.vmax))
+                full = getattr(axis, "_data_extent", None) or (
+                    float(axis.vmin),
+                    float(axis.vmax),
+                )
+                self._full_range[index] = (float(full[0]), float(full[1]))
         for index, axis in self._y_axes():
             if axis.type == "category":
                 full = list(
@@ -220,7 +235,62 @@ class DataZoomComponent(QObject):
                 if full:
                     self._full_y_cats[index] = full
             else:
-                self._full_y_range[index] = (float(axis.vmin), float(axis.vmax))
+                full = getattr(axis, "_data_extent", None) or (
+                    float(axis.vmin),
+                    float(axis.vmax),
+                )
+                self._full_y_range[index] = (float(full[0]), float(full[1]))
+        for index, axis in self._axes():
+            if axis.type != "category":
+                self._extent_epochs[("x", index)] = int(
+                    getattr(axis, "_extent_epoch", 0)
+                )
+        for index, axis in self._y_axes():
+            if axis.type != "category":
+                self._extent_epochs[("y", index)] = int(
+                    getattr(axis, "_extent_epoch", 0)
+                )
+
+    def refreshValueExtent(self) -> bool:
+        """系列 layout 修正轴范围后，只重捕**变过**的 value/log 全量范围。
+
+        ``layout_all`` 的顺序是「写回窗口 → 坐标系 → 系列」。横向柱 / 堆叠柱 /
+        K 线 / 箱线图的真实值域要到系列 ``layout`` 里才算得出来，所以这里必须
+        在系列之后补一次 —— 否则 dataZoom 会拿「未修正的范围」当全量，把轴
+        改回去（默认自动滚轮组件必中：横向柱三根柱子一样长、堆叠柱上层被裁）。
+
+        只认 ``_extent_epoch`` 变化过的轴，避免每帧复制 1M 个类别列表。
+        """
+        changed = False
+        for index, axis in self._axes():
+            if axis.type == "category":
+                continue
+            epoch = int(getattr(axis, "_extent_epoch", 0))
+            key = ("x", index)
+            if self._extent_epochs.get(key) == epoch:
+                continue
+            full = getattr(axis, "_data_extent", None) or (
+                float(axis.vmin),
+                float(axis.vmax),
+            )
+            self._full_range[index] = (float(full[0]), float(full[1]))
+            self._extent_epochs[key] = epoch
+            changed = True
+        for index, axis in self._y_axes():
+            if axis.type == "category":
+                continue
+            epoch = int(getattr(axis, "_extent_epoch", 0))
+            key = ("y", index)
+            if self._extent_epochs.get(key) == epoch:
+                continue
+            full = getattr(axis, "_data_extent", None) or (
+                float(axis.vmin),
+                float(axis.vmax),
+            )
+            self._full_y_range[index] = (float(full[0]), float(full[1]))
+            self._extent_epochs[key] = epoch
+            changed = True
+        return changed
 
     def _capture_full(self, index: int, axis) -> None:
         if axis.type == "category":
@@ -228,7 +298,11 @@ class DataZoomComponent(QObject):
                 self._full_cats[index] = list(axis.categories)
         else:
             if index not in self._full_range:
-                self._full_range[index] = (float(axis.vmin), float(axis.vmax))
+                full = getattr(axis, "_data_extent", None) or (
+                    float(axis.vmin),
+                    float(axis.vmax),
+                )
+                self._full_range[index] = (float(full[0]), float(full[1]))
 
     def _capture_full_y(self, index: int, axis) -> None:
         if axis.type == "category":
@@ -236,7 +310,11 @@ class DataZoomComponent(QObject):
                 self._full_y_cats[index] = list(axis.categories)
         else:
             if index not in self._full_y_range:
-                self._full_y_range[index] = (float(axis.vmin), float(axis.vmax))
+                full = getattr(axis, "_data_extent", None) or (
+                    float(axis.vmin),
+                    float(axis.vmax),
+                )
+                self._full_y_range[index] = (float(full[0]), float(full[1]))
 
     @staticmethod
     def _apply_axis_window(
@@ -254,8 +332,10 @@ class DataZoomComponent(QObject):
             n = len(full)
             if n == 0:
                 return
-            i0 = int(start / 100.0 * n)
-            i1 = int(-(-end / 100.0 * n // 1))  # ceil
+            # 百分比 → 下标必须带 epsilon：``i0/n*100`` 再乘回去常有 1ulp
+            # 误差（n=3, i0=1 得 0.9999999999999999，int() 退一格）。
+            i0 = int(math.floor(start / 100.0 * n + 1e-9))
+            i1 = int(math.ceil(end / 100.0 * n - 1e-9))
             i0 = _clamp(i0, 0, n - 1)
             i1 = _clamp(max(i1, i0 + 1), 1, n)
             # 幂等快速路径：窗口没变、且轴内容仍是上一次写的窗口时跳过 ——
@@ -741,15 +821,20 @@ class DataZoomComponent(QObject):
         if plot.width() <= 0:
             return
         factor = 0.8 if delta_y > 0 else 1.25
+        coord = self.chart.coordAt(pos)
+        x_axis = getattr(coord, "x_axis", None) if isinstance(coord, GridCoord) else None
         old_span = self.end - self.start
         if old_span > 0:
             new_span = _clamp(old_span * factor, 4.0, 100.0)
             frac = _clamp((pos.x() - plot.left()) / plot.width(), 0.0, 1.0)
+            # inverse 轴的像素方向与数据方向相反：不翻转锚点，鼠标下的
+            # 数据点在缩放时会漂走。
+            if x_axis is not None and getattr(x_axis, "inverse", False):
+                frac = 1.0 - frac
             anchor = self.start + frac * old_span
             self.start = anchor - frac * new_span
             self.end = self.start + new_span
             self.start, self.end = self._clamp_span(self.start, self.end)
-        coord = self.chart.coordAt(pos)
         if plot.contains(pos) and isinstance(coord, GridCoord) and coord.y_axes:
             self.enableYAxisZoom()
         if self._y_zoom_enabled and plot.height() > 0:
@@ -757,6 +842,10 @@ class DataZoomComponent(QObject):
             if old_y_span > 0:
                 new_y_span = _clamp(old_y_span * factor, 4.0, 100.0)
                 frac_y = _clamp((plot.bottom() - pos.y()) / plot.height(), 0.0, 1.0)
+                if isinstance(coord, GridCoord) and getattr(
+                    coord.y_axis, "inverse", False
+                ):
+                    frac_y = 1.0 - frac_y
                 anchor_y = self.y_start + frac_y * old_y_span
                 self.y_start = anchor_y - frac_y * new_y_span
                 self.y_end = self.y_start + new_y_span
@@ -781,6 +870,9 @@ class DataZoomComponent(QObject):
         if plot.width() <= 0:
             return
         shift = -dx_px / plot.width() * 100.0
+        # inverse 轴：内容跟手的方向相反
+        if getattr(self._axis(), "inverse", False):
+            shift = -shift
         shift = _clamp(shift, -self.start, 100.0 - self.end)
         self.start += shift
         self.end += shift

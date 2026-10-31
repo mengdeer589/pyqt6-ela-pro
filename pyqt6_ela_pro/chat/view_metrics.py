@@ -4,6 +4,9 @@
 _MESSAGE_SPACING = 20
 #: 虚拟列表每帧最多物化的气泡数（单个约 7ms：建壳 + 查看器 + Markdown 渲染）
 _VIRTUAL_MATERIALIZE_BUDGET = 4
+#: 虚拟列表每帧物化的时间预算（毫秒）：真实会话里单条消息可能远超 7ms，
+#: 只按条数限制会让整页跳转一帧内叠 3~4 条重型消息（实测 30~50ms）。
+_VIRTUAL_MATERIALIZE_BUDGET_MS = 8.0
 #: 虚拟列表的物化余量（视口高度的倍数，上下各留）
 _VIRTUAL_WINDOW_MARGIN_RATIOS = 0.75
 #: 懒加载触发距离（距顶部不足该倍数的视口高度时预渲染更早的消息）

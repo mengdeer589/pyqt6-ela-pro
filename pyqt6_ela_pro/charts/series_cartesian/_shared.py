@@ -18,7 +18,6 @@ from .. import _downsample as _ds
 from .._symbol import drawSymbol
 from .._utils import parse_color, to_float as _to_float
 from ..axes import formatValue
-from ..core import parseDataPoint
 
 
 def _lerp(a, b, t):
@@ -426,15 +425,20 @@ def _grid_value_extent(
             a is b for a, b in zip(cached_opts, opts)
         ):
             return cached_ext
-    ext = _grid_value_extent_uncached(chart, opts)
+    ext = _grid_value_extent_uncached(chart, opts, axis_kind)
     if len(_GRID_EXTENT_CACHE) >= _GRID_EXTENT_CACHE_LIMIT:
         _GRID_EXTENT_CACHE.clear()
     _GRID_EXTENT_CACHE[key] = (ext, tuple(opts))
     return ext
 
 
-def _grid_value_extent_uncached(chart, opts) -> tuple:
-    """``_grid_value_extent`` 的实际计算（无缓存）。"""
+def _grid_value_extent_uncached(chart, opts, axis_kind: str = "y") -> tuple:
+    """``_grid_value_extent`` 的实际计算（无缓存）。
+
+    ``axis_kind`` 决定读数据项哪一维：``"x"`` 读 ``[x, y]`` 的第一维 /
+    横向柱的标量值，``"y"`` 读第二维 / 标量值。堆叠和只在 y 轴累计
+    （x 轴是类目 / 独立值，不参与堆叠）。
+    """
     dmin = None
     dmax = None
 
@@ -446,30 +450,63 @@ def _grid_value_extent_uncached(chart, opts) -> tuple:
         dmin = v if dmin is None else min(dmin, v)
         dmax = v if dmax is None else max(dmax, v)
 
+    def datum(item, index):
+        """按 axis_kind 取数值；标量在两条轴上都是它自己（横向柱）。"""
+        v = item.get("value") if isinstance(item, dict) else item
+        if isinstance(v, (list, tuple)):
+            if not v:
+                return None
+            raw = v[0] if axis_kind == "x" else (v[1] if len(v) >= 2 else None)
+            return _to_float(raw, None)
+        if isinstance(v, (int, float)) and not isinstance(v, bool):
+            f = float(v)
+            return f if math.isfinite(f) else None
+        return None
+
+    def stack_key(item, index):
+        """堆叠对齐键：``[x, y]`` 用 x，标量用下标（与 bar/line 渲染器一致）。"""
+        v = item.get("value") if isinstance(item, dict) else item
+        if isinstance(v, (list, tuple)) and v:
+            x = v[0]
+            if isinstance(x, (str, int, float)) and not isinstance(x, bool):
+                return x
+        return index
+
     stack_pos = {}
     stack_neg = {}
+    stack_all = {}
     for s in opts:
         stype = str(s.get("type") or "line")
         data = s.get("data")
         if data is None:
             data = []
-        if stype == "bar" and s.get("stack"):
+        if axis_kind == "y" and stype in ("bar", "line") and s.get("stack"):
             key = str(s.get("stack"))
+            strategy = str(s.get("stackStrategy") or "samesign").strip().lower()
             for i, item in enumerate(data):
-                _, y = parseDataPoint(item, i)
+                y = datum(item, i)
                 if y is None:
                     continue
-                if y >= 0:
-                    stack_pos[(key, i)] = stack_pos.get((key, i), 0.0) + y
+                sk = (key, stack_key(item, i))
+                if strategy == "all":
+                    stack_all[sk] = stack_all.get(sk, 0.0) + y
+                elif strategy == "positive":
+                    if y >= 0:
+                        stack_pos[sk] = stack_pos.get(sk, 0.0) + y
+                elif strategy == "negative":
+                    if y < 0:
+                        stack_neg[sk] = stack_neg.get(sk, 0.0) + y
+                elif y >= 0:
+                    stack_pos[sk] = stack_pos.get(sk, 0.0) + y
                 else:
-                    stack_neg[(key, i)] = stack_neg.get((key, i), 0.0) + y
-        elif stype == "candlestick":
+                    stack_neg[sk] = stack_neg.get(sk, 0.0) + y
+        elif axis_kind == "y" and stype == "candlestick":
             for item in data:
                 nums = _datum_list(item)
                 if nums and len(nums) >= 4:
                     feed(min(nums[2], nums[0], nums[1]))
                     feed(max(nums[3], nums[0], nums[1]))
-        elif stype == "boxplot":
+        elif axis_kind == "y" and stype == "boxplot":
             for item in data:
                 nums = _datum_list(item)
                 if nums and len(nums) >= 5:
@@ -477,11 +514,18 @@ def _grid_value_extent_uncached(chart, opts) -> tuple:
                     feed(nums[4])
         else:
             for i, item in enumerate(data):
-                _, y = parseDataPoint(item, i)
-                feed(y)
+                v = datum(item, i)
+                if v is None:
+                    # candlestick / boxplot 的 x 维就是数据下标
+                    if axis_kind == "x" and stype in ("candlestick", "boxplot"):
+                        feed(float(i))
+                    continue
+                feed(v)
     for v in stack_pos.values():
         feed(v)
     for v in stack_neg.values():
+        feed(v)
+    for v in stack_all.values():
         feed(v)
     if dmin is None:
         return None
@@ -519,4 +563,16 @@ def _fix_value_axis(axis, chart, series_opt=None, axis_kind: str = "y"):
             # log 轴只接受正值；全非正时保持 setSeries 给的默认范围。
             if lo <= 0.0 or hi <= 0.0:
                 return
-        axis.setExtent(lo, hi)
+        # 记下真实全量范围：dataZoom 的「全量」必须用它，而不是 setSeries
+        # 阶段那份（横向柱的 x 是下标、堆叠柱只算单值、K 线只算收盘价）。
+        # 窗口态下不要用全量覆盖当前窗口 —— 窗口由 dataZoom 负责写回。
+        if not getattr(axis, "_windowed", False):
+            axis.setExtent(lo, hi)
+            # setExtent 会做 0 基线 / min-max / nice ticks；全量要取**生效后**
+            # 的端点，否则「缩放态」与「全景态」的轴范围会差一档。
+            extent = (float(axis.vmin), float(axis.vmax))
+        else:
+            extent = (lo, hi)
+        if extent != getattr(axis, "_data_extent", None):
+            axis._data_extent = extent
+            axis._extent_epoch = int(getattr(axis, "_extent_epoch", 0)) + 1

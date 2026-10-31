@@ -43,6 +43,12 @@ class ElaChatQueueDock(_ThemeAwareMixin, ElaScrollPageArea):
     editRequested = pyqtSignal(str)
     #: 点击「移除」（参数：消息 id）
     removeRequested = pyqtSignal(str)
+    #: 请求把某条排队消息移到指定下标（参数：消息 id、目标下标）
+    reorderRequested = pyqtSignal(str, int)
+    #: 点击「插话」（参数：消息 id）
+    steerRequested = pyqtSignal(str)
+    #: 点击「撤销」上一次队列操作
+    undoRequested = pyqtSignal()
     #: 展开状态变化（参数：是否展开）
     toggled = pyqtSignal(bool)
 
@@ -55,6 +61,8 @@ class ElaChatQueueDock(_ThemeAwareMixin, ElaScrollPageArea):
         self.setBorderRadius(10)
         self._messages: list = []
         self._expanded = False
+        self._working = False
+        self._undo_available = False
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(10, 6, 10, 8)
@@ -83,7 +91,19 @@ class ElaChatQueueDock(_ThemeAwareMixin, ElaScrollPageArea):
         header_layout.addWidget(self._chevron)
         header_layout.addWidget(self._title)
         header_layout.addWidget(self._preview, 1)
-        layout.addWidget(self._header)
+        header_row = QHBoxLayout()
+        header_row.setContentsMargins(0, 0, 0, 0)
+        header_row.setSpacing(4)
+        self._undo_button = ElaIconButton(
+            ElaIconType.IconName.ArrowRotateLeft, 12, 18, 18, self
+        )
+        self._undo_button.setBorderRadius(4)
+        self._undo_button.setToolTip("撤销上一次队列操作")
+        self._undo_button.hide()
+        self._undo_button.clicked.connect(self.undoRequested)
+        header_row.addWidget(self._header, 1)
+        header_row.addWidget(self._undo_button)
+        layout.addLayout(header_row)
 
         self._rows = QWidget(self)
         self._rows_layout = QVBoxLayout(self._rows)
@@ -129,6 +149,27 @@ class ElaChatQueueDock(_ThemeAwareMixin, ElaScrollPageArea):
     def count(self) -> int:
         """排队消息条数。"""
         return len(self._messages)
+
+    def setWorking(self, on: bool) -> None:
+        """设置是否正在生成（生成中行按钮显示「插话」）。"""
+        on = bool(on)
+        if on == self._working:
+            return
+        self._working = on
+        self._rebuild_rows()
+
+    def working(self) -> bool:
+        """是否正在生成。"""
+        return self._working
+
+    def setUndoAvailable(self, on: bool) -> None:
+        """设置撤销按钮是否可用。"""
+        self._undo_available = bool(on)
+        self._undo_button.setVisible(self._undo_available)
+
+    def undoAvailable(self) -> bool:
+        """撤销是否可用。"""
+        return self._undo_available
 
     def setExpanded(self, on: bool) -> None:
         """展开 / 收起明细。"""
@@ -180,10 +221,17 @@ class ElaChatQueueDock(_ThemeAwareMixin, ElaScrollPageArea):
         label.setToolTip(message["text"])
         row._queue_label = label
         layout.addWidget(label, 1)
-        send = ElaButton("立即发送", variant="text", size="small", parent=row)
-        send.clicked.connect(
-            lambda _checked=False, mid=message["id"]: self.sendRequested.emit(mid)
+        send = ElaButton(
+            "插话" if self._working else "立即发送",
+            variant="text",
+            size="small",
+            parent=row,
         )
+        send.setToolTip("送进当前回合，不打断生成" if self._working else "立即发送这一条")
+        send.clicked.connect(
+            lambda _checked=False, mid=message["id"]: self._activate_row(mid)
+        )
+        row._send_button = send
         edit = ElaButton("编辑", variant="text", size="small", parent=row)
         edit.clicked.connect(
             lambda _checked=False, mid=message["id"]: self.editRequested.emit(mid)
@@ -198,6 +246,12 @@ class ElaChatQueueDock(_ThemeAwareMixin, ElaScrollPageArea):
         layout.addWidget(edit)
         layout.addWidget(remove)
         return row
+
+    def _activate_row(self, queueId: str) -> None:
+        if self._working:
+            self.steerRequested.emit(queueId)
+        else:
+            self.sendRequested.emit(queueId)
 
     @staticmethod
     def _row_text(message: dict) -> str:
@@ -215,6 +269,8 @@ class ElaChatQueueDock(_ThemeAwareMixin, ElaScrollPageArea):
         self._title.setTextWeight(QFont.Weight.DemiBold)
         self._preview.setTextColor(muted_color(self._theme_mode, 0.55))
         self._preview.setTextPixelSize(12)
+        self._undo_button.setLightIconColor(muted_color(self._theme_mode, 0.6))
+        self._undo_button.setDarkIconColor(muted_color(self._theme_mode, 0.6))
         for index in range(self._rows_layout.count()):
             item = self._rows_layout.itemAt(index)
             row = item.widget() if item is not None else None

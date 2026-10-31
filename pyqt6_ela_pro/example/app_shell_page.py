@@ -225,6 +225,7 @@ class AppShellPage(ExamplePage):
             self._taskbar_paused = True
             if self._taskbar_timer:
                 self._taskbar_timer.stop()
+            self._setTaskbarStatus("已暂停：任务栏进度条变黄")
 
     def _resetTaskbarDemo(self):
         if self._taskbar_timer:
@@ -235,6 +236,7 @@ class AppShellPage(ExamplePage):
         if self._taskbar_progress:
             self._taskbar_progress.reset()
             self._taskbar_progress.hide()
+        self._setTaskbarStatus("已重置")
 
     def _resumeTaskbarDemo(self):
         if self._taskbar_progress and self._taskbar_paused:
@@ -242,6 +244,7 @@ class AppShellPage(ExamplePage):
             self._taskbar_paused = False
             if self._taskbar_timer:
                 self._taskbar_timer.start(50)
+            self._setTaskbarStatus("进行中：看任务栏按钮上的进度条（绿色）")
 
     def _ensureTaskbarProgress(self):
         if self._taskbar_progress is None:
@@ -262,10 +265,16 @@ class AppShellPage(ExamplePage):
             self._taskbar_running = False
             if self._taskbar_progress:
                 self._taskbar_progress.hide()
+            self._setTaskbarStatus("已完成：进度条自动隐藏")
 
     def _startTaskbarDemo(self):
         if not self._ensureTaskbarProgress():
             return
+        progress = self._taskbar_progress
+        if not progress.available():
+            self._setTaskbarStatus(f"任务栏进度不可用：{progress.unavailableReason()}")
+            return
+        self._setTaskbarStatus("进行中：看任务栏按钮上的进度条（绿色）")
         self._taskbar_running = True
         self._taskbar_paused = False
         self._taskbar_value = 0
@@ -276,12 +285,18 @@ class AppShellPage(ExamplePage):
         self._taskbar_timer.timeout.connect(self._updateTaskbarProgress)
         self._taskbar_timer.start(50)
 
+    def _setTaskbarStatus(self, text):
+        status = getattr(self, "_taskbar_status", None)
+        if status is not None:
+            status.setText(text)
+
     def _stopTaskbarDemo(self):
         if self._taskbar_timer:
             self._taskbar_timer.stop()
         self._taskbar_running = False
         if self._taskbar_progress:
             self._taskbar_progress.stop()
+        self._setTaskbarStatus("已停止：任务栏进度条变红")
 
     def _demoTaskbarProgress(self, parent_layout):
         parent_layout.addLayout(
@@ -332,10 +347,15 @@ class AppShellPage(ExamplePage):
         parent_layout.addLayout(btn_layout)
 
         info = ElaText(
-            "提示: 任务栏进度条仅在 Windows 平台有效，且需要关联到窗口", self
+            "提示: 任务栏进度条仅在 Windows 平台有效（ITaskbarList4 / ITaskbarList3），"
+            "且窗口要有任务栏按钮；不可用时会在这里显示原因",
+            self,
         )
         info.setTextPixelSize(12)
         parent_layout.addWidget(info)
+        self._taskbar_status = ElaText("", self)
+        self._taskbar_status.setTextPixelSize(12)
+        parent_layout.addWidget(self._taskbar_status)
         parent_layout.addSpacing(20)
 
     def _buildTrayMenu(self):

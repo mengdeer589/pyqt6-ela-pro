@@ -3,7 +3,8 @@
 **侧边栏的两级结构**（见 ``__main__.py``）：一级是可折叠的 expander（按主题
 分组），展开后是页面 / 分类。分组依据是「这组页面回答的是同一个问题」。
 
-页面清单（``__all__`` 与侧边栏注册顺序一致）：
+页面清单（``__all__`` 与侧边栏注册顺序一致；工作台内部的工作区类也单独
+导出，供测试与宿主复用）：
 
 ======================  ====================================================
 一级分组                页面
@@ -12,18 +13,20 @@
                         按钮与菜单 / 进度与反馈 / Fluent 与补充组件
 数据与图表              表格 / 图表（第三方库）/ ElaChartWidget 图表工作台
 内容渲染                Markdown 渲染
-AI 对话                  聊天组件总览 / 输入区能力 / Agent 能力 / 会话管理 /
-                        持久化与性能
+AI 对话                  AI 组件工作台（概览 / 输入区 / Agent / 文件与 Diff /
+                        时间线与检索 / 会话 / 持久化）
 窗口与应用外壳          ElaWindow 应用外壳 / 弹窗与提示 / 启动与托盘
 系统交互与嵌入          外部内容嵌入 / 终端输出 / 划词助手
 动效与图形              动画与图标 / 节点图编辑器
 参考文档                聊天组件 API 指南
 ======================  ====================================================
 
-**AI 对话那五页是按能力域切的**，不是按使用场景：「长什么样」（总览，预填 +
-可重播）/「怎么接」（输入区）/「agent 多了什么」/「多话题怎么管」/
+**AI 对话是一个工作台页面**（与图表工作台同构）：顶部 ``ElaPivot`` 切七个
+工作区，首次切换才构建。工作区按能力域切，不是按使用场景：「长什么样」
+（概览，预填 + 可重播）/「怎么接」（输入区）/「agent 多了什么」（工具与审批）/
+「改了文件看什么」（文件与 Diff）/「轨迹状态与检索」/「多话题怎么管」/
 「落库与大消息量」。聊天组件有些能力**只在流式过程中可见**（推理逐步浮现、
-工具卡忙碌环、统计徽标落定），所以聊天示例页统一是「预填 + 可重播」，
+工具卡忙碌环、统计徽标落定），所以聊天示例统一是「预填 + 可重播」，
 共用零件见 ``chat_demo_kit.py``。
 """
 
@@ -35,11 +38,14 @@ from .buttons_menus_page import ButtonsMenusPage
 from .chart_lib_page import ChartLibPage
 from .charts_page import ChartsPage
 from .chat_agent_page import ChatAgentPage
+from .chat_files_page import ChatFilesPage
 from .chat_guide_page import ChatGuidePage
 from .chat_input_page import ChatInputPage
 from .chat_overview_page import ChatOverviewPage
 from .chat_persist_page import ChatPersistPage
 from .chat_session_page import ChatSessionPage
+from .chat_timeline_page import ChatTimelinePage
+from .chat_workbench_page import ChatWorkbenchPage
 from .combo_box_page import ComboBoxPage
 from .container_layout_page import ContainerLayoutPage
 from .data_table_page import DataTablePage
@@ -70,10 +76,13 @@ __all__ = [
     "ChartsPage",
     # 内容渲染
     "MarkdownPage",
-    # AI 对话（按能力域切，不是按使用场景）
+    # AI 对话（工作台；各工作区类单独导出，供测试与宿主复用）
+    "ChatWorkbenchPage",
     "ChatOverviewPage",
     "ChatInputPage",
     "ChatAgentPage",
+    "ChatFilesPage",
+    "ChatTimelinePage",
     "ChatSessionPage",
     "ChatPersistPage",
     # 窗口与应用外壳

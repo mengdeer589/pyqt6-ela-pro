@@ -16,7 +16,7 @@
 5. **新建话题** —— 组件**只发信号**，界面与会话归宿主；
 6. **排队 / 撤回 / 重新生成 / 停止** —— 一轮对话的四种干预。
 
-这一页是「怎么把聊天接起来」的完整答案；组件**能力面**在「聊天组件总览」，
+这一页是「怎么把聊天接起来」的完整答案；组件**能力面**在「概览」工作区，
 agent 专属能力在「Agent 能力」。
 """
 
@@ -28,7 +28,9 @@ from PyQt6ElaWidgetTools import ElaIconType, ElaMenu
 from pyqt6_ela_pro import ElaButton, ElaDropDownButton
 from pyqt6_ela_pro.chat import (
     ElaChatMockBackend,
+    ElaChatPromptHistory,
     ElaChatRoleType,
+    ElaChatSelectorItem,
     ElaChatStatusType,
     ElaChatReasoningStyleType,
     ElaChatStatusBar,
@@ -188,6 +190,9 @@ class ChatInputPage(ExamplePage):
             self._section_new_topic(),
             self._section_turn_control(),
             self._section_usage(),
+            self._section_composer_extras(),
+            self._section_shell_history(),
+            self._section_queue_advanced(),
         ):
             main_layout.addLayout(section)
 
@@ -834,6 +839,146 @@ class ChatInputPage(ExamplePage):
             7,
             f"已喂 {used:,} / {window:,} 词元（{chat_input.contextUsagePercent()}%）"
             f" · 花费 ${cost:.4f} —— 点一下工具栏里的圆环看点击回执",
+        )
+
+    # ================================================================ 08 命令 / 选择器
+    def _section_composer_extras(self):
+        box = self._section(
+            8,
+            "命令与下拉选择器",
+            self._demo_composer_extras,
+            "``setCommandProvider`` 让输入 `/` 弹出命令列表；"
+            "``addSelector`` 在发送键之前加模型 / agent 下拉（数据全由宿主提供）。",
+        )
+        row = QHBoxLayout()
+        row.addWidget(self._button("插入 / 命令", self._demo_composer_extras))
+        row.addWidget(self._button("显示模型选择器", self._demo_selector))
+        row.addStretch()
+        box.addLayout(row)
+        return box
+
+    def _demo_composer_extras(self) -> None:
+        """``/`` 命令补全 + 命令选中信号（只插入，不替宿主执行）。"""
+        self._chat.setCommandProvider(
+            lambda query: [
+                ElaChatSuggestion(
+                    id="compact",
+                    label="compact",
+                    description="压缩上下文",
+                    kind="command",
+                ),
+                ElaChatSuggestion(
+                    id="clear",
+                    label="clear",
+                    description="清空上下文",
+                    kind="command",
+                ),
+            ]
+        )
+        self._chat.chatInput().setText("/")
+        self._chat.chatInput().textEdit().setFocus()
+        self._say(8, "已注册 / 命令；输入 `/` 打开列表，选中后只插入文本并发 commandSelected")
+
+    def _demo_selector(self) -> None:
+        """模型 / agent 下拉选择器（``ElaChatSelectorItem``）。"""
+        selector = self._chat.selector("model") or self._chat.addSelector(
+            "model",
+            "模型",
+            [
+                ElaChatSelectorItem(id="deepseek-v4", label="deepseek-v4"),
+                ElaChatSelectorItem(id="qwen3", label="qwen3"),
+            ],
+            "deepseek-v4",
+        )
+        selector.setItems(
+            [
+                ElaChatSelectorItem(id="deepseek-v4", label="deepseek-v4"),
+                ElaChatSelectorItem(id="qwen3", label="qwen3"),
+            ],
+            selector.current(),
+        )
+        self._say(8, "已在发送键前显示模型选择器；切换会发 selectorChanged(key, id)")
+
+    # ================================================================ 09 shell / 历史
+    def _section_shell_history(self):
+        box = self._section(
+            9,
+            "shell 模式与提示历史",
+            self._demo_shell_history,
+            "``setShellMode(True)`` 切等宽字体、Esc 退出、提交走 ``shellSubmitted``；"
+            "``setHistory`` 让 ↑/↓ 浏览历史并保留当前草稿。",
+        )
+        row = QHBoxLayout()
+        row.addWidget(self._button("切换 shell 模式", self._demo_shell_history))
+        row.addWidget(self._button("预置历史", self._demo_history))
+        row.addStretch()
+        box.addLayout(row)
+        return box
+
+    def _demo_shell_history(self) -> None:
+        """进入 / 退出 shell 模式（等宽字体 + Esc 退出 + 独立提交信号）。"""
+        chat_input = self._chat.chatInput()
+        chat_input.setShellMode(not chat_input.shellMode())
+        self._say(
+            9,
+            "shell 模式已" + ("开启（输入命令，Esc 退出）" if chat_input.shellMode() else "关闭"),
+        )
+
+    def _demo_history(self) -> None:
+        """预置提示历史，在输入框按 ↑/↓ 浏览。"""
+        history = ElaChatPromptHistory()
+        history.add("用 Python 写一个快速排序")
+        history.add("把上面的代码改成尾递归")
+        self._chat.setHistory(history)
+        self._say(9, "已预置两条历史：在输入框按 ↑ / ↓ 浏览，状态会保留当前草稿")
+
+    # ================================================================ 10 队列增强
+    def _section_queue_advanced(self):
+        box = self._section(
+            10,
+            "队列排序 / 插话 / 撤销 / 待发送",
+            self._demo_queue_advanced,
+            "队列是输入区的一部分：``moveQueued`` 排序、``steerQueued`` 把排队项"
+            "转为插话、``undoQueueChange`` 回退上一次队列操作；"
+            "``steerMessage`` 会先在时间线建一条「待发送」用户消息。",
+        )
+        row = QHBoxLayout()
+        row.addWidget(self._button("排队三条 + 排序", self._on_queue_advanced))
+        row.addWidget(self._button("撤销队列操作", self._on_queue_undo))
+        row.addWidget(self._button("插入待发送", self._on_pending_steer))
+        row.addWidget(self._button("清空队列", self._chat.clearQueue))
+        row.addStretch()
+        box.addLayout(row)
+        return box
+
+    def _demo_queue_advanced(self) -> None:
+        """队列排序 → 转插话 → 撤销（快照栈上限 20）。"""
+        chat = self._chat
+        chat.setGenerating(True)
+        for text in ("排队 A", "排队 B", "排队 C"):
+            chat.enqueueMessage(text)
+        ids = [item["id"] for item in chat.queuedMessages()]
+        if len(ids) >= 3:
+            chat.moveQueued(ids[-1], 0)
+            chat.steerQueued(ids[0])
+        chat.setGenerating(False)
+        self._say(10, "已排队 3 条、把第 3 条移到最前并转为插话；可点「撤销」回退")
+
+    def _on_queue_advanced(self) -> None:
+        self._demo_queue_advanced()
+
+    def _on_queue_undo(self) -> None:
+        if self._chat.undoQueueChange():
+            self._say(10, "已撤销上一次队列操作（排序 / 插话 / 移除都在快照栈里）")
+        else:
+            self._say(10, "没有可撤销的队列操作")
+
+    def _on_pending_steer(self) -> None:
+        steer_id = self._chat.steerMessage("生成中补充一句")
+        self._say(
+            10,
+            "steerMessage 已插入待发送消息"
+            + (f"（{steer_id}）" if steer_id else "（空文本被忽略）"),
         )
 
     def _on_context_usage_clicked(self) -> None:

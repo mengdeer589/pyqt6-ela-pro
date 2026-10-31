@@ -131,10 +131,19 @@
 
 from ._json import backend as jsonBackend, dumps as jsonDumps, loads as jsonLoads
 from .binder import ElaChatStreamBinder, ElaChatTurnSummary
+from .._diff import ElaDiffFile as ElaChatFileChange
+from .._diff import ElaDiffLine as ElaChatFileChangeLine
+from .._diff import diffLines as diffChatLines
+from .._diff import filesFromMetadata as chatFilesFromMetadata
+from .._diff import parseUnifiedDiff as parseChatDiff
 from .blocks import (
     AttachmentStrip,
     ContextToolGroupCard,
     ElaChatAvatarSource,
+    ElaChatFileChanges,
+    ElaChatNotice,
+    ElaChatRetryCard,
+    ElaChatWorkingRow,
     ErrorCard,
     MessageActions,
     MessageHeader,
@@ -162,10 +171,19 @@ from .message import (
     ElaChatQuestion,
     ElaChatReasoningStyleType,
     ElaChatRoleType,
+    ElaChatMention,
+    ElaChatNoticeType,
     ElaChatStats,
     ElaChatStatusType,
     ElaChatToolCall,
     ElaChatToolStatusType,
+)
+from .timeline_detail import (
+    DEFAULT_TIMELINE_DETAIL,
+    ElaChatDetailDepthType,
+    ElaChatDetailPlacementType,
+    ElaChatDetailSection,
+    ElaChatTimelineDetail,
 )
 from ._pricing import ModelPricing, cost_from_parts, formatCost, stats_cost
 from .journal import JOURNAL_VERSION, ElaChatTurnJournal
@@ -181,6 +199,14 @@ from .renderers import (
     toolRendererNames,
     unregisterToolRenderer,
 )
+from .renderers_builtin import (
+    cleanAnsi,
+    installBuiltinToolRenderers,
+    uninstallBuiltinToolRenderers,
+)
+from .prompt_history import ElaChatPromptHistory
+from .search import ElaChatSearchBar, ElaChatSearchHit
+from .selector import ElaChatSelector, ElaChatSelectorItem
 from .session import SESSION_SCHEMA_VERSION, ElaChatSessionInfo, ElaChatSessionStats
 from .status import ElaChatStatusBar
 from .suggestions import ElaChatSuggestion, SuggestionPopup
@@ -201,6 +227,30 @@ __all__ = [
     "ElaChatPartKindType",
     "ElaChatPermission",
     "ElaChatPermissionStatusType",
+    "ElaChatMention",
+    "ElaChatNoticeType",
+    "ElaChatNotice",
+    "ElaChatRetryCard",
+    "ElaChatWorkingRow",
+    "ElaChatDetailDepthType",
+    "ElaChatDetailPlacementType",
+    "ElaChatDetailSection",
+    "ElaChatTimelineDetail",
+    "DEFAULT_TIMELINE_DETAIL",
+    "ElaChatFileChange",
+    "ElaChatFileChangeLine",
+    "ElaChatFileChanges",
+    "ElaChatPromptHistory",
+    "ElaChatSearchBar",
+    "ElaChatSearchHit",
+    "ElaChatSelector",
+    "ElaChatSelectorItem",
+    "diffChatLines",
+    "parseChatDiff",
+    "chatFilesFromMetadata",
+    "installBuiltinToolRenderers",
+    "uninstallBuiltinToolRenderers",
+    "cleanAnsi",
     "ElaChatOption",
     "ElaChatQuestion",
     "ElaChatAttachment",

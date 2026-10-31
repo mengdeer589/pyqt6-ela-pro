@@ -13,12 +13,10 @@ from functools import wraps
 from typing import Any, Callable, Optional, Protocol, TypeVar, runtime_checkable
 
 from PyQt6 import sip
-from PyQt6.QtCore import QLocale, QObject, QPoint, QRect, QSize, Qt, QTimer
+from PyQt6.QtCore import QLocale, QObject, QPoint, QTimer
 from PyQt6.QtGui import (
-    QColor,
     QFont,
     QFontDatabase,
-    QPainter,
     QRawFont,
     QTextCharFormat,
     QTextCursor,
@@ -430,60 +428,6 @@ def hideComboboxPopup(combo) -> bool:  # noqa: N802 (与 Qt 命名一致)
         return False
     QComboBox.hidePopup(combo)
     return True
-
-
-def _draw_button_content(
-    painter: QPainter,
-    text: str,
-    icon_name,
-    icon_size: int,
-    face_inset: int,
-    widget_width: int,
-    widget_height: int,
-    text_color: QColor,
-    icon_getter: Callable[[Any, QColor], Any],
-) -> QRect:
-    """绘制按钮图标和文字，返回文字区域 ``QRect``。"""
-    if icon_name is not None:
-        icon_sz = QSize(icon_size, icon_size)
-        spacing = 8
-        content_height = widget_height - 2 * face_inset
-
-        fm = painter.fontMetrics()
-        text_width = fm.horizontalAdvance(text)
-        total_content_width = icon_sz.width() + spacing + text_width
-        start_x = (
-            face_inset + (widget_width - 2 * face_inset - total_content_width) // 2
-        )
-
-        icon_y = face_inset + (content_height - icon_sz.height()) // 2
-        icon_rect = QRect(start_x, icon_y, icon_sz.width(), icon_sz.height())
-
-        text_rect = QRect(
-            icon_rect.right() + spacing,
-            face_inset,
-            text_width,
-            content_height,
-        )
-        icon = icon_getter(icon_name, text_color)
-        painter.drawPixmap(icon_rect, icon.pixmap(icon_sz))
-    else:
-        rect = QRect(
-            face_inset,
-            face_inset,
-            widget_width - 2 * face_inset,
-            widget_height - 2 * face_inset,
-        )
-        text_rect = rect
-
-    painter.setPen(text_color)
-    painter.setFont(painter.font())
-    painter.drawText(
-        text_rect,
-        Qt.AlignmentFlag.AlignCenter | Qt.AlignmentFlag.AlignVCenter,
-        text,
-    )
-    return text_rect
 
 
 def _disconnect_theme_on_destroy(obj) -> None:

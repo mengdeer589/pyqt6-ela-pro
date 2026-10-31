@@ -1,16 +1,21 @@
-"""``ElaConfirmDialog`` 测试：初值 / 文本属性 / 定位 / 按钮 / 主题。"""
+"""``ElaConfirmDialog`` 测试：初值 / 文本属性 / 定位 / 按钮 / 键盘 / 表面。"""
 
 from __future__ import annotations
 
 import pytest
-from PyQt6.QtCore import QEvent, QPoint, QPointF, QRect, Qt
-from PyQt6.QtGui import QEnterEvent, QFontMetrics
+from PyQt6.QtCore import QPoint, QRect, Qt
 from PyQt6.QtTest import QTest
 from PyQt6.QtWidgets import QApplication, QWidget
-from PyQt6ElaWidgetTools import ElaThemeType
+from PyQt6ElaWidgetTools import ElaThemeType, eTheme
 
 from pyqt6_ela_pro._styles import SHADOW_MARGIN
-from pyqt6_ela_pro.ela_confirm_dialog import ElaConfirmDialog, _ElaConfirmButton
+from pyqt6_ela_pro._theme import surfacePopup
+from pyqt6_ela_pro.ela_button import ElaButton
+from pyqt6_ela_pro.ela_confirm_dialog import (
+    _BOX_WIDTH,
+    _CONTENT_MAX_H,
+    ElaConfirmDialog,
+)
 
 
 @pytest.fixture
@@ -23,11 +28,6 @@ def dlg(make, parent):
     return make(ElaConfirmDialog, parent)
 
 
-@pytest.fixture
-def confirm_btn(make):
-    return make(_ElaConfirmButton, _ElaConfirmButton.TYPE_CONFIRM)
-
-
 class TestElaConfirmDialogInit:
     @pytest.mark.parametrize(
         ("attr", "expected"),
@@ -36,8 +36,6 @@ class TestElaConfirmDialogInit:
             ("_content", ""),
             ("_border_radius", 8),
             ("_position", "bottom"),
-            ("_title_pixel_size", 15),
-            ("_content_pixel_size", 13),
         ],
     )
     def test_default_state(self, dlg, attr, expected):
@@ -49,16 +47,32 @@ class TestElaConfirmDialogInit:
         assert dlg._position == position
         assert dlg.position() == position
 
-    def test_minimum_size(self, dlg):
-        # 最小尺寸 = 内容区 + 两侧阴影边距。``FramelessWindowHint`` 去掉了系统
-        # 阴影，边距不预留出来的话阴影会被自身窗口裁掉。
-        assert dlg.minimumWidth() == 280 + dlg._shadow_margin * 2
-        assert dlg.minimumHeight() == 150 + dlg._shadow_margin * 2
-        assert dlg._shadow_margin == SHADOW_MARGIN
+    def test_window_width_is_fixed(self, dlg):
+        # 宽度 = 内容宽 + 两侧阴影边距。``FramelessWindowHint`` 去掉了系统阴影，
+        # 边距不预留出来的话阴影会被自身窗口裁掉。
+        sm = dlg._shadow_margin
+        assert sm == SHADOW_MARGIN
+        assert dlg.minimumWidth() == _BOX_WIDTH + 2 * sm
+        assert dlg.maximumWidth() == _BOX_WIDTH + 2 * sm
+        assert dlg.sizeHint().width() == _BOX_WIDTH + 2 * sm
 
     @pytest.mark.parametrize("attr", ["_confirm_btn", "_cancel_btn"])
     def test_has_button(self, dlg, attr):
-        assert hasattr(dlg, attr)
+        assert isinstance(getattr(dlg, attr), ElaButton)
+
+    def test_button_hierarchy(self, dlg):
+        """确认 = 实心主色，取消 = 中性描边（与 Ela 对话框的按钮层级一致）。"""
+        assert dlg._confirm_btn.text() == "确定"
+        assert dlg._confirm_btn.variant() == "solid"
+        assert dlg._confirm_btn.color() == "primary"
+        assert dlg._cancel_btn.text() == "取消"
+        assert dlg._cancel_btn.variant() == "outlined"
+        assert dlg._cancel_btn.color() == "default"
+
+    def test_confirm_is_default_button(self, dlg):
+        assert dlg._confirm_btn.isDefault()
+        assert dlg._confirm_btn.autoDefault()
+        assert dlg._cancel_btn.autoDefault()
 
     def test_frameless_window_hint(self, dlg):
         assert dlg.windowFlags() & Qt.WindowType.FramelessWindowHint
@@ -116,34 +130,18 @@ class TestElaConfirmDialogTextProps:
     def test_getter_default(self, dlg, getter, expected):
         assert getter(dlg) == expected
 
+    def test_long_title_is_elided(self, dlg):
+        """无边框窗口不能靠拉伸看全标题，超宽按省略号截断（title() 仍是原文）。"""
+        title = "很长的标题" * 20
+        dlg.setTitle(title)
+        assert dlg.title() == title
+        assert dlg._title_label.text().endswith("…")
 
-class TestElaConfirmButton:
-    @pytest.mark.parametrize(
-        "btn_type", [_ElaConfirmButton.TYPE_CONFIRM, _ElaConfirmButton.TYPE_CANCEL]
-    )
-    def test_button_type(self, make, btn_type):
-        btn = make(_ElaConfirmButton, btn_type)
-        assert btn._type == btn_type
-
-    def test_initial_state(self, confirm_btn):
-        assert confirm_btn._is_hovered is False
-        assert confirm_btn._is_pressed is False
-
-    def test_button_has_clicked_signal(self, confirm_btn):
-        assert hasattr(confirm_btn, "clicked")
-
-    def test_button_has_hand_cursor(self, confirm_btn):
-        assert confirm_btn.cursor().shape() == Qt.CursorShape.PointingHandCursor
-
-    def test_button_fixed_height(self, confirm_btn):
-        assert confirm_btn.height() == 40
-
-    def test_button_enter_leave_events(self, confirm_btn):
-        pos = QPointF(1, 1)
-        confirm_btn.enterEvent(QEnterEvent(QPointF(pos), QPointF(pos), QPointF(pos)))
-        assert confirm_btn._is_hovered is True
-        confirm_btn.leaveEvent(QEvent(QEvent.Type.Leave))
-        assert confirm_btn._is_hovered is False
+    def test_empty_title_hides_label(self, dlg):
+        dlg.setTitle("")
+        assert dlg._title_label.isHidden()
+        dlg.setTitle("提示")
+        assert not dlg._title_label.isHidden()
 
 
 class TestElaConfirmDialogPlacement:
@@ -173,7 +171,6 @@ class TestElaConfirmDialogPlacement:
     @staticmethod
     def _dialog(make, qapp, anchor, position):
         dialog = make(ElaConfirmDialog, anchor, position=position)
-        dialog.resize(280, 150)
         dialog.show()
         qapp.processEvents()
         dialog._positionDialog()
@@ -226,21 +223,15 @@ class TestElaConfirmDialogPlacement:
 class TestElaConfirmDialogContentSizing:
     """正文高度必须撑开窗口。
 
-    回归：原先没有 ``sizeHint`` 覆写，类调用 ``show()`` 永远只有最小尺寸
-    288×158，正文区固定 50px —— 8 行文案实测需要 144px，一大半被裁掉
-    （用户看不到自己在确认什么）。
+    回归：原先没有 ``sizeHint`` 覆写，类调用 ``show()`` 永远只有最小尺寸、
+    正文区固定 50px —— 8 行文案实测需要 144px，一大半被裁掉（用户看不到
+    自己在确认什么）。
     """
 
     LONG = "\n".join(f"第 {i} 行：这是一段较长的确认说明文字。" for i in range(1, 9))
 
-    @staticmethod
-    def _content_area_height(dlg) -> int:
-        box_h = dlg.height() - 2 * dlg._shadow_margin
-        return box_h - 40 - 45 - 15
-
-    def test_empty_content_keeps_minimum_size(self, dlg):
-        assert dlg.sizeHint().height() == dlg.minimumHeight()
-        assert dlg.height() == dlg.minimumHeight()
+    def test_construction_size_matches_hint(self, dlg):
+        assert dlg.height() == dlg.sizeHint().height()
 
     def test_long_content_grows_dialog(self, dlg):
         before = dlg.height()
@@ -251,14 +242,14 @@ class TestElaConfirmDialogContentSizing:
 
     def test_long_content_fits_content_area(self, dlg):
         dlg.setContent(self.LONG)
-        font = dlg.font()
-        font.setPixelSize(dlg._content_pixel_size)
-        need = QFontMetrics(font).boundingRect(
-            QRect(0, 0, 280 - 30, 10000),
-            Qt.TextFlag.TextWordWrap,
-            self.LONG,
-        )
-        assert self._content_area_height(dlg) >= need.height()
+        need = dlg._content_label.heightForWidth(dlg._content_width())
+        assert dlg._content_label.height() >= need
+        assert dlg._content_label.height() <= _CONTENT_MAX_H
+
+    def test_long_content_height_is_capped(self, dlg):
+        """无边框弹框没有滚动条：超过上限的部分裁切，窗口不再无限长高。"""
+        dlg.setContent("\n".join(["一行很长的确认说明文字"] * 200))
+        assert dlg._content_label.height() == _CONTENT_MAX_H
 
 
 class TestElaConfirmDialogKeyboard:
@@ -276,6 +267,34 @@ class TestElaConfirmDialogKeyboard:
         dlg._confirm_btn.clicked.connect(lambda: received.append(True))
         QTest.keyClick(dlg._confirm_btn, key)
         assert received == [True]
+
+    def test_initial_focus_is_confirm_without_focus_ring(self, dlg, qapp):
+        """弹框一打开就套一圈主色焦点环会被误读成「已选中」。"""
+        dlg.show()
+        qapp.processEvents()
+        assert dlg._confirm_btn.hasFocus()
+        assert dlg._confirm_btn._focus_ring is False
+        dlg.close()
+
+    def test_enter_on_dialog_activates_confirm(self, dlg, qapp):
+        received = []
+        dlg.confirmed.connect(lambda: received.append(True))
+        dlg.show()
+        qapp.processEvents()
+        QTest.keyClick(dlg, Qt.Key.Key_Return)
+        qapp.processEvents()
+        assert received == [True]
+        assert not dlg.isVisible()
+
+    def test_enter_on_focused_cancel_cancels(self, dlg, qapp):
+        received = []
+        dlg.cancelled.connect(lambda: received.append(True))
+        dlg.show()
+        qapp.processEvents()
+        QTest.keyClick(dlg._cancel_btn, Qt.Key.Key_Return)
+        qapp.processEvents()
+        assert received == [True]
+        assert not dlg.isVisible()
 
     def test_escape_emits_cancelled(self, dlg, qapp):
         """Escape 关掉弹框也算取消 —— 宿主接 ``cancelled`` 不能漏掉这条路径。"""
@@ -295,61 +314,33 @@ class TestElaConfirmDialogKeyboard:
         assert received == [True]
 
 
-class TestElaConfirmButtonStateLayer:
-    """hover / press 状态层：**暗色叠白、亮色叠黑**，且裁在弹框圆角盒内。
+class TestElaConfirmDialogSurface:
+    """表面走 ``PopupBase`` + 1px ``PopupBorder``（与 toast / tooltip 同一材质）。"""
 
-    回归：原先状态层用 ``fillRect`` 铺满按钮矩形 —— ① 亮 / 暗都叠黑，深色
-    主题下 hover 实测只差 2 个明度级（看不见）；② 按钮铺满整窗，方块状态层
-    糊住弹框圆角、还盖到阴影边距上（hover 时窗口左下角出现 ``a=10`` 的方块）。
-    """
+    @pytest.fixture
+    def themed(self):
+        previous = eTheme.getThemeMode()
+
+        def _set(mode):
+            eTheme.setThemeMode(mode)
+
+        yield _set
+        eTheme.setThemeMode(previous)
 
     @pytest.mark.parametrize(
-        ("mode", "expected"),
-        [
-            (ElaThemeType.ThemeMode.Dark, (255, 255, 255)),
-            (ElaThemeType.ThemeMode.Light, (0, 0, 0)),
-        ],
+        "mode",
+        [ElaThemeType.ThemeMode.Light, ElaThemeType.ThemeMode.Dark],
+        ids=["light", "dark"],
     )
-    def test_state_layer_follows_theme(self, confirm_btn, mode, expected):
-        confirm_btn._onThemeChanged(mode)
-        assert confirm_btn._state_layer().getRgb()[:3] == expected
-
-    def test_box_path_is_none_without_parent(self, confirm_btn):
-        assert confirm_btn._box_path() is None
-
-    def test_box_path_matches_parent_rounded_box(self, dlg, qapp):
+    def test_surface_uses_popup_base(self, make, parent, qapp, themed, mode):
+        themed(mode)
+        dlg = make(ElaConfirmDialog, parent)
+        dlg.setContent("确定要清空当前对话吗？此操作不可撤销。")
         dlg.show()
         qapp.processEvents()
-        btn = dlg._confirm_btn
-        path = btn._box_path()
-        assert path is not None
-        bounds = path.boundingRect()
-        # 弹框盒 280×150 映射到按钮坐标系：盒顶在按钮上方，盒底与按钮底对齐
-        assert bounds.left() == 0
-        assert bounds.top() == -110
-        assert bounds.width() == 280
-        assert bounds.height() == 150
-        assert bounds.bottom() == btn.height()
-
-    def test_hover_stays_inside_rounded_box(self, dlg, qapp):
-        dlg.setContent("确定要清空当前对话吗？")
-        dlg.show()
-        qapp.processEvents()
-        btn = dlg._confirm_btn
-        idle = dlg.grab().toImage()
-        btn._is_hovered = True
-        btn.update()
-        qapp.processEvents()
-        hovered = dlg.grab().toImage()
-
-        inside_y = dlg.height() - 20
-        assert (
-            hovered.pixelColor(30, inside_y).rgba()
-            != idle.pixelColor(30, inside_y).rgba()
-        )
-        # 窗口左下角在圆角盒之外（阴影边距区）：hover 不许糊到这里
-        corner_y = dlg.height() - 1
-        assert (
-            hovered.pixelColor(1, corner_y).rgba()
-            == idle.pixelColor(1, corner_y).rgba()
-        )
+        image = dlg.grab().toImage()
+        sm = dlg._shadow_margin
+        # 左侧内边距区（文字从内容区 16px 处开始），避开边框与圆角
+        color = image.pixelColor(sm + 2, dlg.height() // 2)
+        assert color.name() == surfacePopup(mode).name()
+        dlg.close()

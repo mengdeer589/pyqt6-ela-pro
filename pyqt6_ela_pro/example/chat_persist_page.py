@@ -19,7 +19,7 @@
 3. **大消息量三条开关** —— 交互 resize 延迟重排、历史加载 ``beginBatch``、
    视口外消息挂起重型查看器。
 
-「会话管理」（多话题 UI）在上一节那一页。
+「会话」（多话题 UI）在另一个工作区。
 """
 
 from PyQt6.QtWidgets import QHBoxLayout, QVBoxLayout
@@ -48,6 +48,7 @@ class ChatPersistPage(ExamplePage):
         self._chat = None
         self._player = None
         self._journal = None
+        self._view_bundle = None
         self._notes: dict = {}
         self._titles: dict = {}
         super().__init__(parent)
@@ -76,6 +77,7 @@ class ChatPersistPage(ExamplePage):
             self._section_journal(),
             self._section_session(),
             self._section_perf(),
+            self._section_view_state(),
         ):
             main_layout.addLayout(section)
 
@@ -461,6 +463,74 @@ class ChatPersistPage(ExamplePage):
             "perf",
             f"setViewportSuspension({target}) —— 默认也是开："
             "视口外消息挂起重型查看器，挂起时 bubble.markdownViewer() 返回 None",
+        )
+
+    # ================================================================ 04 视图状态
+    def _section_view_state(self):
+        box = QVBoxLayout()
+        box.setSpacing(6)
+        box.addLayout(
+            self._createHeaderRow("04. 密度 / 披露 / 草稿的持久化", self._demo_view_state)
+        )
+        label = note(
+            self,
+            "时间线密度、逐分段披露与输入草稿都是宿主状态：前两者进 "
+            "exportSession 的 view 段，草稿走 draftState() / setDraftState()。",
+        )
+        self._notes["state"] = label
+        self._titles["state"] = "状态"
+        box.addWidget(label)
+
+        row = QHBoxLayout()
+        row.setSpacing(8)
+        for text, callback in (
+            ("写入并导出", self._demo_view_state),
+            ("检查 bundle", self._on_inspect_state),
+        ):
+            button = ElaButton(text, variant="outlined", size="small", parent=self)
+            button.clicked.connect(self._fire(label, callback))
+            row.addWidget(button)
+        row.addStretch()
+        box.addLayout(row)
+        return box
+
+    def _demo_view_state(self) -> None:
+        """设置密度 / 披露 / 草稿，然后看它们在 exportSession 里的落点。"""
+        view = self._chat.chatView()
+        view.setTimelineDetail(
+            {
+                "thinking": {"placement": "expanded", "details": "expanded"},
+                "tools": {"placement": "expanded", "details": "expanded"},
+            }
+        )
+        message = view.messages()[-1] if view.messages() else None
+        part = None
+        if message is not None:
+            part = next(
+                (item for item in message.parts if item.kind == "reasoning"), None
+            )
+        if part is not None:
+            view.setPartExpanded(part.id, True)
+        self._chat.chatInput().setText("未发送的草稿：请补充边界测试")
+        self._view_bundle = view.exportSession()
+        self._say(
+            "state",
+            "已写入 thinking=expanded、披露 1 项、草稿 1 条；"
+            "bundle.view 会同时包含 timeline_detail 与 disclosure。",
+        )
+
+    def _on_inspect_state(self) -> None:
+        if self._view_bundle is None:
+            self._say("state", "还没有导出，先点「写入并导出」")
+            return
+        options = self._view_bundle.get("view", {})
+        detail = options.get("timeline_detail", {}).get("thinking", {})
+        disclosure = options.get("disclosure", {})
+        draft = self._chat.draftState()
+        self._say(
+            "state",
+            f"timeline_detail.thinking={detail.get('placement')}, "
+            f"disclosure={len(disclosure)} 项, draft={draft.get('text')!r}",
         )
 
     # ---------------------------------------------------------------- 工具

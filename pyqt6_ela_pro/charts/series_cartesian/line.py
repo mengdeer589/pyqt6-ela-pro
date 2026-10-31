@@ -31,6 +31,7 @@ from .line_symbols import _LineSymbolMixin
 
 from ._shared import (
     _draw_symbol,
+    _fix_value_axis,
     _label_placement,
     _lerp,
     _monotone_path,
@@ -157,6 +158,15 @@ class LineSeriesRenderer(_LineSamplingMixin, _LineSymbolMixin, SeriesRenderer):
         self._point_idx = []
         if coord is None:
             return
+        # 堆叠折线 / 面积图的值域必须含堆叠和（``setSeries`` 只按单值算），
+        # 否则上层系列被裁到绘图区外。**只有 stack 才走这里**：普通折线
+        # 的轴范围已由 ``setSeries`` 的 numpy 快路径算好，再调
+        # ``_grid_value_extent`` 会退化成百万级 Python 循环。
+        if isinstance(coord, GridCoord) and self.opt.get("stack"):
+            if coord.y_axis.type in ("value", "log"):
+                _fix_value_axis(coord.y_axis, self.chart, self.opt, "y")
+            elif coord.x_axis.type in ("value", "log"):
+                _fix_value_axis(coord.x_axis, self.chart, self.opt, "x")
         self._load_data()
         single = getattr(coord, "kind", "") == "singleAxis"
 
@@ -927,6 +937,14 @@ class LineSeriesRenderer(_LineSamplingMixin, _LineSymbolMixin, SeriesRenderer):
             "x": self._x_at(orig),
         }
 
+    def samplingStats(self) -> dict:
+        """采样统计（公开 API）：原始点数 / 绘制点数 / 是否降采样。"""
+        return {
+            "dataLen": int(self._data_len),
+            "drawn": len(self._points),
+            "sampled": bool(self._sampled),
+        }
+
     def valueAtIndex(self, index: int):
         idx = self._full_index(index)  # dataZoom 窗口偏移换算
         if not isinstance(idx, int) or not (0 <= idx < self._data_len):
@@ -934,8 +952,7 @@ class LineSeriesRenderer(_LineSamplingMixin, _LineSymbolMixin, SeriesRenderer):
         y = self._raw_value(idx)
         if y is None:
             return None
-        # 命中点坐标：精确下标优先，否则取采样集中最近的原始下标
-        # （gap 断点的占位下标为 -1，不参与最近点比较）。
+        # 命中点坐标：精确下标优先，否则取采样集中最近的原始下标。
         # ``_point_idx`` 升序，二分即可 —— 原实现每次线性扫全部采样点，
         # 鼠标每移动一次、每条系列都要付 O(采样点数)。
         pos = None
@@ -943,8 +960,10 @@ class LineSeriesRenderer(_LineSamplingMixin, _LineSymbolMixin, SeriesRenderer):
             ids = self._point_idx
             at = bisect.bisect_left(ids, idx)
             best = None
-            for k in (at - 1, at):
-                if not (0 <= k < len(ids)):
+            # 断点占位是「重复前一下标 + None 点」，会紧邻在 at 两侧：
+            # 多扫两格并跳过 None，避免把命中点吸到断点上。
+            for k in range(max(0, at - 2), min(len(ids), at + 2)):
+                if self._points[k] is None:
                     continue
                 orig = ids[k]
                 if orig < 0:

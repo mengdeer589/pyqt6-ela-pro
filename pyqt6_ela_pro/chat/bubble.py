@@ -41,6 +41,8 @@
 
 from __future__ import annotations
 
+import html
+
 from datetime import datetime
 from typing import Optional
 
@@ -65,6 +67,7 @@ from PyQt6.QtWidgets import (
 )
 from PyQt6ElaWidgetTools import ElaIconType, ElaMenu, ElaText, ElaThemeType
 
+from .._colors import accent_text
 from .._styles import ColorText, setTextColor
 from ..ela_markdown_viewer import ElaMarkdownViewer
 from ..ela_shimmer import ElaShimmer, ElaShimmerTemplateType
@@ -75,6 +78,7 @@ from .bubble_permission import _BubblePermissionMixin
 from .bubble_stats import _BubbleStatsMixin
 from .bubble_stream import _BubbleStreamMixin
 from .bubble_reasoning import _BubbleReasoningMixin
+from .bubble_detail import _BubbleDetailMixin
 from .bubble_text import _BubbleTextMixin
 from .bubble_tools import _BubbleToolsMixin
 
@@ -83,6 +87,7 @@ from .blocks import (
     AVATAR_SIZE,
     AttachmentStrip,
     ElaChatAvatarSource,
+    ElaChatRetryCard,
     ErrorCard,
     MessageActions,
     MessageHeader,
@@ -168,6 +173,10 @@ class _BubbleBody(QWidget):
         self._bg = QColor(color)
         self.update()
 
+    def backgroundColor(self) -> QColor:
+        """获取气泡底色（文本高亮等取对比色用）。"""
+        return QColor(self._bg)
+
     def setBorder(self, color: QColor) -> None:
         """设置气泡描边色（透明表示不描边）。"""
         self._border = QColor(color)
@@ -234,6 +243,7 @@ class ElaChatBubble(
     _BubbleStatsMixin,
     _BubblePermissionMixin,
     _BubbleMiscMixin,
+    _BubbleDetailMixin,
     ElaThemeWidget,
 ):
     """单条聊天消息气泡（用户 / 助手 / 系统三种角色，分层富消息；助手消息正文是
@@ -248,6 +258,8 @@ class ElaChatBubble(
     undoRequested = pyqtSignal()
     #: 用户点击「重新生成」
     regenerateRequested = pyqtSignal()
+    #: 用户取消自动重试
+    retryCancelled = pyqtSignal()
     #: 用户在错误卡上点击「重试」（同参数重发；由 view 转发成带 messageId 的
     #: ``retryRequested``）
     retryRequested = pyqtSignal()
@@ -289,6 +301,13 @@ class ElaChatBubble(
         self._avatar_visible = True
         self._avatar_shape = AVATAR_DEFAULT_SHAPE
         self._title = ""
+        self._agent = ""
+        self._model = ""
+        self._model_variant = ""
+        self._mentions: tuple = ()
+        self._user_text = ""
+        self._pending_delivery = ""
+        self._pending_actions_added = False
         self._timestamp = ""
         self._duration_ms = 0.0
         self._reasoning_style = ElaChatReasoningStyleType.Collapse
@@ -316,6 +335,9 @@ class ElaChatBubble(
         self._waiting_shimmer: Optional[ElaShimmer] = None
         self._waiting_placeholder_enabled = True
         self._timeline = ChatPartTimeline(self)
+        #: 时间线密度 / 逐分段披露（由 view 或宿主设置）
+        self._timeline_detail = None
+        self._disclosure: dict = {}
         #: 分段是否只存数据、尚未建控件（批量加载时按需物化）
         self._parts_deferred = False
         #: 超长消息只物化了末尾若干步（其余步骤折叠在「展开全部」按钮后）
@@ -361,6 +383,7 @@ class ElaChatBubble(
         #: 「哪些工具卡默认展开」的策略（可注入，见 setToolDefaultOpen）
         self._tool_open_policy = toolDefaultOpen
         self._error: Optional[ErrorCard] = None
+        self._retry_card = None
         self._attachments: Optional[AttachmentStrip] = None
         # -- 合成 / 压缩 / 审批分段 -----------------------------------------
         #: 审批分段 id -> 审批卡控件
@@ -716,6 +739,115 @@ class ElaChatBubble(
         """获取头部时间文本。"""
         return self._timestamp
 
+    def setIdentity(self, agent: str = "", model: str = "", modelVariant: str = "") -> None:
+        """设置历史消息的 agent / 模型 / 变体（空则不显示）。
+
+        用户消息显示在头部副行（名字下面），助手消息显示在底部 meta 行 ——
+        与 opencode 的「提问者身份在气泡上方、回答身份在回答末尾」一致。
+        """
+        self._agent = str(agent or "")
+        self._model = str(model or "")
+        self._model_variant = str(modelVariant or "")
+        self._sync_identity()
+
+    def identity(self) -> tuple:
+        """获取 ``(agent, model, modelVariant)`` 快照。"""
+        return (self._agent, self._model, self._model_variant)
+
+    def _identity_text(self) -> str:
+        model = self._model
+        if model and self._model_variant:
+            model = f"{model} ({self._model_variant})"
+        return "  ·  ".join(item for item in (self._agent, model) if item)
+
+    def _sync_identity(self) -> None:
+        text = self._identity_text()
+        if self._role == ElaChatRoleType.User:
+            self._header.setContext(text)
+        else:
+            self._meta.setContext(text)
+
+    def setMentions(self, mentions) -> None:
+        """设置用户文本里的 @ 引用区间并立即重绘高亮。"""
+        self._mentions = tuple(mentions or ())
+        if self._role == ElaChatRoleType.User:
+            self._render_user_text()
+            # RichText 的标签文本是 HTML（含 span 标签），气泡宽度必须按
+            # **原文**重算，否则会量到 HTML 源码长度、把短消息撑得很宽。
+            self._update_max_width()
+
+    def mentions(self) -> tuple:
+        """获取 @ 引用区间快照。"""
+        return self._mentions
+
+    def _render_user_text(self) -> None:
+        """用户文本：有 mention 时用 RichText 分段着色，否则保持 PlainText。"""
+        if self._label is None or self._role != ElaChatRoleType.User:
+            return
+        text = self._user_text
+        spans = [
+            item
+            for item in self._mentions
+            if getattr(item, "isValid", bool(item.end > item.start))
+        ]
+        if not spans:
+            self._label.setTextFormat(Qt.TextFormat.PlainText)
+            self._label.setText(text)
+            return
+        spans = sorted(spans, key=lambda item: item.start)
+        color = accent_text(
+            "primary",
+            self._theme_mode,
+            self._body.backgroundColor() if self._body is not None else None,
+        ).name()
+        pieces = []
+        cursor = 0
+        for item in spans:
+            start = max(cursor, min(int(item.start), len(text)))
+            end = max(start, min(int(item.end), len(text)))
+            if start > cursor:
+                pieces.append(html.escape(text[cursor:start]).replace("\n", "<br/>"))
+            if end > start:
+                pieces.append(
+                    f'<span style="color:{color}; font-weight:600;">'
+                    f"{html.escape(text[start:end]).replace(chr(10), '<br/>')}</span>"
+                )
+            cursor = end
+        if cursor < len(text):
+            pieces.append(html.escape(text[cursor:]).replace("\n", "<br/>"))
+        self._label.setTextFormat(Qt.TextFormat.RichText)
+        self._label.setText("".join(pieces))
+
+    def setPendingDelivery(self, delivery: str = "") -> None:
+        """标记用户消息为「待发送」（``steer`` 插话 / ``queue`` 排队）。
+
+        空串 = 已送达 / 普通消息；清掉待发送动作并恢复正常头部状态。
+        """
+        self._pending_delivery = str(delivery or "")
+        if self._pending_delivery:
+            if not self._pending_actions_added:
+                self._actions.addCustomAction(
+                    "pending_queue",
+                    icon=ElaIconType.IconName.ArrowDownToLine,
+                    tooltip="移到队列",
+                )
+                self._actions.addCustomAction(
+                    "pending_delete",
+                    icon=ElaIconType.IconName.Xmark,
+                    tooltip="删除这条待发送消息",
+                )
+                self._pending_actions_added = True
+        elif self._pending_actions_added:
+            for key in ("pending_queue", "pending_delete"):
+                self._actions.removeItem(key)
+            self._pending_actions_added = False
+        self._sync_header_status()
+        self._sync_footer()
+
+    def pendingDelivery(self) -> str:
+        """获取待发送投递方式（空 = 普通 / 已送达）。"""
+        return self._pending_delivery
+
     def stampNow(self) -> None:
         """把时间设置为当前时刻（``HH:MM:SS``）。"""
         self.setTimestamp(datetime.now().strftime("%H:%M:%S"))
@@ -732,6 +864,35 @@ class ElaChatBubble(
     def duration(self) -> float:
         """获取本轮耗时（毫秒）。"""
         return self._duration_ms
+
+    def setRetry(self, attempt: int, message: str, nextAt: float = 0.0) -> None:
+        """显示自动重试卡（仅助手消息；``nextAt`` 为 epoch 毫秒）。"""
+        if self._role != ElaChatRoleType.Assistant:
+            return
+        card = self._retry_card
+        if card is None:
+            card = ElaChatRetryCard(self._content)
+            card.retryRequested.connect(self.retryRequested)
+            card.cancelRequested.connect(self._on_retry_cancelled)
+            self._retry_card = card
+            if self._content_layout is not None:
+                self._content_layout.insertWidget(0, card)
+        card.setRetry(attempt, message, nextAt)
+
+    def clearRetry(self) -> None:
+        """清除并隐藏自动重试卡。"""
+        card = self._retry_card
+        if card is not None:
+            card.clear()
+
+    def retryState(self) -> tuple:
+        """获取 ``(attempt, message, nextAt)``；无重试返回 ``(0, '', 0.0)``。"""
+        card = self._retry_card
+        return card.retryState() if card is not None else (0, "", 0.0)
+
+    def _on_retry_cancelled(self) -> None:
+        self.clearRetry()
+        self.retryCancelled.emit()
 
     def meta(self) -> MessageMeta:
         """获取底部 meta 控件。"""
@@ -879,7 +1040,8 @@ class ElaChatBubble(
         """按最长行估算正文文本的单行像素宽度（按文本缓存）。"""
         if self._label is None:
             return 0
-        text = self._label.text() or ""
+        # 用户消息带 mention 时标签里是 HTML 源码；宽度按 ``_user_text`` 原文量。
+        text = self._user_text or ""
         if self._text_width_cache is not None and self._text_width_cache[0] == text:
             return self._text_width_cache[1]
         fm = self._label.fontMetrics()
@@ -916,6 +1078,8 @@ class ElaChatBubble(
                 setTextColor(self._label, text)
         if self._disclaimer is not None:
             self._disclaimer.setTextColor(muted_color(mode, 0.55))
+        if self._role == ElaChatRoleType.User and self._label is not None:
+            self._render_user_text()
 
     # -- 内容 --------------------------------------------------------------
 

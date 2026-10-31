@@ -81,16 +81,27 @@ class HeatmapSeriesRenderer(SeriesRenderer):
         return out
 
     def _colors_and_range(self, items):
-        """→ (colors, vmin, vmax)：visualMap 优先，否则默认色带 + 数据范围。"""
-        vm = self.chart._option_ref().get("visualMap")
+        """→ (colors, vmin, vmax)：visualMap 优先，否则默认色带 + 数据范围。
+
+        **必须读组件实例的活值**：``calculable`` 拖把手改的是实例
+        ``min/max``，读 option 静态值会让拖动完全不改配色。
+        """
+        vm = self.visualMapComponent()
         colors = None
         vmin = vmax = None
-        if isinstance(vm, dict):
-            in_range = vm.get("inRange") or {}
-            if isinstance(in_range.get("colors"), list) and in_range["colors"]:
-                colors = in_range["colors"]
-            vmin = _to_float(vm.get("min"), None)
-            vmax = _to_float(vm.get("max"), None)
+        if vm is not None:
+            try:
+                colors = vm.colors()
+            except Exception:
+                colors = None
+            vmin = _to_float(getattr(vm, "min", None), None)
+            vmax = _to_float(getattr(vm, "max", None), None)
+        if colors is None:
+            raw = self.chart._option_ref().get("visualMap")
+            if isinstance(raw, dict):
+                in_range = raw.get("inRange") or {}
+                if isinstance(in_range.get("colors"), list) and in_range["colors"]:
+                    colors = in_range["colors"]
         if colors is None:
             colors = [T("color.primary.subtle"), T("color.primary")]
         vals = [v for _, _, v, _, _ in items]
@@ -128,7 +139,6 @@ class HeatmapSeriesRenderer(SeriesRenderer):
         gap = self._cell_gap
         span = vmax - vmin
         cells = []
-        data_index = 0
         for day in coord.iterDates():
             rect = coord.cellRect(day)
             if rect.isNull():
@@ -138,7 +148,9 @@ class HeatmapSeriesRenderer(SeriesRenderer):
             if entry is None:
                 cells.append(
                     {
-                        "index": data_index,
+                        # 空日不是数据项：dataIndex 必须为 None，不能拿「日序号」
+                        # 冒充（会让事件的 dataIndex 与 series.data 完全对不上）。
+                        "index": None,
                         "rect": cell,
                         "value": None,
                         "label": day.isoformat(),
@@ -148,9 +160,8 @@ class HeatmapSeriesRenderer(SeriesRenderer):
                         "empty": True,
                     }
                 )
-                data_index += 1
                 continue
-            value, text, item_style = entry
+            value, text, item_style, data_index = entry
             t = 0.5 if span == 0 else (value - vmin) / span
             raw = item_style.get("color")
             color = (
@@ -197,10 +208,10 @@ class HeatmapSeriesRenderer(SeriesRenderer):
         if self._calendar:
             self._load_calendar_style(coord)
             data_map = {}
-            for x, _y, val, text, style in items:
+            for data_index, (x, _y, val, text, style) in enumerate(items):
                 day = coord._parse_date(x)
                 if day is not None:
-                    data_map[day] = (val, text, style)
+                    data_map[day] = (val, text, style, data_index)
             self._cells = self._calendar_cells(coord, data_map, colors, vmin, vmax)
             return
         for data_index, (x, y, val, text, _style) in enumerate(items):

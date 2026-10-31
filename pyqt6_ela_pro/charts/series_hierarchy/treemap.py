@@ -178,7 +178,8 @@ class TreemapSeriesRenderer(SeriesRenderer):
             if hovered is not None:
                 if node.style_index == hovered:
                     color = color.lighter(112)
-                else:
+                elif self.blursOtherItems():
+                    # 只在 emphasis.focus == "self" 时淡化其余项
                     alpha *= 0.35
             color = with_alpha(color, int((60 + 195 * anim_t) * alpha))
             border_color, border_w = self.itemBorder(node.style_index)

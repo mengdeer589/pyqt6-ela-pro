@@ -29,6 +29,17 @@ def _with_created_at(message: ElaChatMessage, createdAt: float) -> ElaChatMessag
     return replace(message, created_at=float(createdAt))
 
 
+def _with_identity(message: ElaChatMessage, identity=None, mentions=None, delivery="") -> ElaChatMessage:
+    """把可选的 agent / 模型 / mention / 投递方式写到新快照上。"""
+    if identity is not None:
+        message = message.withIdentity(*identity)
+    if mentions:
+        message = message.withMentions(mentions)
+    if delivery:
+        message = message.withDelivery(delivery)
+    return message
+
+
 def _settle_restored(message: ElaChatMessage) -> ElaChatMessage:
     """恢复出来的消息一律落定：消息状态与未完成工具都不留在途态。
 
@@ -86,9 +97,21 @@ class _ViewMessagesMixin:
             )
         return self._create_message(role, text, streaming=False, messageId=messageId)
 
-    def beginMessage(self, role: str = ElaChatRoleType.Assistant) -> int:
+    def beginMessage(
+        self,
+        role: str = ElaChatRoleType.Assistant,
+        *,
+        agent: str = "",
+        model: str = "",
+        modelVariant: str = "",
+    ) -> int:
         """开始一条流式消息（通常为助手），返回消息 id。"""
-        return self._create_message(role, "", streaming=True)
+        return self._create_message(
+            role,
+            "",
+            streaming=True,
+            identity=(agent, model, modelVariant),
+        )
 
     def addMessageFromDict(self, data, messageId: Optional[int] = None) -> int:
         """从 :meth:`ElaChatMessage.toDict` 的输出恢复一条消息，返回消息 id。
@@ -252,6 +275,10 @@ class _ViewMessagesMixin:
             return
         if message.title:
             self.setMessageTitle(messageId, message.title)
+        if message.agent or message.model or message.model_variant:
+            bubble.setIdentity(message.agent, message.model, message.model_variant)
+        if message.mentions:
+            bubble.setMentions(message.mentions)
         if message.timestamp:
             self.setMessageTimestamp(messageId, message.timestamp)
         if message.duration_ms:
@@ -279,10 +306,13 @@ class _ViewMessagesMixin:
                 # 必须一起落定（与 journal 的 ``settleOpen`` 同口径）—— 否则
                 # 底部行永久隐藏、挂起调度永远跳过它，且没有任何路径再收尾。
                 status = ElaChatStatusType.Stopped
-            bubble.setStatus(status)
-            self._update_snapshot(
-                messageId, lambda m, value=status: m.withStatus(value)
-            )
+            # 历史恢复的默认状态就是 Done：重复 setStatus 会再跑一遍
+            # ``_apply_stats_mode``（建徽标 / 汇总 / 停靠），是物化热路径上的纯浪费。
+            if bubble.status() != status:
+                bubble.setStatus(status)
+                self._update_snapshot(
+                    messageId, lambda m, value=status: m.withStatus(value)
+                )
 
     def exportSession(self, session=None, extra=None) -> dict:
         """导出整会话快照（消息时间线 + 会话元数据 + 视图外观选项）。
@@ -320,6 +350,10 @@ class _ViewMessagesMixin:
                 "avatar_visible": self._avatar_visible,
                 "user_bubble_ratio": self._user_bubble_ratio,
                 "content_max_width": self._content_max_width,
+                "timeline_detail": self.timelineDetail().toDict(),
+                "disclosure": {
+                    str(key): bool(value) for key, value in self._disclosure.items()
+                },
             },
             "messages": [message.toDict() for message in messages],
             "extra": extra,
@@ -352,9 +386,11 @@ class _ViewMessagesMixin:
             # 先校验后清空：坏 bundle（批内重复 id）不能把当前会话清掉再抛。
             # 不查「与现有消息撞号」—— clear 随后就清空它们，撞号无害。
             self._validate_preserve_ids(rows, against_existing=False)
-        self._apply_session_view(bundle.get("view"))
         if clear:
+            # 先清空再应用视图选项：``clear()`` 会重置披露状态，反过来会把刚
+            # 恢复的 timeline_detail / disclosure 又抹掉。
             self.clear()
+        self._apply_session_view(bundle.get("view"))
         return len(self.restoreMessages(rows, preserveIds=clear))
 
     def _apply_session_view(self, options) -> None:
@@ -377,6 +413,19 @@ class _ViewMessagesMixin:
         width = options.get("content_max_width")
         if isinstance(width, int) and not isinstance(width, bool):
             self.setContentMaxWidth(width)
+        detail = options.get("timeline_detail")
+        if isinstance(detail, dict):
+            self.setTimelineDetail(detail)
+        disclosure = options.get("disclosure")
+        if isinstance(disclosure, dict):
+            self._disclosure.clear()
+            for key, value in disclosure.items():
+                if isinstance(key, str) and isinstance(value, bool):
+                    self._disclosure[key] = value
+            for bubble in list(self._bubbles.values()):
+                if bubble is not None:
+                    bubble._disclosure = self._disclosure
+                    bubble.applyTimelineDetail()
 
     def _create_message(
         self,
@@ -389,6 +438,9 @@ class _ViewMessagesMixin:
         emitAdded: bool = True,
         snapshot: Optional[ElaChatMessage] = None,
         deferShell: bool = False,
+        identity=None,
+        mentions=None,
+        delivery: str = "",
     ) -> int:
         if role not in ElaChatRoleType.All:
             role = ElaChatRoleType.Assistant
@@ -429,12 +481,17 @@ class _ViewMessagesMixin:
             and not streaming
         ):
             # 大批量恢复：只落数据 + 等高占位，滚到附近才建 bubble
-            message = snapshot or ElaChatMessage(
-                id=messageId,
-                role=role,
-                text=text,
-                status=ElaChatStatusType.Done,
-                created_at=time.time(),
+            message = snapshot or _with_identity(
+                ElaChatMessage(
+                    id=messageId,
+                    role=role,
+                    text=text,
+                    status=ElaChatStatusType.Done,
+                    created_at=time.time(),
+                ),
+                identity,
+                mentions,
+                delivery,
             )
             self._remember_message(message)
             self._empty.setVisible(False)
@@ -451,7 +508,19 @@ class _ViewMessagesMixin:
                 self.messageAdded.emit(messageId, role)
             return messageId
 
-        bubble = self._build_bubble(messageId, role, text, streaming, deferred)
+        bubble = self._build_bubble(
+            messageId,
+            role,
+            text,
+            streaming,
+            deferred,
+            identity=(
+                (snapshot.agent, snapshot.model, snapshot.model_variant)
+                if snapshot is not None
+                else identity
+            ),
+            mentions=(snapshot.mentions if snapshot is not None else mentions),
+        )
         self._empty.setVisible(False)
         if snapshot is not None:
             self._remember_message(snapshot)
@@ -460,13 +529,18 @@ class _ViewMessagesMixin:
                 ElaChatStatusType.Streaming if streaming else ElaChatStatusType.Done
             )
             self._remember_message(
-                ElaChatMessage(
-                    id=messageId,
-                    role=role,
-                    text=text,
-                    status=status,
-                    created_at=time.time(),
-                    timestamp=bubble.timestamp(),
+                _with_identity(
+                    ElaChatMessage(
+                        id=messageId,
+                        role=role,
+                        text=text,
+                        status=status,
+                        created_at=time.time(),
+                        timestamp=bubble.timestamp(),
+                    ),
+                    identity,
+                    mentions,
+                    delivery,
                 )
             )
         if self._virtual_list_mode and messageId not in self._virtual_bubble_ids:
@@ -499,9 +573,15 @@ class _ViewMessagesMixin:
         streaming: bool,
         deferred: bool,
         insert_index: Optional[int] = None,
+        identity=None,
+        mentions=None,
     ) -> ElaChatBubble:
         """建气泡并完成全部宿主信号接线（壳虚拟化物化时复用）。"""
         bubble = ElaChatBubble(role, "" if deferred else text, self._content)
+        if identity is not None:
+            bubble.setIdentity(*identity)
+        if mentions:
+            bubble.setMentions(mentions)
         bubble.setAvatarVisible(self._avatar_visible)
         bubble.setAvatarShape(self._avatar_shape)
         if role == ElaChatRoleType.User and self._user_avatar is not None:
@@ -516,6 +596,10 @@ class _ViewMessagesMixin:
         bubble.setToolGrouping(self._tool_grouping)
         bubble.setStatsMode(self._stats_mode)
         bubble.setToolDefaultOpen(self._tool_default_open)
+        bubble._disclosure = self._disclosure
+        bubble.setTimelineDetail(self._timeline_detail)
+        if self._retry.get(messageId) is not None:
+            bubble.setRetry(*self._retry[messageId])
         bubble.setDisclaimer(self._disclaimer_text)
         bubble.setDisclaimerVisible(self._disclaimer_visible)
         bubble.setCopyNotificationEnabled(self._copy_notification_enabled)
@@ -547,6 +631,9 @@ class _ViewMessagesMixin:
         )
         bubble.retryRequested.connect(
             lambda mid=messageId: self.retryRequested.emit(mid)
+        )
+        bubble.retryCancelled.connect(
+            lambda mid=messageId: self.retryCancelled.emit(mid)
         )
         bubble.permissionRequested.connect(
             lambda requestId, mid=messageId: self.permissionRequested.emit(
@@ -585,6 +672,7 @@ class _ViewMessagesMixin:
                 insert_index = self._content_layout.count() - 1
         insert_index = max(0, min(int(insert_index), self._content_layout.count() - 1))
         self._content_layout.insertWidget(insert_index, bubble)
+        self._position_activity_row()
         bubble.show()
         return bubble
 
@@ -687,6 +775,7 @@ class _ViewMessagesMixin:
             return
         self._store.remove(messageId)
         self._virtual_prefix_dirty = True
+        self._virtual_order_dirty = True
         if not self._messages:
             self._empty.setVisible(True)
         self.messageRemoved.emit(messageId)
@@ -716,6 +805,7 @@ class _ViewMessagesMixin:
             self._detach_message(mid)
         self._store.remove_ids(removed_set)
         self._virtual_prefix_dirty = True
+        self._virtual_order_dirty = True
         if not self._messages:
             self._empty.setVisible(True)
         self._update_jump_button()
@@ -762,6 +852,7 @@ class _ViewMessagesMixin:
         self._virtual_order.clear()
         self._virtual_prefix.clear()
         self._virtual_prefix_dirty = True
+        self._virtual_order_dirty = True
         self._render_queue.clear()
         self._render_timer.stop()
         # **渐进渲染被打断时必须自己收尾**：``beginBatch`` 关掉了视口刷新，而恢复
@@ -787,6 +878,13 @@ class _ViewMessagesMixin:
                 except ValueError:
                     pass
         self._guards_by_message.clear()
+        self._disclosure.clear()
+        self._retry.clear()
+        self._activity_text = ""
+        self.clearSearch()
+        if getattr(self, "_activity_row", None) is not None:
+            self._activity_row.setText("")
+            self._activity_row.hide()
         self._empty.setVisible(True)
         self._update_jump_button()
 
@@ -814,6 +912,11 @@ class _ViewMessagesMixin:
             self._virtual_prefix_dirty = True
             if not self._virtual_window_timer.isActive():
                 self._virtual_window_timer.start(0)
+        message = self._store.message(messageId)
+        if message is not None:
+            for part in message.parts:
+                self._disclosure.pop(part.id, None)
+        self._retry.pop(messageId, None)
         self._dirty_syncs.discard(messageId)
         self._suspended_ids.discard(messageId)
         if messageId in self._lazy_ids:
@@ -833,6 +936,7 @@ class _ViewMessagesMixin:
         """追加快照并维护 id 索引 / 高度缓存失效。"""
         self._store.add(message)
         self._virtual_prefix_dirty = True
+        self._virtual_order_dirty = True
 
     def _reindex_messages(self) -> None:
         """重建 id → 下标 / 快照索引（列表结构变化后调用）。"""
@@ -916,3 +1020,7 @@ class _ViewMessagesMixin:
             self.undoRequested.emit(messageId)
         elif action == "regenerate":
             self.regenerateRequested.emit(messageId)
+        elif action == "pending_queue":
+            self.pendingUserActionRequested.emit(messageId, "queue")
+        elif action == "pending_delete":
+            self.pendingUserActionRequested.emit(messageId, "delete")

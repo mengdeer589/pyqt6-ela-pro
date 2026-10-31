@@ -315,6 +315,7 @@ class MessageHeader(ElaThemeWidget):
         super().__init__(parent)
         self._role = role
         self._title = ""
+        self._context = ""
         self._timestamp = ""
         self._status_text = ""
         self._status_kind = ""
@@ -336,6 +337,10 @@ class MessageHeader(ElaThemeWidget):
         self._subtitle_layout = QHBoxLayout(self._subtitle_row)
         self._subtitle_layout.setContentsMargins(0, 0, 0, 0)
         self._subtitle_layout.setSpacing(4)
+        self._context_label = ColorText(self._subtitle_row)
+        self._context_label.setWordWrap(False)
+        self._context_label.setTextFormat(Qt.TextFormat.PlainText)
+        self._context_sep = ColorText("·", self._subtitle_row)
         self._time_label = ColorText(self._subtitle_row)
         self._time_label.setWordWrap(False)
         self._time_label.setTextFormat(Qt.TextFormat.PlainText)
@@ -346,6 +351,8 @@ class MessageHeader(ElaThemeWidget):
         self._status_label.setTextFormat(Qt.TextFormat.PlainText)
         if role == ElaChatRoleType.User:
             self._subtitle_layout.addStretch(1)
+        self._subtitle_layout.addWidget(self._context_label)
+        self._subtitle_layout.addWidget(self._context_sep)
         self._subtitle_layout.addWidget(self._time_label)
         self._subtitle_layout.addWidget(self._sep_label)
         self._subtitle_layout.addWidget(self._status_dot)
@@ -385,6 +392,15 @@ class MessageHeader(ElaThemeWidget):
         """获取名称 / 模型名。"""
         return self._title
 
+    def setContext(self, text: str) -> None:
+        """设置上下文文本（agent · 模型 / 变体；空则不显示）。"""
+        self._context = text or ""
+        self._sync_subtitle()
+
+    def context(self) -> str:
+        """获取上下文文本。"""
+        return self._context
+
     def setTimestamp(self, text: str) -> None:
         """设置时间文本。"""
         self._timestamp = text or ""
@@ -414,8 +430,12 @@ class MessageHeader(ElaThemeWidget):
         return self._status_dot
 
     def _sync_subtitle(self) -> None:
+        has_context = bool(self._context)
         has_time = bool(self._timestamp)
         has_status = bool(self._status_text)
+        self._context_label.setText(self._context)
+        self._context_label.setVisible(has_context)
+        self._context_sep.setVisible(has_context and (has_time or has_status))
         self._time_label.setText(self._timestamp)
         self._time_label.setVisible(has_time)
         self._sep_label.setVisible(has_time and has_status)
@@ -427,7 +447,7 @@ class MessageHeader(ElaThemeWidget):
             and self._status_kind
             in (ElaChatStatusType.Streaming, ElaChatStatusType.Queued)
         )
-        self._subtitle_row.setVisible(has_time or has_status)
+        self._subtitle_row.setVisible(has_context or has_time or has_status)
 
     # -- 外观 --------------------------------------------------------------
 
@@ -495,6 +515,10 @@ class MessageHeader(ElaThemeWidget):
         title_font.setPixelSize(13)
         title_font.setWeight(QFont.Weight.DemiBold)
         self._title_label.setFont(title_font)
+        self._context_label.setTextColor(muted)
+        self._context_label.setTextPixelSize(11)
+        self._context_sep.setTextColor(muted)
+        self._context_sep.setTextPixelSize(11)
         self._time_label.setTextColor(muted)
         self._time_label.setFont(mono_font(11))
         self._sep_label.setTextColor(muted)
@@ -511,7 +535,9 @@ class MessageMeta(ElaThemeWidget):
     def __init__(self, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
         self._title = ""
+        self._context = ""
         self._duration_ms = 0.0
+        self._interrupted = False
         self._label = ColorText(self)
         self._label.setTextFormat(Qt.TextFormat.PlainText)
         layout = QHBoxLayout(self)
@@ -530,6 +556,24 @@ class MessageMeta(ElaThemeWidget):
         """获取名称 / 模型名。"""
         return self._title
 
+    def setContext(self, text: str) -> None:
+        """设置上下文文本（agent · 模型 / 变体；空则不显示）。"""
+        self._context = text or ""
+        self._sync()
+
+    def context(self) -> str:
+        """获取上下文文本。"""
+        return self._context
+
+    def setInterrupted(self, on: bool) -> None:
+        """设置是否显示「已中断」。"""
+        self._interrupted = bool(on)
+        self._sync()
+
+    def interrupted(self) -> bool:
+        """是否标记为已中断。"""
+        return self._interrupted
+
     def setDuration(self, durationMs: float) -> None:
         """设置耗时（毫秒）。"""
         self._duration_ms = float(durationMs or 0.0)
@@ -543,9 +587,13 @@ class MessageMeta(ElaThemeWidget):
         parts = []
         if self._title:
             parts.append(self._title)
+        if self._context:
+            parts.append(self._context)
         duration = formatDuration(self._duration_ms)
         if duration:
             parts.append(f"耗时 {duration}")
+        if self._interrupted:
+            parts.append("已中断")
         self._label.setText("  ·  ".join(parts))
         self.setVisible(bool(parts))
 

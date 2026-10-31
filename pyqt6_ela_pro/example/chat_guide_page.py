@@ -574,6 +574,8 @@ binder 和窗口（本页示例里 `worker` 就是这个角色）。
 | `isOpen()` / `roundIndex()` | 是否有回合在跑 / 当前回合内的 LLM 轮次（1 起） |
 | `shutdownWorker(timeoutMs=None)` | 后端收尾（`shutdownOnClose` 内部用的就是它；`timeoutMs=None` = 不等线程退出） |
 | `shutdownOnClose(window)` | 关窗 / 销毁时自动 `worker.shutdown()`（免写 `closeEvent`） |
+| `retry(attempt, message, nextAt=0)` | 显示自动重试倒计时（后端退避时调用；`error()` / `finish()` 自动清除） |
+| `setAutoActivity(on=True)` / `setActivityProvider(fn)` | 自动维护时间线活动行（回合开始 / 工具调用 / 首字）与自定义文案 |
 | `stream(chunk)` / `toolCallStarted(tc)` / `toolCallEnded(tc, r)` | worker 信号直连（自动接线的底层） |
 
 ## Widget（宿主行为）
@@ -601,6 +603,9 @@ binder 和窗口（本页示例里 `worker` 就是这个角色）。
 | `enqueueMessage(text, attachments=None)` / `queuedMessages()` / `queueCount()` / `dequeueMessage(id)` / `editQueuedMessage(id)` / `clearQueue()` / `queueChanged(list)` | 排队队列的增删改查；`editQueuedMessage` 把该条回填输入框并出队（再提交就是普通发送） |
 | `generationStarted(id)` / `generationFinished(id, status)` / `messageUpdated(id)` / `messageActionTriggered(id, action)` / `sessionChanged(id)` / `attachmentsChanged(list)` / `batchRenderFinished()` | 状态 / 遥测信号：生成开始 / 结束（`status` 是字符串枚举）、消息快照更新、消息操作按钮、会话标记、附件变化、批量恢复的首批排空（**不是**「全部渲染完」） |
 | `setUserName(name)` / `setAssistantName(name)` / `setPlaceholderText(text)` / `setMentionProvider(fn)` / `mentions()` / `sendUserMessage(text, attachments=None, messageId=None)` / `addMessage(role, text)` | 外壳与程序化消息：名字作用于已有与后续消息；`@` 引用 `provider(query) -> list`，提交时用 `mentions()` 取有效 id；`sendUserMessage` 建用户消息 + 进生成态（返回 id），`addMessage` 只建消息不提交 |
+| `addSelector(key, title, items, current)` / `selectorValue(key)` / `setCommandProvider(fn)` / `setShellMode(on)` / `setHistory(history)` | 输入区命令 / 模型选择器 / shell / 提示历史的 widget 转发（**不转发 view 的同名接口**） |
+| `moveQueued(id, toIndex)` / `steerQueued(id)` / `undoQueueChange()` / `canUndoQueue()` | 队列排序 / 转插话 / 撤销（快照栈上限 20） |
+| `mentionSpans()` / `draftState()` / `setDraftState(state)` | @ 引用区间 / 草稿快照（宿主按会话保存） |
 | `setGenerating(on)` / `isGenerating()` / `streamingMessageId()` | 生成态与当前流式消息 id（`stopGeneration()` 见「三层边界」） |
 
 > **widget 不再转发 view 的细粒度接口** —— `addToolCall()` / `beginText()` /
@@ -633,6 +638,11 @@ binder 和窗口（本页示例里 `worker` 就是这个角色）。
 | `setAttachments(list)` / `addAttachments(paths)` / `addAttachment(name, path="", size=0)` / `attachments()` / `attachmentPaths()` / `clearAttachments()` | 附件条的程序化入口（拖放 / 粘贴之外）；`attachments()` 是快照，`attachmentPaths()` 只给有本地路径的项 |
 | `setMentionProvider(fn)` / `mentions()` / `clearMentions()` / `mentionSelected(text, value)` | `@` 引用：候选由宿主给；提交时用 `mentions()` 或 `mentionSelected` 拿有效 id |
 | `addFileButton()` / `setAddFileVisible(on)` / `clearButton()` / `setClearVisible(on)` / `setFilePicker(fn)` | 工具栏按钮句柄 / 显隐；`setFilePicker` 可把系统文件框换成宿主自己的选择器 |
+| `setCommandProvider(fn)` / `setCommandSubmitMode(mode)` | `/` 命令补全（`provider(query) -> list`）；`signal` 模式下提交发 `commandSubmitted(text)` 且不落消息 |
+| `addSelector(key, title, items, current)` / `setSelectorItems(key, items, current)` / `selectorValue(key)` | 模型 / agent / 变体下拉（`ElaChatSelectorItem`），变化发 `selectorChanged(key, id)` |
+| `setShellMode(on)` / `shellMode()` | 等宽字体、Esc 退出、提交走 `shellSubmitted(text)` |
+| `setHistory(history)` / `draftState()` / `setDraftState(state)` | 提示历史（`ElaChatPromptHistory`，↑/↓ 浏览）与草稿快照 |
+| `mentionSpans()` | 当前文本的 `ElaChatMention` 区间（用户消息 @ 高亮用） |
 | `setQueueEnabled(on)` / `queueEnabled()` | 生成中是否允许排队（默认开；关掉时发送键置灰、回车不被吞） |
 | `submit()` / `text()` / `setText(text)` / `clear()` | 程序化提交 / 读写草稿（`submit()` 走与回车相同的校验与信号） |
 
@@ -646,7 +656,14 @@ binder 和窗口（本页示例里 `worker` 就是这个角色）。
 | `setVirtualPartsEnabled(on)` | 关闭时下一次导入立即建全部工具卡 / 思考块（小会话或逐控件断言测试用）；已延迟的消息会当场物化 |
 | `setShellVirtualizationEnabled(on, minMessages=None)` | 批量恢复 ≥ 80 条时默认连气泡壳一起延迟；关闭后立即建壳。未物化消息的 `bubble(id)` 返回 `None`，`message(id)` / `messages()` / 导出仍是完整数据 |
 | `setVirtualListEnabled(on, minMessages=None)` | 批量 ≥ 200 条时默认改用 spacer 虚拟列表（只保留视口附近气泡，不逐条建占位）；关闭后当场物化全部消息 |
-| `addToolCall(messageId, name, args, toolCallId)` | 追加工具调用（上下文工具自动归组） |
+| `addToolCall(messageId, name, args, toolCallId, metadata=...)` | 追加工具调用（上下文工具自动归组）；`metadata` 进渲染器上下文（文件变更 / shell 状态等） |
+| `setTimelineDetail(detail)` / `setPartExpanded(partId, opened)` | 时间线密度 / 逐分段披露 |
+| `addNotice(messageId, noticeType, text, detail)` | 追加时间线通知 |
+| `setActivity(text)` | 底部运行态活动行 |
+| `setRetry(messageId, attempt, message, nextAt)` / `clearRetry(messageId)` | 自动重试态 |
+| `addPendingUserMessage(text, ...)` / `resolvePendingUserMessage(id, sent=True)` | 待发送用户消息（插话先上屏） |
+| `searchText(query, caseSensitive=False)` / `searchNext()` / `searchPrev()` / `clearSearch()` | 会话内搜索与循环跳转 |
+| `setMessageIdentity(id, agent, model, modelVariant)` / `setMessageMentions(id, mentions)` | 消息身份 / @ 区间（也可在 `addMessage` 时传） |
 | `setReasoningStyle(style)` / `setToolGrouping(on)` / `setStatsMode(mode)` | 展示形态，立即对已有消息生效 |
 | `setDisclaimer(text)` / `setDisclaimerVisible(on)` | 助手消息底部的「内容由 AI 生成，仅供参考」提示（默认开启；流式期间随整行隐藏）；`DISCLAIMER_TEXT` 是默认文案 |
 | `setCopyNotificationEnabled(on)` | 点击消息底部「复制」后是否弹 `ElaMessageBar`「已复制到剪贴板」成功提示（默认开启，立即对已有消息生效；应用偏好，不进 `exportSession`） |
@@ -654,7 +671,7 @@ binder 和窗口（本页示例里 `worker` 就是这个角色）。
 | `setUserAvatar(source)` / `setAssistantAvatar(source)` / `setAvatarShape(shape)` | 头像自定义：SVG / 路径 / `QPixmap` / `QImage` / `QIcon` / `bytes` 等（含已存在与后续消息）；形状 `"circle"`（默认）/ `"rounded"`（**带圆角的矩形**）/ `"square"`，非法值回落圆形 |
 | `setToolDefaultOpen(policy)` | 注入工具卡展开策略（`policy(name, args, ok) -> bool`），只影响**之后新建**的卡片 |
 | `registerToolRenderer(name, factory, *, subtitle, groupable, replace=False)` | **工具结果富渲染**（模块级函数）：`factory(ToolRenderContext) -> QWidget` 只替换卡片**内容区**，头部 / 折叠 / 错误竖线 / 忙碌环 / 展开策略仍由 `ToolCallCard` 负责。可选实现 `updateToolResult(result, status)` 收推送。`subtitle(args) -> (键, 值)` 的键自动从参数摘要排除。`replace=False` 时注册同名渲染器直接报错（防静默覆盖）。库内不内置任何渲染器 |
-| `beginPermission(messageId, request)` / `resolvePermission(messageId, requestId, reply, answer, feedback)` | 工具审批。**交互与记录分离**：等待回复时交互卡在**输入区上方的 `ElaChatPermissionDock`**（输入区照常可用，不顶替它），答完在时间线该 part 的**原位**留下一张**默认折叠**的 `PermissionRecord`（与「工具调用 (N)」同一套折叠交互）。**组件只画卡 + 发信号，不阻塞**（Qt 里挂起等用户点按钮会卡死事件循环）；「始终允许」的规则持久化归宿主。`request.questions` 非空 = **问答型逐题向导**（见下），为空 = 批准型三键。传入**已是落定态**的 request 时直接落成记录卡（重放后端历史用），不进 dock、不发 `permissionRequested` |
+| `beginPermission(messageId, request)` / `resolvePermission(messageId, requestId, reply, answer, feedback)` | 工具审批。**交互与记录分离**：等待回复时交互卡在**输入区上方的 `ElaChatPermissionDock`**（输入区照常可用，不顶替它），答完在时间线该 part 的**原位**留下一张**默认折叠**的 `PermissionRecord`（与「工具调用 (N)」同一套折叠交互）。**组件只画卡 + 发信号，不阻塞**（Qt 里挂起等用户点按钮会卡死事件循环）；「始终允许」的规则持久化归宿主。`request.questions` 非空 = **问答型逐题向导**（见下），为空 = 批准型三键（允许一次 / **始终允许 = 长按 700ms 才生效** / 拒绝…）。传入**已是落定态**的 request 时直接落成记录卡（重放后端历史用），不进 dock、不发 `permissionRequested` |
 | `pendingPermissions(messageId)` / `permissionCard(messageId, requestId)` / `interactivePermissionCard(messageId, requestId)` / `permissionAnswers(messageId, requestId)` | 读审批状态。`permissionCard` 只返回时间线上的**记录卡**（等待期间是 `None`），还在 dock 里等回复的交互卡用 `interactivePermissionCard`。`permissionAnswers` 给**未塌缩**的 `{key: [label, ...]}`，用于「答到一半还没提交」时看进度 |
 | `beginCompaction(messageId, reason)` / `appendCompactionSummary(...)` / `endCompaction(...)` | 上下文压缩在时间线上的表达。**库不实现压缩算法**，只负责「能表达 + 能持久化」 |
 | `addSteerNotice(messageId, text)` | 插话回执行（`↳ <text>`）。刻意不插用户气泡 —— 助手消息正在流式输出，中途插一条用户消息视觉上很怪 |

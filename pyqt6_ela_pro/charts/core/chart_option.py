@@ -85,6 +85,7 @@ class _ChartOptionMixin:
 
         :returns: self（支持链式调用）
         """
+        self._ensure_alive()
         if not isinstance(option, dict):
             option = {}
         prev_list, prev_by_name = self._capture_prev_data(option)
@@ -93,15 +94,24 @@ class _ChartOptionMixin:
             # list 逐元素复制一遍（本机 100 万点约 60~95 ms）。
             self._option = _copy_option_shallow_arrays(option)
             self._series_state = {}
+            self._item_state = {}
             self._timeline_base = None
             self._zoom_opt_snapshot = None  # 全量替换 = 缩放复位
             self._selection = {}
             self._selection_epoch += 1
             self.tooltip.hide()
             self._hover = None
+            # 全量替换 = 缩放复位。**默认滚轮缩放组件是 host 组件、跨
+            # setOption 存活**，``_rebuild`` 里那句 ``None == None`` 会让
+            # ``adoptWindow`` 把旧窗口套到新数据上（实测换数据后仍停在 30%~60%）。
+            self._reset_host_zoom = True
         else:
             _merge_option(self._option, option)
-        self._opt_version += 1
+        # **版本号由 ``_rebuild`` 递增，不能在这里递增**：``lazyUpdate`` 会在
+        # 重建前先返回，此刻系列层缓存键已经带上新版本号 —— 只要中间发生过
+        # 一次重绘，旧渲染器就会把位图存进「新键」，重建后同键命中、旧数据
+        # 被原样贴回（实测渲染器已是 B、画面仍是 A）。
+        self._update_timeline_base(option)
         if lazyUpdate:
             self._lazy_pending = True
             self._schedule_lazy_option()
@@ -275,28 +285,52 @@ class _ChartOptionMixin:
         摄入」的契约彻底绕过 —— 而 timeline 的基线捕获 + 每帧 apply 各来一次，
         于是**每切一帧就深拷贝整份数据**。``_copy_any`` 是深层拷贝但**在任意
         深度保留缓冲区**，语义相同、代价不同。
+
+        **只在基线为空时捕获**，且调用点只能是 ``setOption``（见
+        ``_update_timeline_base``）。帧切换（``_refresh``）期间 ``_option``
+        已经是「基线 + 当前帧」的生效结果，此时再捕获会把帧里的值写回基线 ——
+        之后切到「不写该键」的帧时，本应回落 ``baseOption`` 却拿到上一帧的值。
         """
         frames = self._option.get("options")
         if not isinstance(frames, list) or not frames:
             self._timeline_base = None
             return
+        if self._timeline_base is not None:
+            return
+        base = self._option.get("baseOption")
+        if isinstance(base, dict):
+            merged = _copy_any(base)
+            extra = {
+                k: v
+                for k, v in self._option.items()
+                if k not in ("baseOption", "options")
+            }
+            _deep_merge(merged, extra)
+        else:
+            merged = {
+                k: _copy_any(v) for k, v in self._option.items() if k != "options"
+            }
+        self._timeline_base = merged
+
+    def _update_timeline_base(self, option: dict) -> None:
+        """把宿主本次传入的**非帧**键合并进 timeline 基线。
+
+        帧切换时 ``_option`` 是生效结果，不能拿它当基线来源；这里只用本次
+        ``setOption`` 的入参（``options`` / ``baseOption`` 之外的键 + 显式
+        ``baseOption``），保证「宿主更新静态配置」与「切帧回落」两件事都成立。
+        """
+        frames = self._option.get("options")
+        if not isinstance(frames, list) or not frames:
+            self._timeline_base = None
+            return
+        self._capture_timeline_base()
         if self._timeline_base is None:
-            base = self._option.get("baseOption")
-            if isinstance(base, dict):
-                merged = _copy_any(base)
-                extra = {
-                    k: v
-                    for k, v in self._option.items()
-                    if k not in ("baseOption", "options")
-                }
-                _deep_merge(merged, extra)
-            else:
-                merged = {
-                    k: _copy_any(v) for k, v in self._option.items() if k != "options"
-                }
-            self._timeline_base = merged
-        # 合并语义下 baseOption 可能被增量修改：同步回基线快照
-        for key, value in self._option.items():
+            return
+        source = option if isinstance(option, dict) else {}
+        base_opt = source.get("baseOption")
+        if isinstance(base_opt, dict):
+            _deep_merge(self._timeline_base, _copy_any(base_opt))
+        for key, value in source.items():
             if key in ("options", "baseOption"):
                 continue
             if key in ("series", "dataZoom", "graphic") and isinstance(value, list):
@@ -305,7 +339,7 @@ class _ChartOptionMixin:
             if isinstance(value, dict) and isinstance(
                 self._timeline_base.get(key), dict
             ):
-                _deep_merge(self._timeline_base[key], value)
+                _deep_merge(self._timeline_base[key], _copy_any(value))
             else:
                 self._timeline_base[key] = _copy_any(value)
 
@@ -339,6 +373,14 @@ class _ChartOptionMixin:
         effective["options"] = _copy_any(frames)
         if isinstance(self._option.get("baseOption"), dict):
             effective["baseOption"] = _copy_any(self._option["baseOption"])
+        # ``timeline.currentIndex`` 是**当前帧状态**，不属于基线：基线里可能
+        # 没有这个键（宿主只写了 data），不补回去的话 goto 之后
+        # ``_option["timeline"]["currentIndex"]`` 会消失。
+        timeline_eff = effective.get("timeline")
+        if not isinstance(timeline_eff, dict):
+            timeline_eff = _copy_any(timeline_opt) if isinstance(timeline_opt, dict) else {}
+            effective["timeline"] = timeline_eff
+        timeline_eff["currentIndex"] = idx
         self._option = effective
 
     def _refresh(self) -> None:
@@ -347,9 +389,9 @@ class _ChartOptionMixin:
         prev_by_name = {
             r.name: prev_list[i] for i, r in enumerate(self._series) if r.name
         }
-        self._capture_timeline_base()
+        # 帧切换**不重捕基线**：基线只由宿主 setOption 更新（见
+        # ``_update_timeline_base``），否则当前帧的值会被并进基线。
         self._apply_timeline_frame()
-        self._opt_version += 1
         self._apply_option(prev_list, prev_by_name)
 
     def _apply_option(self, prev_list: list, prev_by_name: dict) -> None:
@@ -359,7 +401,6 @@ class _ChartOptionMixin:
         在动画关闭时会跳过旧数据快照（百万级物化纯浪费），此时不注入
         ``prev_data``，渲染器走无插值路径。
         """
-        self._capture_timeline_base()
         self._apply_timeline_frame()
         self._rebuild()
         if prev_list is not None or prev_by_name:
@@ -404,6 +445,7 @@ class _ChartOptionMixin:
         **按引用**、最后一步才物化成新 list，因此「深拷贝」的语义仍然成立
         （调用方改动返回值不会影响图表），但不会逐元素复制两遍百万级数据。
         """
+        self._ensure_alive()
         option = _unwrap_option(_copy_any(self._option))
         return self._overlay_live_state(option)
 
@@ -417,10 +459,28 @@ class _ChartOptionMixin:
         if not isinstance(option, dict):
             return option
         legend = option.get("legend")
-        if isinstance(legend, dict) and self._series:
-            legend["selected"] = {
-                r.name: self._seriesVisible(r.name) for r in self._series
-            }
+        if self._series:
+            series_names = {r.name for r in self._series}
+            live = {}
+            for r in self._series:
+                getter = getattr(r, "legendItems", None)
+                names = (
+                    [name for name, _ in getter()]
+                    if callable(getter)
+                    else [r.name]
+                )
+                for name in names:
+                    live[name] = (
+                        self._seriesVisible(name)
+                        if name in series_names
+                        else bool(self._item_state.get(name, True))
+                    )
+            if isinstance(legend, dict):
+                legend["selected"] = dict(live)
+            elif isinstance(legend, list):
+                for entry in legend:
+                    if isinstance(entry, dict):
+                        entry["selected"] = dict(live)
         zoom = self._component("dataZoom")
         if zoom is not None and option.get("dataZoom") is not None:
             entries = option.get("dataZoom")
@@ -453,6 +513,7 @@ class _ChartOptionMixin:
 
         ``width`` 传 dict 时按 ECharts opts 解析（``{"width":..., "height":...}``）。
         """
+        self._ensure_alive()
         opts = width if isinstance(width, dict) else None
         if opts is not None:
             width = opts.get("width")
@@ -472,6 +533,7 @@ class _ChartOptionMixin:
         ``{"seriesId": str}``（三者其一）+ ``"data"``（单点或点列表）；
         返回是否找到目标系列并追加。
         """
+        self._ensure_alive()
         if not isinstance(params, dict):
             return False
         data = params.get("data")
@@ -568,6 +630,7 @@ class _ChartOptionMixin:
 
         :returns: 动作是否被识别并执行
         """
+        self._ensure_alive()
         if not isinstance(payload, dict):
             return False
         action = str(payload.get("type") or "")
@@ -722,6 +785,12 @@ class _ChartOptionMixin:
 
     def _rebuild(self) -> None:
         """按当前 option 重建组件 / 坐标系 / 系列渲染器（并使布局缓存失效）。"""
+        if self._disposed:
+            # 迟到的定时器（timeline / lazy）可能在 dispose 之后触发重建
+            return
+        # 重建 = 渲染器换了：版本号必须在这里递增，否则系列层位图缓存
+        # 会把「旧渲染器画的图」当成新状态（见 ``setOption`` 的注释）。
+        self._opt_version += 1
         self._hide_annotation_editor()
         opt = self._option
         self._layout_key = None
@@ -732,7 +801,12 @@ class _ChartOptionMixin:
             title.setOption(title_opt)
         self.title = self.titles[0]
 
-        legend_opts = _component_options(opt.get("legend"), "show")
+        # **未写 ``legend`` = 不显示图例**（ECharts 语义）。原先默认 show=True，
+        # 单系列图会在底部挂一条 `series0`，纯噪音。
+        if "legend" in opt:
+            legend_opts = _component_options(opt.get("legend"), "show")
+        else:
+            legend_opts = [{"show": False}]
         if len(legend_opts) != len(self.legends):
             self.legends = [Legend(self) for _ in legend_opts]
         for legend, legend_opt in zip(self.legends, legend_opts):
@@ -750,6 +824,7 @@ class _ChartOptionMixin:
             if isinstance(selected, dict):
                 for name, visible in selected.items():
                     self._series_state[str(name)] = bool(visible)
+                    self._item_state[str(name)] = bool(visible)
 
         # 坐标系：calendar > polar > singleAxis > grid。grid 仅在
         # ①option 显式给出 xAxis/yAxis/grid，或 ②存在 coordinateSystem
@@ -852,9 +927,13 @@ class _ChartOptionMixin:
                         seeds.add(int(value))
                     except (TypeError, ValueError, OverflowError):
                         continue
-            for index, item in enumerate(r.data()):
-                if isinstance(item, dict) and item.get("selected") is True:
-                    seeds.add(index)
+            # ``ElaNumericBuffer`` 只承载数值，不可能有 ``data[i].selected``
+            # 这类 dict 项：跳过整趟遍历（1M 行实测 441ms / 136MB 临时对象）。
+            data_items = r.data()
+            if not _cdata.isBufferLike(data_items):
+                for index, item in enumerate(data_items):
+                    if isinstance(item, dict) and item.get("selected") is True:
+                        seeds.add(index)
             if seeds:
                 data_len = len(r.data())
                 self._selection[r.name] = {i for i in seeds if 0 <= i < data_len}
@@ -879,12 +958,33 @@ class _ChartOptionMixin:
                 self._spawn_component(cls, value, series_opt)
         # 用户缩放跨 setOption 保留（ECharts 组件状态语义）：option 里的
         # dataZoom 段没变就沿用旧窗口，只在显式改了 start/end 时采纳新值。
+        reset_zoom = bool(getattr(self, "_reset_host_zoom", False))
+        self._reset_host_zoom = False
         new_zoom = self._component("dataZoom")
-        if new_zoom is not None and old_zoom_state and not zoom_opt_changed:
+        if (
+            new_zoom is not None
+            and old_zoom_state
+            and not zoom_opt_changed
+            and not reset_zoom
+        ):
             new_zoom.adoptWindow(old_zoom_state)
         self._zoom_opt_snapshot = _copy_any(opt.get("dataZoom"))
         # 直角坐标图默认滚轮缩放（用户配了 dataZoom 就完全听用户的）
         self._ensure_wheel_zoom()
+        if reset_zoom:
+            # 全量替换 / clear：**所有** dataZoom（含跨 setOption 存活的
+            # host 自动滚轮组件）回到各自 option 的初始窗口。
+            for comp in self._components:
+                if getattr(comp, "optionKey", "") != "dataZoom":
+                    continue
+                comp.start = comp.init_start
+                comp.end = comp.init_end
+                comp.y_start = comp.y_init_start
+                comp.y_end = comp.y_init_end
+                try:
+                    comp.apply()
+                except Exception:
+                    pass
         # 显式配置 brush = 用户要框选数据；未显式 setDragMode 时默认走 select
         if not self._drag_mode_explicit and self._drag_mode == self.DRAG_MODE_DEFAULT:
             if isinstance(opt.get("brush"), (dict, list)):
@@ -898,10 +998,30 @@ class _ChartOptionMixin:
         # 默认左键框选：dataZoom / brush 的拖拽接管按当前模式重放
         self._apply_drag_mode()
 
-        # 图例条目
+        # 图例条目：饼 / 漏斗按数据项（legendItems 由渲染器给），其余按系列名。
+        # **图例整体隐藏时不要构建条目**：饼图的 legendItems 会遍历全部数据项，
+        # 百万级数据下纯属浪费。
+        show_legend = any(bool(opt.get("show", True)) for opt in legend_opts)
+        hidden = {
+            str(name)
+            for name, visible in self._item_state.items()
+            if not visible
+        }
         items = []
-        for i, r in enumerate(self._series):
-            items.append((r.name, self.colorForSeries(r)))
+        for r in self._series:
+            setter = getattr(r, "setHiddenItems", None)
+            if callable(setter):
+                try:
+                    setter(hidden)
+                except Exception:
+                    pass
+            if not show_legend:
+                continue
+            getter = getattr(r, "legendItems", None)
+            if callable(getter):
+                items.extend(getter())
+            else:
+                items.append((r.name, self.colorForSeries(r)))
         for legend in self.legends:
             legend.setItems(items)
         self._layout_all(force=True)

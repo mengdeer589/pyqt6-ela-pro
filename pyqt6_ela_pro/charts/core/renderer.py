@@ -208,6 +208,10 @@ class SeriesRenderer:
                 return color
         return self.chart.colorForSeries(self)
 
+    def legendItems(self) -> list:
+        """图例条目 ``[(name, QColor)]``（默认 = 系列名；饼 / 漏斗按数据项）。"""
+        return [(self.name, self.color())]
+
     # -- itemStyle / label / emphasis（ECharts 通用键） --------------------
     def itemStyle(self) -> dict:
         """系列级 ``itemStyle``（非 dict 时返回空 dict）。"""

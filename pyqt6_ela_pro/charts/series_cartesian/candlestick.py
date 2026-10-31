@@ -131,6 +131,9 @@ class CandlestickSeriesRenderer(SeriesRenderer):
 
     # -- 交互 -------------------------------------------------------------
     def hitTest(self, pos: QPointF):
+        if self._anim_t < 1.0:
+            # 实体从 open 向 high/low 生长：终态影线位置此刻还是空白。
+            return None
         coord = self.chart.coordFor(self.opt)
         if not isinstance(coord, GridCoord):
             return None

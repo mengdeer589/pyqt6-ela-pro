@@ -32,6 +32,7 @@ from pyqt6_ela_pro.chat.blocks import PermissionCard, PermissionRecord
 from pyqt6_ela_pro.chat.docks import ElaChatPermissionDock
 from pyqt6_ela_pro.chat._question import CARD_PADDING
 from pyqt6_ela_pro.ela_button import ElaButton
+from pyqt6_ela_pro.ela_long_press_button import ElaLongPressButton
 
 
 def _turn(chat):
@@ -733,6 +734,10 @@ class TestApproveActions:
         buttons = card._action_buttons()
         assert len(buttons) == 3
         assert all(isinstance(b, ElaButton) for b in buttons)
+        # 「始终允许」是持久授权 -> 长按按钮（仍是 ElaButton 子类）
+        assert isinstance(buttons[1], ElaLongPressButton)
+        assert not isinstance(buttons[0], ElaLongPressButton)
+        assert not isinstance(buttons[2], ElaLongPressButton)
 
     def test_colour_coded_by_importance(self, qapp, make):
         """允许=实心强调色 / 始终=描边 / 拒绝=危险色。"""
@@ -741,6 +746,25 @@ class TestApproveActions:
         assert (allow.variant(), allow.color()) == ("solid", "primary")
         assert always.variant() == "outlined"
         assert reject.isDanger(), "拒绝必须走危险色，否则和「允许」长得一样"
+
+    def test_three_buttons_share_small_size(self, qapp, make):
+        """三键必须同高（22px）：长按按钮以前只有 30px 一档，会突出一截。"""
+        _chat, _mid, card = self._approve_card(make)
+        allow, always, reject = card._action_buttons()
+        assert {b.buttonSize() for b in (allow, always, reject)} == {"small"}
+        assert {b.height() for b in (allow, always, reject)} == {22}
+
+    def test_always_button_needs_hold(self, qapp, make):
+        """短按不通过（只连 ``longPressed``），避免误发持久授权。"""
+        chat, mid, card = self._approve_card(make)
+        seen = []
+        chat.permissionReplied.connect(lambda i, r, rep, a, f: seen.append(rep))
+        always = card._action_buttons()[1]
+        assert always.duration() == card.ALWAYS_HOLD_MS
+        always.click()
+        assert seen == []
+        always.longPressed.emit()
+        assert seen == ["always"]
 
     def test_actions_hidden_while_responding(self, qapp, make):
         chat, mid, card = self._approve_card(make)

@@ -59,8 +59,10 @@
     dock —— 否则 Qt 会把无父控件当顶层窗口弹出来，用户看到「小窗一闪」）。
   - **两种形态由 `permission.questions` 是否为空决定**（**这就是判据，勿另设
     标志位**）：
-    - **批准型**（`questions` 为空）：允许一次（实心强调色）/ 始终允许（描边）/
-      拒绝…（危险色）—— **按重要性分档**，不是三个等权重的文字按钮；可带反馈；
+    - **批准型**（`questions` 为空）：允许一次（实心强调色）/ 始终允许（描边、
+      **`ElaLongPressButton`：要按住 700ms 才生效** —— 持久授权的误触代价比
+      「允许一次」高一个量级）/ 拒绝…（危险色）—— **按重要性分档**，不是三个
+      等权重文字按钮；可带反馈；长按期间按钮面被主题主色填满、文字自动换对比色；
     - **问答型**（`questions` 非空）：**逐题向导** —— 标题行（「需要你回答 ·
       短标签」+ 右侧「N / M」+ 可点的进度段胶囊，**仅多题时出现**），题面
       （14px 主文本色），候选卡（每项**两行**：标题 + 说明，
@@ -359,4 +361,56 @@ chat.sendNextQueued()                         # 或手动触发
 
 ---
 
-**延伸阅读**：应用内 API 指南见 `pyqt6_ela_pro/example/chat_guide_page.py`；可运行示例是 `example/` 下的聊天五页（总览 / 输入区能力 / Agent 能力 / 会话管理 / 持久化与性能）；最小接入示例在仓库 `llm_test/`（不入库）。
+- **时间线通知（`ElaChatNotice`）** — `view.addNotice(messageId, noticeType, text, detail)`
+  在消息时间线里追加一条弱化分隔行（模型 / agent / 目录切换、中断、指令更新、
+  重启）。`noticeType` 取 `ElaChatNoticeType`，文案由宿主提供；通知的 `text`
+  **不并入** `message.text`。
+- **自动重试（`ElaChatRetryCard`）** — `view.setRetry(messageId, attempt, message,
+  nextAt)` / `clearRetry` / `retryState`：显示「第 N 次重试 · Ns 后」+ 立即重试 /
+  取消；`nextAt` 是 epoch 毫秒（0 = 无倒计时）。`ElaChatStreamBinder.retry(...)`
+  是后端退避的快捷入口；`error()` / `finish()` 自动清重试态。
+- **运行态活动行（`ElaChatWorkingRow`）** — `view.setActivity("正在运行命令…")`
+  在时间线底部显示呼吸点 + 文案（空串隐藏）。`binder.setAutoActivity(True)`
+  会在回合开始 / 工具调用 / 首字时自动维护；`setActivityProvider(fn)` 可覆盖文案。
+- **时间线密度（`ElaChatTimelineDetail`）** — `view.setTimelineDetail(detail)`：
+  thinking / shell / edit / subagents / notices / tools 六个分区，每个分区
+  `placement`（hidden / collapsed / expanded）+ `details`（collapsed / expanded）。
+  密度直接改变已存在控件的可见性与默认开合，**不重建文档**；hidden 工具仍保留
+  在数据与导出里，只是不占视线。`view.setPartExpanded(partId, on)` 记录逐分段
+  的手动披露状态，二者随 `exportSession` 的 `view` 段持久化。
+- **会话内搜索（`ElaChatSearchBar` / `ElaChatSearchHit`）** —
+  `view.searchText(query, caseSensitive=False)` 搜索助手正文 + 用户文本，
+  `searchNext` / `searchPrev` 循环跳转并高亮；`view.showSearchBar()` /
+  `hideSearchBar()`，`ElaChatWidget` 的 `Ctrl+F` 走同一入口。
+- **Diff / 文件变更** — 顶层 `ElaDiffView`（统一 diff：双行号、+/- 底色、
+  Pygments 着色、折叠上下文、大 diff 上限），`ElaChatFileChanges` 是工具 body
+  用的文件列表（每文件懒建 diff）；纯模型在 `pyqt6_ela_pro/_diff.py`
+  （`parseUnifiedDiff` / `diffLines` / `filesFromMetadata`）。
+  `ElaChatToolCall.metadata` 由宿主填写，约定：
+  `{"files": [{"file", "patch" | "before" + "after", "additions", "deletions",
+  "status"}], "diagnostics": ..., "shell": ...}`。
+- **可选内置工具渲染器** — `installBuiltinToolRenderers()` 注册
+  `shell` / `bash` / `execute`（复用 `ElaTerminalView`：ANSI 色彩 / 行数上限 /
+  右键复制）与
+  `edit` / `write` / `patch` / `apply_patch`（文件变更 + diff）；**默认不注册**，
+  同名宿主渲染器优先，`uninstallBuiltinToolRenderers()` 可整体摘掉。
+- **输入区增强** — `ElaChatInput` 增加：
+  - `setCommandProvider(provider)`：`/` 命令补全（`commandSelected`）；
+    `setCommandSubmitMode("signal")` 时提交发 `commandSubmitted(text)` 且不落消息；
+  - `addSelector(key, title, items, current)` / `setSelectorItems`：模型 / agent /
+    变体下拉（`ElaChatSelectorItem`，`selectorChanged(key, id)`）；
+  - `setShellMode(True)`：等宽字体、`Esc` 退出、提交走 `shellSubmitted(text)`；
+  - `setHistory(ElaChatPromptHistory)`：↑/↓ 浏览提示历史，保留当前草稿；
+  - `draftState()` / `setDraftState()` + 300ms `draftChanged`：宿主按会话保存草稿。
+- **队列增强** — `ElaChatQueueDock` 增加「插话」（生成中）/ 撤销；
+  `ElaChatWidget.moveQueued(queueId, toIndex)` / `steerQueued(queueId)` /
+  `undoQueueChange()`（快照栈上限 20）。`steerMessage` 会在时间线上先建一条
+  「待发送」用户消息，`drainSteer` 结算为已送达；「移到队列 / 删除」动作由
+  `pendingUserActionRequested` 交给 widget 处理。
+- **消息身份 / @ 提及** — `ElaChatMessage` 增加 `agent` / `model` /
+  `model_variant` / `mentions` / `delivery`；`view.setMessageIdentity(...)` 后
+  用户消息头显示 `agent · 模型`，助手底部 meta 显示 `agent · 模型 · 耗时 · 已中断`。
+  `ElaChatInput.mentionSpans()` 给出 `ElaChatMention` 区间，用户气泡按区间
+  高亮，复制仍取纯文本。
+
+**延伸阅读**：应用内 API 指南见 `pyqt6_ela_pro/example/chat_guide_page.py`；可运行示例是 `example/chat_workbench_page.py` 的 **AI 组件工作台**（七个工作区：概览 / 输入区 / Agent / 文件与 Diff / 时间线与检索 / 会话 / 持久化，与图表工作台一样首次切换才构建）；最小接入示例在仓库 `llm_test/`（不入库）。

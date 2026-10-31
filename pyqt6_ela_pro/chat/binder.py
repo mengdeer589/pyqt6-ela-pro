@@ -147,6 +147,10 @@ class ElaChatStreamBinder:
         self._had_text = False
         self._finish_reason = ""
         self._cancelled = False
+        #: 自动维护时间线活动行（默认开）
+        self._auto_activity = True
+        self._activity_provider = None
+        self._activity_text = ""
         if worker is not None:
             self.connectWorker(worker)
 
@@ -242,8 +246,80 @@ class ElaChatStreamBinder:
 
     # -- 回合与轮次 --------------------------------------------------------
 
+    # -- 运行态活动行 ------------------------------------------------------
+
+    def setAutoActivity(self, on: bool = True) -> None:
+        """开关「自动维护时间线活动行」（默认开）。"""
+        self._auto_activity = bool(on)
+        if not self._auto_activity:
+            self._clear_activity()
+
+    def autoActivity(self) -> bool:
+        """是否自动维护活动行。"""
+        return self._auto_activity
+
+    def setActivityProvider(self, provider) -> None:
+        """注入活动文案提供者 ``(kind, detail) -> str | None``。
+
+        返回 ``None`` 表示回落库内默认文案；返回空串表示隐藏活动行。
+        """
+        self._activity_provider = provider if callable(provider) else None
+        if self._activity_text:
+            self._set_activity(self._activity_text)
+
+    def _activity_for_tool(self, name: str) -> str:
+        key = str(name or "").lower()
+        if key in ("read", "glob", "grep", "list"):
+            return "正在读取上下文…"
+        if key in ("edit", "write", "patch", "apply_patch"):
+            return "正在修改文件…"
+        if key in ("shell", "bash", "execute", "terminal"):
+            return "正在运行命令…"
+        if key in ("websearch", "webfetch"):
+            return "正在搜索…"
+        if key in ("subagent", "task", "agent"):
+            return "正在委派子代理…"
+        return f"正在调用 {name}…" if name else "正在工作…"
+
+    def _set_activity(self, text: str, kind: str = "", detail: str = "") -> None:
+        if not self._auto_activity:
+            return
+        if self._activity_provider is not None:
+            try:
+                custom = self._activity_provider(kind, detail)
+            except Exception:
+                custom = None
+            if custom is not None:
+                text = str(custom)
+        self._activity_text = str(text or "")
+        self._chat.chatView().setActivity(self._activity_text)
+
+    def _clear_activity(self) -> None:
+        self._activity_text = ""
+        self._chat.chatView().setActivity("")
+
+    def _clear_retry(self) -> None:
+        target = self._target()
+        if target is not None:
+            self._chat.chatView().clearRetry(target)
+
+    def retry(self, attempt: int, message: str, nextAt: float = 0.0) -> None:
+        """显示自动重试状态（后端退避重试时调用）。"""
+        target = self._target()
+        if target is None:
+            return
+        self._chat.chatView().setRetry(target, attempt, message, nextAt)
+        self._set_activity("正在重试…", "retry", str(attempt))
+
     def startTurn(
-        self, prompt: str, regenerate: bool = False, attachments=None
+        self,
+        prompt: str,
+        regenerate: bool = False,
+        attachments=None,
+        *,
+        agent: str = "",
+        model: str = "",
+        modelVariant: str = "",
     ) -> Optional[int]:
         """开始一个回合：先驱动后端起跑，随后新建助手消息并重置计时。
 
@@ -269,8 +345,11 @@ class ElaChatStreamBinder:
             return None
         # 记住消息 id：widget 的转发层已删除，消息内容操作全在 view 层且每个方法
         # 都要求显式传 messageId，所以 binder 必须自己攥着这个 id。
-        self._message_id = self._chat.beginAssistantMessage()
+        self._message_id = self._chat.beginAssistantMessage(
+            agent=agent, model=model, modelVariant=modelVariant
+        )
         self.beginTurn(turn)
+        self._set_activity("正在思考…", "thinking")
         return turn
 
     def _target(self) -> Optional[int]:
@@ -302,6 +381,8 @@ class ElaChatStreamBinder:
             # 宿主可能自己建好消息再调 beginTurn()（不经 startTurn），接上当前
             # 流式消息。view 层不再有「省略即当前流式」的默认，id 必须由调用链带着。
             self._message_id = self._chat.streamingMessageId()
+        self._clear_retry()
+        self._set_activity("正在思考…", "thinking")
         return turn
 
     def beginRound(self) -> None:
@@ -318,6 +399,7 @@ class ElaChatStreamBinder:
             return
         self._round_start = self._clock()
         self._round += 1
+        self._set_activity("正在思考…", "thinking")
         if self._round > 1:
             self._endReasoning()
             self._chat.chatView().beginStep(self._target())
@@ -357,6 +439,7 @@ class ElaChatStreamBinder:
         """追加推理分片（同一轮复用同一思考段；回合外忽略）。"""
         if not text or not self.isOpen():
             return
+        self._set_activity("正在思考…", "thinking")
         if not self._reasoning_open:
             self._reasoning_open = True
             self._reasoning_start = self._clock()
@@ -376,6 +459,8 @@ class ElaChatStreamBinder:
         if text.strip():
             self._had_text = True
             self._endReasoning()
+            self._clear_retry()
+            self._set_activity("", "answer")
         self._chat.chatView().appendText(self._target(), text)
 
     def stream(self, chunk) -> None:
@@ -405,6 +490,8 @@ class ElaChatStreamBinder:
                 # dict 里可能有非有限浮点等不可序列化值：退化成原文，不能让
                 # 一次畸形参数把整条工具调用丢掉（或在 Qt 槽里炸掉进程）。
                 arguments = str(arguments)
+        self._clear_retry()
+        self._set_activity(self._activity_for_tool(name), "tool", str(name or ""))
         self._chat.chatView().addToolCall(
             self._target(), name, arguments, callId or None
         )
@@ -419,6 +506,7 @@ class ElaChatStreamBinder:
         self._chat.chatView().setToolCallResult(
             self._target(), callId, text, ok=bool(ok)
         )
+        self._set_activity("正在思考…", "thinking")
 
     def toolCallStarted(self, toolCall: dict) -> None:
         """工具调用开始（OpenAI 风格 ``tool_call`` dict，可直接连信号）。
@@ -473,6 +561,8 @@ class ElaChatStreamBinder:
         if not self.isOpen():
             return
         self._endReasoning()
+        self._clear_activity()
+        self._clear_retry()
         self._chat.chatView().setMessageError(self._target(), message, errorType)
 
     def emptyTurn(self, finishReason: str = "") -> None:
@@ -517,6 +607,8 @@ class ElaChatStreamBinder:
         if status is None:
             status = ElaChatStatusType.Stopped if self._cancelled else ElaChatStatusType.Done
         self._endReasoning()
+        self._clear_activity()
+        self._clear_retry()
         target = self._target()
         durationMs = 0.0
         if self._turn_open and self._turn_start is not None:

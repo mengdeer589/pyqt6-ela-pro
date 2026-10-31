@@ -248,6 +248,9 @@ class VisualMapComponent:
             self.min = min(value, self.max - margin)
         else:
             self.max = max(value, self.min + margin)
+        # 拖动改的是组件活值，不在系列层缓存键里 —— 必须 invalidateLayout()
+        # （顺带递增 _geometry_epoch），否则位图原样贴回、拖动完全不变色。
+        self.chart.invalidateLayout()
         self.chart.update()
         return True
 

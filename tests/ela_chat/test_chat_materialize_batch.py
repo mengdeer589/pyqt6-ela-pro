@@ -17,17 +17,21 @@ from pyqt6_ela_pro.chat import (
 
 class _CountingStatsBadge(StatsBadge):
     show_calls = 0
+    tracked = None
 
     def show(self) -> None:
-        type(self).show_calls += 1
+        if self.window() is type(self).tracked:
+            type(self).show_calls += 1
         super().show()
 
 
 class _CountingToolGroupPanel(ToolGroupPanel):
     show_calls = 0
+    tracked = None
 
     def show(self) -> None:
-        type(self).show_calls += 1
+        if self.window() is type(self).tracked:
+            type(self).show_calls += 1
         super().show()
 
 
@@ -55,6 +59,10 @@ class TestBulkMaterialize:
         monkeypatch.setattr(bubble_tools, "ToolGroupPanel", _CountingToolGroupPanel)
 
         bubble = make(ElaChatBubble)
+        # 只统计**本测试气泡**里的显示次数：上一个测试的视图可能还在冲刷
+        # 延迟队列，全局计数会把它的面板也算进来。
+        _CountingStatsBadge.tracked = bubble
+        _CountingToolGroupPanel.tracked = bubble
         bubble.resize(640, 480)
         bubble.show()
         qapp.processEvents()

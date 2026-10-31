@@ -246,6 +246,9 @@ class SunburstSeriesRenderer(SeriesRenderer):
             p.restore()
 
     def hitTest(self, pos: QPointF):
+        if self._anim_t < 1.0:
+            # 扫掠角按 anim_t 展开：终态扇区位置此刻还没画出来。
+            return None
         if not self._nodes:
             return None
         dx = pos.x() - self._center.x()

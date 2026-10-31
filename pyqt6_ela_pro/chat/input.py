@@ -46,6 +46,7 @@ from PyQt6.QtCore import (
     QIODevice,
     QRectF,
     QSize,
+    QTimer,
     Qt,
     pyqtSignal,
 )
@@ -71,6 +72,7 @@ from PyQt6ElaWidgetTools import (
     ElaThemeType,
 )
 
+from .._internal import system_cjk_font_family
 from .._styles import editBorderlessStyle
 from .._theme import ElaStatusRoleType, statusColor
 from ..ela_button import ElaButton
@@ -88,7 +90,8 @@ from ._theme import (
     text_color,
 )
 from .blocks import AttachmentStrip
-from .message import _as_float, _as_int
+from .message import ElaChatMention, _as_float, _as_int
+from .selector import ElaChatSelector
 from .suggestions import ElaChatSuggestion, SuggestionPopup
 from .toolbar import ElaChatToolBar, ElaChatToolButton
 
@@ -105,6 +108,8 @@ _LARGE_PASTE_CHARS = 8000
 _LARGE_PASTE_LINES = 120
 #: ``@`` 引用匹配
 _MENTION_RE = re.compile(r"(?:^|\s)@([^\s@]*)$")
+#: ``/`` 命令匹配（行首或空白后；命令名不允许再出现 ``/``）
+_COMMAND_RE = re.compile(r"(?:^|\s)/([^\s/]*)$")
 #: 判定「mention 仍完整存在」用的尾部：token 之后不能再跟词字符。
 #: 覆盖 ASCII 字母数字下划线、CJK（基本区 + 扩展 A/B+ + 兼容区）、以及 ``@``
 #: 本身（避免 "@Al@Al" 误判）。
@@ -511,6 +516,18 @@ class ElaChatInput(ElaThemeWidget):
     imagePasted = pyqtSignal(QImage)
     #: ``@`` 引用被选中（参数：引用 id、展示文本）
     mentionSelected = pyqtSignal(str, str)
+    #: ``/`` 命令被选中（参数：命令名）
+    commandSelected = pyqtSignal(str)
+    #: 提交了一个 ``/`` 命令（``setCommandSubmitMode("signal")`` 时）
+    commandSubmitted = pyqtSignal(str)
+    #: 下拉选择器变化（参数：选择器 key、item id）
+    selectorChanged = pyqtSignal(str, str)
+    #: shell 模式提交（参数：命令行文本）
+    shellSubmitted = pyqtSignal(str)
+    #: 草稿变化（防抖；参数：``draftState()`` 快照）
+    draftChanged = pyqtSignal(dict)
+    #: 备选投递（``Ctrl+Enter``：生成中走插话，否则普通发送）
+    alternateSubmitted = pyqtSignal(str, list)
     #: 点击「清空上下文」（**尚未执行清空**，宿主或组件弹确认后自行处理）
     clearRequested = pyqtSignal()
     #: 点击「新建话题」（组件不做任何处理，宿主据此开新会话 / 话题）
@@ -530,7 +547,15 @@ class ElaChatInput(ElaThemeWidget):
         self._stop_text = "停止"
         self._file_picker: Optional[Callable[[], list]] = None
         self._mention_provider: Optional[Callable[[str], list]] = None
+        self._command_provider: Optional[Callable[[str], list]] = None
+        self._command_submit_mode = "send"
+        self._popup_kind = ""
         self._mentions: list = []
+        self._selectors: dict = {}
+        self._shell_mode = False
+        self._add_file_visible_before_shell = True
+        self._history = None
+        self._history_applying = False
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(*_OUTER_MARGIN)
@@ -578,6 +603,18 @@ class ElaChatInput(ElaThemeWidget):
         self._edit.filesAdded.connect(self._on_files_added)
         self._edit.largeTextPasted.connect(self._on_large_text_pasted)
         self._normal_font = QFont(self._edit.font())
+        self._shell_font = QFont(self._normal_font)
+        cjk = system_cjk_font_family()
+        self._shell_font.setFamilies(
+            [cjk] if cjk else ["Consolas", "Cascadia Mono", "Courier New"]
+        )
+        self._shell_font.setStyleHint(QFont.StyleHint.Monospace)
+        self._draft_timer = QTimer(self)
+        self._draft_timer.setSingleShot(True)
+        self._draft_timer.setInterval(300)
+        self._draft_timer.timeout.connect(
+            lambda: self.draftChanged.emit(self.draftState())
+        )
         surface_layout.addWidget(self._edit)
 
         # 卡片内 ③：工具栏（左：新建话题 / 添加文件 / 清空上下文 + 自定义；右：发送 / 停止）
@@ -650,6 +687,54 @@ class ElaChatInput(ElaThemeWidget):
         """设置 ``@`` 引用候选提供者（``provider(query) -> list``）。"""
         self._mention_provider = provider
 
+    def setCommandProvider(self, provider: Optional[Callable[[str], list]]) -> None:
+        """设置 ``/`` 命令候选提供者（``provider(query) -> list``）。"""
+        self._command_provider = provider
+
+    def setCommandSubmitMode(self, mode: str) -> None:
+        """设置 ``/`` 命令的提交方式。
+
+        ``"send"``（默认）：照常走 ``submitted`` / ``submittedFull``，由宿主
+        当作普通提示发送；``"signal"``：发 ``commandSubmitted(text)`` 且不落
+        消息（客户端命令，由宿主自行执行后清空输入）。
+        """
+        if mode not in ("send", "signal"):
+            raise ValueError("setCommandSubmitMode: mode 必须是 'send' 或 'signal'")
+        self._command_submit_mode = mode
+
+    def commandSubmitMode(self) -> str:
+        """获取命令提交方式。"""
+        return self._command_submit_mode
+
+    def setShellMode(self, on: bool) -> None:
+        """进入 / 退出 shell 模式（等宽字体、Esc 退出、提交走 ``shellSubmitted``）。"""
+        on = bool(on)
+        if on == self._shell_mode:
+            return
+        self._shell_mode = on
+        if on:
+            self._add_file_visible_before_shell = self.addFileVisible()
+            self._add_file_button.setVisible(False)
+            for selector in self._selectors.values():
+                selector.setVisible(False)
+            self._attachments.setVisible(False)
+            self._edit.setFont(self._shell_font)
+            self._edit.setPlaceholderText("输入命令…")
+            self._close_popup()
+        else:
+            self._edit.setFont(self._normal_font)
+            self._edit.setPlaceholderText(self._default_placeholder)
+            self._add_file_button.setVisible(self._add_file_visible_before_shell)
+            for selector in self._selectors.values():
+                selector.setVisible(True)
+            self._attachments.setVisible(bool(self.attachments()))
+        self._sync_height()
+        self._edit.setFocus()
+
+    def shellMode(self) -> bool:
+        """是否处于 shell 模式。"""
+        return self._shell_mode
+
     def openMentionPopup(self) -> None:
         """主动打开 ``@`` 引用补全（``+`` 菜单入口）。"""
         if self._mention_provider is None:
@@ -657,23 +742,54 @@ class ElaChatInput(ElaThemeWidget):
         items = self._mention_provider("") or []
         if not items:
             return
+        self._popup_kind = "mention"
+        self._popup.open(items)
+
+    def openCommandPopup(self) -> None:
+        """主动打开 ``/`` 命令补全。"""
+        if self._command_provider is None:
+            return
+        items = self._command_provider("") or []
+        if not items:
+            return
+        self._popup_kind = "command"
         self._popup.open(items)
 
     def _update_popup(self) -> None:
         text = self._edit.toPlainText()
+        command = _COMMAND_RE.search(text)
+        if command and self._command_provider is not None:
+            items = self._command_provider(command.group(1)) or []
+            if items:
+                self._popup_kind = "command"
+                self._popup.open(items)
+                return
         mention = _MENTION_RE.search(text)
         if mention and self._mention_provider is not None:
             items = self._mention_provider(mention.group(1)) or []
             if items:
+                self._popup_kind = "mention"
                 self._popup.open(items)
                 return
         self._close_popup()
 
     def _close_popup(self) -> None:
+        self._popup_kind = ""
         self._popup.close()
 
     def _on_suggestion_activated(self, item: ElaChatSuggestion) -> None:
         text = self._edit.toPlainText()
+        if self._popup_kind == "command":
+            match = _COMMAND_RE.search(text)
+            token = item.insert_text or f"/{item.label.lstrip('/')} "
+            if match:
+                start = match.start(1) - 1
+                self._set_edit_text(text[:start] + token + text[match.end(1) :])
+            else:
+                self._set_edit_text(text + token)
+            self.commandSelected.emit(item.id or item.label)
+            self._popup_kind = ""
+            return
         token = item.insert_text or f"@{item.label} "
         match = _MENTION_RE.search(text)
         if match:
@@ -681,8 +797,9 @@ class ElaChatInput(ElaThemeWidget):
             self._set_edit_text(text[:start] + token + text[match.end(1) :])
         else:
             self._set_edit_text(text + token)
-        self._mentions.append((item.id, token))
+        self._mentions.append((item.id, token, getattr(item, "kind", "")))
         self.mentionSelected.emit(item.id, item.label)
+        self._popup_kind = ""
 
     def _set_edit_text(self, text: str) -> None:
         self._edit.setPlainText(text)
@@ -702,7 +819,8 @@ class ElaChatInput(ElaThemeWidget):
         if not text:
             return []
         out = []
-        for mid, token in self._mentions:
+        for entry in self._mentions:
+            mid, token = entry[0], entry[1]
             bare = token.strip()
             if not bare:
                 continue
@@ -710,9 +828,142 @@ class ElaChatInput(ElaThemeWidget):
                 out.append(mid)
         return out
 
+    def mentionSpans(self) -> list:
+        """当前文本里仍有效的 ``@`` 引用区间（``ElaChatMention`` 列表）。
+
+        偏移按 Python ``str`` 下标计；同一 token 多次出现只取第一处
+        （输入区一次插入一个 token，重复手打不视为引用）。
+        """
+        text = self._edit.toPlainText()
+        if not text:
+            return []
+        result = []
+        for entry in self._mentions:
+            token = entry[1]
+            kind = entry[2] if len(entry) > 2 else ""
+            bare = token.strip()
+            if not bare:
+                continue
+            pattern = re.compile(r"(?:^|\s)(" + re.escape(bare) + ")" + _MENTION_TAIL)
+            match = pattern.search(text)
+            if match is None:
+                continue
+            start = match.start(1)
+            result.append(ElaChatMention(start=start, end=start + len(bare), kind=kind))
+        return result
+
     def clearMentions(self) -> None:
         """清空引用记录。"""
         self._mentions.clear()
+
+    # -- 历史 / 草稿 -------------------------------------------------------
+
+    def setHistory(self, history) -> None:
+        """接入提示历史（``ElaChatPromptHistory`` 或 ``None``）。"""
+        self._history = history
+
+    def history(self):
+        """获取提示历史对象。"""
+        return self._history
+
+    def draftState(self) -> dict:
+        """获取当前草稿（文本 + 可序列化附件 + mentions）。"""
+        attachments = []
+        for item in self.attachments():
+            attachments.append(
+                {
+                    "name": getattr(item, "name", ""),
+                    "path": getattr(item, "path", ""),
+                    "size": getattr(item, "size", 0),
+                    "mime": getattr(item, "mime", ""),
+                }
+            )
+        return {
+            "text": self.text(),
+            "attachments": attachments,
+            "mentions": [item.toDict() for item in self.mentionSpans()],
+        }
+
+    def setDraftState(self, state) -> None:
+        """恢复草稿（不可序列化的图片会退化成文件 chip）。"""
+        if not isinstance(state, dict):
+            return
+        self.setText(str(state.get("text") or ""))
+        attachments = state.get("attachments")
+        if isinstance(attachments, list):
+            self.setAttachments(attachments)
+        self._mentions.clear()
+
+    def _historyMode(self) -> str:  # noqa: N802
+        return "shell" if self._shell_mode else "normal"
+
+    def _applyHistoryEntry(self, entry) -> None:  # noqa: N802
+        if not isinstance(entry, dict):
+            return
+        self._history_applying = True
+        try:
+            self._set_edit_text(str(entry.get("text") or ""))
+            attachments = entry.get("attachments")
+            if isinstance(attachments, list):
+                self.setAttachments(attachments)
+        finally:
+            self._history_applying = False
+
+    # -- 下拉选择器 --------------------------------------------------------
+
+    def addSelector(
+        self,
+        key: str,
+        title: str,
+        items=None,
+        current: str = "",
+    ) -> ElaChatSelector:
+        """在发送键之前添加一个下拉选择器，返回控件句柄。"""
+        selector_key = str(key or "")
+        if not selector_key:
+            raise ValueError("addSelector: key 不能为空")
+        if selector_key in self._selectors:
+            raise ValueError(f"addSelector: selector {selector_key!r} 已存在")
+        selector = ElaChatSelector(title, items or [], current, self._surface)
+        selector.selectionChanged.connect(
+            lambda itemId, k=selector_key: self.selectorChanged.emit(k, itemId)
+        )
+        self._toolbar.insertWidget(self._button, selector, key=f"selector:{selector_key}")
+        self._selectors[selector_key] = selector
+        return selector
+
+    def setSelectorItems(
+        self, key: str, items, current: Optional[str] = None
+    ) -> bool:
+        """替换某个选择器的选项（不存在返回 ``False``）。"""
+        selector = self._selectors.get(str(key or ""))
+        if selector is None:
+            return False
+        selector.setItems(items, current)
+        return True
+
+    def removeSelector(self, key: str) -> bool:
+        """移除选择器（销毁控件）。"""
+        selector_key = str(key or "")
+        selector = self._selectors.pop(selector_key, None)
+        if selector is None:
+            return False
+        self._toolbar.removeItem(selector)
+        selector.deleteLater()
+        return True
+
+    def selector(self, key: str) -> Optional[ElaChatSelector]:
+        """获取选择器句柄。"""
+        return self._selectors.get(str(key or ""))
+
+    def selectors(self) -> dict:
+        """获取全部选择器（副本）。"""
+        return dict(self._selectors)
+
+    def selectorValue(self, key: str) -> str:
+        """获取某个选择器的当前 id（不存在返回空串）。"""
+        selector = self._selectors.get(str(key or ""))
+        return selector.current() if selector is not None else ""
 
     # -- 工具栏 ------------------------------------------------------------
 
@@ -884,6 +1135,7 @@ class ElaChatInput(ElaThemeWidget):
         self._attachments.clear()
 
     def _on_attachments_changed(self, attachments: list) -> None:
+        self._draft_timer.start()
         self.attachmentsChanged.emit(attachments)
 
     def _on_image_pasted(self, image: QImage) -> bool:
@@ -1009,6 +1261,31 @@ class ElaChatInput(ElaThemeWidget):
         if self._generating and not self._queue_enabled:
             return False
         attachments = self.attachments()
+        if self._history is not None:
+            self._history.add(
+                text,
+                attachments,
+                self.mentionSpans(),
+                self._historyMode(),
+            )
+        if self._shell_mode:
+            self.shellSubmitted.emit(text)
+            self._edit.clear()
+            self._attachments.clear()
+            self.clearMentions()
+            self._close_popup()
+            return True
+        if (
+            self._command_submit_mode == "signal"
+            and self._command_provider is not None
+            and text.startswith("/")
+        ):
+            self.commandSubmitted.emit(text)
+            self._edit.clear()
+            self._attachments.clear()
+            self.clearMentions()
+            self._close_popup()
+            return True
         self.submitted.emit(text)
         self.submittedFull.emit(text, attachments)
         self._edit.clear()
@@ -1124,6 +1401,9 @@ class ElaChatInput(ElaThemeWidget):
         self._sync_height()
         self._sync_button()
         self._update_popup()
+        if not self._history_applying and self._history is not None:
+            self._history.reset(self._historyMode())
+        self._draft_timer.start()
         self.textChanged.emit(self._edit.toPlainText())
 
     def resizeEvent(self, event) -> None:  # noqa: N802 (Qt 命名)
@@ -1204,6 +1484,30 @@ class ElaChatInput(ElaThemeWidget):
                 self._popup.activateCurrent()
                 return True
 
+        if (
+            self._history is not None
+            and key in (Qt.Key.Key_Up, Qt.Key.Key_Down)
+            and not (modifiers & ~Qt.KeyboardModifier.KeypadModifier)
+            and not self._preedit
+        ):
+            cursor = self._edit.textCursor()
+            if not cursor.hasSelection():
+                if key == Qt.Key.Key_Up and cursor.blockNumber() == 0:
+                    entry = self._history.previous(
+                        self._historyMode(), self._edit.toPlainText()
+                    )
+                    if entry is not None:
+                        self._applyHistoryEntry(entry)
+                        return True
+                if (
+                    key == Qt.Key.Key_Down
+                    and cursor.blockNumber() == self._edit.document().blockCount() - 1
+                ):
+                    entry = self._history.next(self._historyMode())
+                    if entry is not None:
+                        self._applyHistoryEntry(entry)
+                        return True
+
         if key == Qt.Key.Key_U and modifiers & Qt.KeyboardModifier.ControlModifier:
             self._on_add_file_clicked()
             return True
@@ -1217,11 +1521,24 @@ class ElaChatInput(ElaThemeWidget):
             if self._popup.isOpen():
                 self._close_popup()
                 return True
+            if self._shell_mode:
+                self.setShellMode(False)
+                return True
             if self._generating:
                 self.stopRequested.emit()
                 return True
 
         if key in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
+            if modifiers & Qt.KeyboardModifier.ControlModifier:
+                text = self._edit.toPlainText().strip()
+                if not text or self._preedit:
+                    return False
+                self.alternateSubmitted.emit(text, self.attachments())
+                self._edit.clear()
+                self._attachments.clear()
+                self.clearMentions()
+                self._close_popup()
+                return True
             if modifiers & Qt.KeyboardModifier.ShiftModifier:
                 return False
             if not self._send_on_enter:

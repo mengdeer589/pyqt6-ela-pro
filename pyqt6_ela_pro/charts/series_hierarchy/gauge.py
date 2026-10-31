@@ -81,7 +81,7 @@ class GaugeSeriesRenderer(SeriesRenderer):
             12.0, _parse_pct(self.opt.get("radius", "75%"), half, half) - 8.0
         )
         self._entries = _parse_named_values(self.data())
-        self._value = self._entries[0][1] if self._entries else self._vmin()
+        self._value = self._entries[0][2] if self._entries else self._vmin()
 
     # 屏幕坐标：a 为自 3 点方向顺时针度数
     def _pt(self, a_deg, r):
@@ -113,7 +113,7 @@ class GaugeSeriesRenderer(SeriesRenderer):
         prev_v = self._vmin()
         prev_entries = _parse_named_values(self.prev_data)
         if prev_entries:
-            prev_v = prev_entries[0][1]
+            prev_v = prev_entries[0][2]
         cur_v = prev_v + (self._value - prev_v) * anim_t
         cur_a = self._value_angle(cur_v)
         r = self._radius

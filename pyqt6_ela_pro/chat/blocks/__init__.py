@@ -85,6 +85,14 @@ from .misc import (
     ErrorCard,
     SteerNotice,
 )
+from .notice import ElaChatNotice, NOTICE_HEIGHT, NOTICE_PIXEL_SIZE
+from .retry import ElaChatRetryCard
+from .working import ElaChatWorkingRow, WORKING_ROW_HEIGHT, WORKING_ROW_PIXEL_SIZE
+from .file_changes import (
+    DEFAULT_DIFF_MAX_HEIGHT,
+    DEFAULT_MAX_VISIBLE_FILES,
+    ElaChatFileChanges,
+)
 from .permission_card import (
     PermissionCard,
 )
@@ -105,8 +113,18 @@ __all__ = [
     "DETAIL_COLLAPSED_LINES",
     "DETAIL_MAX_LINE_CHARS",
     "ElaChatAvatarSource",
+    "ElaChatFileChanges",
+    "ElaChatNotice",
+    "ElaChatRetryCard",
+    "ElaChatWorkingRow",
+    "DEFAULT_DIFF_MAX_HEIGHT",
+    "DEFAULT_MAX_VISIBLE_FILES",
     "ErrorCard",
     "LAYOUT_SPACING",
+    "NOTICE_HEIGHT",
+    "NOTICE_PIXEL_SIZE",
+    "WORKING_ROW_HEIGHT",
+    "WORKING_ROW_PIXEL_SIZE",
     "MessageActions",
     "MessageHeader",
     "MessageMeta",

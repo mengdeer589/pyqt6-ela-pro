@@ -297,7 +297,9 @@ class ButtonsMenusPage(ExamplePage):
             )
         )
         self._addInfoText(
-            "按住按钮一段时间后才能触发点击事件，适合危险操作防误触", parent_layout
+            "按住按钮一段时间后才触发 longPressed，适合危险操作防误触；"
+            "尺寸 / 变体 / 颜色与 ElaButton 共用（size='small' = 22px）",
+            parent_layout,
         )
         btn_layout2 = QHBoxLayout()
         btn_layout2.setSpacing(15)
@@ -306,6 +308,16 @@ class ButtonsMenusPage(ExamplePage):
         self._longPressBtn.setFixedWidth(160)
         self._longPressBtn.longPressed.connect(self._onLongPressTriggered)
         btn_layout2.addWidget(self._longPressBtn)
+        small_long_press = ElaLongPressButton(
+            "small",
+            variant="solid",
+            color="primary",
+            size="small",
+            duration=800,
+            parent=self,
+        )
+        small_long_press.longPressed.connect(self._onLongPressTriggered)
+        btn_layout2.addWidget(small_long_press)
         duration_label = ElaText("时长:", self)
         duration_label.setTextPixelSize(14)
         btn_layout2.addWidget(duration_label)

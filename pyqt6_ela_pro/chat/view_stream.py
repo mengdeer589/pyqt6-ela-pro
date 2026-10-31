@@ -11,6 +11,8 @@ from .message import (
     ElaChatRoleType,
     ElaChatStats,
     ElaChatStatusType,
+    ElaChatToolCall,
+    ElaChatToolStatusType,
 )
 
 
@@ -130,12 +132,30 @@ class _ViewStreamMixin:
         name: str,
         arguments: str = "",
         toolCallId: Optional[str] = None,
+        *,
+        metadata=None,
     ) -> Optional[str]:
-        """为指定消息添加工具调用卡片，返回调用 id。"""
+        """为指定消息添加工具调用卡片，返回调用 id。
+
+        ``metadata`` 是结构化附加数据（文件变更 / shell 状态 / 诊断等），
+        会原样进入渲染器上下文与工具调用快照。
+        """
         bubble = self._require_bubble(messageId, "addToolCall")
         if bubble is None:
             return None
-        callId = bubble.addToolCall(name, arguments, toolCallId)
+        if metadata is not None:
+            call = ElaChatToolCall(
+                id=str(toolCallId or ""),
+                name=str(name or ""),
+                arguments=str(arguments or ""),
+                status=ElaChatToolStatusType.Running,
+                metadata=dict(metadata) if isinstance(metadata, dict) else {},
+            )
+            callId = bubble.addToolCall(
+                name, arguments, toolCallId, tool_call=call
+            )
+        else:
+            callId = bubble.addToolCall(name, arguments, toolCallId)
         self._sync_parts(messageId)
         self.messageUpdated.emit(messageId)
         self._follow_bottom()
@@ -185,8 +205,10 @@ class _ViewStreamMixin:
         self.messageUpdated.emit(messageId)
         return partId
 
-    def beginCompaction(self, messageId: int, reason: str = "auto") -> str:
-        """标记一次上下文压缩开始，返回分段 id。
+    def beginCompaction(
+        self, messageId: int, reason: str = "auto", *, queued: bool = False
+    ) -> str:
+        """标记一次上下文压缩开始（``queued=True`` 表示已排队、尚未开跑），返回分段 id。
 
         **库不实现压缩算法**（摘要 / 收缩循环 / 词元估算都在 provider 侧），
         只在时间线上如实表达「这里发生过压缩」并接住摘要。
@@ -196,7 +218,7 @@ class _ViewStreamMixin:
         bubble = self._require_bubble(messageId, "beginCompaction")
         if bubble is None:
             return ""
-        partId = bubble.beginCompaction(reason)
+        partId = bubble.beginCompaction(reason, queued=queued)
         self._sync_parts(messageId)
         self.messageUpdated.emit(messageId)
         return partId
@@ -216,12 +238,14 @@ class _ViewStreamMixin:
         partId: str,
         status: str = ElaChatStatusType.Done,
         historyCount: int = 0,
+        *,
+        stats=None,
     ) -> None:
-        """结束压缩并落定摘要。"""
+        """结束压缩并落定摘要（``stats`` 为压缩请求本身的用量）。"""
         bubble = self._require_bubble(messageId, "endCompaction")
         if bubble is None:
             return
-        bubble.endCompaction(partId, status, historyCount)
+        bubble.endCompaction(partId, status, historyCount, stats=stats)
         self._sync_parts(messageId)
         self.messageUpdated.emit(messageId)
 

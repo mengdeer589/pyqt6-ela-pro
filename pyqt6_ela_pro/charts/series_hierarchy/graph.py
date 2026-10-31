@@ -53,6 +53,7 @@ class GraphSeriesRenderer(SeriesRenderer):
         self._force_cache = None
         self._pan = QPointF()
         self._pan_start = None
+        self._pan_origin = QPointF()
         self._plot = QRectF()
         self._roam = self._parse_roam()
         try:
@@ -76,12 +77,15 @@ class GraphSeriesRenderer(SeriesRenderer):
                 name = str(item.get("name") or f"node{i}")
                 size = item.get("symbolSize")
                 category = item.get("category")
+                value = item.get("value")
                 item_style = self.itemStyleOf(item)
             else:
                 name, size, category, item_style = str(item), None, None, {}
+                value = None
             nodes.append(
                 {
                     "name": name,
+                    "value": value,
                     "size": size,
                     "category": category,
                     "itemStyle": item_style,
@@ -180,6 +184,7 @@ class GraphSeriesRenderer(SeriesRenderer):
             self._nodes.append(
                 {
                     "name": nd["name"],
+                    "value": nd.get("value"),
                     "size": _clamp(size, 4.0, 60.0),
                     "pos": pos,
                     "color": category_color or _series_palette_color(self.chart, i),
@@ -218,6 +223,7 @@ class GraphSeriesRenderer(SeriesRenderer):
                     return True
         if self._roam[1]:
             self._pan_start = QPointF(pos)
+            self._pan_origin = QPointF(self._pan)
             return True
         return False
 
@@ -233,7 +239,9 @@ class GraphSeriesRenderer(SeriesRenderer):
             self.chart.update()
             return True
         if self._pan_start is not None:
-            self._pan = QPointF(pos) - self._pan_start
+            # 相对「本次按下时的 pan」累加：直接用 pos-start 会在第二次拖动
+            # 时把之前的平移量丢掉（画面跳回原点）。
+            self._pan = self._pan_origin + (QPointF(pos) - self._pan_start)
             self.chart.invalidateLayout()  # 同上：pan 改的是绘制变换
             self.chart.update()
             return True
@@ -266,6 +274,7 @@ class GraphSeriesRenderer(SeriesRenderer):
         """复位 roam 缩放 / 平移（ECharts restore 语义）。"""
         self._pan = QPointF()
         self._pan_start = None
+        self._pan_origin = QPointF()
         self._zoom = 1.0
         self.chart.invalidateLayout()
         self.chart.update()
@@ -480,4 +489,10 @@ class GraphSeriesRenderer(SeriesRenderer):
         if best is None:
             return None
         i, nd = best
-        return {"name": nd["name"], "value": i, "series": self.name, "dataIndex": i}
+        value = nd.get("value")
+        return {
+            "name": nd["name"],
+            "value": i if value is None else value,
+            "series": self.name,
+            "dataIndex": i,
+        }

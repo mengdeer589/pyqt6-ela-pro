@@ -198,8 +198,21 @@ class LinesSeriesRenderer(SeriesRenderer):
     def hitTest(self, pos: QPointF):
         best = None
         best_d = 8.0
+        curveness = _to_float(
+            (self.opt.get("lineStyle") or {}).get("curveness"), 0.0
+        )
         for i, seg in enumerate(self._segments):
-            d = dist_point_segment(pos, seg["p0"], seg["p1"])
+            if abs(curveness) > 1e-6:
+                # 命中必须贴着实际绘制的贝塞尔曲线，不能拿弦当近似
+                # （曲线中点与弦中点实测可差 90px：可见曲线没提示、空白有提示）。
+                path = self._curve_path(seg["p0"], seg["p1"], curveness)
+                pts = [path.pointAtPercent(k / 8.0) for k in range(9)]
+                d = min(
+                    dist_point_segment(pos, a, b)
+                    for a, b in zip(pts, pts[1:])
+                )
+            else:
+                d = dist_point_segment(pos, seg["p0"], seg["p1"])
             if d <= best_d:
                 best_d = d
                 best = (i, seg)

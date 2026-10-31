@@ -1,0 +1,199 @@
+"""可选的内置工具结果渲染器（默认不注册，宿主 opt-in）。
+
+``installBuiltinToolRenderers()`` 只注册高价值的几类：
+- ``shell`` / ``bash`` / ``execute``：复用 ``ElaTerminalView``（ANSI 色彩 /
+  行数上限 / 主题 / 右键复制），关掉它的工具栏与行号槽；
+- ``edit`` / ``write`` / ``patch`` / ``apply_patch``：文件变更 + 懒建 diff。
+
+宿主可先注册自己的实现（``replace=False``），内置安装会**跳过同名**，
+不会覆盖宿主的产品决策。
+"""
+
+from __future__ import annotations
+
+import re
+from pathlib import Path
+from typing import Optional
+
+from PyQt6.QtCore import Qt
+from PyQt6.QtGui import QPixmap
+from PyQt6.QtWidgets import QLabel, QSizePolicy, QVBoxLayout, QWidget
+
+from .._diff import diffLines, filesFromMetadata
+from ..terminal_view import ElaTerminalView
+from .blocks.file_changes import ElaChatFileChanges
+from .renderers import (
+    ToolRenderContext,
+    registerToolRenderer,
+    toolRenderer,
+    unregisterToolRenderer,
+)
+
+#: ANSI 转义序列（SGR / 光标 / 清屏等）
+_ANSI_RE = re.compile(r"\x1b\[[0-9;?]*[ -/]*[@-~]")
+#: 控制台最大高度
+CONSOLE_MAX_HEIGHT = 260
+#: 终端保留行数上限
+CONSOLE_MAX_LINES = 2000
+
+
+def cleanAnsi(text: str) -> str:
+    """去掉 ANSI 转义，保留最后一次 ``\\r`` 重画的内容。
+
+    内置 shell 渲染器现在直接交给 :class:`ElaTerminalView`（它自己解析 ANSI
+    并保留颜色），本函数只留给宿主诊断 / 纯文本导出使用。
+    """
+    raw = _ANSI_RE.sub("", str(text or ""))
+    lines = []
+    for line in raw.replace("\r\n", "\n").split("\n"):
+        if "\r" in line:
+            line = line.rsplit("\r", 1)[-1]
+        lines.append(line)
+    return "\n".join(lines)
+
+
+class _ShellBody(ElaTerminalView):
+    """shell 输出 body：复用终端组件的 ANSI 解析 / 行数上限 / 右键复制。"""
+
+    def __init__(self, parent: Optional[QWidget] = None) -> None:
+        super().__init__(maxLines=CONSOLE_MAX_LINES, parent=parent)
+        self.setToolbarVisible(False)
+        self.setLineNumbersVisible(False)
+        self.setMaximumHeight(CONSOLE_MAX_HEIGHT)
+        self.setMinimumHeight(80)
+        self.setSizePolicy(
+            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred
+        )
+        self.setAutoScroll(True)
+
+    def setOutput(self, text: str) -> None:
+        self.clear()
+        if text:
+            self.append(text)
+
+    def updateToolResult(self, result: str, status: str) -> None:
+        self.setOutput(result)
+
+
+def _shellFactory(ctx: ToolRenderContext):
+    body = _ShellBody()
+    body.setOutput(ctx.result or "")
+    return body
+
+
+class _FileChangesBody(ElaChatFileChanges):
+    """文件变更 body；结果更新时按 metadata / 参数重建。"""
+
+    def __init__(
+        self, ctx: ToolRenderContext, parent: Optional[QWidget] = None
+    ) -> None:
+        super().__init__(parent)
+        self._ctx = ctx
+        self._sync()
+
+    def _sync(self) -> None:
+        files = []
+        raw = self._ctx.metadata.get("files")
+        if isinstance(raw, list):
+            files = filesFromMetadata(raw)
+        if not files:
+            args = self._ctx.parsedArguments()
+            path = str(args.get("path") or args.get("file") or "")
+            if path:
+                before = args.get("oldString")
+                after = args.get("newString")
+                if isinstance(before, str) or isinstance(after, str):
+                    files = [diffLines(before or "", after or "", path)]
+                elif isinstance(args.get("content"), str):
+                    files = [diffLines("", args.get("content") or "", path)]
+        self.setFiles(files)
+
+    def updateToolResult(self, result: str, status: str) -> None:
+        if not isinstance(self._ctx.metadata.get("files"), list):
+            self._sync()
+
+
+def _fileFactory(ctx: ToolRenderContext):
+    return _FileChangesBody(ctx)
+
+
+def _readImageFactory(ctx: ToolRenderContext):
+    path = ""
+    image = ctx.metadata.get("image")
+    if isinstance(image, str):
+        path = image
+    if not path:
+        args = ctx.parsedArguments()
+        candidate = str(args.get("path") or args.get("file") or "")
+        if candidate.lower().endswith(
+            (".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp")
+        ):
+            path = candidate
+    if not path:
+        return None
+    resolved = Path(path)
+    if not resolved.is_file():
+        return None
+    pixmap = QPixmap(str(resolved))
+    if pixmap.isNull():
+        return None
+    holder = QWidget()
+    layout = QVBoxLayout(holder)
+    layout.setContentsMargins(0, 0, 0, 0)
+    label = QLabel(holder)
+    label.setPixmap(
+        pixmap.scaled(
+            360,
+            260,
+            Qt.AspectRatioMode.KeepAspectRatio,
+            Qt.TransformationMode.SmoothTransformation,
+        )
+    )
+    label.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Maximum)
+    layout.addWidget(label)
+    return holder
+
+
+#: 已由本模块安装的名字（卸载时只移除仍是本模块工厂的项）
+_INSTALLED: set = set()
+
+
+def installBuiltinToolRenderers() -> list:
+    """注册内置渲染器（同名已存在时跳过），返回本次实际注册的名字列表。"""
+    registrations = [
+        ("shell", _shellFactory),
+        ("bash", _shellFactory),
+        ("execute", _shellFactory),
+        ("edit", _fileFactory),
+        ("write", _fileFactory),
+        ("patch", _fileFactory),
+        ("apply_patch", _fileFactory),
+    ]
+    installed = []
+    for name, factory in registrations:
+        if toolRenderer(name) is not None:
+            continue
+        registerToolRenderer(name, factory)
+        _INSTALLED.add(name)
+        installed.append(name)
+    return installed
+
+
+def uninstallBuiltinToolRenderers() -> list:
+    """移除本模块安装且未被宿主覆盖的渲染器，返回移除的名字。"""
+    removed = []
+    for name in list(_INSTALLED):
+        factory = toolRenderer(name)
+        if factory in (_shellFactory, _fileFactory, _readImageFactory):
+            unregisterToolRenderer(name)
+            removed.append(name)
+        _INSTALLED.discard(name)
+    return removed
+
+
+__all__ = [
+    "CONSOLE_MAX_HEIGHT",
+    "cleanAnsi",
+    "installBuiltinToolRenderers",
+    "uninstallBuiltinToolRenderers",
+]

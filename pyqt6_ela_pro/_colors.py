@@ -4,6 +4,11 @@
 每个命名颜色定义 ``accent`` / ``accentHover`` / ``accentActive`` / ``accentBg`` /
 ``accentBgHover`` / ``textColor``。``get_color_scheme`` 额外派生实心按钮专用色
 ``solid`` / ``solidHover`` / ``solidActive`` / ``solidText``，保证文字对比度 ≥ 4.5:1。
+
+``primary`` / ``blue`` **不读静态表**：accent / hover / press 取 ``eTheme`` 的实时
+强调色（``PrimaryNormal`` / ``PrimaryHover`` / ``PrimaryPress``），这样
+:func:`~pyqt6_ela_pro._theme.setAccentColor` 换色后按钮跟着变，深浅两档也与 Ela
+自带控件逐值一致。其余色系仍是库内固定色板。
 """
 
 from __future__ import annotations
@@ -12,7 +17,7 @@ import re
 from typing import Optional
 
 from PyQt6.QtGui import QColor
-from PyQt6ElaWidgetTools import ElaThemeType
+from PyQt6ElaWidgetTools import ElaThemeType, eTheme
 
 #: CSS ``rgb()`` / ``rgba()``（ECharts / 网页里最常见的颜色写法；``QColor`` 不解析）
 _RGB_FUNC_RE = re.compile(
@@ -333,6 +338,20 @@ _COLOR_ALIAS: dict[str, str] = {
     "primary": "blue",
 }
 
+#: **跟随 ``eTheme`` 实时强调色**的色系（``primary`` 是 ``blue`` 的别名）。
+#:
+#: 其余色系是库自带的固定色板；只有主色必须与 Ela 自带控件一致 —— 否则
+#: ``setAccentColor()`` 换色后按钮还是出厂蓝，深色主题下也会与
+#: ``PrimaryNormal`` 有可见色差（出厂值就不完全相同）。
+_LIVE_ACCENT_COLORS = frozenset({"blue"})
+
+#: 主色色板缓存：键 = 模式 + 三个强调色槽的 hex。换色后自然换键。
+_LIVE_SCHEME_CACHE: dict[tuple[str, str, str, str], dict[str, QColor]] = {}
+
+#: ``accentBg`` / ``accentBgHover`` 的 tint 强度（强调色占背景的比例）。
+#: 由出厂色板反解：亮色 10% / 22%，暗色 22% / 35%（往白 / 往黑混合）。
+_BG_TINT = {"light": (0.10, 0.22), "dark": (0.22, 0.35)}
+
 
 def _resolve_color(name: str) -> str:
     return _COLOR_ALIAS.get(name, name)
@@ -340,6 +359,18 @@ def _resolve_color(name: str) -> str:
 
 def _mode_key(mode: ElaThemeType.ThemeMode) -> str:
     return "light" if mode == ElaThemeType.ThemeMode.Light else "dark"
+
+
+def _theme_color(mode: ElaThemeType.ThemeMode, slot) -> QColor:
+    """``eTheme`` 颜色槽 → **独立拷贝**（上游返回 const 引用，改它等于改全局）。"""
+    return QColor(eTheme.getThemeColor(mode, slot))
+
+
+def _accent_for(resolved: str, mode: ElaThemeType.ThemeMode) -> QColor:
+    """某色系的 accent：主色取**实时**主题强调色，其余取固定色板。"""
+    if resolved in _LIVE_ACCENT_COLORS:
+        return _theme_color(mode, ElaThemeType.ThemeColor.PrimaryNormal)
+    return QColor(_COLOR_PALETTE[resolved][_mode_key(mode)]["accent"])
 
 
 def _relative_luminance(color: QColor) -> float:
@@ -401,6 +432,69 @@ def _solid_palette(accent: QColor, color_name: str) -> dict[str, QColor]:
     }
 
 
+def _readable_accent(
+    accent: QColor,
+    mode: ElaThemeType.ThemeMode,
+    background: QColor,
+    target: float = 4.5,
+) -> QColor:
+    """把 ``accent`` 调成 ``background`` 上可读的彩字（不够就朝本档文字色二分）。"""
+    accent = QColor(accent)
+    bg = QColor(background)
+    toward = (
+        QColor("#ffffff") if mode != ElaThemeType.ThemeMode.Light else QColor("#000000")
+    )
+    if _contrast_ratio(accent, bg) >= target:
+        return accent
+    # 二分找「刚好达标」的最小混合量。**不能按固定步长循环有限次** ——
+    # 6% × 40 步只到 #efefe3（离白还差 8%），低对比底色（暗色 yellow）永远
+    # 收敛不到 4.5，最后静默返回一个不达标的值。
+    low, high = 0.0, 1.0
+    for _ in range(12):
+        mid = (low + high) / 2.0
+        if _contrast_ratio(_mix(accent, toward, mid), bg) >= target:
+            high = mid
+        else:
+            low = mid
+    return _mix(accent, toward, high)
+
+
+def _live_accent_scheme(mode: ElaThemeType.ThemeMode) -> dict[str, QColor]:
+    """主色色板：``accent`` / hover / press 全部取 ``eTheme`` **实时**值。
+
+    ``accentBg`` 由强调色按出厂比例 tint 出来（亮色往白、暗色往黑），
+    ``solid*`` 仍是 ``_solid_palette`` 派生（压暗保证白字 ≥ 4.5）。
+    """
+    accent = _theme_color(mode, ElaThemeType.ThemeColor.PrimaryNormal)
+    hover = _theme_color(mode, ElaThemeType.ThemeColor.PrimaryHover)
+    press = _theme_color(mode, ElaThemeType.ThemeColor.PrimaryPress)
+    key = (_mode_key(mode), accent.name(), hover.name(), press.name())
+    cached = _LIVE_SCHEME_CACHE.get(key)
+    if cached is None:
+        base = (
+            QColor("#ffffff")
+            if mode == ElaThemeType.ThemeMode.Light
+            else QColor("#000000")
+        )
+        bg_tint, bg_hover_tint = _BG_TINT[_mode_key(mode)]
+        scheme = {
+            "accent": accent,
+            "accentHover": hover,
+            "accentActive": press,
+            "accentBg": _mix(base, accent, bg_tint),
+            "accentBgHover": _mix(base, accent, bg_hover_tint),
+            "textColor": QColor("#ffffff"),
+        }
+        scheme["accentText"] = _readable_accent(accent, mode, scheme["accentBg"])
+        scheme.update(_solid_palette(accent, "blue"))
+        cached = {k: QColor(v) for k, v in scheme.items()}
+        if len(_LIVE_SCHEME_CACHE) > 8:  # 换色次数极少，别让缓存无界
+            _LIVE_SCHEME_CACHE.clear()
+        _LIVE_SCHEME_CACHE[key] = cached
+    # 交出副本：调用方会 setAlpha / 就地改，别污染缓存
+    return {k: QColor(v) for k, v in cached.items()}
+
+
 def get_color_scheme(
     color_name: str, mode: ElaThemeType.ThemeMode
 ) -> dict[str, QColor]:
@@ -409,10 +503,16 @@ def get_color_scheme(
     在原始 6 个键之外，额外包含：
     - ``accentText``：浅底（``accentBg``）上的**可读彩字**，对比度 ≥ 4.5；
     - 实心按钮色 ``solid`` / ``solidHover`` / ``solidActive`` / ``solidText``。
+
+    ``primary`` / ``blue`` **跟随 ``eTheme`` 的实时强调色**（含
+    :func:`~pyqt6_ela_pro._theme.setAccentColor` 之后的换色），与 Ela 自带控件
+    完全一致；其余色系读库内固定色板。
     """
     resolved = _resolve_color(color_name)
     if resolved not in _COLOR_PALETTE:
         resolved = "blue"
+    if resolved in _LIVE_ACCENT_COLORS:
+        return _live_accent_scheme(mode)
     raw = _COLOR_PALETTE[resolved][_mode_key(mode)]
     scheme = {k: QColor(v) for k, v in raw.items()}
     scheme["accentText"] = accent_text(resolved, mode, scheme["accentBg"])
@@ -424,7 +524,7 @@ def get_accent_color(color_name: str, mode: ElaThemeType.ThemeMode) -> QColor:
     resolved = _resolve_color(color_name)
     if resolved not in _COLOR_PALETTE:
         resolved = "blue"
-    return QColor(_COLOR_PALETTE[resolved][_mode_key(mode)]["accent"])
+    return _accent_for(resolved, mode)
 
 
 def accent_text(
@@ -445,25 +545,27 @@ def accent_text(
     resolved = _resolve_color(color_name)
     if resolved not in _COLOR_PALETTE:
         resolved = "blue"
-    raw = _COLOR_PALETTE[resolved][_mode_key(mode)]
-    accent = QColor(raw["accent"])
-    bg = QColor(background) if background is not None else QColor(raw["accentBg"])
-    toward = (
-        QColor("#ffffff") if mode != ElaThemeType.ThemeMode.Light else QColor("#000000")
-    )
-    if _contrast_ratio(accent, bg) >= target:
-        return accent
-    # 二分找「刚好达标」的最小混合量。**不能按固定步长循环有限次** ——
-    # 6% × 40 步只到 #efefe3（离白还差 8%），低对比底色（暗色 yellow）永远
-    # 收敛不到 4.5，最后静默返回一个不达标的值。
-    low, high = 0.0, 1.0
-    for _ in range(12):
-        mid = (low + high) / 2.0
-        if _contrast_ratio(_mix(accent, toward, mid), bg) >= target:
-            high = mid
-        else:
-            low = mid
-    return _mix(accent, toward, high)
+    if background is not None:
+        bg = QColor(background)
+    elif resolved in _LIVE_ACCENT_COLORS:
+        bg = _live_accent_scheme(mode)["accentBg"]
+    else:
+        bg = QColor(_COLOR_PALETTE[resolved][_mode_key(mode)]["accentBg"])
+    return _readable_accent(_accent_for(resolved, mode), mode, bg, target)
+
+
+def text_on_color(background: QColor) -> QColor:
+    """叠在 ``background`` 上的可读文字色（白 / 黑二选一，取对比度更高者）。
+
+    用于**动态底色**（长按 / 进度按钮的填充会盖住文字）：固定前景色必然在
+    其中一侧失效（浅色主题上的白字、深色主题上的黑字）。
+    """
+    bg = QColor(background)
+    if not bg.isValid():
+        return QColor("#000000")
+    white = QColor("#ffffff")
+    black = QColor("#000000")
+    return white if _contrast_ratio(white, bg) >= _contrast_ratio(black, bg) else black
 
 
 # ── 状态层（透明底控件的悬浮 / 按下反馈）───────────────────────

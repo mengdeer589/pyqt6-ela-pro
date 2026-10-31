@@ -43,6 +43,7 @@ from pyqt6_ela_pro.chat.message import (
     ElaChatPermissionStatusType,
     ElaChatQuestion,
 )
+from pyqt6_ela_pro.ela_long_press_button import ElaLongPressButton
 
 
 @pytest.fixture
@@ -296,14 +297,20 @@ class TestPermission:
         assert not any(b.isEnabled() for b in card._action_buttons())
         assert seen == ["allowed"]
 
-    def test_always_button_emits_always(self, chat):
+    def test_always_button_requires_long_press(self, chat):
+        """「始终允许」是持久授权：短按不通过，长按才发 ``always``。"""
         seen = []
         chat.permissionReplied.connect(lambda i, r, rep, a, f: seen.append(rep))
         mid = _turn(chat)
         chat.chatView().beginPermission(mid, self._request())
-        chat.chatView().interactivePermissionCard(mid, "r1")._action_buttons()[
-            1
-        ].click()
+        card = chat.chatView().interactivePermissionCard(mid, "r1")
+        always = card._action_buttons()[1]
+        assert isinstance(always, ElaLongPressButton)
+
+        always.click()  # 短按 = 普通点击，不该批准
+        assert seen == []
+
+        always.longPressed.emit()
         assert seen == ["always"]
 
     def test_double_click_guarded(self, chat):
@@ -615,7 +622,9 @@ class TestCompaction:
 
         other = make(ElaChatWidget)
         other.chatView().addMessageFromDict(data)
-        parts = other.chatView().message(mid).partsOfKind(ElaChatPartKindType.Compaction)
+        parts = (
+            other.chatView().message(mid).partsOfKind(ElaChatPartKindType.Compaction)
+        )
         assert len(parts) == 1
         assert parts[0].text == "## 摘要"
 

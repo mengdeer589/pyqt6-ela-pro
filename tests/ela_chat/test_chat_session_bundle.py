@@ -104,14 +104,15 @@ class TestExportSession:
         assert bundle["session"]["title"] == "历史"
         assert bundle["session"]["message_count"] == view.count()  # 按实际重算
         assert bundle["extra"] == {"model": "deepseek-v4"}
-        assert bundle["view"] == {
-            "reasoning_style": "inline",
-            "stats_mode": "steps",
-            "tool_grouping": False,
-            "avatar_visible": False,
-            "user_bubble_ratio": 0.5,
-            "content_max_width": 600,
-        }
+        view_options = bundle["view"]
+        assert view_options["reasoning_style"] == "inline"
+        assert view_options["stats_mode"] == "steps"
+        assert view_options["tool_grouping"] is False
+        assert view_options["avatar_visible"] is False
+        assert view_options["user_bubble_ratio"] == 0.5
+        assert view_options["content_max_width"] == 600
+        assert view_options["timeline_detail"]["thinking"]["placement"] == "collapsed"
+        assert view_options["disclosure"] == {}
         assert len(bundle["messages"]) == view.count()
         assert [row["id"] for row in bundle["messages"]] == [
             message.id for message in view.messages()

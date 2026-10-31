@@ -52,11 +52,41 @@ class PieSeriesRenderer(SeriesRenderer):
         self._total = 0.0
         self._r_in = 0.0
         self._r_out = 1.0
+        #: 图例隐藏的数据项名（ECharts 饼图图例按数据项开关）
+        self._hidden_items = set()
+
+    def setHiddenItems(self, names) -> None:
+        """设置被图例隐藏的数据项（按名称）。"""
+        self._hidden_items = {str(n) for n in (names or [])}
+
+    def legendItems(self) -> list:
+        """饼图图例条目 = 数据项名（不是系列名）。"""
+        out = []
+        for index, item in enumerate(self.data()):
+            if isinstance(item, dict):
+                name = str(item.get("name") or "")
+            else:
+                name = str(item or "")
+            if not name:
+                continue
+            out.append(
+                (
+                    name,
+                    self.itemColor(
+                        index, default=_series_palette_color(self.chart, index)
+                    ),
+                )
+            )
+        return out
 
     # -- 布局 -------------------------------------------------------------
     def layout(self, rect: QRectF) -> None:
         self._sectors = []
-        entries = _parse_named_values(self.data())
+        entries = [
+            entry
+            for entry in _parse_named_values(self.data())
+            if entry[1] not in self._hidden_items
+        ]
         label_opt = dict(self.opt.get("label") or {})
         label_show = bool(label_opt.get("show", True))
         label_pos = str(label_opt.get("position") or "outside")
@@ -94,26 +124,27 @@ class PieSeriesRenderer(SeriesRenderer):
             r_out = _parse_pct(radius_opt, base, base)
         r_in = _clamp(r_in, 0.0, r_out)
         self._r_in, self._r_out = r_in, r_out
-        self._total = sum(v for _, v in entries)
+        self._total = sum(max(v, 0.0) for _, _, v in entries)
         if not entries or self._total <= 0:
             return
-        vmax = max(v for _, v in entries) or 1.0
+        vmax = max((max(v, 0.0) for _, _, v in entries), default=0.0) or 1.0
         rose = str(self.opt.get("roseType") or "")
         scale = 1.0
-        spans = self._sector_spans([v for _, v in entries])
-        for i, (name, v) in enumerate(entries):
+        spans = self._sector_spans([max(v, 0.0) for _, _, v in entries])
+        for i, (data_index, name, v) in enumerate(entries):
             a0, span_eff = spans[i]
+            v_pos = max(v, 0.0)
             if rose == "radius":
-                scale = _clamp(v / vmax, 0.05, 1.0)
+                scale = _clamp(v_pos / vmax, 0.05, 1.0)
             elif rose == "area":
-                scale = _clamp(math.sqrt(_clamp(v / vmax, 0.0, 1.0)), 0.05, 1.0)
+                scale = _clamp(math.sqrt(_clamp(v_pos / vmax, 0.0, 1.0)), 0.05, 1.0)
             self._sectors.append(
                 {
-                    "index": i,
+                    "index": data_index,
                     "name": name,
                     "value": v,
                     "color": self.itemColor(
-                        i, default=_series_palette_color(self.chart, i)
+                        data_index, default=_series_palette_color(self.chart, data_index)
                     ),
                     "a0": a0,
                     "a1": a0 + span_eff,
@@ -195,7 +226,7 @@ class PieSeriesRenderer(SeriesRenderer):
         ):
             return self._sectors
         values = [
-            p[1] + (s["value"] - p[1]) * anim_t for p, s in zip(prev, self._sectors)
+            p[2] + (s["value"] - p[2]) * anim_t for p, s in zip(prev, self._sectors)
         ]
         vmax = max(values) or 1.0
         rose = str(self.opt.get("roseType") or "")

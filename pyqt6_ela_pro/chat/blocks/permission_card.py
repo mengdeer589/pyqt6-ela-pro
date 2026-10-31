@@ -26,6 +26,8 @@ from PyQt6ElaWidgetTools import (
 from ..._internal import _ThemeAwareMixin
 from ..._styles import ColorText
 from ...ela_button import ElaButton
+from ...ela_long_press_button import ElaLongPressButton
+from ...tooltips import ElaToolTipPositionType, set_tooltip
 from .. import _json
 from .._question import (
     OPTION_GAP,
@@ -58,8 +60,8 @@ class PermissionCard(_ThemeAwareMixin, ElaScrollPageArea):
 
     两种形态，由 ``permission.questions`` 是否为空决定（**不另设标志位**）：
 
-    - **批准型**（``questions`` 为空）：``允许一次`` / ``始终允许`` / ``拒绝…``
-      三个动作 + 可选的理由输入行；
+    - **批准型**（``questions`` 为空）：``允许一次`` / ``始终允许``（**长按
+      700ms** 才生效，防误触的持久授权）/ ``拒绝…`` 三个动作 + 可选的理由输入行；
     - **问答型**（``questions`` 非空）：**逐题向导**（对齐 opencode 的
       ``session-question-dock.tsx``）—— 头部「N / M 个问题」+ 可点的进度段，
       中间是当前那道的题面 + 候选卡（两行：标题 + 说明，可多选），末行是
@@ -79,6 +81,9 @@ class PermissionCard(_ThemeAwareMixin, ElaScrollPageArea):
     #: 里的 ``Allowed`` / ``Always`` / ``Rejected`` / ``Cancelled``。问答型的
     #: ``answer`` 是 ``json.dumps({key: str | [str, ...]})``，批准型为空串。
     replied = pyqtSignal(str, str, str)
+
+    #: 「始终允许」的长按时长（毫秒）。持久授权误触代价高，点一下不够。
+    ALWAYS_HOLD_MS = 700
 
     _REJECT_ICON = ElaIconType.IconName.Ban
     _OK_ICON = ElaIconType.IconName.CircleCheck
@@ -228,11 +233,23 @@ class PermissionCard(_ThemeAwareMixin, ElaScrollPageArea):
             lambda: self._emit_reply(ElaChatPermissionStatusType.Allowed, "", "")
         )
         actions_layout.addWidget(self._allow_button)
-        self._always_button = ElaButton(
-            "始终允许", variant="outlined", size="small", parent=self._actions
+        # 「始终允许」是**持久授权**：点一下就放行以后的同类请求，误触代价
+        # 比「允许一次」高一个量级 —— 改成按住 700ms 才生效（对齐 opencode 的
+        # 长按确认语义）。短按不发长按信号，所以不会误批；`clicked` 不接。
+        self._always_button = ElaLongPressButton(
+            "始终允许",
+            variant="outlined",
+            size="small",
+            duration=self.ALWAYS_HOLD_MS,
+            parent=self._actions,
         )
-        self._always_button.clicked.connect(
+        self._always_button.longPressed.connect(
             lambda: self._emit_reply(ElaChatPermissionStatusType.Always, "", "")
+        )
+        set_tooltip(
+            self._always_button,
+            f"长按 {self.ALWAYS_HOLD_MS / 1000:g} 秒始终允许",
+            ElaToolTipPositionType.Top,
         )
         actions_layout.addWidget(self._always_button)
         self._reject_button = ElaButton(

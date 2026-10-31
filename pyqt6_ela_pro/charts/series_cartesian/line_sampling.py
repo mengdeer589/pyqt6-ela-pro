@@ -20,6 +20,13 @@ from ._shared import (
 class _LineSamplingMixin:
     """方法组 mixin：状态由宿主类 ``__init__`` 建立。"""
 
+    @staticmethod
+    def _stack_key(x, index):
+        """堆叠对齐键：优先 x（类别名 / 数值），不可哈希时退回下标。"""
+        if isinstance(x, (str, int, float)) and not isinstance(x, bool):
+            return x
+        return index
+
     def _stacked_data(self):
         """stack 模式：叠加前序同名 stack 可见系列的值（不影响原始 opt）。
 
@@ -69,21 +76,22 @@ class _LineSamplingMixin:
         neg_base: dict = {}
         for src in srcs:
             for i, item in enumerate(src):
-                _, y = parseDataPoint(item, i)
+                x, y = parseDataPoint(item, i)
                 if y is None:
                     continue
-                all_base[i] = all_base.get(i, 0.0) + y
+                key_i = self._stack_key(x, i)
+                all_base[key_i] = all_base.get(key_i, 0.0) + y
                 bucket = pos_base if y >= 0 else neg_base
-                bucket[i] = bucket.get(i, 0.0) + y
+                bucket[key_i] = bucket.get(key_i, 0.0) + y
 
-        def base_for(i, y):
+        def base_for(key_i, y):
             if strategy == "all":
-                return all_base.get(i, 0.0)
+                return all_base.get(key_i, 0.0)
             if strategy == "positive":
-                return pos_base.get(i, 0.0) if y >= 0 else 0.0
+                return pos_base.get(key_i, 0.0) if y >= 0 else 0.0
             if strategy == "negative":
-                return neg_base.get(i, 0.0) if y < 0 else 0.0
-            return (pos_base if y >= 0 else neg_base).get(i, 0.0)
+                return neg_base.get(key_i, 0.0) if y < 0 else 0.0
+            return (pos_base if y >= 0 else neg_base).get(key_i, 0.0)
 
         self._stack_base = {}
         if not all_base:
@@ -91,11 +99,11 @@ class _LineSamplingMixin:
             return None
         out = []
         for i, item in enumerate(own):
-            _x, y = parseDataPoint(item, i)
+            x, y = parseDataPoint(item, i)
             if y is None:
                 out.append(item)
                 continue
-            base = base_for(i, y)
+            base = base_for(self._stack_key(x, i), y)
             if base:
                 self._stack_base[i] = base
             stacked = y + base
@@ -440,4 +448,7 @@ class _LineSamplingMixin:
         idxs = self._point_idx
         for j in sorted(np_.unique(js).tolist(), reverse=True):
             points.insert(j, None)
-            idxs.insert(j, -1)  # 与 None 点平行的占位（消费者先跳过 None）
+            # 与 None 点平行的占位：**必须保持 `_point_idx` 升序**（valueAtIndex
+            # 用二分查最近点，插 -1 会让整个列表失序、命中点画到别处）。
+            # 重复前一个下标即可：该位置的 point 是 None，消费者会跳过。
+            idxs.insert(j, idxs[j - 1] if j > 0 else 0)

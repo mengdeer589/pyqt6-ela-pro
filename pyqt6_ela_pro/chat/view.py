@@ -49,6 +49,8 @@ from .blocks import (
 )
 from .bubble import DISCLAIMER_TEXT, ElaChatBubble
 from .view_appearance import _ViewAppearanceMixin
+from .view_search import _ViewSearchMixin
+from .view_timeline import _ViewTimelineMixin
 from .view_messages import _ViewMessagesMixin
 from .view_stream import _ViewStreamMixin
 from .view_scroll import _ViewScrollMixin
@@ -108,6 +110,8 @@ class ElaChatView(
     _ViewMessagesMixin,
     _ViewStreamMixin,
     _ViewScrollMixin,
+    _ViewTimelineMixin,
+    _ViewSearchMixin,
     _ViewAppearanceMixin,
     ElaThemeWidget,
 ):
@@ -175,8 +179,12 @@ class ElaChatView(
     permissionDockRequested = pyqtSignal(int, str, object)
     #: 某条审批已落定（参数：消息 id、partId）—— dock 据此撤下当前卡、接下一张
     permissionSettled = pyqtSignal(int, str)
-    #: 用户在错误卡上点击「重试」（参数：消息 id）—— 同参数重发
+    #: 用户在错误卡 / 自动重试卡上点击「重试」（参数：消息 id）—— 同参数重发
     retryRequested = pyqtSignal(int)
+    #: 用户取消自动重试（参数：消息 id）
+    retryCancelled = pyqtSignal(int)
+    #: 待发送消息上的动作（参数：消息 id、动作：queue / delete）
+    pendingUserActionRequested = pyqtSignal(int, str)
     #: 用户点击附件 chip（参数：消息 id、路径）
     attachmentClicked = pyqtSignal(int, str)
     #: 空态建议被点击（参数：建议文本）
@@ -192,6 +200,9 @@ class ElaChatView(
         self._virtual_order: list = []
         self._virtual_prefix: list = []
         self._virtual_prefix_dirty = True
+        #: 消息列表结构变化（增删 / 清空）才需要重建 order / index；
+        #: 滚动时只有高度变化，重建它们是纯浪费。
+        self._virtual_order_dirty = True
         self._bubbles: dict = {}
         self._stick = True
         self._avatar_visible = True
@@ -212,6 +223,21 @@ class ElaChatView(
         self._scroll_guards: list = []
         self._guards_by_message: dict = {}
         self._strict_ids = False
+        #: 时间线密度（None = 默认）
+        self._timeline_detail = None
+        #: partId -> 展开覆盖（所有气泡共享同一份字典，物化时自动生效）
+        self._disclosure: dict = {}
+        #: messageId -> (attempt, message, nextAt)
+        self._retry: dict = {}
+        #: 运行态活动行（惰性创建）
+        self._activity_row = None
+        self._activity_text = ""
+        #: 会话内搜索状态
+        self._search_hits: list = []
+        self._search_index = -1
+        self._search_query = ""
+        self._search_case = False
+        self._search_bar = None
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)

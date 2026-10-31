@@ -122,6 +122,38 @@ def layout_all(chart, force: bool = False) -> None:
                 ),
                 f"系列布局异常（{renderer.name}）: {exc!r}",
             )
+    # 系列 layout 会修正 value 轴的真实范围（横向柱 / 堆叠 / K 线 / 箱线）。
+    # dataZoom 的全量必须在这之后重捕一次，否则它会拿「未修正的范围」把轴
+    # 改回去 —— 默认自动滚轮组件跨 setOption 存活，任何图都会中招。
+    refreshed = False
+    for component in chart._components:
+        refresh = getattr(component, "refreshValueExtent", None)
+        if not callable(refresh):
+            continue
+        try:
+            if refresh():
+                refreshed = True
+        except Exception as exc:
+            warn_once(
+                f"refresh-extent:{component.__class__.__name__}",
+                f"全量范围重捕失败（{component.__class__.__name__}）: {exc!r}",
+            )
+    if refreshed:
+        # 全量变了 → 窗口要按新全量重放；本帧系列几何还是旧轴算的，
+        # 失效布局键让下一帧按新轴重排（一帧内自愈，肉眼不可见）。
+        for component in chart._components:
+            apply_window = getattr(component, "applyWindow", None)
+            if not callable(apply_window):
+                continue
+            try:
+                apply_window()
+            except Exception as exc:
+                warn_once(
+                    f"reapply-window:{component.__class__.__name__}",
+                    f"窗口重放失败（{component.__class__.__name__}）: {exc!r}",
+                )
+        chart._layout_key = None
+        chart.update()
     for component in chart._components:
         layout = getattr(component, "layout", None)
         if callable(layout):

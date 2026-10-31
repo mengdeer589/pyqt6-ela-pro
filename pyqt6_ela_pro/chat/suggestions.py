@@ -42,6 +42,8 @@ class ElaChatSuggestion:
     description: str = ""
     #: 选中后插入编辑器的文本（默认使用 ``label``）
     insert_text: str = ""
+    #: 类型（``file`` / ``agent`` / ``command`` / 其它宿主自定义）
+    kind: str = ""
 
 
 class SuggestionPopup(ElaScrollPageArea):

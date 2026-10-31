@@ -12,7 +12,13 @@ from PyQt6.QtWidgets import QWidget
 
 from ..ela_button import ElaButton
 from ..ela_markdown_viewer import ElaMarkdownViewer
-from .blocks import CompactionSeparator, PermissionRecord, ReasoningBlock, ToolCallCard
+from .blocks import (
+    CompactionSeparator,
+    ElaChatNotice,
+    PermissionRecord,
+    ReasoningBlock,
+    ToolCallCard,
+)
 from .message import (
     ElaChatPart,
     ElaChatPartKindType,
@@ -56,6 +62,8 @@ def estimate_parts_height(parts, width: int, stats_mode: str = "footer") -> int:
             total += 64
         elif kind == ElaChatPartKindType.Permission:
             total += 96
+        elif kind == ElaChatPartKindType.Notice:
+            total += 30
         else:
             total += 40
     return max(40, total)
@@ -87,6 +95,7 @@ class ChatPartTimeline:
             self._bubble._parts_layout.addWidget(widget)
         if part.kind != ElaChatPartKindType.Stats:
             self._bubble._move_step_stats_to_end(part.step)
+        self._bubble._apply_part_visibility(part.id)
         self._bubble._sync_waiting_placeholder()
 
     def _move_step_stats_to_end(self, step: int) -> None:
@@ -190,6 +199,8 @@ class ChatPartTimeline:
                 for part in self._bubble._parts
                 if part.kind == ElaChatPartKindType.Text
             )
+        if self._bubble._role == ElaChatRoleType.User:
+            return getattr(self._bubble, "_user_text", "")
         return self._bubble._label.text() if self._bubble._label is not None else ""
 
     def parts(self) -> tuple:
@@ -492,6 +503,15 @@ class ChatPartTimeline:
             self._bubble.addSteerNotice(part.text, part.id or None)
         elif kind == ElaChatPartKindType.Compaction:
             self._bubble._restore_compaction(part)
+        elif kind == ElaChatPartKindType.Notice:
+            widget = ElaChatNotice(
+                part.notice_type,
+                part.text or "",
+                part.detail or "",
+                self._bubble._parts_container or self._bubble._content or self,
+            )
+            self._bubble._append_part(part, widget)
+            self._bubble._apply_part_visibility(part.id)
         elif kind == ElaChatPartKindType.Permission:
             request = part.permission
             if request is not None:
@@ -504,6 +524,8 @@ class ChatPartTimeline:
         )
         widget.setSummary(part.text or "")
         widget.setCompactionStatus(part.status)
+        widget.setHistoryCount(part.history_count)
+        widget.setStats(part.stats)
         self._bubble._append_part(part, widget)
 
     def _restore_permission(self, partId: str, request: ElaChatPermission) -> None:

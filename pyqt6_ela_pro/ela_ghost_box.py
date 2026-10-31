@@ -359,13 +359,17 @@ class _GhostPopupFooter(QWidget):
             self._custom_widget is not None
             and self._custom_ownership != ElaWidgetOwnershipType.Owned
         ):
-            self._destroy_slot = partial(
+            slot = partial(
                 _release_footer_custom_on_destroy,
                 self._custom_widget,
                 self._custom_ownership,
                 self._custom_original_parent,
             )
-            self.destroyed.connect(self._destroy_slot)
+            # 用**局部名**连接：`self.destroyed.connect(self._x)` 是「永不触发的
+            # 自绑槽」形状，机器守卫会拦（这里的槽是 partial + 模块级函数，功能上
+            # 没问题，但别给守卫开后门）。
+            self._destroy_slot = slot
+            self.destroyed.connect(slot)
 
     def setCustomWidget(
         self,

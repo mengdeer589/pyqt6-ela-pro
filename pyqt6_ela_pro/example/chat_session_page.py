@@ -13,8 +13,8 @@
    ``binder.abortTurn(cancelBackend=True)``** 再销毁，否则后端回调会打进已释放的控件；
 3. **恢复 = 重建页面 + ``view.importSession(bundle)``**，再回填草稿。
 
-对话界面本身的形态在「聊天组件总览」页，接入方式在「输入区能力」页，
-落库与崩溃恢复在「持久化与性能」页。
+对话界面本身的形态在「概览」工作区，接入方式在「输入区」工作区，
+落库与崩溃恢复在「持久化」工作区。
 """
 
 from PyQt6.QtCore import QPoint

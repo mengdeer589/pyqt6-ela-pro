@@ -158,7 +158,7 @@ class ParallelSeriesRenderer(SeriesRenderer):
         p.save()
         # 兜底 grid 坐标系对平行坐标无意义，覆盖其轴线背景
         p.setPen(Qt.PenStyle.NoPen)
-        p.setBrush(QColor(T("color.bg.base")))
+        p.setBrush(self.chart._background_color())
         p.drawRect(
             QRectF(
                 self._area.left() - 40,

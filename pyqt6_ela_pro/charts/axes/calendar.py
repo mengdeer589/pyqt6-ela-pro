@@ -91,42 +91,74 @@ class CalendarCoord(Coord):
     def _resolve_range(cls, rng):
         """``calendar.range`` → ``(start, end)``。
 
-        支持年份（``2026`` / ``"2026"``）、单日期、``[start, end]`` 或
-        ``["2026"]``；非法 / 缺省回退当前年。
+        支持年份（``2026`` / ``"2026"``）、月份（``"2026-01"``）、单日期、
+        ``[start, end]`` 或 ``["2026"]`` / ``["2026-01", "2026-03"]``；
+        非法 / 缺省回退当前年。**月份 / 年份数组不再静默变成全年**。
         """
         today = date.today()
         year = today.year
+
+        def span_of(value):
+            """单个 range 元素 → (start, end, granularity)；无法解析返回 None。"""
+            if value is None:
+                return None
+            if isinstance(value, (int, float)) and not isinstance(value, bool):
+                y = cls._clamp_year(value)
+                return date(y, 1, 1), date(y, 12, 31), "year"
+            if isinstance(value, str):
+                text = value.strip()
+                if len(text) == 4 and text.isdigit():
+                    y = cls._clamp_year(text)
+                    return date(y, 1, 1), date(y, 12, 31), "year"
+                if len(text) == 7 and text[4] == "-" and text[:4].isdigit():
+                    try:
+                        y, m = int(text[:4]), int(text[5:])
+                        first = date(y, m, 1)
+                    except (ValueError, OverflowError):
+                        return None
+                    if y < 1 or y > _MAX_DATE_YEAR:
+                        return None
+                    return first, cls._month_end(first), "month"
+                parsed = cls._parse_date(text)
+                if parsed is not None:
+                    return parsed, parsed, "day"
+                return None
+            parsed = cls._parse_date(value)
+            if parsed is not None:
+                return parsed, parsed, "day"
+            return None
+
         if rng is None:
             return date(year, 1, 1), date(year, 12, 31)
-        if isinstance(rng, (int, float)) and not isinstance(rng, bool):
-            year = cls._clamp_year(rng)
-            return date(year, 1, 1), date(year, 12, 31)
-        if isinstance(rng, str):
-            text = rng.strip()
-            if len(text) == 4 and text.isdigit():
-                year = cls._clamp_year(text)
+        if not isinstance(rng, (list, tuple)):
+            span = span_of(rng)
+            if span is None:
                 return date(year, 1, 1), date(year, 12, 31)
-            parsed = cls._parse_date(text)
-            if parsed is not None:
-                return parsed, parsed
+            return span[0], span[1]
+        items = list(rng)
+        if not items:
             return date(year, 1, 1), date(year, 12, 31)
-        if isinstance(rng, (list, tuple)):
-            items = list(rng)
-            if len(items) == 1:
-                items.append(None)
-            start = cls._parse_date(items[0])
-            end = cls._parse_date(items[1]) if len(items) > 1 else None
-            if start is None and isinstance(items[0], (int, float)):
-                year = cls._clamp_year(items[0])
+        first = span_of(items[0])
+        if first is None:
+            return date(year, 1, 1), date(year, 12, 31)
+        start, first_end, _gran = first
+        if len(items) > 1 and items[1] is not None:
+            second = span_of(items[1])
+            if second is None:
                 return date(year, 1, 1), date(year, 12, 31)
-            if start is None:
-                start = date(year, 1, 1)
-            if end is None:
-                end = date(start.year, 12, 31)
-            if end < start:
-                start, end = end, start
-            return start, end
-        return date(year, 1, 1), date(year, 12, 31)
+            end = second[1]
+        else:
+            end = first_end
+        if end < start:
+            start, end = end, start
+        return start, end
+
+    @staticmethod
+    def _month_end(first: date) -> date:
+        """某月最后一天（``date`` 自带下月一号减一天）。"""
+        if first.month == 12:
+            return date(first.year, 12, 31)
+        return date(first.year, first.month + 1, 1) - timedelta(days=1)
 
     # -- 日期工具 ---------------------------------------------------------
     @staticmethod

@@ -19,9 +19,10 @@ from __future__ import annotations
 import warnings
 from typing import Literal, Optional
 
-from PyQt6.QtCore import Qt, QRect, QRectF, QSize, QTimer, QVariantAnimation
+from PyQt6.QtCore import Qt, QPointF, QRect, QRectF, QSize, QTimer, QVariantAnimation
 from PyQt6.QtGui import (
     QColor,
+    QLinearGradient,
     QPainter,
     QPainterPath,
     QPen,
@@ -33,7 +34,7 @@ from PyQt6.QtWidgets import QPushButton, QWidget
 from PyQt6ElaWidgetTools import eApp, eTheme, ElaThemeType, ElaIcon, ElaIconType
 
 from ._internal import _ThemeAwareMixin
-from ._colors import get_color_scheme, state_tint
+from ._colors import get_color_scheme, state_tint, text_on_color
 from ._motion import Duration, start_idle_loop, start_transition
 from ._styles import coerceElaIcon
 from ._theme import accent as theme_accent, blend
@@ -96,6 +97,39 @@ _SIZE_MAP: dict[str, dict[str, int]] = {
         "radius": 8,
     },
 }
+
+
+def paintProgressFill(  # noqa: N802 (与 paintRoundedCard 等绘制原语同风格)
+    painter: QPainter, path: QPainterPath, progress: float, color: QColor
+) -> None:
+    """在按钮面上画横向进度填充（裁剪到 ``path``）。
+
+    :class:`ElaLongPressButton` / :class:`ElaProgressButton` 在
+    :meth:`ElaButton._paint_face_overlay` 里调用。``progress <= 0`` 不画；
+    ``>= 1`` 整面填充。填充**不降透明度**（要的是主题色本身），文字可读性靠
+    :meth:`ElaButton._progress_text_color` 把压在填充上的文字换成对比色。
+    """
+    p = max(0.0, min(1.0, float(progress)))
+    if p <= 0.0:
+        return
+    fill = QColor(color)
+    if not fill.isValid():
+        return
+    rect = path.boundingRect()
+    painter.save()
+    try:
+        painter.setClipPath(path)
+        if p >= 1.0:
+            painter.fillRect(rect, fill)
+            return
+        gradient = QLinearGradient(QPointF(rect.topLeft()), QPointF(rect.topRight()))
+        gradient.setColorAt(0.0, fill)
+        gradient.setColorAt(p, fill)
+        gradient.setColorAt(min(p + 0.05, 1.0), QColor(0, 0, 0, 0))
+        gradient.setColorAt(1.0, QColor(0, 0, 0, 0))
+        painter.fillRect(rect, gradient)
+    finally:
+        painter.restore()
 
 
 # ── ElaButton ────────────────────────────────────────────────
@@ -312,6 +346,41 @@ class ElaButton(_ThemeAwareMixin, QPushButton):
     def _effective_color(self) -> str:
         return "danger" if self._danger else self._color_name
 
+    def _paint_face_overlay(self, painter: QPainter, path: QPainterPath) -> None:
+        """在按钮面（背景 / 描边之后，focus ring 与文字之前）叠加内容。
+
+        长按进度、外部驱动的进度填充都挂在这里。默认不画；实现在绘制链上，
+        异常会穿出 Qt 回调（0xC0000409），**实现方必须自己兜住**。
+        """
+
+    def _progress_fill_color(self) -> QColor:
+        """进度填充的默认色（未自定义时）。
+
+        - 普通变体：**主题主色**（实心按钮底色 ``solid``）—— 这是「主题色」
+          最直观的一档；``default`` 色彩本身是中性灰，改用 ``primary`` 的。
+        - ``solid`` 变体：底色就是同一个 ``solid``，同色叠同色看不见 ——
+          压暗 25% 当进度（文字仍是 ``solidText``，对比度反而更高）。
+        """
+        scheme = self._scheme()
+        if self._effective_color() == "default":
+            scheme = get_color_scheme("primary", self._theme_mode)
+        solid = QColor(scheme["solid"])
+        if self._variant == "solid":
+            return blend(solid, QColor("#000000"), 0.35)
+        return solid
+
+    def _progress_on_color(self) -> Optional[QColor]:
+        """进度填充覆盖的区域里重画内容用的对比色；不需要重画时 ``None``。"""
+        progress = float(getattr(self, "_progress", 0.0))
+        custom = bool(getattr(self, "_custom_progress_color", False))
+        # 实心变体的填充是同色压暗（文字本来就压得住），除非宿主自定义了填充色
+        if progress <= 0.0 or (self._variant == "solid" and not custom):
+            return None
+        fill = self._progress_color if custom else self._progress_fill_color()
+        if not fill.isValid():
+            return None
+        return text_on_color(fill)
+
     def _is_dark(self) -> bool:
         return self._theme_mode == ElaThemeType.ThemeMode.Dark
 
@@ -322,11 +391,15 @@ class ElaButton(_ThemeAwareMixin, QPushButton):
     # ── ElaChipColorType helpers ─────────────────────────────────────
 
     def _neutral_text(self) -> QColor:
-        return QColor(0xE0, 0xE0, 0xE0) if self._is_dark() else QColor(0x1F, 0x1F, 0x1F)
+        """中性档文字色：直接用主题的 ``BasicText``（``#1F1F1F`` / ``#E0E0E0`` 是
+        旧值 —— 与 Ela 自带控件差一个色阶，浅色 / 深色都能看出来）。"""
+        return eTheme.getThemeColor(self._theme_mode, ElaThemeType.ThemeColor.BasicText)
 
     def _neutral_border(self) -> QColor:
         """default 变体的描边色，与上游 ``ElaPushButton`` 同款。"""
-        return eTheme.getThemeColor(self._theme_mode, ElaThemeType.ThemeColor.BasicBorder)
+        return eTheme.getThemeColor(
+            self._theme_mode, ElaThemeType.ThemeColor.BasicBorder
+        )
 
     def _disabled_bg(self) -> QColor:
         return eTheme.getThemeColor(
@@ -489,7 +562,6 @@ class ElaButton(_ThemeAwareMixin, QPushButton):
 
             disabled = not self.isEnabled()
             pressed = self.isDown()
-            hovered = self._hovered
             variant = self._variant
             cname = self._effective_color()
             is_default = cname == "default"
@@ -545,6 +617,13 @@ class ElaButton(_ThemeAwareMixin, QPushButton):
             painter.setPen(border_pen if border_pen is not None else Qt.PenStyle.NoPen)
             painter.drawPath(path)
 
+            # -- Face overlay（长按 / 进度填充）--
+            # 钩子在 Qt 绘制链上：异常穿出去 = 0xC0000409（无 traceback），兜住。
+            try:
+                self._paint_face_overlay(painter, path)
+            except Exception:  # noqa: BLE001 —— paintEvent 里不能把异常带出去
+                pass
+
             # -- Focus ring（键盘可见性）--
             if self._focus_ring:
                 ring_color = (
@@ -568,69 +647,94 @@ class ElaButton(_ThemeAwareMixin, QPushButton):
                 )
 
             # -- Draw icon / spinner + text --
-            painter.setPen(text_color)
-            icon_name = self._icon_name
-            loading = self._loading
-            btn_text = self.text()
-            svg_pixmap = None if loading else self._svg_pixmap_for_paint(text_color)
-            if icon_name is not None or loading or svg_pixmap is not None:
-                spacing = 8
-                icon_sz = QSize(self._icon_size, self._icon_size)
-                fm = painter.fontMetrics()
-                tw = fm.horizontalAdvance(btn_text) if btn_text else 0
-                if tw:
-                    total_w = icon_sz.width() + spacing + tw
-                    sx = _FACE_INSET + (fw - total_w) // 2
-                else:
-                    # 纯图标按钮：只居中图标本身（含 spacing 会向左偏）
-                    sx = _FACE_INSET + (fw - icon_sz.width()) // 2
-                iy = _FACE_INSET + (fh - icon_sz.height()) // 2
-                ir = QRect(sx, iy, icon_sz.width(), icon_sz.height())
-                if loading:
-                    spin_pen = QPen(text_color, 2)
-                    spin_pen.setCapStyle(Qt.PenCapStyle.RoundCap)
-                    painter.setPen(spin_pen)
-                    painter.setBrush(Qt.BrushStyle.NoBrush)
-                    painter.drawArc(QRectF(ir), self._spin_angle * 16, 270 * 16)
-                    painter.setPen(text_color)
-                elif svg_pixmap is not None:
-                    painter.drawPixmap(ir, svg_pixmap)
-                else:
-                    # 绘制链兜底：取图标失败（归一后仍非法 / 图标字体未就绪）
-                    # 只丢这一枚图标，绝不让异常穿出 paintEvent
-                    try:
-                        icon = ElaIcon.getInstance().getElaIcon(
-                            coerceElaIcon(icon_name), text_color
-                        )
-                    except Exception:
-                        icon = None
-                    if icon is not None:
-                        painter.drawPixmap(ir, icon.pixmap(icon_sz))
-                if tw:
-                    tr = QRect(ir.right() + spacing, _FACE_INSET, tw, fh)
-                    painter.drawText(
-                        tr,
-                        Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
-                        btn_text,
+            self._paint_content(painter, text_color, fw, fh)
+
+            # 进度填充压在文字上：在被覆盖的区域用**对比色重画一遍**。这样单个
+            # 字形跨过填充边界时，两段各用自己的颜色（原生进度按钮的形状），
+            # 而不是整段渐变出一个读不出来的中间灰。
+            on_color = self._progress_on_color()
+            if on_color is not None:
+                painter.save()
+                try:
+                    painter.setClipPath(path)
+                    painter.setClipRect(
+                        QRectF(_FACE_INSET, _FACE_INSET, fw * self._progress, fh),
+                        Qt.ClipOperation.IntersectClip,
                     )
-                    if variant == "link" and hovered and not disabled:
-                        underline_y = ir.center().y() + fm.ascent() // 2 + 2
-                        painter.setPen(QPen(text_color, 1))
-                        painter.drawLine(
-                            tr.left(), underline_y, tr.left() + tw, underline_y
-                        )
+                    self._paint_content(painter, on_color, fw, fh)
+                finally:
+                    painter.restore()
+        finally:
+            painter.end()
+
+    def _paint_content(
+        self, painter: QPainter, text_color: QColor, fw: int, fh: int
+    ) -> None:
+        """画图标 / 加载指示器 / 文字（进度填充覆盖的区域要用对比色重画一遍）。"""
+        variant = self._variant
+        hovered = self._hovered
+        disabled = not self.isEnabled()
+        painter.setPen(text_color)
+        icon_name = self._icon_name
+        loading = self._loading
+        btn_text = self.text()
+        svg_pixmap = None if loading else self._svg_pixmap_for_paint(text_color)
+        if icon_name is not None or loading or svg_pixmap is not None:
+            spacing = 8
+            icon_sz = QSize(self._icon_size, self._icon_size)
+            fm = painter.fontMetrics()
+            tw = fm.horizontalAdvance(btn_text) if btn_text else 0
+            if tw:
+                total_w = icon_sz.width() + spacing + tw
+                sx = _FACE_INSET + (fw - total_w) // 2
             else:
+                # 纯图标按钮：只居中图标本身（含 spacing 会向左偏）
+                sx = _FACE_INSET + (fw - icon_sz.width()) // 2
+            iy = _FACE_INSET + (fh - icon_sz.height()) // 2
+            ir = QRect(sx, iy, icon_sz.width(), icon_sz.height())
+            if loading:
+                spin_pen = QPen(text_color, 2)
+                spin_pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+                painter.setPen(spin_pen)
+                painter.setBrush(Qt.BrushStyle.NoBrush)
+                painter.drawArc(QRectF(ir), self._spin_angle * 16, 270 * 16)
+                painter.setPen(text_color)
+            elif svg_pixmap is not None:
+                painter.drawPixmap(ir, svg_pixmap)
+            else:
+                # 绘制链兜底：取图标失败（归一后仍非法 / 图标字体未就绪）
+                # 只丢这一枚图标，绝不让异常穿出 paintEvent
+                try:
+                    icon = ElaIcon.getInstance().getElaIcon(
+                        coerceElaIcon(icon_name), text_color
+                    )
+                except Exception:
+                    icon = None
+                if icon is not None:
+                    painter.drawPixmap(ir, icon.pixmap(icon_sz))
+            if tw:
+                tr = QRect(ir.right() + spacing, _FACE_INSET, tw, fh)
                 painter.drawText(
-                    QRect(_FACE_INSET, _FACE_INSET, fw, fh),
-                    Qt.AlignmentFlag.AlignCenter | Qt.AlignmentFlag.AlignVCenter,
+                    tr,
+                    Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
                     btn_text,
                 )
                 if variant == "link" and hovered and not disabled:
-                    fm = painter.fontMetrics()
-                    tw = fm.horizontalAdvance(btn_text)
-                    tx = _FACE_INSET + (fw - tw) // 2
-                    ty = _FACE_INSET + fh // 2 + fm.ascent() // 2 + 2
+                    underline_y = ir.center().y() + fm.ascent() // 2 + 2
                     painter.setPen(QPen(text_color, 1))
-                    painter.drawLine(tx, ty, tx + tw, ty)
-        finally:
-            painter.end()
+                    painter.drawLine(
+                        tr.left(), underline_y, tr.left() + tw, underline_y
+                    )
+        else:
+            painter.drawText(
+                QRect(_FACE_INSET, _FACE_INSET, fw, fh),
+                Qt.AlignmentFlag.AlignCenter | Qt.AlignmentFlag.AlignVCenter,
+                btn_text,
+            )
+            if variant == "link" and hovered and not disabled:
+                fm = painter.fontMetrics()
+                tw = fm.horizontalAdvance(btn_text)
+                tx = _FACE_INSET + (fw - tw) // 2
+                ty = _FACE_INSET + fh // 2 + fm.ascent() // 2 + 2
+                painter.setPen(QPen(text_color, 1))
+                painter.drawLine(tx, ty, tx + tw, ty)

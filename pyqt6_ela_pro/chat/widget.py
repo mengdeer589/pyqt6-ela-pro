@@ -51,8 +51,8 @@ from contextlib import contextmanager
 from typing import Optional
 from uuid import uuid4
 
-from PyQt6.QtCore import pyqtSignal
-from PyQt6.QtGui import QImage
+from PyQt6.QtCore import Qt, pyqtSignal
+from PyQt6.QtGui import QImage, QKeySequence, QShortcut
 from PyQt6.QtWidgets import QVBoxLayout, QWidget
 
 from .._ownership import ElaWidgetOwnershipType
@@ -133,6 +133,10 @@ class ElaChatWidget(ElaThemeWidget):
     #: 用户在错误卡上点击「重试」（参数：消息 id）—— **同参数重发**，
     #: 与 ``regenerateRequested``（换采样重来）是两件事
     retryRequested = pyqtSignal(int)
+    #: 用户取消自动重试（参数：消息 id）
+    retryCancelled = pyqtSignal(int)
+    #: 待发送消息动作（参数：消息 id、动作）
+    pendingUserActionRequested = pyqtSignal(int, str)
     #: 插入了待答复的工具审批（参数：消息 id、``requestId``）—— **组件不在
     #: 这里阻塞**，宿主收到后自行挂起后端（Qt 里阻塞会卡死事件循环）
     permissionRequested = pyqtSignal(int, str)
@@ -151,6 +155,16 @@ class ElaChatWidget(ElaThemeWidget):
     steerReady = pyqtSignal(object)
     #: ``@`` 引用被选中（参数：引用 id、展示文本）
     mentionSelected = pyqtSignal(str, str)
+    #: ``/`` 命令被选中（参数：命令名）
+    commandSelected = pyqtSignal(str)
+    #: ``/`` 命令被提交（``setCommandSubmitMode("signal")`` 时）
+    commandSubmitted = pyqtSignal(str)
+    #: 输入区下拉选择器变化（参数：key、item id）
+    selectorChanged = pyqtSignal(str, str)
+    #: shell 模式提交（参数：命令行文本）
+    shellSubmitted = pyqtSignal(str)
+    #: 输入草稿变化（防抖）
+    draftChanged = pyqtSignal(dict)
     #: 剪贴板图片被粘贴（参数：``QImage``）
     imagePasted = pyqtSignal(QImage)
     #: 文件进入输入区（拖放到组件任意位置 / 粘贴「复制的文件」；参数：本地文件路径列表）
@@ -170,6 +184,7 @@ class ElaChatWidget(ElaThemeWidget):
         self._current_session_id = ""
         self._queue_enabled = True
         self._queue: list = []
+        self._queue_history: list = []
         self._auto_send_queue = True
         #: 待送插话（steer）；与 ``_queue`` 分开，投递时机完全不同
         self._steer: list = []
@@ -203,6 +218,8 @@ class ElaChatWidget(ElaThemeWidget):
         self._view.undoRequested.connect(self.undoRequested)
         self._view.regenerateRequested.connect(self.regenerateRequested)
         self._view.retryRequested.connect(self.retryRequested)
+        self._view.retryCancelled.connect(self.retryCancelled)
+        self._view.pendingUserActionRequested.connect(self._on_pending_user_action)
         self._view.permissionRequested.connect(self.permissionRequested)
         self._view.permissionReplied.connect(self.permissionReplied)
         # 审批的交互卡 -> 输入区 dock；落定后撤下并接上下一张待答的
@@ -215,6 +232,12 @@ class ElaChatWidget(ElaThemeWidget):
         self._input.stopRequested.connect(self.stopGeneration)
         self._input.attachmentsChanged.connect(self.attachmentsChanged)
         self._input.mentionSelected.connect(self.mentionSelected)
+        self._input.commandSelected.connect(self.commandSelected)
+        self._input.commandSubmitted.connect(self.commandSubmitted)
+        self._input.selectorChanged.connect(self.selectorChanged)
+        self._input.shellSubmitted.connect(self.shellSubmitted)
+        self._input.draftChanged.connect(self.draftChanged)
+        self._input.alternateSubmitted.connect(self._on_alternate_submitted)
         self._input.imagePasted.connect(self.imagePasted)
         self._input.filesAdded.connect(self.filesAdded)
         self._input.clearRequested.connect(self._on_clear_requested)
@@ -224,8 +247,18 @@ class ElaChatWidget(ElaThemeWidget):
         self._queue_dock.sendRequested.connect(self.sendQueuedNow)
         self._queue_dock.editRequested.connect(self.editQueuedMessage)
         self._queue_dock.removeRequested.connect(self.dequeueMessage)
+        self._queue_dock.reorderRequested.connect(self.moveQueued)
+        self._queue_dock.steerRequested.connect(self.steerQueued)
+        self._queue_dock.undoRequested.connect(self.undoQueueChange)
 
         # 整块组件都是放置点：拖文件到消息区（含空态 / 排队 dock）也照样进附件
+        # Ctrl+F：打开会话内搜索（焦点在子控件时也生效）
+        self._search_shortcut = QShortcut(QKeySequence.StandardKey.Find, self)
+        self._search_shortcut.setContext(
+            Qt.ShortcutContext.WidgetWithChildrenShortcut
+        )
+        self._search_shortcut.activated.connect(self._view.showSearchBar)
+
         self.setAcceptDrops(True)
 
     # -- 拖放（组件任意位置 → 输入区附件） ---------------------------------
@@ -420,6 +453,11 @@ class ElaChatWidget(ElaThemeWidget):
         text: str,
         attachments=None,
         messageId: Optional[int] = None,
+        *,
+        mentions=None,
+        agent: str = "",
+        model: str = "",
+        modelVariant: str = "",
     ) -> Optional[int]:
         """添加用户消息并进入生成状态；返回消息 id（空文本返回 ``None``）。
 
@@ -455,6 +493,10 @@ class ElaChatWidget(ElaThemeWidget):
             messageId = self._view.addMessage(
                 ElaChatRoleType.User, text, messageId=messageId
             )
+        if mentions:
+            self._view.setMessageMentions(messageId, mentions)
+        if agent or model or modelVariant:
+            self._view.setMessageIdentity(messageId, agent, model, modelVariant)
         if self._user_title:
             self._view.setMessageTitle(messageId, self._user_title)
         if attachments:
@@ -465,10 +507,34 @@ class ElaChatWidget(ElaThemeWidget):
         return messageId
 
     def _on_input_submitted(self, text: str, attachments: list) -> None:
+        mentions = self._input.mentionSpans()
         if self._generating and self._queue_enabled:
-            self.enqueueMessage(text, attachments)
+            self.enqueueMessage(text, attachments, mentions=mentions)
             return
-        self.sendUserMessage(text, attachments)
+        self.sendUserMessage(text, attachments, mentions=mentions)
+
+    def _on_alternate_submitted(self, text: str, attachments: list) -> None:
+        """``Ctrl+Enter``：生成中走插话，空闲时普通发送。"""
+        if self._generating:
+            self.steerMessage(text, attachments)
+        else:
+            self.sendUserMessage(text, attachments)
+
+    def _on_pending_user_action(self, messageId: int, action: str) -> None:
+        """待发送消息上的「移到队列 / 删除」。"""
+        message = self._view.message(messageId)
+        if message is None:
+            return
+        if action == "queue":
+            self.enqueueMessage(
+                message.text,
+                message.attachments,
+                mentions=message.mentions,
+            )
+            self._view.resolvePendingUserMessage(messageId, sent=False)
+        elif action == "delete":
+            self._view.resolvePendingUserMessage(messageId, sent=False)
+        self.pendingUserActionRequested.emit(messageId, action)
 
     @contextmanager
     def _autoSendPaused(self):  # noqa: N802 (与 Qt 命名一致)
@@ -489,6 +555,71 @@ class ElaChatWidget(ElaThemeWidget):
 
     # -- 排队（follow-up） -------------------------------------------------
 
+    def _snapshot_queue(self) -> None:
+        """记录一次队列快照（撤销栈上限 20）。"""
+        self._queue_history.append(
+            (
+                [dict(item) for item in self._queue],
+                [dict(item) for item in self._steer],
+            )
+        )
+        if len(self._queue_history) > 20:
+            del self._queue_history[0]
+
+    def canUndoQueue(self) -> bool:
+        """是否有可撤销的队列操作。"""
+        return bool(self._queue_history)
+
+    def undoQueueChange(self) -> bool:
+        """撤销上一次队列操作（添加 / 移除 / 编辑 / 排序 / 插话）。"""
+        if not self._queue_history:
+            return False
+        queue, steer = self._queue_history.pop()
+        self._queue = queue
+        self._steer = steer
+        self._sync_queue()
+        self.steerChanged.emit(self.steerMessages())
+        self.queueChanged.emit(self.queuedMessages())
+        return True
+
+    def moveQueued(self, queueId: str, toIndex: int) -> bool:
+        """把排队消息移到指定下标。"""
+        for index, item in enumerate(self._queue):
+            if item["id"] != queueId:
+                continue
+            target = max(0, min(int(toIndex), len(self._queue) - 1))
+            if target == index:
+                return True
+            self._snapshot_queue()
+            entry = self._queue.pop(index)
+            self._queue.insert(target, entry)
+            self._sync_queue()
+            return True
+        return False
+
+    def steerQueued(self, queueId: str) -> bool:
+        """把排队消息转为插话（仅生成中可用）。"""
+        if not self._generating:
+            return False
+        for index, item in enumerate(self._queue):
+            if item["id"] != queueId:
+                continue
+            self._snapshot_queue()
+            self._queue.pop(index)
+            self._steer.append(
+                {
+                    "id": uuid4().hex[:12],
+                    "text": item["text"],
+                    "attachments": list(item.get("attachments") or []),
+                    "messageId": item.get("messageId"),
+                    "mentions": list(item.get("mentions") or []),
+                }
+            )
+            self._sync_queue()
+            self.steerChanged.emit(self.steerMessages())
+            return True
+        return False
+
     def setQueueEnabled(self, on: bool) -> None:
         """设置生成中提交是否进入排队（默认开启）。"""
         self._queue_enabled = bool(on)
@@ -503,6 +634,8 @@ class ElaChatWidget(ElaThemeWidget):
         text: str,
         attachments=None,
         messageId: Optional[int] = None,
+        *,
+        mentions=None,
     ) -> Optional[str]:
         """把消息加入排队 dock；返回排队 id（空文本返回 ``None``）。
 
@@ -515,6 +648,7 @@ class ElaChatWidget(ElaThemeWidget):
             for item in self._queue:
                 if item.get("messageId") == messageId:
                     return item["id"]
+        self._snapshot_queue()
         queueId = uuid4().hex[:12]
         self._queue.append(
             {
@@ -522,6 +656,7 @@ class ElaChatWidget(ElaThemeWidget):
                 "text": text,
                 "attachments": list(attachments or []),
                 "messageId": messageId,
+                "mentions": list(mentions or []),
             }
         )
         self._sync_queue()
@@ -539,6 +674,7 @@ class ElaChatWidget(ElaThemeWidget):
         """移除指定排队消息。"""
         for index, item in enumerate(self._queue):
             if item["id"] == queueId:
+                self._snapshot_queue()
                 self._queue.pop(index)
                 self._sync_queue()
                 return True
@@ -558,7 +694,10 @@ class ElaChatWidget(ElaThemeWidget):
             self._queue.pop(index)
             self._sync_queue()
             self.sendUserMessage(
-                item["text"], item["attachments"], item.get("messageId")
+                item["text"],
+                item["attachments"],
+                item.get("messageId"),
+                mentions=item.get("mentions"),
             )
             return True
         return False
@@ -568,6 +707,7 @@ class ElaChatWidget(ElaThemeWidget):
         for index, item in enumerate(self._queue):
             if item["id"] != queueId:
                 continue
+            self._snapshot_queue()
             self._queue.pop(index)
             self._sync_queue()
             self._input.setText(item["text"])
@@ -581,6 +721,7 @@ class ElaChatWidget(ElaThemeWidget):
         """清空排队消息。"""
         if not self._queue:
             return
+        self._snapshot_queue()
         self._queue.clear()
         self._sync_queue()
 
@@ -613,6 +754,13 @@ class ElaChatWidget(ElaThemeWidget):
             for item in self._steer:
                 if item.get("messageId") == messageId:
                     return item["id"]
+        self._snapshot_queue()
+        pendingId = self._view.addPendingUserMessage(
+            text,
+            attachments,
+            [],
+            "steer",
+        )
         steerId = uuid4().hex[:12]
         self._steer.append(
             {
@@ -620,6 +768,7 @@ class ElaChatWidget(ElaThemeWidget):
                 "text": text,
                 "attachments": list(attachments or []),
                 "messageId": messageId,
+                "pendingMessageId": pendingId,
             }
         )
         self.steerChanged.emit(self.steerMessages())
@@ -637,6 +786,10 @@ class ElaChatWidget(ElaThemeWidget):
         """丢弃指定插话（用户改主意了）。"""
         for index, item in enumerate(self._steer):
             if item["id"] == steerId:
+                self._snapshot_queue()
+                pendingId = item.get("pendingMessageId")
+                if pendingId is not None:
+                    self._view.resolvePendingUserMessage(int(pendingId), sent=False)
                 self._steer.pop(index)
                 self.steerChanged.emit(self.steerMessages())
                 return True
@@ -646,6 +799,11 @@ class ElaChatWidget(ElaThemeWidget):
         """清空待送插话。"""
         if not self._steer:
             return
+        self._snapshot_queue()
+        for item in list(self._steer):
+            pendingId = item.get("pendingMessageId")
+            if pendingId is not None:
+                self._view.resolvePendingUserMessage(int(pendingId), sent=False)
         self._steer.clear()
         self.steerChanged.emit(self.steerMessages())
 
@@ -673,6 +831,9 @@ class ElaChatWidget(ElaThemeWidget):
         if not self._steer:
             return None
         item = self._steer.pop(0)
+        pendingId = item.get("pendingMessageId")
+        if pendingId is not None:
+            self._view.resolvePendingUserMessage(int(pendingId), sent=True)
         self.steerChanged.emit(self.steerMessages())
         messageId = self.streamingMessageId() or self._streaming_id
         if messageId is not None:
@@ -785,9 +946,13 @@ class ElaChatWidget(ElaThemeWidget):
 
     def _sync_queue(self) -> None:
         self._queue_dock.setMessages(self._queue)
+        self._queue_dock.setWorking(bool(self._generating))
+        self._queue_dock.setUndoAvailable(self.canUndoQueue())
         self.queueChanged.emit(self.queuedMessages())
 
-    def beginAssistantMessage(self) -> int:
+    def beginAssistantMessage(
+        self, *, agent: str = "", model: str = "", modelVariant: str = ""
+    ) -> int:
         """开始一条助手流式消息；返回消息 id。
 
         防御：若已有消息在流式生成（宿主直接调用且未先结束），先把上一条
@@ -796,7 +961,12 @@ class ElaChatWidget(ElaThemeWidget):
         """
         if self._streaming_id is not None:
             self._endActiveStream(ElaChatStatusType.Stopped)
-        messageId = self._view.beginMessage(ElaChatRoleType.Assistant)
+        messageId = self._view.beginMessage(
+            ElaChatRoleType.Assistant,
+            agent=agent,
+            model=model,
+            modelVariant=modelVariant,
+        )
         if self._assistant_title:
             self._view.setMessageTitle(messageId, self._assistant_title)
         self._streaming_id = messageId
@@ -902,6 +1072,8 @@ class ElaChatWidget(ElaThemeWidget):
         if message is None or message.isStreaming:
             self._view.endMessage(target, status)
         self.setGenerating(False)
+        if self._steer:
+            self.clearSteer()
         self._emit_generation_finished(target, status)
         return target
 
@@ -914,6 +1086,62 @@ class ElaChatWidget(ElaThemeWidget):
     def mentions(self) -> list:
         """当前输入中仍有效的 ``@`` 引用 id 列表。"""
         return self._input.mentions()
+
+    def mentionSpans(self) -> list:
+        """当前文本里的 ``@`` 引用区间（``ElaChatMention`` 列表）。"""
+        return self._input.mentionSpans()
+
+    def setCommandProvider(self, provider) -> None:
+        """设置 ``/`` 命令候选提供者（``provider(query) -> list``）。"""
+        self._input.setCommandProvider(provider)
+
+    def setCommandSubmitMode(self, mode: str) -> None:
+        """设置 ``/`` 命令提交方式（``send`` / ``signal``）。"""
+        self._input.setCommandSubmitMode(mode)
+
+    def commandSubmitMode(self) -> str:
+        """获取命令提交方式。"""
+        return self._input.commandSubmitMode()
+
+    def addSelector(self, key: str, title: str, items=None, current: str = ""):
+        """在输入区发送键之前添加下拉选择器。"""
+        return self._input.addSelector(key, title, items, current)
+
+    def setSelectorItems(self, key: str, items, current=None) -> bool:
+        """替换某个选择器的选项。"""
+        return self._input.setSelectorItems(key, items, current)
+
+    def selector(self, key: str):
+        """获取选择器句柄。"""
+        return self._input.selector(key)
+
+    def selectorValue(self, key: str) -> str:
+        """获取某个选择器的当前 id。"""
+        return self._input.selectorValue(key)
+
+    def setShellMode(self, on: bool) -> None:
+        """进入 / 退出输入区 shell 模式。"""
+        self._input.setShellMode(on)
+
+    def shellMode(self) -> bool:
+        """是否处于 shell 模式。"""
+        return self._input.shellMode()
+
+    def setHistory(self, history) -> None:
+        """接入提示历史（``ElaChatPromptHistory`` 或 ``None``）。"""
+        self._input.setHistory(history)
+
+    def history(self):
+        """获取提示历史对象。"""
+        return self._input.history()
+
+    def draftState(self) -> dict:
+        """获取输入草稿快照。"""
+        return self._input.draftState()
+
+    def setDraftState(self, state) -> None:
+        """恢复输入草稿。"""
+        self._input.setDraftState(state)
 
     def streamingMessageId(self) -> Optional[int]:
         """当前正在流式生成的消息 id；无则 ``None``。
@@ -951,6 +1179,7 @@ class ElaChatWidget(ElaThemeWidget):
         """设置生成状态（输入区按钮在发送/停止间切换）。"""
         self._generating = bool(on)
         self._input.setGenerating(self._generating)
+        self._queue_dock.setWorking(self._generating)
 
     def isGenerating(self) -> bool:
         """是否正在生成。"""

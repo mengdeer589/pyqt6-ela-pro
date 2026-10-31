@@ -61,7 +61,11 @@ class RadarSeriesRenderer(SeriesRenderer):
         for item in indicators or []:
             if isinstance(item, dict):
                 inds.append(
-                    {"name": str(item.get("name") or ""), "max": item.get("max")}
+                    {
+                        "name": str(item.get("name") or ""),
+                        "min": item.get("min"),
+                        "max": item.get("max"),
+                    }
                 )
         entries = []
         for item in self.data():
@@ -81,13 +85,22 @@ class RadarSeriesRenderer(SeriesRenderer):
         if not inds:
             self._indicators = []
             return
-        # 每维 max：缺省取全数据该维最大 * 1.1
+        # 每维 min/max：min 缺省 0，max 缺省取全数据该维最大 * 1.1
         n = len(inds)
         for j in range(n):
+            lo = _to_float(inds[j].get("min"), 0.0)
+            if not math.isfinite(lo):
+                lo = 0.0
             if inds[j]["max"] is None:
                 col = [vals[j] for _, vals in entries if j < len(vals)]
-                inds[j]["max"] = (max(col) * 1.1) if col else 1.0
-            inds[j]["max"] = max(_to_float(inds[j]["max"], 1.0), 1e-6)
+                hi = (max(col) * 1.1) if col else 1.0
+            else:
+                hi = _to_float(inds[j]["max"], 1.0)
+            if not math.isfinite(hi):
+                hi = 1.0
+            if hi <= lo:
+                hi = lo + 1e-6
+            inds[j]["min"], inds[j]["max"] = lo, hi
         self._indicators = inds
         center_opt = (
             self.opt.get("center") or radar_opt.get("center") or ["50%", "50%"]
@@ -125,7 +138,8 @@ class RadarSeriesRenderer(SeriesRenderer):
             pts = []
             for j in range(n):
                 v = vals[j] if j < len(vals) else 0.0
-                frac = _clamp(v / inds[j]["max"], 0.0, 1.0)
+                lo, hi = inds[j]["min"], inds[j]["max"]
+                frac = _clamp((v - lo) / (hi - lo), 0.0, 1.0)
                 theta = -math.pi / 2 + j / n * 2 * math.pi
                 r = self._radius * frac
                 pts.append(

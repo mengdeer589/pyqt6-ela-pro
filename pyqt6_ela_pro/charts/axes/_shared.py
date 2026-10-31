@@ -81,9 +81,17 @@ def chartFont(
         cjk_family = system_cjk_font_family()
         font.setFamilies([cjk_family] if cjk_family else list(FONT_FAMILIES))
     font.setStyleHint(QFont.StyleHint.SansSerif)
-    font.setPixelSize(int(px if px else T("font.xs")))
+    # 数值容错：外部 JSON 里 ``fontSize`` 可能是 ``"12.5"`` / ``"12px"``，
+    # 直接 ``int(px)`` 会抛 ValueError（层级系列整条 paint 中断 → 静默消失）。
+    px_value = _to_float(px, T("font.xs"))
+    if px_value is None or not math.isfinite(px_value) or px_value <= 0:
+        px_value = float(T("font.xs"))
+    font.setPixelSize(max(1, int(round(px_value))))
     if weight:
-        font.setWeight(QFont.Weight(int(weight)))
+        try:
+            font.setWeight(QFont.Weight(int(weight)))
+        except (TypeError, ValueError, OverflowError):
+            pass
     if italic:
         font.setItalic(True)
     return font
@@ -141,7 +149,17 @@ def niceTicks(vmin: float, vmax: float, segments: int = 5):
         vmin, vmax = 0.0, 1.0
         span = 1.0
     step0 = span / segments
-    mag = 10 ** math.floor(math.log10(step0)) if step0 > 0 else 1.0
+    if not math.isfinite(step0) or step0 <= 0.0:
+        vmin, vmax = 0.0, 1.0
+        span = 1.0
+        step0 = 1.0 / segments
+    mag = 10 ** math.floor(math.log10(step0))
+    if not math.isfinite(mag) or mag <= 0.0:
+        # 次正规数（如 span=2.5e-323）下 ``10 ** -324`` 下溢成 0，随后
+        # ``vmin / step`` 直接 ZeroDivisionError。极端量级退回等分刻度，
+        # 不做 nice 取整 —— 有刻度可读总比崩掉 setOption 好。
+        ticks = [vmin + i * span / segments for i in range(segments + 1)]
+        return vmin, vmax, ticks
     step = mag
     for m in (1.0, 2.0, 5.0, 10.0):
         if m * mag >= step0 - 1e-12:

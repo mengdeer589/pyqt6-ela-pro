@@ -1,8 +1,9 @@
 """
-确认对话框组件，风格参考 ElaWidgetTools 的 ElaMessageDialog。
+确认弹框组件：贴锚点弹出的轻量确认条。
 
-全 QPainter 自定义绘制，包含标题、正文、确认/取消图标按钮。
-支持深浅色主题自适应。
+表面（阴影 + 圆角底 + 1px 描边）由 ``QPainter`` 自绘，内容用 Ela 原生拼装
+（``ColorText`` 标题 / 正文 + ``ElaButton`` 取消 / 确定），与库内其它组件共享
+同一套字阶、按钮与主题令牌。支持深浅色主题自适应。
 
 用法::
 
@@ -26,189 +27,60 @@ from __future__ import annotations
 from typing import Optional
 
 from PyQt6.QtCore import (
-    Qt,
     QPoint,
-    QPointF,
     QRect,
     QRectF,
     QSize,
-    QSizeF,
+    Qt,
     pyqtSignal,
-    QEvent,
 )
 from PyQt6.QtGui import (
-    QColor,
-    QEnterEvent,
-    QFontMetrics,
-    QKeyEvent,
-    QPainter,
-    QPainterPath,
-    QPen,
-    QPaintEvent,
-    QMouseEvent,
     QFont,
+    QFontMetrics,
+    QPainter,
+    QPaintEvent,
 )
-from PyQt6.QtWidgets import QApplication, QDialog, QWidget, QVBoxLayout, QHBoxLayout
+from PyQt6.QtWidgets import QApplication, QDialog, QHBoxLayout, QVBoxLayout, QWidget
 
 from PyQt6ElaWidgetTools import eTheme, ElaThemeType
 
-from ._internal import _ThemeAwareMixin, single_shot_on
-from ._styles import SHADOW_MARGIN, paintOverlayShadow
-from .widget_base import ElaThemeWidget
+from ._internal import _ThemeAwareMixin, is_deleted, single_shot_on
+from ._styles import SHADOW_MARGIN, ColorText, paintOverlayShadow, paintRoundedCard
+from ._theme import border, surfacePopup
+from .ela_button import ElaButton
 
 
 #: 弹框与锚点组件之间的间距（像素）
 _CONFIRM_DIALOG_GAP = 5
-#: 内容区起始 y（标题下方）
-_CONTENT_TOP = 45
-#: 内容区底部留白（分隔线上方）
-_CONTENT_BOTTOM_PAD = 15
-#: 按钮行高度
-_BUTTON_ROW_H = 40
-#: 内容区最大高度（超出裁切 —— 无边框弹框没有滚动条；400px 够常规确认文案）
+#: 内容区宽度（不含两侧阴影边距）
+_BOX_WIDTH = 300
+#: 内容区左右内边距
+_PAD_X = 16
+#: 内容区上内边距
+_PAD_TOP = 14
+#: 内容区下内边距
+_PAD_BOTTOM = 14
+#: 标题与正文之间的间距
+_TITLE_GAP = 6
+#: 正文与按钮行之间的间距
+_BODY_GAP = 16
+#: 正文区最大高度（超出裁切 —— 无边框弹框没有滚动条；400px 够常规确认文案）
 _CONTENT_MAX_H = 400
-
-
-class _ElaConfirmButton(ElaThemeWidget):
-    """确认/取消图标按钮，全 QPainter 自绘。"""
-
-    clicked = pyqtSignal()
-
-    TYPE_CONFIRM = 0
-    TYPE_CANCEL = 1
-
-    def __init__(self, button_type: int, parent: Optional[QWidget] = None) -> None:
-        super().__init__(parent)
-        self._type = button_type
-        self._is_hovered = False
-        self._is_pressed = False
-        self.setFixedHeight(_BUTTON_ROW_H)
-        self.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
-        self.setAccessibleName("确认" if button_type == self.TYPE_CONFIRM else "取消")
-
-    def _onThemeChanged(self, mode: ElaThemeType.ThemeMode) -> None:
-        self._theme_mode = mode
-        self.update()
-
-    def enterEvent(self, event: QEnterEvent) -> None:
-        self._is_hovered = True
-        self.update()
-        super().enterEvent(event)
-
-    def leaveEvent(self, event: QEvent) -> None:
-        self._is_hovered = False
-        self._is_pressed = False
-        self.update()
-        super().leaveEvent(event)
-
-    def mousePressEvent(self, event: QMouseEvent) -> None:
-        if event.button() == Qt.MouseButton.LeftButton:
-            self._is_pressed = True
-            self.update()
-        super().mousePressEvent(event)
-
-    def mouseReleaseEvent(self, event: QMouseEvent) -> None:
-        if event.button() == Qt.MouseButton.LeftButton and self._is_pressed:
-            self._is_pressed = False
-            self.update()
-            if self.rect().contains(event.position().toPoint()):
-                self.clicked.emit()
-        super().mouseReleaseEvent(event)
-
-    def keyPressEvent(self, event: QKeyEvent) -> None:
-        """空格 / 回车激活（按钮可 Tab 聚焦，键盘用户也能确认 / 取消）。"""
-        if event.key() in (
-            Qt.Key.Key_Space,
-            Qt.Key.Key_Return,
-            Qt.Key.Key_Enter,
-        ):
-            self.clicked.emit()
-            event.accept()
-            return
-        super().keyPressEvent(event)
-
-    def _state_layer(self) -> QColor:
-        """hover / press 状态层：**暗色叠白、亮色叠黑**（黑叠黑在深色下看不见）。"""
-        if self._theme_mode == ElaThemeType.ThemeMode.Dark:
-            return QColor(255, 255, 255)
-        return QColor(0, 0, 0)
-
-    def _box_path(self) -> Optional[QPainterPath]:
-        """父弹框圆角盒在本按钮坐标系里的路径（状态层 / 焦点环都裁到它）。
-
-        按钮行在弹框底部：不裁的话方块状态层会糊住盒子的圆角、还盖到阴影
-        边距上（实测 hover 时窗口左下角出现 ``a=10`` 的方块）。
-        """
-        parent = self.parent()
-        margin = getattr(parent, "_shadow_margin", None)
-        radius = getattr(parent, "borderRadius", None)
-        if margin is None or radius is None:
-            return None
-        top_left = self.mapFrom(parent, QPoint(int(margin), int(margin)))
-        box = QRectF(
-            QPointF(top_left),
-            QSizeF(parent.width() - 2 * margin, parent.height() - 2 * margin),
-        )
-        path = QPainterPath()
-        r = float(radius())
-        path.addRoundedRect(box, r, r)
-        return path
-
-    def paintEvent(self, _event: QPaintEvent) -> None:
-        painter = QPainter(self)
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-
-        clip = self._box_path()
-        if clip is not None:
-            painter.save()
-            painter.setClipPath(clip)
-        if self._is_pressed or self._is_hovered:
-            layer = self._state_layer()
-            layer.setAlpha(24 if self._is_pressed else 12)
-            painter.fillRect(self.rect(), layer)
-        if self.hasFocus():
-            accent = eTheme.getThemeColor(
-                self._theme_mode, ElaThemeType.ThemeColor.PrimaryNormal
-            )
-            painter.setPen(QPen(accent, 2))
-            painter.setBrush(Qt.BrushStyle.NoBrush)
-            painter.drawRoundedRect(QRectF(self.rect()).adjusted(1, 1, -1, -1), 4, 4)
-        if clip is not None:
-            painter.restore()
-
-        color = eTheme.getThemeColor(
-            self._theme_mode, ElaThemeType.ThemeColor.BasicText
-        )
-        painter.setPen(
-            QPen(
-                color,
-                2,
-                Qt.PenStyle.SolidLine,
-                Qt.PenCapStyle.RoundCap,
-                Qt.PenJoinStyle.RoundJoin,
-            )
-        )
-
-        cx = self.width() // 2
-        cy = self.height() // 2
-
-        if self._type == self.TYPE_CONFIRM:
-            painter.drawLine(cx - 6, cy, cx - 2, cy + 4)
-            painter.drawLine(cx - 2, cy + 4, cx + 6, cy - 4)
-        else:
-            off = 5
-            painter.drawLine(cx - off, cy - off, cx + off, cy + off)
-            painter.drawLine(cx - off, cy + off, cx + off, cy - off)
+#: 标题 / 正文字号（对齐 ``ElaDialogBase`` 的 15px 标题与 ``ElaText`` Body 的 13px）
+_TITLE_PIXEL_SIZE = 15
+_CONTENT_PIXEL_SIZE = 13
 
 
 class ElaConfirmDialog(_ThemeAwareMixin, QDialog):
-    """确认对话框。
+    """贴锚点弹出的确认弹框。
 
-    全 QPainter 自绘，带有标题、正文和两个图标按钮（确认 ✓ / 取消 ✕）。
+    表面自绘（``PopupBase`` + ``PopupBorder``，阴影边距见 ``SHADOW_MARGIN``），
+    文字与按钮是 Ela 原生控件：标题 15px DemiBold、正文 13px 自动换行，
+    ``取消`` / ``确定`` 为 :class:`ElaButton`（outlined / solid + primary）。
     支持深浅色主题自适应。
 
-    :param parent: 父组件
+    :param parent: 父组件，同时作为弹出位置的锚点
+    :param position: ``"bottom"`` 放锚点下方、``"top"`` 放上方（放不下自动翻边）
     """
 
     confirmed = pyqtSignal()
@@ -224,85 +96,120 @@ class ElaConfirmDialog(_ThemeAwareMixin, QDialog):
         self._title = "标题"
         self._content = ""
         self._border_radius = 8
-        self._title_pixel_size = 15
-        self._content_pixel_size = 13
         self._position = position  # "bottom" or "top"
         #: 阴影边距。``FramelessWindowHint`` 去掉了系统阴影，不自己画就完全没有
         #: 阴影（弹框比 toast / 气泡「扁」一层）。窗口尺寸要把这圈算进去。
         self._shadow_margin = SHADOW_MARGIN
 
         self.setWindowFlags(Qt.WindowType.Dialog | Qt.WindowType.FramelessWindowHint)
-        self.setMinimumSize(
-            280 + self._shadow_margin * 2, 150 + self._shadow_margin * 2
-        )
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+        #: 弹框宽度固定（轻量 popover 没有手动调宽的场景），高度随正文撑开。
+        self.setFixedWidth(_BOX_WIDTH + 2 * self._shadow_margin)
 
-        self._confirm_btn = _ElaConfirmButton(_ElaConfirmButton.TYPE_CONFIRM, self)
-        self._cancel_btn = _ElaConfirmButton(_ElaConfirmButton.TYPE_CANCEL, self)
+        sm = self._shadow_margin
+        self._title_label = ColorText(self)
+        self._title_label.setTextPixelSize(_TITLE_PIXEL_SIZE)
+        self._title_label.setTextWeight(QFont.Weight.DemiBold)
+        # 标题 / 正文都可能来自宿主或模型输出，必须按纯文本渲染。
+        self._title_label.setTextFormat(Qt.TextFormat.PlainText)
+        self._title_label.setWordWrap(False)
+        self._title_label.setVisible(bool(self._title))
+
+        self._content_label = ColorText(self)
+        self._content_label.setTextPixelSize(_CONTENT_PIXEL_SIZE)
+        self._content_label.setTextFormat(Qt.TextFormat.PlainText)
+        self._content_label.setWordWrap(True)
+        # 定高后默认是垂直居中；正文必须从顶部起排（否则标题与正文之间会凭空
+        # 多出半行，而底部又少半行）。
+        self._content_label.setAlignment(
+            Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop
+        )
+
+        # 按钮走库内统一按钮族：文字 + 主次层级（取消中性 / 确定实心主色）。
+        self._cancel_btn = ElaButton(
+            "取消",
+            variant="outlined",
+            color="default",
+            size="middle",
+            parent=self,
+        )
+        self._confirm_btn = ElaButton(
+            "确定",
+            variant="solid",
+            color="primary",
+            size="middle",
+            parent=self,
+        )
+        # Enter / Space 落在「当前聚焦的按钮」上（Windows 消息框惯例）：初始焦点
+        # 给「确定」，Tab 到「取消」后回车就是取消；两个按钮都没焦点时回落到
+        # 默认按钮「确定」。
+        self._cancel_btn.setAutoDefault(True)
+        self._confirm_btn.setAutoDefault(True)
+        self._confirm_btn.setDefault(True)
         self._confirm_btn.clicked.connect(self._onConfirm)
         self._cancel_btn.clicked.connect(self._onCancel)
 
         layout = QVBoxLayout(self)
-        # 按钮行落在圆角盒**内部**：不内缩的话按钮铺满整窗，方块状态层会盖到
-        # 阴影边距和圆角上（配合 _ElaConfirmButton._box_path 的裁剪）
+        # 边距 = 阴影边距 + 内容内缩；窗口尺寸把 shadow margin 算进来，子控件
+        # 不会压到阴影上。
         layout.setContentsMargins(
-            self._shadow_margin, 0, self._shadow_margin, self._shadow_margin
+            sm + _PAD_X, sm + _PAD_TOP, sm + _PAD_X, sm + _PAD_BOTTOM
         )
         layout.setSpacing(0)
-        layout.addStretch()
+        layout.addWidget(self._title_label)
+        layout.addSpacing(_TITLE_GAP)
+        layout.addWidget(self._content_label)
+        layout.addSpacing(_BODY_GAP)
 
-        btn_layout = QHBoxLayout()
-        btn_layout.setContentsMargins(0, 0, 0, 0)
-        btn_layout.setSpacing(0)
-        btn_layout.addWidget(self._confirm_btn, 1)
-        btn_layout.addWidget(self._cancel_btn, 1)
-        layout.addLayout(btn_layout)
+        button_layout = QHBoxLayout()
+        button_layout.setContentsMargins(0, 0, 0, 0)
+        button_layout.setSpacing(8)
+        button_layout.addStretch(1)
+        button_layout.addWidget(self._cancel_btn)
+        button_layout.addWidget(self._confirm_btn)
+        layout.addLayout(button_layout)
 
+        self.setTabOrder(self._cancel_btn, self._confirm_btn)
         self._onThemeChanged(eTheme.getThemeMode())
-        self.adjustSize()
+        self._refresh_size()
 
     # ── Public API ────────────────────────────────────────
 
     def setTitle(self, title: str) -> None:
         self._title = title
-        self.update()
+        self._sync_title_text()
+        # 空标题不占一行（``show(parent, title="", ...)`` 是合法调用）。
+        self._title_label.setVisible(bool(title))
+        self._refresh_size()
 
     def title(self) -> str:
         return self._title
 
     def setContent(self, content: str) -> None:
-        """正文；隐藏时按换行后的高度重算窗口大小。"""
+        """正文；按换行后的高度重算窗口大小。"""
         self._content = content
+        self._content_label.setText(content)
         self._refresh_size()
-        self.update()
 
     def content(self) -> str:
         return self._content
 
     def sizeHint(self) -> QSize:
-        """按**换行后的正文高度**给出窗口大小。
+        """窗口大小 = 固定宽度 + 布局按内容算出的高度。
 
-        没有它，类调用 ``show()`` 只有最小尺寸 288×158、正文区固定 50px
-        —— 8 行文案实测需要 144px，**一大半被裁掉**（用户看不到自己在确认什么）。
-        超过 ``_CONTENT_MAX_H`` 的部分仍裁切（无边框弹框没有滚动条）。
+        没有它，类调用 ``show()`` 会停在最小尺寸、正文被裁掉一大半（用户看不到
+        自己在确认什么）。正文超过 ``_CONTENT_MAX_H`` 的部分仍裁切（无边框弹框
+        没有滚动条）。
         """
-        sm = self._shadow_margin
-        font = self.font()
-        font.setPixelSize(self._content_pixel_size)
-        fm = QFontMetrics(font)
-        need = fm.boundingRect(
-            QRect(0, 0, 280 - 30, 10000),
-            Qt.TextFlag.TextWordWrap,
-            self._content,
-        )
-        content_h = max(50, min(need.height() + 4, _CONTENT_MAX_H))
-        box_h = _CONTENT_TOP + content_h + _CONTENT_BOTTOM_PAD + _BUTTON_ROW_H
-        return QSize(280 + 2 * sm, box_h + 2 * sm)
-
-    def _refresh_size(self) -> None:
-        """正文变化后重算窗口尺寸（可见时不动 —— 用户可能已手动调整过）。"""
-        if not self.isVisible():
-            self.adjustSize()
+        layout = self.layout()
+        width = _BOX_WIDTH + 2 * self._shadow_margin
+        if layout is None:
+            return super().sizeHint()
+        layout.activate()
+        height = layout.heightForWidth(width)
+        if height <= 0:
+            height = layout.sizeHint().height()
+        return QSize(width, max(height, self.minimumSizeHint().height()))
 
     def setBorderRadius(self, radius: int) -> None:
         self._border_radius = radius
@@ -343,8 +250,38 @@ class ElaConfirmDialog(_ThemeAwareMixin, QDialog):
 
     # ── Internal ──────────────────────────────────────────
 
-    def showEvent(self, event):
+    def _content_width(self) -> int:
+        return _BOX_WIDTH - 2 * _PAD_X
+
+    def _sync_title_text(self) -> None:
+        """标题单行显示，超宽按省略号截断（无边框窗口不能靠拉伸看全）。"""
+        font_metrics = QFontMetrics(self._title_label.font())
+        self._title_label.setText(
+            font_metrics.elidedText(
+                self._title,
+                Qt.TextElideMode.ElideRight,
+                self._content_width(),
+            )
+        )
+
+    def _sync_content_height(self) -> None:
+        """正文按当前宽度折行后的高度定高（上限 ``_CONTENT_MAX_H``）。"""
+        need = self._content_label.heightForWidth(self._content_width())
+        if need <= 0:
+            need = self._content_label.fontMetrics().lineSpacing()
+        self._content_label.setFixedHeight(min(need + 2, _CONTENT_MAX_H))
+
+    def _refresh_size(self) -> None:
+        self._sync_title_text()
+        self._sync_content_height()
+        self.adjustSize()
+
+    def showEvent(self, event) -> None:  # noqa: N802 (Qt 命名)
         super().showEvent(event)
+        # 初始焦点给「确定」（Enter / Space 都落到主操作），OtherFocusReason
+        # 不会触发 ElaButton 的键盘焦点环 —— 弹框一打开就套一圈主色环会被误读
+        # 成「已选中」。
+        self._confirm_btn.setFocus(Qt.FocusReason.OtherFocusReason)
         if self.parent():
             single_shot_on(self, 0, self._positionDialog)
 
@@ -359,7 +296,7 @@ class ElaConfirmDialog(_ThemeAwareMixin, QDialog):
         最大化窗口）时 ``y`` 直接落到屏幕外，弹框整块不可见。
         """
         anchor = self.parent()
-        if anchor is None:
+        if anchor is None or is_deleted(anchor) or is_deleted(self):
             return
         try:
             anchor_rect = QRect(anchor.mapToGlobal(QPoint(0, 0)), anchor.size())
@@ -412,7 +349,6 @@ class ElaConfirmDialog(_ThemeAwareMixin, QDialog):
     def paintEvent(self, _event: QPaintEvent) -> None:
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-        painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
         painter.setRenderHint(QPainter.RenderHint.TextAntialiasing)
 
         mode = self._theme_mode
@@ -423,45 +359,12 @@ class ElaConfirmDialog(_ThemeAwareMixin, QDialog):
 
         paintOverlayShadow(painter, self.rect(), margin=sm, radius=br)
 
-        # 之后所有坐标字面量（15/45/h-40 …）都按**盒子原点**算，所以整体平移一次，
-        # 不逐个加偏移 —— 少一处漏改就少一处错位。
+        # 之后所有坐标都按**盒子原点**算，所以整体平移一次，不逐个加偏移。
         painter.translate(sm, sm)
-        box = QRect(0, 0, w, h)
-
-        painter.setPen(Qt.PenStyle.NoPen)
-        painter.setBrush(eTheme.getThemeColor(mode, ElaThemeType.ThemeColor.BasicBase))
-        painter.drawRoundedRect(box, br, br)
-
-        # Title（超宽省略 —— 无边框窗口不能靠拉伸看全）
-        title_font = self.font()
-        title_font.setPixelSize(self._title_pixel_size)
-        title_font.setWeight(QFont.Weight.Bold)
-        painter.setFont(title_font)
-        painter.setPen(eTheme.getThemeColor(mode, ElaThemeType.ThemeColor.BasicText))
-        title_text = QFontMetrics(title_font).elidedText(
-            self._title, Qt.TextElideMode.ElideRight, w - 30
+        paintRoundedCard(
+            painter,
+            QRectF(0, 0, w, h),
+            background=surfacePopup(mode),
+            border=border(mode),
+            radius=br,
         )
-        painter.drawText(
-            QRect(15, 15, w - 30, 25),
-            Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop,
-            title_text,
-        )
-
-        content_font = self.font()
-        content_font.setPixelSize(self._content_pixel_size)
-        content_font.setWeight(QFont.Weight.Normal)
-        painter.setFont(content_font)
-        content_h = h - 40 - 45 - 15
-        if content_h > 0:
-            painter.drawText(
-                QRect(15, 45, w - 30, content_h),
-                Qt.TextFlag.TextWordWrap
-                | Qt.AlignmentFlag.AlignLeft
-                | Qt.AlignmentFlag.AlignTop,
-                self._content,
-            )
-
-        painter.setPen(
-            QPen(eTheme.getThemeColor(mode, ElaThemeType.ThemeColor.BasicBorder), 1)
-        )
-        painter.drawLine(0, h - 40, w, h - 40)

@@ -250,7 +250,7 @@ class ElaChip(ElaThemeWidget):
         mode = self._theme_mode
         if not self._is_colored():
             return eTheme.getThemeColor(mode, ElaThemeType.ThemeColor.BasicText)
-        key = (self._chip_color, mode)
+        key = (self._chip_color, mode, self._scheme()["accent"].name())
         if self._fg_cache and self._fg_cache[0] == key:
             return QColor(self._fg_cache[1])
         # 按**最强档 tint（press）**合成后的底色取色：hover / 空闲的对比度只会更高
