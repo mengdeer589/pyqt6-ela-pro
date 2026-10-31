@@ -23,27 +23,14 @@ from ..axes import chartFont, formatValue
 class VisualMapComponent:
     """连续视觉映射：值 → 颜色，右下 / 底部渐变条 + 两端数值标签。
 
-    option::
-
-        "visualMap": {"min": 0, "max": 100,
-                      "inRange": {"colors": ["#EBEFF5", "#3F5E8C"]},
-                      "orient": "vertical"|"horizontal"}
-
-    ``mapColor(v)`` 为公共方法：系列（map / heatmap 等）经
-    ``chart.components`` 查找本组件调用。colors 缺省为
-    primary.subtle → primary（T() 实时取，主题感知）。
-
-    **绑定**：``seriesIndex``（int）或 ``seriesId``（str）把本 visualMap
-    限定给某一个系列（ECharts 语义）；两者都不给就是「通用」，任何系列都能用。
-    没有绑定语义时，多个 map / heatmap 系列会**全部拿到同一个** visualMap
-    （原先是「谁排在前面谁赢」），于是给第二个系列配的独立色带永远不生效。
+    option: ``"visualMap": {"min": 0, "max": 100,
+    "inRange": {"colors": ["#EBEFF5", "#3F5E8C"]}, "orient": "vertical"}``。
+    ``mapColor(v)`` 供系列经 ``chart.components`` 查找调用；``seriesIndex`` /
+    ``seriesId`` 可把实例绑定到单个系列，都不给即通用件。
     """
 
     optionKey = "visualMap"
-    #: 顶层数组要为每个元素各建一个实例（ECharts 的 visualMap 就是数组语义）。
-    #: 不声明的话 ``visualMap: [{...}, {...}]`` 会把整个 list 塞进
-    #: ``dict(opt or {})`` 抛 ``ValueError``，被 ``_spawn_component`` 吞掉 ——
-    #: **一个 visualMap 都建不起来**。
+    #: 顶层数组逐项建实例；不声明时 ``dict(list)`` 抛错会被吞掉，一个都建不起来。
     spawnPerItem = True
 
     def __init__(self, chart, opt):
@@ -59,26 +46,19 @@ class VisualMapComponent:
             "horizontal" if str(self.opt.get("orient")) == "horizontal" else "vertical"
         )
         #: ``type="piecewise"`` 或给了 ``pieces``：分段色块而不是连续渐变
-        self._piecewise = (
-            str(self.opt.get("type") or "").strip().lower() == "piecewise"
-            or isinstance(self.opt.get("pieces"), list)
-        )
+        self._piecewise = str(
+            self.opt.get("type") or ""
+        ).strip().lower() == "piecewise" or isinstance(self.opt.get("pieces"), list)
         self._piece_rects = []  # [(QRectF, label, color)]
         self._bar = QRectF()
         #: 可拖拽把手的当前目标（``None`` / ``"min"`` / ``"max"``）
         self._drag = None
-        #: 色带代表的全量范围（``calculable`` 把手在这个区间内滑动；
-        #: ``min`` / ``max`` 是当前生效的映射范围，可被拖动收窄）
+        #: 色带代表的全量范围（``calculable`` 把手在此区间滑动；min/max 是当前映射范围）
         self._extent = (self.min, self.max)
 
     # -- 绑定 ---------------------------------------------------------------
     def bindsTo(self, series_index: int, series_id: str = "") -> bool:
-        """本 visualMap 是否服务于给定系列。
-
-        判定顺序（与 ECharts 一致）：显式绑定优先，其次「未绑定的通用
-        visualMap」，都不匹配才算不适用。**通用件必须排在显式绑定之后** ——
-        反过来的话一个都没绑定的 visualMap 会把所有系列都抢走。
-        """
+        """本 visualMap 是否服务于给定系列（显式绑定优先，其次通用件）。"""
         idx = self.opt.get("seriesIndex")
         sid = self.opt.get("seriesId")
         if isinstance(idx, int) and not isinstance(idx, bool):
@@ -248,8 +228,7 @@ class VisualMapComponent:
             self.min = min(value, self.max - margin)
         else:
             self.max = max(value, self.min + margin)
-        # 拖动改的是组件活值，不在系列层缓存键里 —— 必须 invalidateLayout()
-        # （顺带递增 _geometry_epoch），否则位图原样贴回、拖动完全不变色。
+        # 拖动改的是组件活值，不在系列层缓存键里，必须 invalidateLayout()。
         self.chart.invalidateLayout()
         self.chart.update()
         return True
@@ -268,7 +247,9 @@ class VisualMapComponent:
         mask.setAlpha(150)
         if self.orient == "vertical":
             p.fillRect(
-                QRectF(bar.left(), bar.top(), bar.width(), max(0.0, hi_pt.y() - bar.top())),
+                QRectF(
+                    bar.left(), bar.top(), bar.width(), max(0.0, hi_pt.y() - bar.top())
+                ),
                 mask,
             )
             p.fillRect(
@@ -282,7 +263,12 @@ class VisualMapComponent:
             )
         else:
             p.fillRect(
-                QRectF(bar.left(), bar.top(), max(0.0, lo_pt.x() - bar.left()), bar.height()),
+                QRectF(
+                    bar.left(),
+                    bar.top(),
+                    max(0.0, lo_pt.x() - bar.left()),
+                    bar.height(),
+                ),
                 mask,
             )
             p.fillRect(

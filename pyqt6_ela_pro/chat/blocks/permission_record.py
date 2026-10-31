@@ -33,22 +33,15 @@ from .collapsible import _CollapsibleBlock
 
 
 class PermissionRecord(_CollapsibleBlock):
-    """审批 / 提问的**时间线记录卡**（落定之后留在消息里备查）。
+    """审批 / 提问的时间线记录卡（落定后留档）：默认折叠成一行，点开看详情。
 
-    交互发生在输入区上方的 :class:`~pyqt6_ela_pro.chat.docks.
-    ElaChatPermissionDock` —— 那里才是「现在要你动手」的位置；答完就只剩「当时
-    问了什么、答了什么」需要留档，所以这里**默认折叠成一行**，点开才看详情，与
-    工具调用面板（``> 工具调用 (N)``）完全同一套折叠交互与外观。
-
-    与 :class:`PermissionCard` **不复用同一个 widget**：交互卡是大控件（题面 +
-    候选卡 + 页脚），记录卡是一行摘要 + 可展开的详情，两者的排版需求正好相反。
+    交互归输入区上方的 ``ElaChatPermissionDock``；与 :class:`PermissionCard` 不复用同一个 widget。
     """
 
     def __init__(
         self, permission: ElaChatPermission, parent: Optional[QWidget] = None
     ) -> None:
-        # **必须先于 super()** —— ``_CollapsibleBlock.__init__`` 末尾会调
-        # ``_apply_theme()``，那里已经要读 ``self._permission`` 了。
+        # 必须先于 super()：``_CollapsibleBlock.__init__`` 末尾会调 ``_apply_theme()`` 读它。
         self._permission = None
         self._detail_expanded = False
         super().__init__(title="", opened=False, parent=parent, surface=True)
@@ -87,9 +80,7 @@ class PermissionRecord(_CollapsibleBlock):
     def setPermission(self, permission: ElaChatPermission) -> None:  # noqa: N802
         """灌入审批快照并刷新标题与详情。
 
-        **默认折叠**（与 ``ToolGroupPanel`` 的 ``工具调用 (N)`` 同一约定）：记录是
-        给人「事后回看」的，不是让人在时间线里读的 —— 一条审批如果自带 200 行
-        diff，展开着会把后面所有消息顶出屏幕。详情有点的才给折叠箭头。
+        默认折叠：记录是给人事后回看的，一条自带 200 行 diff 的审批展开着会把后面所有消息顶出屏幕。
         """
         self._permission = permission
         self._detail_expanded = False
@@ -100,11 +91,9 @@ class PermissionRecord(_CollapsibleBlock):
 
     @staticmethod
     def _summary_title(permission: ElaChatPermission) -> str:
-        """一行摘要标题（记录卡默认折叠时唯一可见的东西）。
+        """一行摘要标题（记录卡折叠时唯一可见的东西）。
 
-        问答型**不拿 ``action`` 当标题** —— 提问没有工具名，宿主随手填的
-        ``action="question"`` / ``action="ask"`` 会原样漏给用户看（实测渲染出来是
-        「已允许一次：question」）。改用第一道题的短标签，答的是什么一眼可见。
+        问答型不拿 ``action`` 当标题：提问没有工具名，宿主随手填的 "question" 会漏给用户看。
         """
         labels = {
             ElaChatPermissionStatusType.Allowed: "已允许一次",
@@ -203,10 +192,8 @@ class PermissionRecord(_CollapsibleBlock):
     def _apply_theme(self) -> None:
         super()._apply_theme()
         if getattr(self, "_resources", None) is None:
-            # ``_CollapsibleBlock.__init__`` 末尾就会调过来，那时子控件还没建。
-            # 不挡住就是 AttributeError；而本类通常是在**点击信号的栈上**被构造的
-            # （用户点「允许一次」-> replied.emit -> 建记录卡），异常穿过 C++ 边界
-            # = 0xC0000409 静默终止。
+            # ``_CollapsibleBlock.__init__`` 末尾就会调过来，那时子控件还没建；本类常在
+            # 点击信号的栈上被构造，异常穿出 C++ 边界 = 0xC0000409。
             return
         mode = self._theme_mode
         permission = self._permission

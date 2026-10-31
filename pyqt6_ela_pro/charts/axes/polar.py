@@ -17,10 +17,8 @@ from .base import AxisModel, Coord
 class PolarCoord(Coord):
     """极坐标系：radiusAxis（value）+ angleAxis（category/value）。
 
-    option 键：``polar`` {``radius``（数值 / ``"N%"`` / ``[inner, outer]``，
-    默认 ``"80%"``）、``center``（``["50%", "50%"]``）、``radiusAxis``、
-    ``angleAxis``。``mapPoint(angle, radius)``：angle 为类别名/下标或数值，
-    radius 为数值；角度自正上方起顺时针。
+    ``polar`` 收 ``radius``（数值 / ``"N%"`` / ``[inner, outer]``，默认 ``"80%"``）
+    与 ``center``。``mapPoint(angle, radius)``：角度自正上方起顺时针。
     """
 
     kind = "polar"
@@ -28,9 +26,7 @@ class PolarCoord(Coord):
     def __init__(self, chart=None, option: dict = None):
         super().__init__(chart, option)
         polar = dict(single_option(self.option.get("polar"), "polar") or {})
-        aopt = dict(
-            single_option(self.option.get("angleAxis"), "angleAxis") or {}
-        )
+        aopt = dict(single_option(self.option.get("angleAxis"), "angleAxis") or {})
         a_default = "category" if aopt.get("data") else "value"
         self.angle_axis = AxisModel(aopt, a_default, self.chart)
         self.radius_axis = AxisModel(
@@ -153,7 +149,7 @@ class PolarCoord(Coord):
         fm = QFontMetricsF(font)
         ticks = self.radius_axis.ticks()
         span = self.radius_axis.vmax - self.radius_axis.vmin
-        # 环形网格（多边形 / 圆形）
+        # 环形网格
         for tv in ticks[1:]:
             frac = 1.0 if span == 0 else (tv - self.radius_axis.vmin) / span
             p.setPen(QPen(c_grid, 1))

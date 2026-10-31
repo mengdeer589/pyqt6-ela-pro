@@ -1,27 +1,8 @@
 """
-聊天消息数据模型（``pyqt6_ela_pro.chat``）。
+聊天消息数据模型：不可变快照 + 纯 JSON 持久化（``toDict`` / ``fromDict``）。
 
-消息由「不可变快照」描述：
-
-- 用户 / 系统消息：文本存于 ``text``，``parts`` 为空；
-- 助手消息：内容按 **步骤 + 分段** 组织为
-  :class:`ElaChatPart` 时间线（``parts``），分段类型见
-  :class:`ElaChatPartKindType`：
-  思考段（``Reasoning``）、正文段（``Text``，可多段）、
-  工具调用段（``Tool``）、步骤用量段（``Stats``）；
-  文本 / 思考 / 工具 / 统计等字段为 ``parts`` 的派生视图，由
-  :meth:`~ElaChatMessage.withParts` 自动重算。
-
-:class:`ElaChatMessage` 为不可变快照，由
-:meth:`~pyqt6_ela_pro.chat.view.ElaChatView.messages` 返回；
-修改请使用组件方法或 ``with*`` 复制器。
-
-**持久化**：每个数据类都提供 ``toDict()`` / ``fromDict()``，输出纯 JSON
-类型（``str`` / ``int`` / ``float`` / ``bool`` / ``None`` / ``list`` /
-``dict``），可直接 ``json.dumps`` 落库。``fromDict()`` 一律**容错**：缺字段
-取默认值、多余字段忽略、类型不对就强转，保证存储格式的版本演进不会让旧
-数据读不出来。写入时带 :data:`SCHEMA_VERSION`，读取方可用
-:meth:`ElaChatMessage.schemaOf` 判断版本。
+助手消息内容以 ``parts`` 时间线为唯一来源，``text`` / ``reasoning`` /
+``tool_calls`` / ``stats`` 是 :meth:`ElaChatMessage.withParts` 派生的视图。
 """
 
 from __future__ import annotations
@@ -48,9 +29,8 @@ def _as_str(value, default: str = "") -> str:
 def _as_int(value, default: int = 0) -> int:
     """容错取整数（浮点截断、字符串解析、失败取默认值）。
 
-    ``OverflowError`` 必须一并捕获：``int(float('inf'))`` 抛的是它，而它**不是**
-    ``TypeError`` / ``ValueError`` 的子类 —— 漏掉会让一个 ``inf`` 词元计数直接穿透
-    ``fromDict``（本该「一律容错」）。
+    必须显式捕获 ``OverflowError``：``int(float('inf'))`` 抛的是它，而它不是
+    ``TypeError`` / ``ValueError`` 的子类。
     """
     if value is None or isinstance(value, bool):
         return default
@@ -94,10 +74,9 @@ def _as_choice(value, allowed, default: str) -> str:
 
 
 def _as_bool(value, default: bool = False) -> bool:
-    """容错取布尔值（``bool`` 直取，``0/1`` 与 ``"true"/"false"`` 按语义解析）。
+    """容错取布尔值（``0/1`` 与 ``"true"/"false"`` 按语义解析）。
 
-    JSON / 存储把布尔写成字符串是常见的数据错误，而 ``bool("false")`` 是
-    ``True`` —— 一个 ``"false"`` 就能把单选悄悄翻成多选。
+    ``bool("false")`` 是 ``True``，字符串布尔必须显式解析。
     """
     if isinstance(value, bool):
         return value
@@ -132,9 +111,7 @@ class ElaChatStatusType(StrEnum):
 
     #: 正在流式生成
     Streaming = "streaming"
-    #: 已提交、等待模型首个输出（TTFT 阶段）。
-    #: **仅头部展示态** —— 消息 / 分段数据仍记 :data:`Streaming`，不进入
-    #: :data:`All`（不会写进持久化数据；气泡 ``_status`` 始终是 Streaming）
+    #: 已提交、等待模型首个输出（TTFT 阶段）；仅头部展示态，数据仍记 ``Streaming``
     Queued = "queued"
     #: 已完成
     Done = "done"
@@ -170,9 +147,7 @@ class ElaChatToolStatusType(StrEnum):
 def _format_size(size) -> str:
     """把字节数格式化为人类可读文本。
 
-    ``size`` 声明为 int，但恢复历史 / 外部喂入时可能是 ``"1.2 MB"`` 这类字符串
-    或 ``None``。这里做容错解析：解析不出就原样回显，而不是让 ``int()`` 抛
-    ValueError（``displaySize()`` 常在绘制路径上被调用）。
+    容错解析 ``"1.2 MB"`` 这类字符串；解析不出就原样回显（常在绘制路径上调用）。
     """
     if isinstance(size, str):
         text = size.strip()
@@ -233,9 +208,7 @@ class ElaChatAttachment:
     digest: str = ""
     #: MIME 类型（可选）
     mime: str = ""
-    #: 运行时图像（粘贴图片的原图；**不序列化**）—— 附件对象在输入区 ↔ 消息之间
-    #: 流转时带着它，撤回回填与消息气泡都据此渲染缩略图；落库 / 恢复历史后为
-    #: ``None``（回退为文件 chip，图片数据由宿主自行保存）
+    #: 运行时图像（粘贴图片的原图；**不序列化**，落库后为 ``None``）
     image: Optional[Any] = None
 
     #: 视为图片的扩展名
@@ -298,8 +271,7 @@ class ElaChatToolCall:
     result: str = ""
     #: 状态（见 :class:`ElaChatToolStatusType`）
     status: str = ElaChatToolStatusType.Running
-    #: 结构化附加数据（文件变更 / shell 状态 / 诊断等，JSON 安全）。
-    #: 由宿主填写，库只在渲染器上下文里原样交出（不做校验 / 不解释）。
+    #: 结构化附加数据（文件变更 / shell 状态 / 诊断等，JSON 安全；库原样交给渲染器）
     metadata: dict = field(default_factory=dict)
 
     @property
@@ -331,7 +303,9 @@ class ElaChatToolCall:
 
     def withMetadata(self, metadata) -> "ElaChatToolCall":
         """返回替换结构化附加数据后的新快照（非字典按空字典处理）。"""
-        return replace(self, metadata=dict(metadata) if isinstance(metadata, dict) else {})
+        return replace(
+            self, metadata=dict(metadata) if isinstance(metadata, dict) else {}
+        )
 
     # -- 持久化 ------------------------------------------------------------
 
@@ -350,9 +324,8 @@ class ElaChatToolCall:
     def fromDict(cls, data) -> "ElaChatToolCall":
         """从字典还原（容错）。
 
-        状态不在白名单内时**不回落成默认值**：一个存储里写着 ``"running"``
-        的调用必须保持 ``running``（宿主重启后仍可补结果），而未知状态宁可
-        原样保留也不要谎报成功。
+        状态不在白名单内也原样保留：存储里的 ``"running"`` 必须保持 running
+        （宿主重启后仍可补结果），未知状态宁可原样留着也不要谎报成功。
         """
         if not isinstance(data, dict):
             return cls(id="", name="")
@@ -371,20 +344,10 @@ class ElaChatToolCall:
 
 @dataclass(frozen=True)
 class ElaChatStats:
-    """消息用量统计快照（映射到参考实现的 token 徽标与提示）。
+    """消息用量统计快照（单步原始数字，:meth:`merge` 求整轮汇总）。
 
-    单步原始数字由服务端按次返回（一次 LLM 调用一份）；多步场景下
-    :meth:`merge` 把各步求和为**整轮汇总**（各轮分别计费，求和即该轮
-    实际计费量）。
-
-    **四路词元互不重叠**（对齐 opencode 的用量模型）：``prompt`` 只含**未命中
-    缓存**的输入 / ``completion``（含 ``reasoning``）/ ``cache_read`` /
-    ``cache_write``。OpenAI / DeepSeek 的 ``prompt_tokens`` 包含缓存命中，
-    ``chat._usage.stats_from_usage`` 会先扣掉；宿主直接构造本类时同样要按
-    「不含缓存」填，否则 ``sessionStats()`` 的四路和与 ``stats_cost()`` 会把
-    缓存算两遍。「当前上下文占用」的口径（最后一条有 tokens 的助手消息的四路
-    和）由 ``ElaChatView.sessionStats()`` 聚合，不靠这里的 ``total_tokens``
-    （那是服务端原始值，可能包含缓存，别拿它和四路混算）。
+    四路词元互不重叠：``prompt`` 只含**未命中缓存**的输入，``completion``
+    （含 ``reasoning``）/ ``cache_read`` / ``cache_write`` 各占一路。
     """
 
     #: 输入词元
@@ -405,23 +368,15 @@ class ElaChatStats:
     tps: float = 0.0
     #: 本步回复耗时（毫秒，0 表示未统计）
     duration_ms: float = 0.0
-    #: 本步花费（美元，0 表示未统计）
-    #:
-    #: **定价不归本库管** —— 模型价格会变、还分上下文长度阶梯，烤进 UI 库
-    #: 必然过期。两条路都留着：宿主可以在 ``binder.stats()`` 里自己算好塞进来，
-    #: 也可以只填词元、由 :func:`pyqt6_ela_pro.chat.stats_cost` 按传入的定价表
-    #: 现算。跨消息的会话总额**不在这里**（用 ``ElaChatView.sessionStats()``）。
+    #: 本步花费（美元，0 表示未统计）；定价表归宿主，库不内置
     cost_usd: float = 0.0
 
     @staticmethod
     def merge(items) -> Optional["ElaChatStats"]:
         """把多个步骤用量合并为整轮汇总（``None`` 与空序列返回 ``None``）。
 
-        - 四路词元与 ``cost_usd`` 求和（各轮 API 分别计费，求和即实际消耗）；
-        - ``ttft_ms`` 取首个非零值；
-        - ``tps`` 按合计输出 / 合计耗时重算（无耗时为 0）；
-        - ``duration_ms`` 置 0（整轮耗时由消息级字段承载，避免重复计数）；
-        - 仅一个非空元素时**原样返回**（保持对象身份）。
+        词元与 ``cost_usd`` 求和，``ttft_ms`` 取首个非零值，``tps`` 按合计输出 /
+        合计耗时重算，``duration_ms`` 置 0（整轮耗时由消息级字段承载）。
         """
         values = [item for item in (items or ()) if item is not None]
         if not values:
@@ -460,8 +415,9 @@ class ElaChatStats:
         )
 
     def tooltip(self, durationLabel: str = "耗时") -> str:
-        """组合提示文本（花费 / 首字 / 耗时 / 速度 / 缓存）；消息级端到端耗时
-        传 ``durationLabel="端到端"``。
+        """组合提示文本（花费 / 首字 / 耗时 / 速度 / 缓存）。
+
+        ``durationLabel`` 是耗时字段的前缀（消息级端到端耗时传 ``"端到端"``）。
         """
         # 先洗一遍：后端 usage 是外部数据，``inf`` 直接进 int()/格式化会把
         # Qt 槽链上的调用点炸掉（``int(inf)`` -> OverflowError）。
@@ -538,17 +494,13 @@ class ElaChatPartKindType(StrEnum):
     Tool = "tool"
     #: 步骤词元用量段
     Stats = "stats"
-    #: 合成上下文段（steer 插话回执 / 断流续写标记 / 其它系统注入的说明）。
-    #: 复用 :attr:`ElaChatPart.text` 装内容，**不新增字段** —— 这类段落的
-    #: 共同点就是「有文本、无结构化数据」，将来再加同类的也不用动数据模型。
+    #: 合成上下文段（steer 回执 / 断流续写标记等）；内容装 ``text``，不新增字段
     Synthetic = "synthetic"
-    #: 上下文压缩段（summary 装在 :attr:`ElaChatPart.text`，
-    #: :attr:`ElaChatPart.status` 装 ``streaming`` / ``done`` / ``error``）
+    #: 上下文压缩段（summary 在 ``text``，``status`` 记 streaming / done / error）
     Compaction = "compaction"
     #: 工具审批段（等用户确认；结构化数据在 :attr:`ElaChatPart.permission`）
     Permission = "permission"
-    #: 时间线通知段（模型 / agent / 目录切换、中断、指令更新、重启）。
-    #: 语义标签在 :attr:`ElaChatPart.notice_type`，文案在 ``text`` / ``detail``。
+    #: 时间线通知段（语义标签在 ``notice_type``，文案在 ``text`` / ``detail``）
     Notice = "notice"
 
     #: 全部合法类型（非枚举成员）
@@ -567,12 +519,7 @@ class ElaChatPartKindType(StrEnum):
 
 
 class ElaChatNoticeType(StrEnum):
-    """时间线通知类型（``kind == Notice`` 的语义标签）。
-
-    通知是**弱化的分隔行**，不是一个可展开卡片：模型切换 / agent 切换 /
-    工作目录切换 / 回合被中断 / 指令更新 / 进程重启。文案与副值由宿主提供，
-    库只负责排版与持久化（不翻译、不推断语义）。
-    """
+    """时间线通知类型（``kind == Notice`` 的语义标签）；库只排版与持久化，不推断语义。"""
 
     #: 模型切换（``detail`` 放模型名）
     ModelSwitched = "model-switched"
@@ -634,14 +581,7 @@ class ElaChatPermissionStatusType(StrEnum):
 
 @dataclass(frozen=True)
 class ElaChatOption:
-    """一个候选项（对齐 opencode 的 ``Question.Option`` / ``Form.Option``）。
-
-    **描述不是可选项** —— 截图级 UI 里每个选项都是两行：标题 + 一行说明
-    「这个选项意味着什么」。只给标题的选项列表逼着用户靠猜，而模型给出的
-    选项之间往往差别很微妙（截图里「新增/修改某个具体组件」vs「修 bug 或做
-    性能优化」就是这种）。早期实现用 ``options: tuple[str, ...]`` 只能一行，
-    描述信息在进组件之前就丢了。
-    """
+    """一个候选项（标题 + 一行说明）；描述不是可选项，缺了用户只能靠猜。"""
 
     #: 展示文本（也是回传的标识 —— opencode 的 ``value`` 恒等于 ``label``）
     label: str
@@ -667,16 +607,12 @@ class ElaChatOption:
 
 @dataclass(frozen=True)
 class ElaChatQuestion:
-    """一道待用户回答的问题（对齐 opencode 的 ``Question.Prompt``）。
+    """一道待用户回答的问题（``key`` + 短标签 + 正文 + 候选项）。
 
-    模型一次可以问**若干道**题（``questions[]``，``minItems 1``），组件把它们
-    做成**逐题向导**而不是一张长列表：header 显示「N / M 个问题」+ 可点击
-    的进度段，一次只展示一道。理由是长列表在窄列里会撑得非常高、用户要上下
-    扫，而向导强制「一题一题答」还顺带给了每题独立的草稿。
+    模型一次可问多道题，组件做成逐题向导（一次只展示一道、每题独立草稿）。
     """
 
-    #: 宿主侧的关联键（对齐 opencode 的 ``q0`` / ``q1`` / ``q2``…）。
-    #: 回传的答案以它为键，宿主据此对应回自己的问题列表。
+    #: 宿主侧的关联键；回传的答案以它为键
     key: str
     #: 短标签（对应 ``Form.Field.title``；opencode 的 ``header``，≤30 字）
     header: str = ""
@@ -728,32 +664,8 @@ class ElaChatQuestion:
 class ElaChatPermission:
     """一次工具执行审批请求（``kind == Permission`` 的分段载荷）。
 
-    **库只画卡 + 收集回复 + 发信号，绝不阻塞等待。** 在 Qt 里挂起等用户点
-    按钮会卡死事件循环（整个窗口变白）。流程是：
-
-    1. 宿主发现某次工具执行需要确认 -> :meth:`ElaChatView.beginPermission`；
-    2. 组件在时间线上画出审批卡并发出 ``permissionRequested``；
-    3. 宿主自行决定怎么挂起后端（可以真的等，也可以先记下继续跑别的）；
-    4. 用户作答 -> 组件更新卡片并发 ``permissionReplied``；
-    5. 宿主按回复恢复 / 中止后端。
-
-    **两种形态由 :attr:`questions` 是否为空区分**：
-
-    - **批准型**（``questions`` 为空）—— ``允许一次`` / ``始终允许`` /
-      ``拒绝…`` 三个动作，答案是空的；
-    - **问答型**（``questions`` 非空）—— 逐题向导，用户在候选项里挑（可多选
-      也可「输入自己的答案」），回传的 ``answer`` 是
-      ``json.dumps({key: str | [str, ...]})``：单选塌缩成标量、多选发整个
-      数组、**未答题整条不进 payload**（对齐 opencode 的
-      ``Object.fromEntries(flatMap(...))``）。
-
-    「始终允许」的规则持久化也归宿主 —— :attr:`resources` 把模式串原样交
-    出去（如 ``("src/*.py",)``），怎么匹配、存哪、作用域多大都是产品决策。
-
-    **未答复就崩溃/关话题的处理**：本段**不写进** ``ElaChatTurnJournal``
-    （对齐 opencode 把 permission/form 都当 ephemeral），重放时该段直接
-    消失、对应工具分段被结算成 ``Aborted`` —— 语义正确（那一轮确实被打断
-    了）。已答复的路径则通过既有的工具结果事件落进 journal，重放无差异。
+    库只画卡 + 收集回复 + 发信号，绝不阻塞等待（Qt 里挂起会卡死事件循环）。
+    ``questions`` 为空 = 批准型，非空 = 问答型（逐题向导）。
     """
 
     #: 请求 id（宿主与组件之间的关联键；同一条消息内唯一）
@@ -836,8 +748,7 @@ class ElaChatPermission:
     def fromDict(cls, data) -> Optional["ElaChatPermission"]:
         """从字典还原；``None`` / 非字典 / **空 ``request_id``** 返回 ``None``。
 
-        与 :meth:`ElaChatQuestion.fromDict` 对空 ``key`` 的口径一致：``request_id``
-        是宿主与组件之间的关联键，空的没法作答 / 没法回传，宁可整条丢掉。
+        ``request_id`` 是宿主与组件的关联键，空的没法作答，宁可整条丢掉。
         """
         if not isinstance(data, dict):
             return None
@@ -883,7 +794,11 @@ class ElaChatMention:
 
     def toDict(self) -> dict:
         """转为纯 JSON 字典。"""
-        return {"start": _as_int(self.start), "end": _as_int(self.end), "kind": _as_str(self.kind)}
+        return {
+            "start": _as_int(self.start),
+            "end": _as_int(self.end),
+            "kind": _as_str(self.kind),
+        }
 
     @classmethod
     def fromDict(cls, data) -> Optional["ElaChatMention"]:
@@ -980,9 +895,8 @@ class ElaChatPart:
     def fromDict(cls, data) -> Optional["ElaChatPart"]:
         """从字典还原；``None`` / 非字典 / **未知 ``kind``** 返回 ``None``。
 
-        未知 ``kind`` 必须丢弃而不是回落成 ``Text``：新版本加了分段类型、
-        旧版本读不懂时，把它当正文渲染出来的是一堆结构标记（调用方会看到
-        ``None`` 从而跳过），远比少渲染一段更安全。
+        未知 ``kind`` 必须丢弃而不是回落成 ``Text``：把新类型的结构标记当正文
+        渲染远比少渲染一段糟糕。
         """
         if not isinstance(data, dict):
             return None
@@ -1015,23 +929,9 @@ class ElaChatPart:
 class ElaChatMessage:
     """不可变消息快照（``messages()`` 返回值，修改请用组件方法）。
 
-    **派生字段与 ``parts`` 的关系**：助手消息以 ``parts`` 时间线为唯一
-    内容来源，``text`` / ``reasoning`` / ``reasoning_ms`` / ``tool_calls`` /
-    ``stats`` 是 :meth:`withParts` 根据分段自动重算的派生视图（步骤化消息
-    请始终经 ``parts`` 修改，直接改这些字段会被下一次 ``withParts`` 覆盖）；
-    用户 / 系统消息没有 ``parts``，文本直接存放在 ``text`` 字段，
-    使用 :meth:`withText` 等复制器即可。
-
-    **流式期间 ``text`` / ``reasoning`` 为空**：分段里的在途分片只存在于
-    气泡的缓冲中，**不写回** ``part.text``（见 ``ElaChatBubble.parts``），
-    所以由它派生的 ``text`` / ``reasoning`` 在回合结束前是空串。这是
-    「``part`` 自足可序列化」的代价 —— 好处是本对象在**任意时刻**都能直接
-    序列化落库，且读一次与读一百次结果相同；需要实时预览请用气泡的
-    ``text()`` / ``partText()``，或监听 ``messageUpdated``。
-
-    ``withText`` / ``withReasoning`` / ``withToolCalls`` / ``withStats``
-    等字段复制器面向「无分段」的普通消息或高级用例；``ElaChatView`` 内部的
-    助手消息更新一律走 ``withParts``。
+    助手消息以 ``parts`` 为唯一内容来源，``text`` / ``reasoning`` /
+    ``tool_calls`` / ``stats`` 由 :meth:`withParts` 派生；流式期间在途分片只
+    存在气泡缓冲里，所以派生字段在回合结束前是空串。
     """
 
     #: 消息序号（同一会话内自增，从 1 开始）
@@ -1054,8 +954,7 @@ class ElaChatMessage:
     model_variant: str = ""
     #: 显示用时间文本（由宿主提供，空则不显示）
     timestamp: str = ""
-    #: 投递方式（``steer`` = 插话；空 = 普通发送 / 队列）。
-    #: 仅用户消息有意义；``status == Queued`` 时表示「还没送达」。
+    #: 投递方式（``steer`` = 插话；空 = 普通 / 队列；仅用户消息有意义）
     delivery: str = ""
     #: 用户文本里的 @ 引用区间（仅用户消息；空 = 不做高亮）
     mentions: Tuple[ElaChatMention, ...] = field(default_factory=tuple)
@@ -1073,10 +972,7 @@ class ElaChatMessage:
     stats: Optional[ElaChatStats] = None
     #: 错误文本（错误卡片，空表示无错误）
     error: str = ""
-    #: 错误类型（``binder.error(errorType, message)`` 的第一个参数；空表示未知）。
-    #: **与 :attr:`error` 分开存**而不是拼进文案 —— 早期实现把类型拼成
-    #: ``"[TypeError] xxx"`` 一股脑塞进 ``error``，类型就此丢失，宿主无法
-    #: 据此决定「重试 / 换模型重试 / 直接放弃」三种动作里点亮哪个。
+    #: 错误类型（``binder.error(errorType, message)`` 的第一个参数；空表示未知）
     error_type: str = ""
     #: 助手消息内容分段（按加入顺序；用户 / 系统消息为空，文本见 ``text``）
     parts: Tuple[ElaChatPart, ...] = field(default_factory=tuple)
@@ -1106,17 +1002,20 @@ class ElaChatMessage:
     def withParts(self, parts) -> "ElaChatMessage":
         """替换内容分段并重算派生字段（text / reasoning / tool_calls / stats）。
 
-        ``Synthetic`` / ``Compaction`` / ``Permission`` 段的 ``text`` **不并入**
-        ``text`` —— 它们不是模型正文：插话回执是用户的旁注，压缩摘要是历史
-        的替代物（并进去等于把同一段历史算两遍），审批详情更不属于回答。
+        ``Synthetic`` / ``Compaction`` / ``Permission`` 段的 ``text`` 不并入
+        ``text`` —— 它们不是模型正文。
         """
         parts = tuple(parts or ())
-        text = "".join(item.text for item in parts if item.kind == ElaChatPartKindType.Text)
+        text = "".join(
+            item.text for item in parts if item.kind == ElaChatPartKindType.Text
+        )
         reasoning = "".join(
             item.text for item in parts if item.kind == ElaChatPartKindType.Reasoning
         )
         reasoningMs = sum(
-            item.duration_ms for item in parts if item.kind == ElaChatPartKindType.Reasoning
+            item.duration_ms
+            for item in parts
+            if item.kind == ElaChatPartKindType.Reasoning
         )
         toolCalls = tuple(
             item.tool_call
@@ -1185,9 +1084,7 @@ class ElaChatMessage:
             agent=self.agent if agent is None else str(agent or ""),
             model=self.model if model is None else str(model or ""),
             model_variant=(
-                self.model_variant
-                if modelVariant is None
-                else str(modelVariant or "")
+                self.model_variant if modelVariant is None else str(modelVariant or "")
             ),
         )
 
@@ -1195,7 +1092,11 @@ class ElaChatMessage:
         """返回替换 @ 引用区间后的新快照（只保留有效区间）。"""
         items = []
         for item in mentions or ():
-            value = item if isinstance(item, ElaChatMention) else ElaChatMention.fromDict(item)
+            value = (
+                item
+                if isinstance(item, ElaChatMention)
+                else ElaChatMention.fromDict(item)
+            )
             if value is not None and value.isValid:
                 items.append(value)
         return replace(self, mentions=tuple(items))
@@ -1263,10 +1164,8 @@ class ElaChatMessage:
     def toDict(self) -> dict:
         """转为纯 JSON 字典，可直接 ``json.dumps`` 落库。
 
-        只写**权威数据**：``parts`` 是助手消息的唯一真相，``text`` /
-        ``reasoning`` / ``tool_calls`` / ``stats`` 都是由它派生的，额外冗余
-        写出只是为了让「不装本库的读取方」（SQL 全文检索、导出）也能直接用。
-        读取时一律以 ``parts`` 重算（见 :meth:`fromDict`）。
+        ``parts`` 是助手消息的唯一真相，其余派生字段只是冗余写出来方便不装
+        本库的读取方；读取时一律以 ``parts`` 重算。
         """
         return {
             "schema": SCHEMA_VERSION,
@@ -1297,15 +1196,16 @@ class ElaChatMessage:
     def fromDict(cls, data) -> "ElaChatMessage":
         """从字典还原（容错：缺字段取默认、多余字段忽略、类型不对就强转）。
 
-        助手消息的派生字段**不信存储里的值**，一律用 ``parts`` 经
-        :meth:`withParts` 重算 —— 否则一份手工改过 / 来自旧版本的库会把
-        派生字段和分段搞成互相矛盾的状态，而这种矛盾在界面上很难看出来。
+        助手消息的派生字段不信存储里的值，一律用 ``parts`` 经 :meth:`withParts`
+        重算，避免派生字段与分段互相矛盾。
         """
         if not isinstance(data, dict):
             return cls(id=0, role=ElaChatRoleType.Assistant)
         base = cls(
             id=_as_int(data.get("id")),
-            role=_as_choice(data.get("role"), ElaChatRoleType.All, ElaChatRoleType.Assistant),
+            role=_as_choice(
+                data.get("role"), ElaChatRoleType.All, ElaChatRoleType.Assistant
+            ),
             text=_as_str(data.get("text")),
             status=_as_choice(
                 data.get("status"), ElaChatStatusType.All, ElaChatStatusType.Done

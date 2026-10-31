@@ -40,13 +40,9 @@ from ._helpers import PREVIEW_MAX_CHARS, RETRYABLE_ERROR_TYPES
 
 
 class SteerNotice(_ThemeAwareMixin, QWidget):
-    """插话回执行（``kind == Synthetic``）。
+    """插话回执行（``kind == Synthetic``）：左竖线 + ``↳ <文本>``。
 
-    渲染成一条极简的左竖线 + ``↳ <文本>``。**刻意不插一条用户气泡** ——
-    助手消息正在流式输出，中途插一条用户消息视觉上很怪（opencode 就是那么
-    做的，产物是时间线上「助手话说到一半、下面冒出一条用户消息」）。改成在
-    同一条助手消息内追加一行旁注，语义是「插话已送达」，视觉连续，且随消息
-    一起持久化。
+    刻意不插用户气泡 —— 助手正在流式输出，旁注形式视觉连续且随消息持久化。
     """
 
     def __init__(self, parent: Optional[QWidget] = None) -> None:
@@ -90,15 +86,9 @@ class SteerNotice(_ThemeAwareMixin, QWidget):
 
 
 class CompactionSeparator(_ThemeAwareMixin, ElaScrollPageArea):
-    """上下文压缩分隔卡（``kind == Compaction``）。
+    """上下文压缩分隔卡（``kind == Compaction``）：如实表达「历史已被摘要替代」。
 
-    「历史已被摘要替代」这件事**必须在时间线上如实表达**，否则用户看到的是
-    一条断层：模型突然「忘了」前面说过什么。渲染成一条虚线 + 说明 + 可折叠
-    的摘要正文（对齐 opencode ``SessionCompactionMessage``）。
-
-    **库不实现压缩算法**：``SHRINK_STEPS`` 收缩循环 / 摘要模板 / 词元估算
-    / transcript 边界全在 provider 抽象那一侧，超出 UI 库范围。本卡片只负责
-    「能表达 + 能持久化」—— 压不压、压哪段、摘要怎么来由宿主决定。
+    库只负责表达与持久化，压缩算法 / 摘要模板 / 词元估算全归宿主。
     """
 
     #: 展开 / 收起摘要
@@ -106,11 +96,7 @@ class CompactionSeparator(_ThemeAwareMixin, ElaScrollPageArea):
 
     #: 分隔文案模板（``{count}`` 会被替换成被压缩的历史条数）
     LABEL_TEMPLATE = "已压缩 {count} 条历史"
-    #: **调用方没给条数时**用的文案。
-    #:
-    #: 绝不能写「已压缩 0 条历史」—— ``historyCount`` 默认 0 是「不知道」的意思，
-    #: 不是「真的压了 0 条」。照实说，模型才不会被一条自相矛盾的时间线带偏
-    #: （实测截图里就是一行「已压缩 0 条历史」）。
+    #: 调用方没给条数时的文案：``historyCount`` 默认 0 是「不知道」，不是「压了 0 条」。
     LABEL_NO_COUNT = "已压缩历史"
 
     def __init__(self, parent: Optional[QWidget] = None) -> None:
@@ -124,9 +110,8 @@ class CompactionSeparator(_ThemeAwareMixin, ElaScrollPageArea):
         self._status = ElaChatStatusType.Done
         self._stats_text = ""
         self._body_built = False
-        # **显式记展开态**，不要从 ``self._body.isVisible()`` 反推：控件还没被
-        # show 过时 ``isVisible()`` 恒为 False（跟父链可见性走），反推出来的
-        # 「展开了吗」在离屏测试与真实挂载前都是错的。
+        # 显式记展开态，不从 ``self._body.isVisible()`` 反推：控件未 show 过时
+        # ``isVisible()`` 恒为 False（跟父链走）。
         self._opened = False
         self._summary_label: Optional[ElaText] = None
         self._preview: Optional[ColorText] = None
@@ -149,9 +134,7 @@ class CompactionSeparator(_ThemeAwareMixin, ElaScrollPageArea):
         self._chevron.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self._header.addWidget(self._chevron, 0, Qt.AlignmentFlag.AlignVCenter)
         layout.addLayout(self._header)
-        # 折叠态的摘要首行。整张卡折叠着也要能回答「到底压掉了什么」——
-        # 只留一行「已压缩 N 条历史」+ 箭头等于什么都没说（对齐 opencode 的
-        # ``SessionCompactionMessage``：分隔条下面就是摘要正文）。
+        # 折叠态的摘要首行：只留「已压缩 N 条」+ 箭头等于什么都没说。
         self._preview = ColorText(self)
         self._preview.setTextFormat(Qt.TextFormat.PlainText)
         self._preview.setTextInteractionFlags(
@@ -185,10 +168,9 @@ class CompactionSeparator(_ThemeAwareMixin, ElaScrollPageArea):
 
     @staticmethod
     def _preview_text(summary: str) -> str:
-        """折叠态那一行：摘要的首行，超长截断。
+        """折叠态那一行：摘要首行，超长按字符数截断。
 
-        ``ColorText`` 不按宽度省略（``ElaText.sizeHint`` 无视 ``wordWrap``），
-        所以只能自己按字符数截，省略号自己加。
+        ``ColorText`` 不按宽度省略（``ElaText.sizeHint`` 无视 ``wordWrap``），只能自己截。
         """
         for line in (summary or "").splitlines():
             line = line.strip()
@@ -235,9 +217,11 @@ class CompactionSeparator(_ThemeAwareMixin, ElaScrollPageArea):
             self._stats_text = ""
             self._sync_label()
             return
-        prompt = max(0, int(getattr(stats, "prompt_tokens", 0) or 0)) + max(
-            0, int(getattr(stats, "cache_read_tokens", 0) or 0)
-        ) + max(0, int(getattr(stats, "cache_write_tokens", 0) or 0))
+        prompt = (
+            max(0, int(getattr(stats, "prompt_tokens", 0) or 0))
+            + max(0, int(getattr(stats, "cache_read_tokens", 0) or 0))
+            + max(0, int(getattr(stats, "cache_write_tokens", 0) or 0))
+        )
         output = max(0, int(getattr(stats, "completion_tokens", 0) or 0)) + max(
             0, int(getattr(stats, "reasoning_tokens", 0) or 0)
         )
@@ -327,16 +311,8 @@ class CompactionSeparator(_ThemeAwareMixin, ElaScrollPageArea):
 class ErrorCard(_ThemeAwareMixin, ElaScrollPageArea):
     """错误卡片（左 danger 竖线 + 图标 + 标题 + 详情 + 动作区）。
 
-    动作区（**手动重试**，对齐 opencode 的 ``session-retry.tsx``）按错误类型
-    点亮：
-
-    - 「重试」—— 同参数重发。仅 :data:`RETRYABLE_ERROR_TYPES` 里的类型
-      有意义（限流 / 超时 / 网络 / 5xx 这类**换次机会大概率会成功**的错误）；
-      参数错误、鉴权失败、内容过滤这类重试只会再失败一次，不给按钮；
-    - 「重新生成」—— 换采样重来，对任何错误都有意义，恒显示（复用气泡
-      底部已有的 ``regenerateRequested`` 通道，不另开一条）。
-
-    两个动作都只发信号，**不自己发请求** —— 后端怎么重试是宿主的事。
+    「重试」只对 :data:`RETRYABLE_ERROR_TYPES` 里的类型显示（换次机会大概率成功）；
+    「重新生成」对任何错误都有意义。两个动作都只发信号，不自己发请求。
     """
 
     #: 点击「重试」（由气泡转发成 view / widget 的 ``retryRequested``）
@@ -388,14 +364,8 @@ class ErrorCard(_ThemeAwareMixin, ElaScrollPageArea):
     def setMessage(self, message: str, errorType: str = "") -> None:
         """设置错误文本与类型（空文本则隐藏整张卡）。
 
-        :param message: 面向用户的错误文本
-        :param errorType: 错误类型（``"RateLimit"`` / ``"Timeout"`` / ...）。
-            **只用于决定动作可用性，不拼进文案** —— 早期实现把它格式化成
-            ``"[TypeError] ..."`` 塞进 message，类型就此丢失，宿主无法据此
-            点亮「重试」还是「换个模型重试」。
-
-        动作区按类型给（:data:`RETRYABLE_ERROR_TYPES` 命中 -> 点亮「重试」，
-        任何类型都点亮「重新生成」）；两个都不可用时动作区隐藏。
+        :param errorType: 错误类型（``"RateLimit"`` / ``"Timeout"`` / ...），
+            只用于决定动作可用性，不拼进文案 —— 类型一旦格式化进文本就取不回来。
         """
         self._message = message or ""
         self._error_type = str(errorType or "")
@@ -428,7 +398,6 @@ class ErrorCard(_ThemeAwareMixin, ElaScrollPageArea):
                 key="retry",
                 callback=self.retryRequested.emit,
             )
-        # 「重新生成」对任何错误都有意义（换采样重来），所以恒有
         if self._message:
             self._actions.addButton(
                 icon=ElaIconType.IconName.RotateLeft,

@@ -24,9 +24,8 @@ from ._shared import _smooth_path
 class ThemeRiverSeriesRenderer(SeriesRenderer):
     """主题河：时间 × 系列的流带图。
 
-    数据：``[[时间, 值, 系列名], ...]``（时间为字符串，ISO 日期可排序）。
-    流带平滑（贝塞尔）、居中基线（各时刻总宽关于绘图区中线对称），
-    自带底部时间轴标签（约 5 个均布刻度）。
+    数据：``[[时间, 值, 系列名], ...]``（时间为字符串，ISO 日期可排序）。流带
+    平滑、居中基线（各时刻总宽关于绘图区中线对称），自带底部时间轴标签。
     """
 
     def __init__(self, chart, opt):
@@ -157,7 +156,7 @@ class ThemeRiverSeriesRenderer(SeriesRenderer):
                 Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignTop,
                 self._times[i],
             )
-        # 流带标签（ECharts themeRiver label：带端显示系列名）
+        # 流带标签（带端显示系列名）
         label_opt = dict(self.opt.get("label") or {})
         if bool(label_opt.get("show", True)) and n:
             label_font = self.labelFont()

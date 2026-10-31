@@ -46,25 +46,13 @@ from ._shared import (
 
 
 class LineSeriesRenderer(_LineSamplingMixin, _LineSymbolMixin, SeriesRenderer):
-    """折线图（完整版，内置 tsdownsample 动态降采样）。
+    """折线 / 面积系列（含采样、断点、符号与标签）。
 
-    option 键：
-    - ``mode``: ``"lines"``（默认，只有线）/ ``"markers"`` / ``"lines+markers"``；
-    - ``smooth``: bool 或 0~1 平滑系数（Catmull-Rom → 贝塞尔）；
-    - ``areaStyle``: dict 或真值，面积填充（透明渐变），
-      ``areaStyle.opacity`` 可调（默认 0.22）；
-    - ``step``: "start" | "middle" | "end" 阶梯线；
-    - ``showSymbol``: 兼容键；显式 ``True`` 等价 ``lines+markers``，``False`` 只画线；
-    - ``symbol``: 数据点形状（显式非 ``"none"`` 时也启用点）；``symbolSize`` 直径 px（默认 6）；
-    - ``lineStyle``: {"type": "solid|dashed|dotted", "width": px, "color": ...}；
-    - ``sampling``: True（默认）/ False / dict：
-      {"algorithm": "minmax"|"m4"|"lttb"|"minmaxLTTB",
-       "threshold": 启用采样的点数下限（默认 2000），
-       "pointsPerPixel": 每像素目标点数（默认 2）}；
-      大数据时按「当前绘图范围（x 轴数值窗口）× 画布像素宽度」动态采样，
-      只渲染窗口内数据，范围 / 尺寸 / 数据变化时自动重采样；
-    - 支持 grid / polar（闭合）/ singleAxis 坐标系；
-    - 过渡动画：旧→新数据插值（采样路径按原始下标对齐）。
+    option 键：``mode``（``lines`` / ``markers`` / ``lines+markers``）、
+    ``smooth``、``areaStyle``、``step``、``symbol`` / ``symbolSize``、
+    ``lineStyle``、``connectNulls``、``sampling``（True / False / dict：
+    algorithm / threshold / pointsPerPixel）。支持 grid / polar（闭合）/
+    singleAxis 坐标系；过渡动画按原始下标对齐旧数据。
     """
 
     def __init__(self, chart, opt):
@@ -86,21 +74,18 @@ class LineSeriesRenderer(_LineSamplingMixin, _LineSymbolMixin, SeriesRenderer):
         self._y_vals = []  # Python 回退路径的 y 值（含 None）
         self._x_vals = []  # Python 回退路径的 x 原始值
         self._np_cache_key = None  # (id(data), len(data))
-        #: ``_stacked_data`` 的结果缓存（见该方法）。条目形如
-        #: ``(key, own, srcs, base, out)``，``own`` / ``srcs`` 是**强引用**，
-        #: 用来在复核时做 ``is`` 比较兼杜绝 id 复用。
+        #: ``_stacked_data`` 的结果缓存：``(key, own, srcs, base, out)``，
+        #: ``own`` / ``srcs`` 是**强引用**，复核时做 ``is`` 比较兼杜绝 id 复用。
         self._stacked_cache = None
-        # 当前缓存所依据的数据对象（**强引用**）。裸 id 单独用不可靠：对象被
-        # 回收后 id 会被复用，可能把上一份数据的 numpy 视图当成当前的。持引用
-        # 既保证 id 有效，也让 `data is self._data_ref` 成为精确的身份判据。
+        # 缓存所依据的数据对象（**强引用**）：裸 id 会因对象回收被复用，
+        # 持引用才能用 ``data is self._data_ref`` 精确判身份。
         self._data_ref = None
         self._cached_len = -1  # ``_data_ref`` 生效时的长度（检测原地增长）
-        # 采样结果 LRU（键 = 数据身份 + 窗口首尾 + 预算 + 算法）+ 「全景视图」
-        # 常驻槽 —— 全景最贵、且是缩放往返的必经点，淘汰时跳过它。
+        # 采样结果 LRU（键 = 数据身份 + 窗口 + 预算 + 算法）+ 全景常驻槽
+        # （全景最贵且是缩放往返的必经点，淘汰时跳过）。
         self._sample_lru: OrderedDict = OrderedDict()
         self._full_sample_key = None
-        # 乱序 x 的窗口缓存（单调 x 走 searchsorted，无需缓存）；数据身份变更
-        # （``_load_data`` 刷新）时整体作废。
+        # 乱序 x 的窗口缓存（单调 x 走 searchsorted，无需缓存），数据身份变更时作废。
         self._win_cache_key = None
         self._win_cache = None
         # x 时间基一次性分析（见 ``_downsample.analyze_x``）：
@@ -113,18 +98,12 @@ class LineSeriesRenderer(_LineSamplingMixin, _LineSymbolMixin, SeriesRenderer):
         self._nearest_x_sorted = None
         self._nearest_index_sorted = None
 
-    # -- 数据解析 ---------------------------------------------------------
-
-    # -- 采样参数 ---------------------------------------------------------
-
-    # -- 采样缓存（LRU + 全景常驻槽）-------------------------------------
-
     # -- 布局 -------------------------------------------------------------
     def plotMode(self) -> str:
         """折线绘制模式（Plotly 语义）：``lines`` / ``markers`` / ``lines+markers``。
 
-        默认 ``lines``（线就是线，不画点）；显式 ``showSymbol: true`` 或
-        ``symbol``（非 none）保持旧 ECharts 习惯，视作 ``lines+markers``。
+        默认 ``lines``；显式 ``showSymbol: true`` 或 ``symbol``（非 none）
+        视作 ``lines+markers``。
         """
         raw = self.opt.get("mode")
         if isinstance(raw, str) and raw.strip():
@@ -158,10 +137,8 @@ class LineSeriesRenderer(_LineSamplingMixin, _LineSymbolMixin, SeriesRenderer):
         self._point_idx = []
         if coord is None:
             return
-        # 堆叠折线 / 面积图的值域必须含堆叠和（``setSeries`` 只按单值算），
-        # 否则上层系列被裁到绘图区外。**只有 stack 才走这里**：普通折线
-        # 的轴范围已由 ``setSeries`` 的 numpy 快路径算好，再调
-        # ``_grid_value_extent`` 会退化成百万级 Python 循环。
+        # 堆叠折线的值域必须含堆叠和（``setSeries`` 只按单值算），否则上层系列被裁。
+        # 只有 stack 走这里：普通折线的范围已由 numpy 快路径算好。
         if isinstance(coord, GridCoord) and self.opt.get("stack"):
             if coord.y_axis.type in ("value", "log"):
                 _fix_value_axis(coord.y_axis, self.chart, self.opt, "y")
@@ -170,9 +147,7 @@ class LineSeriesRenderer(_LineSamplingMixin, _LineSymbolMixin, SeriesRenderer):
         self._load_data()
         single = getattr(coord, "kind", "") == "singleAxis"
 
-        # 采样决策：**所有轴类型统一抽稀**（此前只对 grid value-x + numpy 生效，
-        # category / polar / 非 numpy 数据全量映射 —— 1M 点会画出上万段线，
-        # 单帧能到 9.5s）。三层兜底：tsdownsample → numpy 按桶 min/max →
+        # 采样对所有轴类型生效：三层兜底 tsdownsample → numpy 按桶 min/max →
         # 纯 Python 等距抽稀。
         enabled, threshold, ppb, algo = self._sampling_params()
         plot_w = self._plot_pixel_width(coord)
@@ -186,13 +161,9 @@ class LineSeriesRenderer(_LineSamplingMixin, _LineSymbolMixin, SeriesRenderer):
             first, last, n_win = _win_span(window, self._data_len)
             sampled = None
             if enabled and n_win > threshold and n_win > 0:
-                # 缓存键必须包含两项身份信息：
-                # ① **数据身份** —— 否则「换成等长的另一份数据」会得到完全相同的键
-                #    而跳过重算，用旧数据的采样下标去画新数据（尖峰错位 / 漏点）。
-                #    这里用 ``_load_data`` 刚刷新过的 ``_np_cache_key``（含 id+len）。
-                # ② **窗口范围** —— 缩放 / 平移后窗口内点数可能不变（n_win 相同），
-                #    但采样点集必须按新窗口重新计算。用窗口首尾下标表达（value 轴与
-                #    category 轴通用；category 轴没有 vmin/vmax 可比）。
+                # 缓存键必须含两项身份信息：① 数据身份（否则换成等长的另一份
+                # 数据会命中旧采样下标）；② 窗口范围（缩放后窗口内点数可能不变，
+                # 但采样点集必须按新窗口重算）。
                 cache_key = (
                     self._np_cache_key,
                     self._data_len,
@@ -225,10 +196,8 @@ class LineSeriesRenderer(_LineSamplingMixin, _LineSymbolMixin, SeriesRenderer):
                 self._sampled = sampled is not None and sampled.size < n_win
             sel = sampled if sampled is not None else window
         elif enabled and self._data_len > threshold:
-            # 纯 Python 兜底路径（数据不是纯数值：dict 项 / 混合类型 / 含 None）：
-            # **先按窗口裁剪**（``_py_window``），再在窗口内等距抽稀到
-            # 「每像素约 ppb 点」。不裁剪的话 stride 会跑在全量上 —— 缩放后
-            # 曲线只能覆盖窗口的一小段（越缩放越稀）。
+            # 纯 Python 兜底路径（dict 项 / 混合类型 / 含 None）：先按窗口裁剪，
+            # 再在窗口内等距抽稀；不裁剪的话缩放后曲线只覆盖窗口一小段。
             axis = coord.x_axis if isinstance(coord, GridCoord) else None
             window = self._py_window(axis)
             base = range(self._data_len) if window is None else window
@@ -244,9 +213,8 @@ class LineSeriesRenderer(_LineSamplingMixin, _LineSymbolMixin, SeriesRenderer):
         if sel is None and self._np_y is None:
             sel = list(range(self._data_len))
 
-        # 向量化快路径：一次算完窗口内所有点的屏幕坐标（逐点 mapPoint 每点
-        # ~6µs，1M 点就是 2.4s）。仅在 numpy 路径 + grid 直角坐标下可用；
-        # 连续窗口 / 全量走**切片视图**（免物化整段下标数组与 y 拷贝）。
+        # 向量化快路径：一次算完窗口内所有点的屏幕坐标（逐点 mapPoint 每点 ~6µs）。
+        # 仅 numpy 路径 + grid 直角坐标可用；连续窗口 / 全量走切片视图。
         px = py = None
         abs_idx = None
         base = 0
@@ -329,9 +297,8 @@ class LineSeriesRenderer(_LineSamplingMixin, _LineSymbolMixin, SeriesRenderer):
 
         self._apply_gap_breaks(coord, plot_w)
 
-        # 数据点符号的屏幕坐标**在布局期算一次**（原先每次 paint 都重映射，
-        # 实测 1M 采样态每帧 ~11ms 花在这里）。点数量再按像素密度抽稀：
-        # 相邻符号至少隔 ~10px，否则密集点互相叠成一坨、纯属浪费。
+        # 符号的屏幕坐标在布局期算一次（每次 paint 重映射在 1M 采样态每帧 ~11ms），
+        # 点数量再按像素密度抽稀（相邻至少 ~10px）。
         self._symbol_items = self._build_symbol_items(coord, single, plot_w)
         self._build_prev_map(coord, single, ppb, algo, threshold)
 
@@ -423,15 +390,9 @@ class LineSeriesRenderer(_LineSamplingMixin, _LineSymbolMixin, SeriesRenderer):
     def _line_path(self, seg):
         """按 smooth / step 构建一段折线几何。
 
-        返回值 ``(path, pts)``：
-
-        * ``path is None`` —— 纯折线（直线段 / step），调用方**批量**
-          ``drawPolyline(QPolygonF(pts))``（实测比逐段 ``drawLine`` 快 8 倍量级，
-          陡峭数据也不吃亏）；
-        * ``path`` 非空 —— 只在 ``smooth``（贝塞尔）时出现，必须走
-          ``QPainterPath``。
-
-        seg: [QPointF]（≥1）。
+        返回 ``(path, pts)``：``path is None`` 表示纯折线（直线段 / step），
+        调用方批量 ``drawPolyline(QPolygonF(pts))``；非空只在 ``smooth``
+        （贝塞尔）时出现。
         """
         step = self.opt.get("step") or ""
         if isinstance(step, (list, tuple)):
@@ -507,10 +468,8 @@ class LineSeriesRenderer(_LineSamplingMixin, _LineSymbolMixin, SeriesRenderer):
         if isinstance(ls.get("color"), str) and ls["color"]:
             color = parse_color(ls["color"])
         polar = getattr(coord, "kind", "") == "polar"
-        # 大数据（超采样阈值）：QPainterPath / drawPolyline 对陡峭线段序列
-        # （minmax 保形锯齿）的光栅化会退化到每段 ~1ms（1856 段可达秒级），
-        # 逐条 drawLine 仅 ~10ms —— 此处对 heavy 数据改用逐段直线绘制；
-        # smooth / step 在 heavy 时退化为直线（ECharts 大数据同策略）
+        # 大数据（超采样阈值）：陡峭线段序列的光栅化会让 polyline / path 退化到
+        # 每段 ~1ms；smooth / step 在 heavy 时退化为直线（ECharts 大数据同策略）。
         _, heavy_threshold, _, _ = self._sampling_params()
         heavy = self._data_len > heavy_threshold
 
@@ -530,8 +489,7 @@ class LineSeriesRenderer(_LineSamplingMixin, _LineSymbolMixin, SeriesRenderer):
         segs = []
         seg = []
         seg_base = []
-        # ``connectNulls``（ECharts）：断点（None / NaN）**不切开**线段，直接连到
-        # 下一个有效点；默认 False 时按断点分段（Plotly 的 ``connectgaps`` 反向）。
+        # ``connectNulls``：断点（None / NaN）不切开线段；默认 False 时按断点分段。
         connect_nulls = bool(self.opt.get("connectNulls", False))
         for pos, pt in enumerate(pts):
             if pt is None:
@@ -562,8 +520,8 @@ class LineSeriesRenderer(_LineSamplingMixin, _LineSymbolMixin, SeriesRenderer):
             for seg_pts, seg_bases in segs:
                 if len(seg_pts) < 2:
                     continue
-                # 几何点直接来自 ``_line_path``（纯折线时 path 为 None）：
-                # 填充走 QPolygonF + drawPolygon（单次 C++ 调用），不再逐点 lineTo。
+                # 几何点直接来自 ``_line_path``：填充走 QPolygonF + drawPolygon
+                # （单次 C++ 调用）。
                 _path, geom_pts = self._line_path(seg_pts)
                 fill = QPolygonF(list(geom_pts))
                 if polar:
@@ -615,7 +573,7 @@ class LineSeriesRenderer(_LineSamplingMixin, _LineSymbolMixin, SeriesRenderer):
             pen_color.setAlphaF(max(0.0, min(1.0, line_opacity)))
         pen = QPen(pen_color, width)
         if heavy:
-            # 大数据：RoundCap 每段圆头光栅化慢 5 倍，密集线段下不可见，
+            # 大数据：RoundCap 每段圆头光栅化慢 5 倍且密集下不可见，
             # 改用默认 FlatCap / BevelJoin
             pen.setCapStyle(Qt.PenCapStyle.FlatCap)
             pen.setJoinStyle(Qt.PenJoinStyle.BevelJoin)
@@ -636,10 +594,9 @@ class LineSeriesRenderer(_LineSamplingMixin, _LineSymbolMixin, SeriesRenderer):
             pen.setJoinStyle(Qt.PenJoinStyle.MiterJoin)
         elif join_name == "round":
             pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
-        # 宽笔（>1px）在 **自重叠折线** 上会踩 Qt stroker 的爆炸路径，实测
-        # （2px + AA + 1856 段竖笔）：``drawPolyline`` 5034ms、``QPainterPath``
-        # 5097ms，而 ``drawLines`` 批量 20ms；10 万段时 polyline 184s。
-        # 细笔（≤1px）三者都在 10ms 量级，用更省的 drawPolyline。
+        # 宽笔（>1px）在**自重叠折线**上会踩 Qt stroker 的爆炸路径：
+        # ``drawPolyline`` / ``QPainterPath`` 单帧可达数秒，``drawLines`` 批量只要
+        # 20ms；细笔（≤1px）三者都在 10ms 量级，用更省的 drawPolyline。
         wide_pen = float(pen.widthF()) > 1.0 + 1e-6
         lt = str(ls.get("type") or "solid")
         if lt in ("dashed", "dash"):
@@ -652,7 +609,7 @@ class LineSeriesRenderer(_LineSamplingMixin, _LineSymbolMixin, SeriesRenderer):
             if len(seg_pts) < 2:
                 continue
             path, geom_pts = self._line_path(seg_pts)
-            # smooth 的贝塞尔同样是「宽笔 + 稠密自重叠」的高危几何：点太多时
+            # smooth 的贝塞尔同样是「宽笔 + 稠密自重叠」高危几何，点太多时
             # 退化成直线段（ECharts 大数据下 smooth 同样退化）。
             if path is not None and not (wide_pen and len(geom_pts) > 2000):
                 if polar:
@@ -668,8 +625,7 @@ class LineSeriesRenderer(_LineSamplingMixin, _LineSymbolMixin, SeriesRenderer):
             else:
                 p.drawPolyline(QPolygonF(points))
 
-        # 数据点符号 / 标签：小数据全画；大数据用布局期算好的像素密度抽稀清单。
-        # Plotly 语义：默认只有线；mode="markers"/"lines+markers" 才画点。
+        # 数据点符号 / 标签：小数据全画，大数据用布局期算好的像素密度抽稀清单。
         symbol_name = str(self.opt.get("symbol") or "emptyCircle")
         symbol_rotate = _to_float(self.opt.get("symbolRotate"), 0.0)
         show_label = self.labelShown()
@@ -698,8 +654,8 @@ class LineSeriesRenderer(_LineSamplingMixin, _LineSymbolMixin, SeriesRenderer):
             uni_color = (
                 (uni["color"] or self.chart.colorForSeries(self)) if uni else None
             )
-            # 统一外观 + 无 hover 强调 + 无标签：位图贴图（实测 5.5k 点
-            # 3.5ms，而逐点 drawEllipse 14.7ms、合并 QPainterPath 204ms）
+            # 统一外观 + 无 hover 强调 + 无标签：位图贴图（比逐点 drawEllipse
+            # 快一个量级，合并 QPainterPath 反而最慢）
             if (
                 uni is not None
                 and not emphasized
@@ -914,8 +870,7 @@ class LineSeriesRenderer(_LineSamplingMixin, _LineSymbolMixin, SeriesRenderer):
     def hitTest(self, pos: QPointF):
         best = None
         best_d = self.chart.hitRadius()  # 命中半径 px（tooltip.hitRadius）
-        # 动画期用「画出来的那份」折线点（与 ``paint`` 同一份插值），
-        # 否则会命中动画终点位置上的点 —— 视觉上完全对不上。
+        # 动画期用画出来的那份折线点，否则会命中动画终点位置上的点。
         pts = (
             self._points if self._anim_t >= 1.0 else self._animated_points(self._anim_t)
         )
@@ -952,9 +907,8 @@ class LineSeriesRenderer(_LineSamplingMixin, _LineSymbolMixin, SeriesRenderer):
         y = self._raw_value(idx)
         if y is None:
             return None
-        # 命中点坐标：精确下标优先，否则取采样集中最近的原始下标。
-        # ``_point_idx`` 升序，二分即可 —— 原实现每次线性扫全部采样点，
-        # 鼠标每移动一次、每条系列都要付 O(采样点数)。
+        # 命中点坐标：精确下标优先，否则取采样集中最近的原始下标
+        # （``_point_idx`` 升序，二分即可）。
         pos = None
         if self._point_idx:
             ids = self._point_idx

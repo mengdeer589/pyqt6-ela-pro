@@ -1,4 +1,4 @@
-"""地图系列（从 ``components`` 归位：它是系列，不是组件）。"""
+"""地图系列（type="map"）。"""
 
 from __future__ import annotations
 
@@ -34,22 +34,10 @@ DEMO_MAP = {
 class MapSeriesRenderer(SeriesRenderer):
     """简化地图系列（type="map"）。
 
-    option::
-
-        {"type": "map", "map": "demo"|自定义名, "nameProperty": "name",
-         "data": [{"name": "华北", "value": 120, "itemStyle": {...}}, ...]}
-
-    - ``map`` 为 ``"demo"``（或缺省）时使用内置示意地图 ``DEMO_MAP``；
-    - 自定义地图经 ``option["geo"]["regions"] = {"名称": [[x, y], ...]}``
-      传入多边形顶点列表（任意平面坐标，自动等比缩放到绘图区）；
-    - 区域着色：优先经 ``chart.components`` 中 visualMap 组件的
-      ``mapColor(v)``，其次 ``itemStyle.color``，否则按 primary.subtle →
-      primary 色带插值；
-    - ``nameProperty``：区域标签取自 data 项的该键（缺省 "name"）；
-    - ``roam``：True / ``1`` / ``"true"`` / ``"scale"`` / ``"move"`` 控制滚轮
-      缩放 + 拖拽平移（ECharts 语义；默认 False）；``zoom`` 初始缩放；
-      ``resetRoam()`` 复位。**数字与布尔字符串都按 true 认** —— 从 JSON 读进
-      来的 option 里 ``roam`` 常是数字，原先落进「方向名」分支被静默关掉。
+    ``map="demo"``（或缺省）用内置示意地图；自定义地图经
+    ``option["geo"]["regions"] = {"名称": [[x, y], ...]}`` 传入多边形顶点。
+    区域着色优先 visualMap 的 ``mapColor``，其次 ``itemStyle.color``，否则按
+    primary.subtle → primary 插值。``roam`` 控制滚轮缩放 + 拖拽平移。
     """
 
     def __init__(self, chart, opt):
@@ -98,10 +86,7 @@ class MapSeriesRenderer(SeriesRenderer):
             if out:
                 return out
         if name not in ("demo", "china-simple"):
-            # **不要静默回落演示地图**。用户写了 ``map: "my-map"`` 却没给
-            # ``geo.regions``，拿到的是内置的「华北 / 东北 / …」，而他的数据
-            # 用的是真实地图的省名 —— 一个都匹配不上，整张图全是底色，且
-            # 没有任何报错。回落保留（空图更难排查），但必须喊一声。
+            # 不要静默回落演示地图：自定义地图名缺 regions 时整图全是底色且零报错。
             warn_once(
                 "map-regions-missing",
                 f"map={name!r} 需要 option['geo']['regions'] 提供多边形顶点，"
@@ -210,11 +195,7 @@ class MapSeriesRenderer(SeriesRenderer):
         self.chart.update()
 
     def _visual_map(self):
-        """本系列该用哪个 visualMap 组件（``None`` = 用内置色带）。
-
-        组件查找统一在 ``SeriesRenderer.visualMapComponent``（显式绑定优先 →
-        通用件），这里只保留旧名字给绘制代码用。
-        """
+        """本系列该用哪个 visualMap 组件（``None`` = 用内置色带）。"""
         return self.visualMapComponent()
 
     def _fill_color(
@@ -235,9 +216,7 @@ class MapSeriesRenderer(SeriesRenderer):
     def labelStyle(self) -> dict:
         """区域名样式（``label``；未设置的键回退顶层 ``textStyle``）。"""
         label = self.opt.get("label")
-        return merged_text_style(
-            self.chart, label if isinstance(label, dict) else {}
-        )
+        return merged_text_style(self.chart, label if isinstance(label, dict) else {})
 
     def labelShown(self) -> bool:
         """区域名是否显示（``label.show``，地图默认 **True**）。"""
@@ -253,8 +232,7 @@ class MapSeriesRenderer(SeriesRenderer):
         vmax = max(vals) if vals else 1.0
         vm = self._visual_map()
         p.save()
-        # ``label``：区域名（ECharts 键）。``show: false`` 可关；字号 / 颜色 /
-        # 字重走与其它系列同一套解析链（含顶层 textStyle 兜底）。
+        # ``label``：区域名，字号 / 颜色 / 字重走统一解析链（含顶层兜底）。
         label_show = self.labelShown()
         label_style = self.labelStyle()
         font = chartFont(

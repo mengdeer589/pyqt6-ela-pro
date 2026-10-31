@@ -72,10 +72,7 @@ class _ImageAttachmentCard(QWidget):
 class AttachmentStrip(ElaThemeWidget):
     """附件层：``ElaChip``（文件）+ 图片缩略卡，``ElaFlowLayout`` 自动换行。
 
-    - 点击通知宿主，× / 关闭按钮移除；
-    - ``setAlignment(AlignRight)`` 时自动收缩宽度并靠右（用户消息）；
-    - 粘贴图片的图像挂在附件的 ``image`` 字段上（运行时，**不序列化**），
-      以 ``digest`` 去重。
+    ``AlignRight`` 时收缩宽度靠右；粘贴图片的图像挂在附件 ``image`` 字段（不序列化），按 ``digest`` 去重。
     """
 
     #: 附件被点击（参数：文件路径，可能为空）
@@ -132,10 +129,9 @@ class AttachmentStrip(ElaThemeWidget):
         name: str = "粘贴的图片.png",
         digest: str = "",
     ) -> Optional[ElaChatAttachment]:
-        """追加剪贴板图片附件（以 digest 去重），返回快照。
+        """追加剪贴板图片附件（按 digest 去重），返回快照。
 
-        图像挂在附件的 ``image`` 字段上（**不序列化**）：附件对象在输入区与
-        消息之间流转，撤回回填 / 消息气泡都据此渲染缩略图。
+        图像挂在附件 ``image`` 字段（不序列化）：输入区与消息之间按引用流转，撤回回填 / 气泡据此渲染缩略图。
         """
         if digest and any(item.digest == digest for item in self._attachments):
             return None
@@ -299,8 +295,7 @@ class AttachmentStrip(ElaThemeWidget):
     def _append(self, attachment: ElaChatAttachment, notify: bool = True) -> None:
         card = self._create_card(attachment)
         self._layout.addWidget(card)
-        # 显式 show：ElaFlowLayout.heightForWidth 只统计可见项；刚 addWidget 的
-        # 子控件在首次事件循环前 isVisible() 仍为 False，量出来是 0 → 1px 条。
+        # 显式 show：ElaFlowLayout.heightForWidth 只统计可见项，未 show 前量出来是 0。
         card.show()
         self._attachments.append(attachment)
         self._cards.append(card)

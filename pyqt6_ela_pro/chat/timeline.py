@@ -88,9 +88,7 @@ class ChatPartTimeline:
     def _append_part(self, part: ElaChatPart, widget: Optional[QWidget]) -> None:
         self._bubble._parts.append(part)
         self._bubble._part_widgets[part.id] = widget
-        # ``widget=None`` 是合法的：待答复的审批 part 只登记数据，等落定后再
-        # 在原位补记录卡（见 beginPermission）。不判空就 ``addWidget(None)``，
-        # Qt 会打 ``QLayout: Cannot add a null widget to QVBoxLayout/``。
+        # widget=None 合法：待答复的审批 part 只登记数据，落定后再补记录卡。
         if widget is not None and self._bubble._parts_layout is not None:
             self._bubble._parts_layout.addWidget(widget)
         if part.kind != ElaChatPartKindType.Stats:
@@ -101,8 +99,8 @@ class ChatPartTimeline:
     def _move_step_stats_to_end(self, step: int) -> None:
         """把指定步骤的步骤用量徽标移到该步骤内容的末尾。
 
-        词元统计在该步 LLM 调用结束时即到达（早于工具执行），后续若同一步骤
-        继续追加工具 / 正文，需要把徽标移到末尾，保持「步骤末尾」的语义。
+        用量在该步 LLM 调用结束时即到达（早于工具执行），后续追加内容要维持
+        「步骤末尾」的语义。
         """
         target = None
         for item in reversed(self._bubble._parts):
@@ -115,8 +113,7 @@ class ChatPartTimeline:
         if widget is None or self._bubble._parts_layout is None:
             return
         if widget.parentWidget() is self._bubble._stats_host:
-            # 已停靠底部行的整轮汇总徽标不参与「步骤末尾」重排：否则收尾后
-            # 再来一次 beginText / 工具更新，就会把它从底部行拽回时间线。
+            # 已停靠底部行的整轮汇总徽标不参与重排，否则会被拽回时间线。
             return
         self._bubble._parts_layout.removeWidget(widget)
         self._bubble._parts_layout.addWidget(widget)
@@ -188,10 +185,8 @@ class ChatPartTimeline:
     def text(self) -> str:
         """获取消息文本（助手消息为全部分段正文的拼接）。
 
-        **纯读取**：流式期间返回的是「落定文本 + 在途缓冲」的完整可见全文
-        （与界面所见一致），但不会把缓冲写回 ``part.text``。要拿可序列化的
-        落定值请读 :meth:`parts` 里各段的 ``text``，或消息快照的
-        ``message.text``（回合结束后二者一致）。
+        纯读取：流式期间返回「落定文本 + 在途缓冲」的完整可见全文，但不写回
+        ``part.text``；要可序列化的落定值读 :meth:`parts`。
         """
         if self._bubble._role == ElaChatRoleType.Assistant:
             return "".join(
@@ -206,29 +201,13 @@ class ChatPartTimeline:
     def parts(self) -> tuple:
         """获取内容分段快照（按加入顺序，构成消息时间线）。
 
-        **纯读取，无副作用**：流式在途分片只存在于缓冲中，读 ``parts()``
-        不会把它们写回 ``part.text``。因此 ``part.text`` **只含已落定内容**，
-        快照可直接用于持久化 / 序列化 / 与服务端对账，且**与读取时机无关**
-        （读一次和读一百次结果相同）。
-
-        「当前可见全文」（含在途分片）用 :meth:`partText`，或在气泡上用
-        :meth:`text` / :meth:`reasoning`。
-
-        .. note::
-           落定发生在分段结束处：:meth:`endText` / :meth:`endReasoning` /
-           :meth:`endStream` / :meth:`setError` 都会把缓冲并入 ``part.text``。
-           所以**流式期间** ``part.text`` 为空、``message.text`` 也为空，
-           回合结束后才是完整正文 —— 这是「part 自足可序列化」的代价，
-           实时预览请走气泡 API 或信号。
+        纯读取无副作用：``part.text`` 只含已落定内容，可直接持久化 / 序列化。
+        流式期间在途分片只在缓冲里，实时预览用 :meth:`partText`。
         """
         return tuple(self._bubble._parts)
 
     def partText(self, part) -> str:
-        """某个分段的当前可见全文 = 落定文本 + 在途缓冲。
-
-        纯读取，不物化。渲染与实时预览读这里；要可序列化的落定值读
-        ``part.text``（见 :meth:`parts` 的说明）。
-        """
+        """某个分段的当前可见全文 = 落定文本 + 在途缓冲（纯读取，不物化）。"""
         base = part.text or ""
         chunks = self._bubble._text_buffers.get(part.id)
         if not chunks:
@@ -236,22 +215,11 @@ class ChatPartTimeline:
         return base + "".join(chunks)
 
     def setParts(self, parts) -> bool:
-        """用一份分段快照重建整条时间线（**从存储恢复**用），返回是否成功。
+        """用一份分段快照重建整条时间线（从存储恢复用），返回是否成功。
 
-        刻意**不**另写一套渲染逻辑，而是把每个分段按顺序**重放**到已经
-        充分测试的增量 API 上（``beginText`` / ``appendText`` / ``endText``、
-        ``beginReasoning`` / ``appendReasoning`` / ``endReasoning``、
-        ``addToolCall`` / ``setToolCallResult``、``setStepStats``）。这样恢复
-        出来的界面与实时流式出来的**逐像素一致**，且工具归组、内联思考行、
-        步骤用量徽标这些横切逻辑自动保持正确 —— 复制一份实现必然随时间
-        漂移。
-
-        保留原 ``part.id``，使 ``messageId`` / ``partId`` 在重启后稳定。
-
-        仅对**助手消息**有效（用户 / 系统消息请用 :meth:`setText`），且
-        消息**不可处于流式状态**（否则返回 ``False``）。消息级字段
-        （标题 / 时间 / 耗时 / 错误 / 附件）不在这里设置，由
-        ``ElaChatView.addMessageFromDict`` 负责。
+        不另写渲染逻辑，而是把每个分段按顺序重放到增量 API 上，保证恢复出来的
+        界面与实时流式逐像素一致。保留原 ``part.id``。仅对助手消息有效，且消息
+        不可处于流式状态；消息级字段由 ``ElaChatView.addMessageFromDict`` 负责。
         """
         if self._bubble._role != ElaChatRoleType.Assistant:
             return False
@@ -278,8 +246,7 @@ class ChatPartTimeline:
                     seen_ids.add(part.id)
                 maxStep = max(maxStep, int(getattr(part, "step", 1) or 1))
                 # 每段先切到它所属步骤，_step_index 影响新建分段的 step 归属。
-                # 切步必须与 beginStep 一样收口工具分组与当前面板 / 用量段，
-                # 否则后续步骤的工具会并进上一步的面板（重放出的界面与实时不一致）。
+                # 切步必须像 beginStep 一样收口工具分组与面板，否则后续工具会并进上一步。
                 if int(getattr(part, "step", 1) or 1) != self._bubble._step_index:
                     self._bubble.endText()
                     self._bubble._finish_tool_group()
@@ -319,10 +286,8 @@ class ChatPartTimeline:
     def setPartsDeferred(self, parts) -> bool:
         """只保存分段数据、不建控件（批量加载历史时的按需物化入口）。
 
-        与 :meth:`setParts` 的区别：这里**不重放**增量 API，只把 parts 挂到
-        气泡上并在分段区放一个等高占位。首屏 / 滚动到附近时由
-        :meth:`materializeParts` 真正建卡。``parts()`` / ``messages()`` /
-        导出读到的仍是完整数据。
+        不重放增量 API，只把 parts 挂到气泡上并放一个等高占位；``parts()`` /
+        ``messages()`` / 导出读到的仍是完整数据。
         """
         if self._bubble._role != ElaChatRoleType.Assistant:
             return False
@@ -394,8 +359,7 @@ class ChatPartTimeline:
             return False
         if not self._bubble.setParts(window):
             return False
-        # ``setParts`` 会把 ``_parts`` 覆盖成窗口分段；恢复完整时间线，
-        # 让 parts() / 导出 / 工具快照读取看到的始终是全量数据。
+        # setParts 会把 _parts 覆盖成窗口分段；恢复完整时间线，让导出 / 搜索看到全量。
         self._bubble._parts = list(parts)
         self._bubble._parts_windowed = True
         button = ElaButton(
@@ -449,9 +413,7 @@ class ChatPartTimeline:
     def _restore_one_part(self, part) -> None:
         """重放单个分段的恢复（内部由 :meth:`setParts` 驱动）。"""
         if not getattr(part, "id", ""):
-            # 损坏数据可能缺 id：统一补一个，否则空 id 的分段会在
-            # ``_part_widgets`` 里互相覆盖（Permission / Compaction / Text
-            # 三条分支对空 id 的口径此前各不相同）。
+            # 损坏数据可能缺 id：统一补一个，否则空 id 的分段会在 _part_widgets 里互相覆盖。
             part = replace(part, id=uuid4().hex[:12])
         kind = getattr(part, "kind", "")
         if kind == ElaChatPartKindType.Text:
@@ -483,10 +445,13 @@ class ChatPartTimeline:
                 return
             current = self._bubble._find_part(callId)
             card = self._bubble._tool_cards.get(callId)
-            # 以卡片里的**归一化**快照为准：``addToolCall`` 会给缺失的
-            # ``tool_call.id`` 补上 callId，拿原始 ``call`` 回写会把 id 又抹空。
+            # 以卡片里的归一化快照为准：addToolCall 会给缺失的 tool_call.id 补上 callId。
             stored = card.toolCall(callId) if card is not None else None
-            if current is not None and stored is not None and current.tool_call != stored:
+            if (
+                current is not None
+                and stored is not None
+                and current.tool_call != stored
+            ):
                 self._bubble._replace_part(callId, current.withToolCall(stored))
                 if isinstance(card, ToolCallCard):
                     card.setStatus(stored.status)
@@ -529,15 +494,11 @@ class ChatPartTimeline:
         self._bubble._append_part(part, widget)
 
     def _restore_permission(self, partId: str, request: ElaChatPermission) -> None:
-        """重放审批分段（恢复路径：建**记录卡** + 灌快照，不发任何交互信号）。
+        """重放审批分段（恢复路径：建记录卡 + 灌快照，不发任何交互信号）。
 
-        恢复出来的审批**一律是只读记录**，即便载荷里的状态还是 ``pending``：
-
-        - **不发** ``permissionRequested``：那一次请求早已随上一个进程消失，
-          宿主此刻并没有在等这个回复；发信号会让宿主去「恢复一个不存在的挂起」；
-        - **不放进 dock**：dock 是「现在要你动手」的位置，而历史里的一张待答卡
-          摆在那里只会让人以为还能点。它照样显示（用户能看到「这里曾需要你
-          确认」），但不参与宿主交互契约。
+        恢复出来的审批一律是只读记录（``pending`` 也落成 ``Cancelled``）：那一次
+        请求已随上个进程消失，发信号会让宿主去恢复一个不存在的挂起，放进 dock 也会
+        让人以为还能点。
         """
         record = request
         if request.isPending:

@@ -27,20 +27,10 @@ from ._shared import _dist, _label_font, _parse_named_values, _parse_pct, _text_
 class GaugeSeriesRenderer(SeriesRenderer):
     """仪表盘。
 
-    option 键：
-    - ``data``: [{"name","value"}]（取首项）；
-    - ``min`` / ``max``: 量程（默认 0 / 100）；
-    - ``startAngle`` / ``endAngle``: ECharts 角度约定——0° 在 3 点方向、
-      逆时针为正（90° 为 12 点方向）；默认 225 / -45，即 270° 弧、
-      **开口在底部**；
-    - ``radius``: "75%" / px；
-    - ``progress``: {"show": True, "width": px}（当前值进度弧）；
-    - ``axisLine``: {"lineStyle": {"width": px, "color": [[frac, "#..."], ...]}}
-      （分段色背景弧）；
-    - ``pointer``: {"show": True, "length": "60%", "width": px}；
-    - ``anchor``: {"show": True, "size": px}（中心小圆）；
-    - ``detail``: {"show": True, "fontSize": px}（中央数值）；
-    - ``title``: {"show": True, "fontSize": px}（名称，数值下方）。
+    支持 ``data`` / ``min`` / ``max`` / ``startAngle`` / ``endAngle`` /
+    ``radius`` / ``progress`` / ``axisLine`` / ``pointer`` / ``anchor`` /
+    ``detail`` / ``title``。ECharts 角度约定：0° 在 3 点方向、逆时针为正，
+    默认 225 / -45（开口在底部）。
     """
 
     def __init__(self, chart, opt):
@@ -187,9 +177,7 @@ class GaugeSeriesRenderer(SeriesRenderer):
             detail_style = self.detailStyle()
             font = chartFont(
                 detail_style.get("fontSize") or T("font.title.md"),
-                text_weight(
-                    detail_style.get("fontWeight"), T("font.weight.semibold")
-                ),
+                text_weight(detail_style.get("fontWeight"), T("font.weight.semibold")),
                 detail_style.get("fontFamily"),
                 text_italic(detail_style.get("fontStyle")),
             )

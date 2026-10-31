@@ -17,12 +17,9 @@ from .bar import BarSeriesRenderer
 class PictorialBarSeriesRenderer(BarSeriesRenderer):
     """象形柱图：以小图形（symbol）填充柱体。
 
-    option 键：
-    - ``symbol``: "rect" | "circle" | "pin"（默认 "rect"）；
-    - ``symbolRepeat``: True 时按 symbolSize 沿柱方向重复堆叠小图形直至
-      柱顶；整数时为固定重复次数（在柱长内均布）；
-    - ``symbolSize``: 数值（边长）或 [宽, 高]。
-    不支持 stack（同名槽位逻辑退化为各占一槽）。
+    ``symbol``：rect / circle / pin（默认 rect）；``symbolRepeat``：True 时按
+    ``symbolSize`` 沿柱方向重复堆叠，整数时固定重复次数；``symbolSize``：数值
+    （边长）或 [宽, 高]。不支持 stack。
     """
 
     def _stack_bases(self):  # 象形柱不堆叠

@@ -19,15 +19,9 @@ from .scatter import ScatterSeriesRenderer
 class EffectScatterSeriesRenderer(ScatterSeriesRenderer):
     """涟漪散点：散点 + QTimer 驱动的扩散圆动画。
 
-    option 键：
-    - ``rippleEffect``: {``period`` 秒（默认 3）、``scale`` 扩散倍数（默认 2.6）、
-      ``brushType``（``"fill"`` 默认 / ``"stroke"``）、``number`` 同时可见环数}；
-    - 其余同 scatter（symbolSize / 第三维映射）。
-
-    动画生命周期：QTimer 以 chart 为 parent，随控件销毁；回调经 weakref
-    持有渲染器，渲染器被替换（setOption 重建）后回调自动停止并
-    deleteLater，不泄漏。仅系列可见时推进（隐藏后定时器暂停、重新显示时
-    经 ``_on_visible_changed`` 恢复，不空转）。
+    ``rippleEffect``：``period``（秒，默认 3）/ ``scale``（扩散倍数，默认 2.6）/
+    ``brushType``（fill 默认 / stroke）/ ``number``（同时可见环数）；其余同 scatter。
+    定时器以 chart 为 parent 随控件销毁，仅系列可见时推进。
     """
 
     _TICK_MS = 40
@@ -47,11 +41,9 @@ class EffectScatterSeriesRenderer(ScatterSeriesRenderer):
         self._brush = "stroke" if brush == "stroke" else "fill"
         timer = QTimer(chart)  # parent 挂 ChartWidget，随控件销毁
         timer.setInterval(self._TICK_MS)
-        # 绑定方法插槽：不用 lambda（闭包签名 / 引用存活都要自己盯，而槽内异常
-        # 在 Qt 回调里就是 0xC0000409 静默终止）
+        # 用绑定方法做槽：lambda 的存活与签名都要自己盯，而槽内异常 = 进程终止。
         timer.timeout.connect(self._on_timer)
-        # 持续动效：Reduced/Disabled 下不扩散。相位冻结在当前值 —— 点仍在、
-        # 只是不扩散，所以不需要摆姿态钩子。
+        # 持续动效：Reduced/Disabled 下不扩散，相位冻结在当前值（点仍在）。
         start_idle_loop(timer, self._TICK_MS)
         self._timer = timer
 
@@ -95,21 +87,14 @@ class EffectScatterSeriesRenderer(ScatterSeriesRenderer):
         self.requestSeriesRepaint()
 
     def stopAnimation(self) -> None:
-        """停止涟漪定时器并释放（渲染器不再需要动画时调用，如测试收尾）。
-
-        定时器 parent 为 chart，chart 销毁时自动释放；本方法用于 chart
-        仍存活但渲染器不再需要动画的场景，避免活动 QTimer 在事件循环
-        处理时对已删除对象发起重绘。
-        """
+        """停止并释放涟漪定时器（chart 仍存活但渲染器不再需要动画时调用）。"""
         self._stop_timer()
 
     def _on_visible_changed(self):
         """显隐变化钩子（core 内部调用）：显示恢复时重启定时器。
 
-        **必须走 ``start_idle_loop`` 而不是裸 ``timer.start()``**：裸 start
-        绕过动效策略，于是「Reduced/Disabled 下持续动效停掉」被图例切换
-        重新打开 —— 无障碍用户看到涟漪照常扩散。而 ``start_idle_loop`` 是幂等的
-        （内部先查 ``isActive()``）、守策略、且无论启不启动都会写 interval。
+        必须走 ``start_idle_loop`` 而非裸 ``timer.start()``：后者绕过动效策略，
+        Reduced/Disabled 下的涟漪会被图例切换重新打开。
         """
         if self.visible and self._timer is not None and not self._timer.isActive():
             start_idle_loop(self._timer, self._TICK_MS)

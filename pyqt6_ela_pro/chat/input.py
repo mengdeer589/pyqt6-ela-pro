@@ -1,32 +1,8 @@
 """
-聊天输入区组件（``pyqt6_ela_pro.chat``）。
+聊天输入区组件：补全浮层 + 输入卡片（附件条 / 编辑框 / 工具栏）。
 
-:class:`ElaChatInput` 分为两层，自上而下：
-
-1. **补全浮层**（按需显示）：``SuggestionPopup``（``ElaScrollPageArea`` +
-   ``ElaListView``），支持 ``@`` 上下文引用；
-2. **输入卡片**（``_InputSurface``，圆角自绘，对齐 opencode）——卡片内自上
-   而下为：附件条（文件 ``ElaChip`` / 图片缩略卡；支持拖放、粘贴图片、去重）
-   → 编辑框（``ElaPlainTextEdit`` **无边框形态**：边框 / 底色 / 聚焦态由卡片
-   统一接管；高度自适应，默认 3~8 行）→ 工具栏（``ElaChatToolBar``：左侧
-   回形针（添加文件）+ 扫帚（清空上下文，发 ``clearRequested``）+ **上下文占用
-   圆环**（默认常驻，见 :meth:`ElaChatInput.setContextUsage`）+ 右侧发送 /
-   停止按钮；宿主可用 :meth:`ElaChatInput.toolBar` 继续添加自定义按钮）。
-
-交互（对齐 opencode）：
-
-- ``Enter`` 发送、``Shift+Enter`` 换行；流式中草稿为空时按钮变「停止」，
-  有草稿时仍为「发送」（交由宿主排队）；
-- ``Esc`` / ``Ctrl+G`` 流式中停止；``Ctrl+U`` 打开文件选择；
-- **大段粘贴（≥8000 字符或 ≥120 行）自动转附件**：写成临时文件走附件管线
-  （宿主按 ``path`` 读内容），不把几兆文本塞进编辑框；
-- 输入法组合（IME）期间回车不会误发送。
-
-用户上传的文件路径：附件快照见 :meth:`ElaChatInput.attachments`（每项含
-``path``），便捷路径列表见 :meth:`ElaChatInput.attachmentPaths`；提交时
-``ElaChatWidget.messageSubmittedFull(text, attachments)`` 携带同一批附件。
-
-命名规范与库内一致（``camelCase``）。
+``Enter`` 发送、``Shift+Enter`` 换行；大段粘贴自动转附件；IME 组合期间回车
+不会误发送。附件快照见 :meth:`ElaChatInput.attachments`。
 """
 
 from __future__ import annotations
@@ -110,9 +86,7 @@ _LARGE_PASTE_LINES = 120
 _MENTION_RE = re.compile(r"(?:^|\s)@([^\s@]*)$")
 #: ``/`` 命令匹配（行首或空白后；命令名不允许再出现 ``/``）
 _COMMAND_RE = re.compile(r"(?:^|\s)/([^\s/]*)$")
-#: 判定「mention 仍完整存在」用的尾部：token 之后不能再跟词字符。
-#: 覆盖 ASCII 字母数字下划线、CJK（基本区 + 扩展 A/B+ + 兼容区）、以及 ``@``
-#: 本身（避免 "@Al@Al" 误判）。
+#: mention 尾部断言：token 之后不能再跟词字符（含 CJK 与 ``@``，避免 "@Al@Al" 误判）
 _MENTION_TAIL = (
     r"(?![0-9A-Za-z_@"
     r"\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff"
@@ -136,25 +110,17 @@ _INPUT_CARD_SPACING = 4
 class _ChatPlainTextEdit(ElaPlainTextEdit):
     """输入编辑器：内容自增高 + 粘贴 / 拖入转附件。
 
-    **自增高走 ``sizeHint()``**（对齐 ``_question._AutoGrowEditor``）：
-    ``textChanged`` 里只 ``updateGeometry()``，绝不在槽里 ``setFixedHeight``
-    —— 槽内重入布局在 Qt 里是 0xC0000409 无 traceback 静默终止。
-
-    编辑框自己就是放置点（``setAcceptDrops(True)``）：文本拖放交给 Qt 原生
-    处理（含框内选中文本的移动），文件 / 图片经 :meth:`insertFromMimeData`
-    转成附件 —— 粘贴与拖入走的是同一个钩子。
-
-    **大段文本（≥ ``_LARGE_PASTE_CHARS`` 字符或 ≥ ``_LARGE_PASTE_LINES`` 行）
-    也转附件**：发 :attr:`largeTextPasted` 而不是把几兆文本塞进编辑框，落临时
-    文件与挂附件由 :class:`ElaChatInput` 完成。
+    自增高走 ``sizeHint()``；``textChanged`` 槽里只 ``updateGeometry()``，绝不
+    在槽内改几何（重入布局 = 0xC0000409 静默终止）。文件 / 图片经
+    :meth:`insertFromMimeData` 转附件（粘贴与拖入同一钩子），大段文本发
+    :attr:`largeTextPasted` 交给 :class:`ElaChatInput` 落盘。
     """
 
     #: 剪贴板图片被粘贴 / 图片被拖入（参数：``QImage``）
     imagePasted = pyqtSignal(QImage)
     #: 本地文件被粘贴 / 拖入（参数：本地文件路径列表）
     filesAdded = pyqtSignal(list)
-    #: **大段文本**被粘贴 / 拖入（参数：文本）—— 编辑器不写盘，由
-    #: :class:`ElaChatInput` 落临时文件后走附件管线（粘贴与拖入同钩子）
+    #: 大段文本被粘贴 / 拖入（参数：文本）；编辑器不写盘，由 :class:`ElaChatInput` 落临时文件
     largeTextPasted = pyqtSignal(str)
     #: 输入法组合文本变化（参数：preedit 串）
     preeditChanged = pyqtSignal(str)
@@ -172,10 +138,8 @@ class _ChatPlainTextEdit(ElaPlainTextEdit):
     def setKeyHandler(self, handler) -> None:  # noqa: N802
         """注入按键处理器（``handler(event) -> bool``，``True`` = 已消费）。
 
-        由 :class:`ElaChatInput` 提供。**刻意不用事件过滤器**：给会被随行
-        销毁的子控件 ``installEventFilter(parent)`` 在父窗口树整体析构时会踩
-        0xC0000409；处理器只在本控件自己的 ``keyPressEvent`` 里被调用，
-        生命周期天然受控。
+        刻意不用事件过滤器：给会被随行销毁的子控件 ``installEventFilter(parent)``
+        在父窗口树整体析构时会踩 0xC0000409。
         """
         self._key_handler = handler
 
@@ -217,8 +181,7 @@ class _ChatPlainTextEdit(ElaPlainTextEdit):
         while block.isValid():
             height += self.blockBoundingRect(block).height()
             if height >= max_height:
-                # 已超上限：不必再数后面的块（长粘贴时 sizeHint 会被布局反复
-                # 询问，O(全部块) 没有必要）。
+                # 已超上限：sizeHint 会被布局反复询问，不必再数后面的块
                 break
             block = block.next()
         return int(min(max(height, min_height), max_height))
@@ -317,28 +280,11 @@ def _shortTokens(value) -> str:
 
 
 class _ContextUsageRing(ElaThemeWidget):
-    """上下文窗口占用指示器（输入区底部工具栏里的小圆环 + hover 详情）。
+    """上下文窗口占用指示器（工具栏小圆环 + hover 详情）。
 
-    **不是进度条**。上下文占用是一个**标量**（当前水位），不是一条有起止的
-    过程 —— 进度条会暗示「正在推进到 100%」，而语义恰恰相反（越接近 100%
-    越危险）。opencode 用 ``ProgressCircle`` 是同一个理由。
-
-    **为什么不用 ``ElaProgressRing``**：它有数值模式，但环色硬编码在 C++ 侧
-    （``ElaProgressRing.cpp:216`` 固定 ``PrimaryNormal``，没有取色接口），
-    而「占用越高越该变色」正是这个指示器的全部价值；且 22px 的环里塞
-    ``62%`` 已经挤到读不清（opencode 为此分出 ``indicator`` / ``button``
-    两档形态）。所以这里自绘：环 + 三档配色，数字交给 tooltip。
-    自绘是库内既有做法（``paintRoundedCard`` / ``FlatIconButton`` 同理），
-    且天然满足禁 QSS 约束。
-
-    三档配色：< 60% 弱化、60~85% 警示、> 85% 危险。
-
-    **默认常驻**（与旁边的新建话题 / 添加文件 / 清空同地位）：没有数据时画一个
-    空底环（0%），显隐由 :meth:`ElaChatInput.setContextUsageVisible` 控制。
-
-    **可点击（当按钮用）**：左键点按发 :attr:`clicked`（组件自身不做任何
-    行为，宿主据此弹上下文详情面板等）；带 hover 8% / press 12% 的状态层
-    （与 ``ElaButton`` 同套比例），拖出圆环松开不算点击。
+    自绘而非 ``ElaProgressRing``：后者的环色硬编码在 C++ 侧，而「占用越高越
+    变色」正是本控件的全部价值。三档配色：< 60% 弱化、60~85% 警示、> 85% 危险。
+    默认常驻（无数据画空底环），可点击，带 hover / press 状态层。
     """
 
     #: 点击圆环（宿主据此弹上下文详情面板等；组件自身不做行为）
@@ -355,8 +301,7 @@ class _ContextUsageRing(ElaThemeWidget):
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         self.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self.setAccessibleName("上下文占用")
-        # 刻意**不**在这里 hide()：它是工具栏的默认组件（与新建话题 / 添加文件 /
-        # 清空同排），无数据时画空底环（0%）。显隐走 setContextUsageVisible。
+        # 刻意不在这里 hide()：它是工具栏默认组件，无数据时画空底环
 
     # -- 数据 --------------------------------------------------------------
 
@@ -443,10 +388,7 @@ class _ContextUsageRing(ElaThemeWidget):
     # -- 内部 --------------------------------------------------------------
 
     def _sync(self) -> None:
-        # 默认常驻（与旁边的新建话题 / 添加文件 / 清空同地位）：显隐只由
-        # ``ElaChatInput.setContextUsageVisible`` 控制，数据有无只影响画多少
-        # 百分比 —— 没数据时画空底环（0%）。
-        # 输入区贴在窗口最底部 → tooltip 朝上弹，别往输入卡片上盖
+        # 显隐只由 setContextUsageVisible 控制；输入区贴窗口底部 → tooltip 朝上弹
         set_tooltip(self, self.tooltipText(), ElaToolTipPositionType.Top)
         self.update()
 
@@ -507,8 +449,7 @@ class ElaChatInput(ElaThemeWidget):
     textChanged = pyqtSignal(str)
     #: 附件列表变化（参数：``ElaChatAttachment`` 列表）
     attachmentsChanged = pyqtSignal(list)
-    #: 本地文件进入输入区（拖放；粘贴「复制的文件」；或大段文本转附件。
-    #: 参数：本地文件路径列表，已自动加入附件）
+    #: 本地文件进入输入区（拖放 / 粘贴「复制的文件」/ 大段文本转附件；已加入附件）
     filesAdded = pyqtSignal(list)
     #: 点击「添加文件」按钮
     addFileRequested = pyqtSignal()
@@ -581,8 +522,7 @@ class ElaChatInput(ElaThemeWidget):
 
         # 卡片内 ②：编辑框（无边框，边框 / 底色 / 聚焦态由卡片统一接管）
         self._edit = _ChatPlainTextEdit(self._surface)
-        # 编辑框无边框（editBorderlessStyle 去掉了原生 CE_ShapedFrame 自绘），
-        # 边框 / 底色 / 聚焦态由 _InputSurface 统一接管
+        # 编辑框无边框：边框 / 底色 / 聚焦态由 _InputSurface 统一接管
         self._edit.setStyle(editBorderlessStyle())
         self._edit.setFrameShape(QFrame.Shape.NoFrame)
         self._default_placeholder = "输入消息，Enter 发送，Shift+Enter 换行"
@@ -592,9 +532,8 @@ class ElaChatInput(ElaThemeWidget):
         self._edit.setTabChangesFocus(True)
         # 编辑框自己处理拖放：文本走 Qt 原生，文件 / 图片经 insertFromMimeData 转附件
         self._edit.setAcceptDrops(True)
-        # 按键走编辑框自己的 keyPressEvent → 注入的处理器；组合 / 焦点走信号。
-        # **不装事件过滤器**：给会被随行销毁的子控件 installEventFilter 在
-        # 父窗口树整体析构时会踩 0xC0000409（见 _ChatPlainTextEdit.setKeyHandler）。
+        # 按键走编辑框自己的 keyPressEvent → 注入的处理器（不装事件过滤器，
+        # 见 _ChatPlainTextEdit.setKeyHandler）；组合 / 焦点走信号。
         self._edit.setKeyHandler(self._handle_edit_key)
         self._edit.preeditChanged.connect(self._on_preedit_changed)
         self._edit.focusChanged.connect(self._on_edit_focus_changed)
@@ -639,9 +578,8 @@ class ElaChatInput(ElaThemeWidget):
             key="clear",
             callback=self._on_clear_clicked,
         )
-        # 上下文占用圆环：与「清空上下文」同排的**默认组件**（无数据时画空
-        # 底环 0%；显隐走 setContextUsageVisible）。数据完全由宿主提供：
-        # ``chatInput().setContextUsage(used, window, costUsd)``
+        # 上下文占用圆环：与「清空上下文」同排的默认组件；数据由宿主经
+        # ``chatInput().setContextUsage(used, window, costUsd)`` 提供
         self._usage_ring = _ContextUsageRing(self._surface)
         self._toolbar.addWidget(self._usage_ring, zone="leading", key="usage")
         self._usage_ring.clicked.connect(self.contextUsageClicked)
@@ -659,8 +597,7 @@ class ElaChatInput(ElaThemeWidget):
         self._button.setFixedSize(_SEND_BUTTON_SIZE, _SEND_BUTTON_SIZE)
         self._button.setBorderRadius(6)
         self._button.clicked.connect(self._on_button_clicked)
-        #: 已写入按钮的图标枚举 —— ``QIcon`` 没有值相等语义，
-        #: ``button.icon() != 枚举`` 恒为 True，每敲一个字都会重建一次图标。
+        #: 已写入按钮的图标枚举 —— ``QIcon`` 无值相等语义，每次比较都会重建图标
         self._button_icon = ElaIconType.IconName.ArrowUp
         # 工具栏控件不抢焦点：点按钮时编辑框保持聚焦（卡片维持强调色边框）
         for control in (
@@ -694,9 +631,8 @@ class ElaChatInput(ElaThemeWidget):
     def setCommandSubmitMode(self, mode: str) -> None:
         """设置 ``/`` 命令的提交方式。
 
-        ``"send"``（默认）：照常走 ``submitted`` / ``submittedFull``，由宿主
-        当作普通提示发送；``"signal"``：发 ``commandSubmitted(text)`` 且不落
-        消息（客户端命令，由宿主自行执行后清空输入）。
+        ``"send"``（默认）走 ``submitted`` / ``submittedFull``；``"signal"`` 只发
+        ``commandSubmitted(text)`` 且不落消息（客户端命令）。
         """
         if mode not in ("send", "signal"):
             raise ValueError("setCommandSubmitMode: mode 必须是 'send' 或 'signal'")
@@ -811,9 +747,8 @@ class ElaChatInput(ElaThemeWidget):
     def mentions(self) -> list:
         """当前仍存在于文本中的 ``@`` 引用 id 列表。
 
-        必须做**词边界**匹配，不能用 ``token in text``：token 是
-        ``"@Al "``，用户把它改成 ``"@Album"`` 之后子串依然成立，引用就会被
-        误报为「还在」，宿主于是带上用户已经改掉的 mention 发出去。
+        必须做词边界匹配：``token in text`` 会把改过的 ``"@Album"`` 仍判成
+        ``"@Al "`` 还在。
         """
         text = self._edit.toPlainText()
         if not text:
@@ -831,8 +766,7 @@ class ElaChatInput(ElaThemeWidget):
     def mentionSpans(self) -> list:
         """当前文本里仍有效的 ``@`` 引用区间（``ElaChatMention`` 列表）。
 
-        偏移按 Python ``str`` 下标计；同一 token 多次出现只取第一处
-        （输入区一次插入一个 token，重复手打不视为引用）。
+        偏移按 Python ``str`` 下标计；同一 token 多次出现只取第一处。
         """
         text = self._edit.toPlainText()
         if not text:
@@ -928,13 +862,13 @@ class ElaChatInput(ElaThemeWidget):
         selector.selectionChanged.connect(
             lambda itemId, k=selector_key: self.selectorChanged.emit(k, itemId)
         )
-        self._toolbar.insertWidget(self._button, selector, key=f"selector:{selector_key}")
+        self._toolbar.insertWidget(
+            self._button, selector, key=f"selector:{selector_key}"
+        )
         self._selectors[selector_key] = selector
         return selector
 
-    def setSelectorItems(
-        self, key: str, items, current: Optional[str] = None
-    ) -> bool:
+    def setSelectorItems(self, key: str, items, current: Optional[str] = None) -> bool:
         """替换某个选择器的选项（不存在返回 ``False``）。"""
         selector = self._selectors.get(str(key or ""))
         if selector is None:
@@ -1002,22 +936,12 @@ class ElaChatInput(ElaThemeWidget):
     ) -> None:
         """设置上下文窗口占用（底部工具栏圆环；``window <= 0`` 按 0% 显示）。
 
-        **数据完全由宿主提供，库不推断**：上下文窗口多大、当前占了多少，
-        只有宿主知道（模型配置在宿主手里）。库也不把它塞进
-        :class:`~pyqt6_ela_pro.chat.message.ElaChatStats` —— 那个字段的
-        ``merge()`` 是**各步求和**语义，而上下文占用是**当前值**，求和是错的。
-
-        圆环是工具栏的**默认组件**（与新建话题 / 添加文件 / 清空同排，默认显示；
-        显隐走 :meth:`setContextUsageVisible`）；没有数据时画空底环。
+        数据完全由宿主提供，库不推断；也不进 ``ElaChatStats``（那个是各步求和，
+        占用是当前值）。没有数据时画空底环。
 
         :param used: 已占用词元
-        :param window: 模型上下文窗口词元；``0`` / 非法值按 0% 显示（换话题 /
-            清空后宿主可用它把圆环归零）
+        :param window: 模型上下文窗口词元；``0`` / 非法值按 0% 显示
         :param costUsd: 会话累计花费（美元），进 hover 详情；``0`` 不显示该行
-
-        hover 显示三行：花费 / 上下文百分比 / 词元总数（对齐 opencode 的
-        ``session-context-usage.tsx``）。占比 ≥ 85% 时配色转危险色并追加
-        一行提示。
         """
         self._usage_used = max(0, _as_int(used))
         self._usage_window = max(0, _as_int(window))
@@ -1074,8 +998,7 @@ class ElaChatInput(ElaThemeWidget):
         return [path for path in files if path]
 
     def _on_clear_clicked(self) -> None:
-        # 只发请求，不自己清 —— 清空涉及「中止生成 → 清队列 → 清消息」，
-        # 那是 widget 层职责（见 ElaChatWidget.clear / clearRequested）
+        # 只发请求：清空涉及「中止生成 → 清队列 → 清消息」，归 widget 层
         self.clearRequested.emit()
 
     def _on_new_topic_clicked(self) -> None:
@@ -1152,9 +1075,8 @@ class ElaChatInput(ElaThemeWidget):
     def _on_large_text_pasted(self, text: str) -> None:
         """大段粘贴转附件：写临时文件并进附件条（失败回退为直接插入）。
 
-        与 ``_add_files`` 同一条附件管线 → ``filesAdded`` 信号照常发出，
-        宿主零改动即可用 ``path`` 读内容；同内容同 digest 恒同路径，附件条
-        按路径自然去重。
+        与 ``_add_files`` 同一条管线 → ``filesAdded`` 照常发出；同内容同 digest
+        恒同路径，附件条按路径自然去重。
         """
         path = self._write_paste_file(text)
         if path is None:
@@ -1173,8 +1095,7 @@ class ElaChatInput(ElaThemeWidget):
     def _write_paste_file(text: str) -> Optional[str]:
         """把粘贴文本写成临时文件，返回路径；失败返回 ``None``。
 
-        文件名带内容摘要（同内容同路径 → 天然幂等）；目录在系统临时目录下，
-        文件生命周期与会话无关（与普通附件同口径，宿主自行决定何时清理）。
+        文件名带内容摘要（同内容同路径 → 天然幂等）；文件生命周期与会话无关。
         """
         try:
             digest = hashlib.sha1(text.encode("utf-8")).hexdigest()[:8]
@@ -1189,8 +1110,7 @@ class ElaChatInput(ElaThemeWidget):
     def _add_files(self, paths: list) -> bool:
         """本地文件进附件条 + 发 ``filesAdded``（拖放与粘贴共用一条路径）。
 
-        信号只带**实际新增**的路径：重复项被附件条按路径去重后不再发出，
-        宿主按信号做上传时不会对同一个文件重复触发。
+        信号只带实际新增的路径：重复项被去重后不再发出。
         """
         added = self.addAttachments(paths)
         if not added:
@@ -1252,8 +1172,7 @@ class ElaChatInput(ElaThemeWidget):
     def submit(self) -> bool:
         """提交当前输入（空文本忽略）；返回是否已提交。
 
-        提交时同时发出 ``submitted``（文本）与 ``submittedFull``（文本 +
-        附件快照），并清空输入与附件；生成中且启用排队时同样可提交。
+        同时发出 ``submitted`` 与 ``submittedFull``，并清空输入与附件。
         """
         text = self._edit.toPlainText().strip()
         if not text:
@@ -1330,9 +1249,8 @@ class ElaChatInput(ElaThemeWidget):
         if self._button.toolTip() != tooltip:
             self._button.setToolTip(tooltip)
             set_tooltip(self._button, tooltip, ElaToolTipPositionType.Top)
-        # 对齐 opencode：空草稿且非「停止」态时置灰不可点（禁用态配色由 ElaButton 自绘）。
-        # 生成中且宿主禁用了排队时提交会被 ``submit()`` 拒绝，按钮必须跟着
-        # 置灰 —— 否则就是一个点了没反应的「发送」
+        # 空草稿且非「停止」态时置灰；生成中禁用排队时提交会被 submit() 拒绝，
+        # 按钮必须跟着置灰（否则就是点了没反应的「发送」）
         blocked = self._generating and not self._queue_enabled
         self._button.setEnabled(stopping or (has_draft and not blocked))
 
@@ -1391,9 +1309,7 @@ class ElaChatInput(ElaThemeWidget):
     def _sync_height(self) -> None:
         """把行数预算同步给编辑框（``setLineBudget`` 内部会 ``updateGeometry``）。
 
-        **不在 ``textChanged`` 槽里改几何**：自增高由 ``_ChatPlainTextEdit``
-        的 ``sizeHint()`` 驱动（对齐 ``_question._AutoGrowEditor``），这里只
-        更新预算 —— 槽内重入布局在 Qt 里会 0xC0000409 无 traceback 静默终止。
+        自增高由 ``_ChatPlainTextEdit.sizeHint()`` 驱动，槽内改几何会重入布局。
         """
         self._edit.setLineBudget(self._min_lines, self._max_lines)
 
@@ -1417,11 +1333,10 @@ class ElaChatInput(ElaThemeWidget):
         return bool(localFiles(mime) or mimeImage(mime) is not None)
 
     def attachMime(self, mime) -> bool:
-        """把 mime 里的文件 / 图片收进附件；**实际收下了**才返回 ``True``。
+        """把 mime 里的文件 / 图片收进附件；实际收下了才返回 ``True``。
 
-        拖放与粘贴共用这条路径：文件走 :meth:`addAttachments` + ``filesAdded``，
-        图片走 :meth:`_on_image_pasted`（与粘贴图片同一处去重）。重复项
-        （同路径 / 同 digest）会被去重，此时返回 ``False``。
+        文件走 :meth:`addAttachments` + ``filesAdded``，图片走
+        :meth:`_on_image_pasted`（与粘贴图片同一处去重）。
         """
         files = localFiles(mime)
         if files:
@@ -1452,8 +1367,7 @@ class ElaChatInput(ElaThemeWidget):
     # -- 键盘 --------------------------------------------------------------
 
     def _on_preedit_changed(self, text: str) -> None:
-        """输入法组合文本（Windows 下 ``inputMethod().isVisible()`` 焦点在框内
-        即恒真，不能用于判断组合中）。"""
+        """记录输入法组合文本（``inputMethod().isVisible()`` 焦点在框内即恒真，不能用作判据）。"""
         self._preedit = text
 
     def _on_edit_focus_changed(self, focused: bool) -> None:
@@ -1465,7 +1379,7 @@ class ElaChatInput(ElaThemeWidget):
     def _handle_edit_key(self, event) -> bool:
         """编辑框按键处理器（由 ``_ChatPlainTextEdit.keyPressEvent`` 调用）。
 
-        返回 ``True`` 表示已消费。逻辑与旧的 ``eventFilter`` 完全一致。
+        返回 ``True`` 表示已消费。
         """
         key = event.key()
         modifiers = event.modifiers()

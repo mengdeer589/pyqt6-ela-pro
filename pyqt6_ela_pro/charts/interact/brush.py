@@ -23,19 +23,11 @@ from ..core import parseDataPoint
 
 
 class BrushComponent(QObject):
-    """矩形刷选：Grid 上拖出半透明框，命中数据点集合并高亮。
+    """矩形 / 套索刷选：Grid 上拖出选框，命中数据点集合并高亮。
 
-    option::
-
-        "brush": {"toolbox": ["rect", "clear"], "outOfBrush": {"opacity": 0.4}}
-
-    松开后命中点列表存入 ``self.selected_items``（元素为
-    {"series", "dataIndex", "value", "x"}），并发出 ``selected(list)``
-    信号；配置了 ``outOfBrush`` 时框外区域以背景色降透明遮罩。
-    再次按下开始新一次刷选并清空旧选区。选中点由 ``paint`` 绘制高亮环。
-
-    **与 dataZoom inside 共存时的显式优先级**：本组件配置后 plot 内左键
-    拖拽归刷选，dataZoom inside 仅保留滚轮缩放。
+    option: ``"brush": {"toolbox": ["rect", "clear"], "outOfBrush": {"opacity": 0.4}}``。
+    落定后 ``selected_items`` 为命中点列表并发出 ``selected(list)``；
+    配置后 plot 内左键拖拽归刷选，dataZoom inside 仅保留滚轮缩放。
     """
 
     optionKey = "brush"
@@ -89,8 +81,7 @@ class BrushComponent(QObject):
             return False
         coord = self.chart.coordAt(pos)
         if not isinstance(coord, GridCoord) or not coord.plot.contains(pos):
-            # 绘图区外按下：把已有选框收掉（框选是「框不消失」，但点出去该让它走）。
-            # 返回 False 不消费事件，别的组件 / 宿主照常拿到这次按下。
+            # 绘图区外按下：收掉已有选框，但不消费事件。
             if self._rect is not None or self._poly:
                 self.clear()
             return False
@@ -133,9 +124,7 @@ class BrushComponent(QObject):
         if too_small:
             self.clear()  # 视为单击：清除选区
         elif str(getattr(self.chart, "_drag_mode", "")) == "zoom":
-            # 框选缩放（Plotly ``dragmode="zoom"``）：选框是**一次性手势** ——
-            # 缩放落地后主动消失；「框选」（select / lasso）才把选框与选中集
-            # 留在画面上（直到下一次点击 / 重新框选）。
+            # 框选缩放是一次性手势：缩放落地后选框主动消失。
             self._zoom_to_rect()
             self.clear()
         else:
@@ -159,8 +148,7 @@ class BrushComponent(QObject):
     def _zoom_to_rect(self) -> None:
         """把当前选框映射成 dataZoom 窗口（``dragmode="zoom"``）。
 
-        比例直接按**当前 dataZoom 窗口**换算：``start/end`` 是相对全量范围的
-        百分比，先缩到 20-80 再框一小块时必须叠加，否则会跳回全量。
+        比例按当前 dataZoom 窗口换算，叠加而不是跳回全量。
         """
         coord = self._coord or self.chart.primaryCoord()
         rect = self._rect
@@ -263,11 +251,10 @@ class BrushComponent(QObject):
         self._cache_highlight_from_items()
 
     def _collect_vectorized(self, r, series_coord, rect, polygon):
-        """numpy 快路径：矩形 / 套索命中（返回 ``None`` = 回退逐点实现）。
+        """numpy 快路径：矩形 / 套索命中（``None`` = 回退逐点实现）。
 
-        原先逐点 ``mapPoint`` 在 10 万点上要 238ms（lasso 更久），而每次重绘
-        还要把选中点重新映射一遍。这里一次向量化映射，矩形框选全向量化；
-        套索先按 bbox 预筛，再逐点判多边形（候选上限见 ``LASSO_MAX_CANDIDATES``）。
+        逐点 ``mapPoint`` 在 10 万点上要 238ms，这里一次向量化映射；
+        套索先按 bbox 预筛再逐点判多边形（候选上限见 ``LASSO_MAX_CANDIDATES``）。
         """
         np_ = _ds.np
         if np_ is None or rect is None:
@@ -363,11 +350,10 @@ class BrushComponent(QObject):
         return True
 
     def _highlight_points(self) -> list:
-        """选中点像素位置列表 [(QPointF, QColor)]（绘制高亮用，带缓存）。
+        """选中点像素位置列表 [(QPointF, QColor)]（带缓存）。
 
-        选中集只在 brush 落定 / clear 时变化，而 ``paint`` 每次重绘都会调用
-        这里 —— 10 万点选中集逐帧重映射实测 121ms/帧。按「选中集版本 +
-        option 版本 + 尺寸 + dataZoom 窗口」缓存，缩放 / 换数据自然失效。
+        选中集只在落定 / clear 时变化，而 ``paint`` 每帧都会调用；
+        10 万点逐帧重映射约 121ms，故按选中集版本 + 视图状态缓存。
         """
         key = self._highlight_key_value()
         if self._highlight_key == key:
@@ -486,7 +472,6 @@ class BrushComponent(QObject):
             points = points[::step]
         if len(points) > self.HIGHLIGHT_BULK:
             # 大量选中：按颜色分组一次 drawPoints（5px 圆头笔 = 实心点）。
-            # 逐个 drawEllipse 2000 个能吃掉 ~60ms/帧。
             groups = {}
             for pt, color in points:
                 groups.setdefault(parse_color(color).name(), []).append(pt)

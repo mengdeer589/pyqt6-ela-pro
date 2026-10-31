@@ -18,11 +18,10 @@ from .._tokens import (
 
 
 class ChartAnimation(QObject):
-    """0→1 进度动画（QVariantAnimation，缓出）。
+    """0→1 进度动画（QVariantAnimation，缓出），渲染器按 ``anim_t`` 插值。
 
-    渲染器在 ``paint(p, anim_t)`` 中经 ``anim_t`` 插值。
-    ``setProgress(v)`` 支持无事件循环环境（测试）手动推进。
-    ``finished`` 在进度到达 1.0（动画播完或手动置满）后发射一次。
+    ``setProgress(v)`` 支持无事件循环环境手动推进；``finished`` 在进度到达
+    1.0 后发射一次。
     """
 
     #: 一次入场 / 过渡动画播放完毕（ECharts ``finished`` 事件源）
@@ -63,10 +62,9 @@ class ChartAnimation(QObject):
     def startResolved(self, full_ms: int, easing=None) -> bool:
         """按全局动效策略启动过渡，返回是否真的播放。
 
-        本类**不用** :func:`pyqt6_ela_pro._motion.start_transition`：它没有 Qt 属性
-        目标，收尾是在 ``_apply`` 里用 ``valueChanged`` 阈值判断的（``v >= 1.0``），
-        不挂 ``QAbstractAnimation.finished`` —— 那个 helper 挂的正是后者。所以这里
-        只借它的策略解析，落到本类自己的 ``complete()``（它本来就是正确的 snap）。
+        刻意不用 :func:`pyqt6_ela_pro._motion.start_transition`：本类没有 Qt 属性
+        目标，收尾靠 ``_apply`` 里的阈值判断，而那个 helper 挂的是
+        ``QAbstractAnimation.finished``。这里只借它解析策略，落到 ``complete()``。
         """
         duration_ms, snap = motion.plan(full_ms, ElaMotionKindType.Transition)
         self.setDuration(duration_ms)

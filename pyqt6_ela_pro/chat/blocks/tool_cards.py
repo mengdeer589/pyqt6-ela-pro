@@ -51,16 +51,9 @@ from .collapsible import _CollapsibleBlock
 class ToolCallCard(_CollapsibleBlock):
     """工具层单卡片（对齐 opencode 语义）。
 
-    - 默认折叠（由 :func:`toolDefaultOpen` 决定，宿主可经
-      :meth:`ElaChatBubble.setToolDefaultOpen` 注入自己的策略）；
-      ``Pending`` 状态锁定不可展开（shell / 显式放开除外）；
-    - 标题为工具名，``Running`` 时以 ``ElaProgressRing`` 指示；
-    - 副标题 / 参数摘要从调用参数提取（前 3 个 ``key=value``，**与副标题
-      重复的那个键会被排除**）；
-    - **运行中不显示参数摘要**（参数分片流式到达，半截参数既误导又引起
-      整行宽度跳变），完成后再出现；
-    - 内容区首次展开时才构建（defer）；
-    - ``setResult(ok=False)`` 切换为错误卡样式（左 danger 竖线 + Ban 图标）。
+    默认折叠（由 :func:`toolDefaultOpen` 决定，宿主可注入策略）；``Pending`` 状态
+    锁定不可展开（shell / 显式放开除外）；运行中不显示参数摘要（分片半截会误导，
+    且让整行宽度跳变），完成后出现；内容区首次展开时才构建。
     """
 
     def __init__(
@@ -93,9 +86,7 @@ class ToolCallCard(_CollapsibleBlock):
         self._message_id = 0
         #: 宿主注册的渲染器（``None`` = 未注册，走默认纯文本 body）
         self._renderer = toolRenderer(call.name)
-        #: **必须持有的 Python 引用**（见 :mod:`pyqt6_ela_pro.chat.renderers`
-        #: 的「生命周期与线程约束」第 1 条：布局只转移 C++ 所有权，Python
-        #: 包装器被 GC 后调用其方法就是解引用已释放内存 = 无 traceback 崩溃）
+        #: 必须持有 Python 引用：布局只转移 C++ 所有权，包装器被 GC 后再调用就是崩溃。
         self._renderer_widget = None
         self._renderer_body_holder: Optional[QWidget] = None
 
@@ -103,8 +94,7 @@ class ToolCallCard(_CollapsibleBlock):
         self._icon.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
         self._icon.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self._icon.setBorderRadius(4)
-        # 记下默认图标色：Error -> Done 时 Q_PROPERTY 不会自动还原，得手动写回
-        # （否则命令执行成功、图标还是失败红）。
+        # 记下默认图标色：Error -> Done 时 Q_PROPERTY 不会自动还原，得手动写回。
         self._default_icon_light = self._icon.getLightIconColor()
         self._default_icon_dark = self._icon.getDarkIconColor()
         self.insertHeaderWidget(0, self._icon)
@@ -120,11 +110,8 @@ class ToolCallCard(_CollapsibleBlock):
         )
         self._args_label.setWordWrap(False)
         self._args_label.setMinimumWidth(0)
-        # 这三个标签显示的是**模型给的内容**（工具名 / 副标题 / 参数摘要），
-        # ElaText 默认 Qt::AutoText，会走 QTextDocument 的 HTML 分支：
-        # 名字里带 "<" 或 "&" 会被当标签/实体吃掉（"a < b" 渲染成 "a "，
-        # "Tom & Jerry" 渲染成 "Tom "），工具名还能注入任意富文本。
-        # 与下面正文区 (_build_body) 的处理保持一致。
+        # 这几个标签显示模型给的内容：ElaText 默认 AutoText 会解析 HTML，名字里带
+        # "<" 或 "&" 会被吃掉（还能注入富文本），必须固定 PlainText。
         for label in (self._title_label, self._subtitle_label, self._args_label):
             label.setTextFormat(Qt.TextFormat.PlainText)
         self._title_label.setMinimumWidth(0)
@@ -133,20 +120,16 @@ class ToolCallCard(_CollapsibleBlock):
         self._args_text = ""
         #: ``(cap, len, hash, font)`` → 省略结果；resize / 主题切换会反复问
         self._elide_cache: dict = {}
-        #: 上一次的失败态：``_apply_theme`` 只在它变化时跑（每次参数分片都刷
-        #: 一遍字体 / 颜色在 Win7 上会触发重新 shaping）。
+        #: 上一次的失败态：``_apply_theme`` 只在它变化时跑（每次分片都刷字体在 Win7 上很贵）。
         self._error_state = None
         insert_at = self.headerLayout().count() - 1
         self.insertHeaderWidget(insert_at, self._subtitle_label)
         self.insertHeaderWidget(insert_at + 1, self._args_label)
-        # _sync_header() 内部已调 _apply_theme()；再调一次会让每个卡片多一次
-        # 字体/颜色写入（Win7 上字体变更会触发重新 shaping）。
+        # _sync_header() 内部已调 _apply_theme()；再调一次会多一次字体 / 颜色写入。
         self._sync_header()
 
     def showEvent(self, event) -> None:  # noqa: N802 (Qt 命名)
-        # 初始展开（defaultOpen / 宿主策略）的卡：super().__init__ 先 setChecked
-        # 后连 toggled，初始展开不会再触发 _on_toggled —— 首次显示时补建正文，
-        # 否则箭头朝下却一块空白，要手动收再展开。
+        # 初始展开的卡：super().__init__ 先 setChecked 后连 toggled，首次显示时补建正文。
         super().showEvent(event)
         if self.isOpened() and not self._body_built:
             self._build_body()
@@ -210,8 +193,7 @@ class ToolCallCard(_CollapsibleBlock):
             status=status,
         )
         self._sync_header()
-        # 状态变化也要通知渲染器：展开状态下「运行中 -> 完成」不带着新状态，
-        # 渲染器（diff / 进度 / 成功态）就永远停在运行态。原实现漏了这一步。
+        # 状态变化也要通知渲染器，否则展开状态下「运行中 -> 完成」会永远停在运行态。
         if self._body_built:
             self._sync_body()
 
@@ -232,8 +214,7 @@ class ToolCallCard(_CollapsibleBlock):
 
     def _on_toggled(self, checked: bool) -> None:
         if not checked or not self._expandable:
-            # 不可展开（pending 锁定）：直接交给基类收回，**不能建 body** ——
-            # 一次本该是 no-op 的点击会把渲染器工厂提前跑掉并永久钉住快照
+            # 不可展开（pending 锁定）：不能建 body，否则渲染器工厂会被提前跑掉并钉住快照。
             super()._on_toggled(checked)
             return
         if not self._body_built:
@@ -241,11 +222,7 @@ class ToolCallCard(_CollapsibleBlock):
         super()._on_toggled(checked)
 
     def _build_body(self) -> None:
-        """首次展开时才构建内容区（defer）。
-
-        宿主注册了渲染器（:mod:`pyqt6_ela_pro.chat.renderers`）就只建它的控件，
-        否则走默认的「参数 / 结果」纯文本。
-        """
+        """首次展开时才构建内容区（defer）：宿主注册了渲染器就只建它的控件。"""
         self._body_built = True
         if self._build_renderer_body():
             self.updateGeometry()
@@ -288,10 +265,8 @@ class ToolCallCard(_CollapsibleBlock):
     def _build_renderer_body(self) -> bool:
         """尝试用宿主注册的渲染器填充内容区；返回是否接管成功。
 
-        任何异常都落回默认纯文本 body：工厂跑在「用户点开卡片」的 Qt 回调
-        链里，宿主渲染器的一个 bug 若冒出去就是 0xC0000409 静默终止整个进程
-        （无 traceback）。渲染器是**增强**不是**可选功能**，不该有能力让聊天
-        窗口消失。
+        任何异常都落回默认纯文本 body：工厂跑在 Qt 回调链里，异常冒出去就是
+        0xC0000409 静默终止整个进程。
         """
         factory = self._renderer
         if factory is None:
@@ -320,9 +295,8 @@ class ToolCallCard(_CollapsibleBlock):
     def _notify_renderer(self) -> None:
         """把结果 / 状态推给渲染器（widget 无该方法则跳过）。
 
-        三重守卫缺一不可：``self`` 可能在结果回调之后已被 ``removeMessage``
-        销毁（Qt 回调里访问已删除控件抛 ``RuntimeError`` 同样是 abort），
-        widget 由宿主构造、也可能已被自行 ``deleteLater``。
+        三重守卫缺一不可：``self`` 可能已被 ``removeMessage`` 销毁，widget 也可能
+        已被宿主自行 ``deleteLater``。
         """
         widget = self._renderer_widget
         if widget is None:
@@ -355,9 +329,7 @@ class ToolCallCard(_CollapsibleBlock):
         self._icon.setAwesome(toolIconName(call.name))
         self._title_text = f"工具调用：{call.name}"
         self.setTitle(self._title_text)
-        # 宿主注册了 subtitle 就用它（渲染器最清楚该显示什么），否则走通用
-        # 键名启发式。两者都返回 (键, 值)，键传给 toolArgumentPairs 做去重 ——
-        # 见 renderers 模块的「subtitle 契约」。
+        # 宿主注册了 subtitle 就用它，否则走通用键名启发式；键传给 toolArgumentPairs 去重。
         _subtitle_key, self._subtitle_text = toolRendererSubtitle(
             call.name, call.arguments
         )
@@ -367,12 +339,9 @@ class ToolCallCard(_CollapsibleBlock):
         self._args_text = "  ".join(
             toolArgumentPairs(call.arguments, excludeKey=_subtitle_key)
         )
-        # 运行中**不显示**参数摘要：参数是分片流式到达的（同一 toolCallId
-        # 重复上报会更新 arguments），显示半截参数既误导（看着像完整调用）
-        # 又会因为撞上省略预算而让整行宽度反复跳变。完成后再一次性出现。
+        # 运行中不显示参数摘要：分片到达时显示半截参数既误导，又会让整行宽度跳变。
         self._args_label.setVisible(bool(self._args_text) and not running)
-        # 失败态变化才重刷主题（字号 / 颜色是静态的，参数分片不必每片重写）；
-        # 省略必须在主题之后，保证按 mono 宽度截断。
+        # 失败态变化才重刷主题（字号 / 颜色是静态的）；省略必须在主题之后。
         is_error = call.status == ElaChatToolStatusType.Error
         if self._error_state != is_error:
             self._error_state = is_error
@@ -384,12 +353,7 @@ class ToolCallCard(_CollapsibleBlock):
         self.setExpandable(not pending or self._allow_open_while_pending)
 
     def _elide_header_texts(self) -> None:
-        """按卡片宽度省略标题 / 副标题 / 参数摘要。
-
-        ``ElaText`` 默认开启 ``wordWrap``，头部空间不足时多行文本会叠在
-        固定高度的标题行里（视觉上互相重叠）。这里按宽度分配配额并省略，
-        保证三者始终单行且不重叠。
-        """
+        """按卡片宽度省略标题 / 副标题 / 参数摘要（三者始终单行且不重叠）。"""
         width = self.width() or self._header.width()
         if width <= 0:
             return
@@ -405,8 +369,7 @@ class ToolCallCard(_CollapsibleBlock):
             if not text:
                 label.setText("")
                 continue
-            # 先按目标像素宽度截源再测量：elidedText 的展示结果由 cap 决定，
-            # 源串再长也不会多显示一个字符；Win7 上逐字形测量很贵（bug #17）。
+            # 先按目标像素宽度截源再测量：展示结果由 cap 决定，源串再长也不会多显示字符。
             source = _elide_source(text, cap, label.fontMetrics())
             key = (cap, len(source), hash(source), label.font().toString())
             elided = self._elide_cache.get(key)
@@ -460,8 +423,7 @@ class ToolCallCard(_CollapsibleBlock):
             self._icon.setLightIconColor(danger)
             self._icon.setDarkIconColor(danger)
         else:
-            # Error -> Done 的重复上报要把图标字形与颜色**一起**还原，
-            # 否则命令明明成功了、图标还是失败红。
+            # Error -> Done 的重复上报要把图标字形与颜色一起还原，否则成功后图标还是红的。
             self._icon.setAwesome(toolIconName(self._call.name))
             self._icon.setLightIconColor(self._default_icon_light)
             self._icon.setDarkIconColor(self._default_icon_dark)
@@ -551,8 +513,7 @@ class ContextToolGroupCard(_CollapsibleBlock):
         row = self._call_rows.get(call.id)
         if row is None:
             return
-        # 与 ToolCallCard._sync_header 同一套：先算副标题键，再据此排除参数，
-        # 否则同一行会出现「a.py  path=a.py」（两条回归用例各守一半）
+        # 与 ToolCallCard._sync_header 同一套：先算副标题键，再据此排除参数。
         subtitle_key, subtitle = toolRendererSubtitle(call.name, call.arguments)
         if not subtitle:
             subtitle_key, subtitle = toolSubtitleParts(call.arguments)
@@ -624,12 +585,9 @@ class ContextToolGroupCard(_CollapsibleBlock):
 class ToolGroupPanel(_CollapsibleBlock):
     """工具调用外层折叠面板（对齐 agent_chat 的「工具调用 (N)」层级）。
 
-    - 与思考折叠块**完全一致**的内联样式：无卡片底色（内层工具卡自带卡面），
-      标题同为纯文本色（**不叠强调色**，见 :meth:`_apply_theme` 的说明），
-      两者只靠「>」箭头与文案区分；
-    - 标题：运行中 ``工具调用 (已完成/总数)``，全部结束 ``工具调用 (总数)``；
-    - 运行指示：``ElaProgressRing``（继承自 :class:`_CollapsibleBlock`）；
-    - 内容区承载 :class:`ToolCallCard` / :class:`ContextToolGroupCard`。
+    与思考折叠块完全一致的内联样式：无卡片底色、标题为纯文本色（不叠强调色），
+    两者只靠「>」箭头与文案区分。内容区承载 :class:`ToolCallCard` /
+    :class:`ContextToolGroupCard`。
     """
 
     def __init__(self, parent: Optional[QWidget] = None) -> None:
@@ -647,8 +605,7 @@ class ToolGroupPanel(_CollapsibleBlock):
         self._tool_layout.setContentsMargins(0, 0, 0, 0)
         self._tool_layout.setSpacing(2)
         self.bodyLayout().addWidget(self._body_container)
-        # 标题 + 浅灰摘要共用一个 QLabel：富文本片段只用于颜色，外部文本全部转义。
-        # 不额外建控件（历史会话满量物化时 1000+ 面板，每个多一个 label 都是净开销）。
+        # 标题 + 浅灰摘要共用一个 label：富文本片段只用于颜色，外部文本全部转义。
         self._title_label.setTextFormat(Qt.TextFormat.RichText)
         self.hide()
 
@@ -739,13 +696,7 @@ class ToolGroupPanel(_CollapsibleBlock):
     def _apply_theme(self) -> None:
         super()._apply_theme()
         mode = self._theme_mode
-        # 与思考块**同为纯文本色** —— 两者靠「>」箭头与文案本身区分，不靠颜色。
-        # 曾经给工具面板标题叠了一层强调色（blend(text, accent, 0.35)），意图是
-        # 「与思考块稍作区分」，实际两头不讨好：0.35 在深色主题下算出 #c1eaff，
-        # 极淡的青在近黑底上 13px 小字里读不出着色过（浅色主题下却是明显的
-        # #002443，所以只有深色才暴露），于是同一层级里出现两种几乎一样的
-        # 亮色，视觉上更含混。回归测试 tests/ela_chat/test_chat_tool_theme.py
-        # 钉住「工具面板标题 == 思考行标题 == 纯文本色」。
+        # 与思考块同为纯文本色：两者靠「>」箭头与文案区分，不靠颜色（叠强调色会含混）。
         self._title_label.setTextColor(text_color(mode))
         self._title_label.setTextPixelSize(13)
         self._title_label.setTextWeight(QFont.Weight.DemiBold)

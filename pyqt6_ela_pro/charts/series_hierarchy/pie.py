@@ -32,17 +32,8 @@ from ._shared import (
 class PieSeriesRenderer(SeriesRenderer):
     """饼 / 环形 / 南丁格尔玫瑰图。
 
-    option 键（系列级）：
-    - ``data``: [{"name","value"}, ...] 或数值列表；
-    - ``radius``: "75%" / px / ["40%","70%"]（内外半径，环形）；
-    - ``center``: ["50%","50%"]（相对内容区）；
-    - ``startAngle``: 起始角（ECharts 角度约定：0 = 3 点方向、逆时针；
-      默认 90 = 12 点方向）；
-    - ``roseType``: "radius"（半径映射值）/ "area"（面积映射值）；
-    - ``label``: {"show": True, "position": "outside|inside|center",
-      "fontSize": px}；outside 为外部引线 + 名称，inside 为内部百分比，
-      center 于环形中心孔显示总计；
-    - ``totalLabel``: {"show": False, "text": "总计"}：环形中心孔总计。
+    支持 ``data`` / ``radius`` / ``center`` / ``startAngle`` / ``roseType`` /
+    ``minAngle`` / ``padAngle`` / ``label`` / ``totalLabel``。
     """
 
     def __init__(self, chart, opt):
@@ -52,7 +43,7 @@ class PieSeriesRenderer(SeriesRenderer):
         self._total = 0.0
         self._r_in = 0.0
         self._r_out = 1.0
-        #: 图例隐藏的数据项名（ECharts 饼图图例按数据项开关）
+        #: 图例隐藏的数据项名（饼图图例按数据项开关）
         self._hidden_items = set()
 
     def setHiddenItems(self, names) -> None:
@@ -92,12 +83,7 @@ class PieSeriesRenderer(SeriesRenderer):
         label_pos = str(label_opt.get("position") or "outside")
         center_opt = self.opt.get("center") or ["50%", "50%"]
         if not isinstance(center_opt, (list, tuple)):
-            # **别让标量按字符下标取值**：``"50%"[0] == "5"`` → 圆心跑到左上角
-            # 5px 处（用户看到的是「饼心不见了」）；而裸数字连 ``len()`` 都
-            # 没有，直接抛 ``TypeError`` 把整张图打没（异常被 ``warn_once``
-            # 吞掉，只剩「饼不见了 + 控制台一行告警」）。
-            # ECharts 规定 ``center`` 是二元组，但单个值按「两轴同值」处理
-            # 比悄悄画错好得多。
+            # 标量按两轴同值处理：按字符下标取值会把圆心算到左上角。
             center_opt = [center_opt, center_opt]
         cx = rect.left() + _parse_pct(
             center_opt[0] if len(center_opt) > 0 else "50%",
@@ -144,7 +130,8 @@ class PieSeriesRenderer(SeriesRenderer):
                     "name": name,
                     "value": v,
                     "color": self.itemColor(
-                        data_index, default=_series_palette_color(self.chart, data_index)
+                        data_index,
+                        default=_series_palette_color(self.chart, data_index),
                     ),
                     "a0": a0,
                     "a1": a0 + span_eff,
@@ -154,13 +141,7 @@ class PieSeriesRenderer(SeriesRenderer):
             )
 
     def _sector_spans(self, values):
-        """给定一组数值算出每个扇区的 ``(a0, span_eff)``（含 min/pad 角）。
-
-        ``_animated_sectors``（过渡动画）与 ``layout``（终态）**必须走同一份
-        公式**：原先过渡路径自己重算 ``v / total * 360``，把 ``minAngle``
-        与 ``padAngle`` 整个丢了 —— 于是「动画播完的那一帧」扇区突然贴到
-        一起、小值扇区缩回 0 角，视觉上是「饼图在动画结束时跳了一下」。
-        """
+        """每个扇区的 ``(a0, span_eff)``（含 minAngle / padAngle）；动画与终态共用。"""
         min_angle = max(0.0, _to_float(self.opt.get("minAngle"), 0.0))
         pad_angle = max(0.0, _to_float(self.opt.get("padAngle"), 0.0))
         total = sum(values) or 1.0
@@ -230,8 +211,7 @@ class PieSeriesRenderer(SeriesRenderer):
         ]
         vmax = max(values) or 1.0
         rose = str(self.opt.get("roseType") or "")
-        # 角度走 ``_sector_spans``：minAngle / padAngle 在过渡动画里同样生效，
-        # 否则动画结束那一帧扇区会突然贴合（见该方法 docstring）。
+        # 角度走 ``_sector_spans``，否则动画结束那一帧扇区会突然贴合。
         spans = self._sector_spans(values)
         rebuilt = []
         for sec, v, (a0, span_eff) in zip(self._sectors, values, spans):
@@ -428,8 +408,7 @@ class PieSeriesRenderer(SeriesRenderer):
         dy = pos.y() - self._center.y()
         r = math.hypot(dx, dy)
         a = math.degrees(math.atan2(dx, -dy)) % 360.0
-        # 与 ``paint`` 逐项对齐：先按进度插值出当前角度（更新动画），
-        # 再按进度缩放扫掠角宽（入场动画），见 ``_sector_path``。
+        # 与 ``paint`` 对齐：先按进度插值角度，再按进度缩放扫掠角宽。
         anim_t = self._anim_t
         sectors = self._animated_sectors(anim_t)
         for i, sec in enumerate(sectors):
@@ -437,10 +416,7 @@ class PieSeriesRenderer(SeriesRenderer):
             a1 = (
                 float(sec["a0"]) + (float(sec["a1"]) - float(sec["a0"])) * anim_t
             ) % 360.0
-            # **整圆必须特判**。``a1`` 原先也取 ``% 360``，于是占满 360° 的
-            # 扇区（单个数据点、单扇区饼图）拿到 ``a0 == a1 == 0``，角度判据
-            # 变成 ``0 <= a < 0`` —— **恒不命中**。后果是这类扇区既没有
-            # tooltip 也没有 click / emphasis，用户看到的是「点不动的饼」。
+            # 整圆必须特判：占满 360° 的扇区取模后 ``a0 == a1``，角度判据恒不命中。
             span = (float(sec["a1"]) - float(sec["a0"])) * anim_t
             if span >= 360.0:
                 in_angle = True

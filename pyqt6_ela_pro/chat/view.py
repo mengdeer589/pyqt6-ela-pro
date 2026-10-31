@@ -1,23 +1,6 @@
-"""
-聊天消息列表视图（``pyqt6_ela_pro.chat``）。
+"""聊天消息列表视图：把气泡排布在滚动区中，提供消息增删改、流式渲染与虚拟化。
 
-:class:`ElaChatView` 把 :class:`~pyqt6_ela_pro.chat.bubble.ElaChatBubble` 按顺序排布
-在外层滚动区中，提供：
-
-- 消息增删改与只读快照 ``messages()``（助手消息含步骤化 ``parts`` 时间线，派生
-  ``text`` / ``reasoning`` / ``tool_calls`` / ``stats``）；
-- 多步骤流式 API：``beginStep`` / ``beginText`` / ``appendText`` / ``endText``、
-  思考（``beginReasoning`` / ``appendReasoning`` / ``endReasoning``）、工具调用
-  （``addToolCall`` / ``setToolCallResult``，每步独立工具面板）、步骤用量
-  （``setStepStats``）与错误（``setMessageError``）；
-- 消息动作透传：``copyRequested`` / ``undoRequested`` / ``regenerateRequested`` /
-  ``attachmentClicked``（均带消息 id）；
-- 贴底自动跟随：用户上滚后暂停跟随并显示「回到底部」浮动按钮；
-- 大消息量：交互 resize 延迟重排（``setResizeReflowDeferred``）、批量渐进渲染
-  （``beginBatch`` / ``endBatch``）与视口外查看器挂起（``setViewportSuspension``）；
-- 空态：标题 / 副标题 / 建议按钮列表。
-
-**参数约定**：本层所有面向消息的方法以 ``messageId`` 作为**首位**参数。
+所有面向消息的方法以 ``messageId`` 作为**首位**参数。
 """
 
 from __future__ import annotations
@@ -74,8 +57,6 @@ from .view_metrics import (
 
 #: 滚动容器内容边距（左、上、右、下）
 _CONTENT_MARGIN = (10, 12, 10, 12)
-#: 消息间距（Editorial Agent 节奏：turn 之间更松弛）
-#: 「回到底部」浮动按钮尺寸（宽、高）与箭头字号
 #: 交互 resize 延迟重排：停手多久后统一 reflow（毫秒）
 _RESIZE_REFLOW_DELAY_MS = 120
 #: 交互 resize 延迟重排的最小消息数（小会话保持实时 reflow）
@@ -86,22 +67,14 @@ _RESIZE_REFLOW_MIN_PARTS = 200
 _SHELL_VIRTUAL_MIN_MESSAGES = 80
 #: 超过该消息数时用「spacer + 可见气泡」虚拟列表（不再为每条消息建占位控件）
 _VIRTUAL_LIST_MIN_MESSAGES = 200
-#: 虚拟列表的物化余量（视口高度的倍数，上下各留）
-#: 虚拟列表每帧最多物化的气泡数（单个约 7ms：建壳 + 查看器 + Markdown 渲染）
 #: 视口外查看器挂起的最小消息数
 _SUSPEND_MIN_MESSAGES = 80
-#: 挂起判定余量（视口高度的倍数，上下各留）
-#: 挂起判定的合并间隔（毫秒）
 #: 批量渐进渲染的时间片预算（毫秒）
 _BATCH_RENDER_BUDGET_MS = 8
 #: 批量加载时**先渲染**的最新消息条数（用户的视线通常停在底部）
 _BATCH_EAGER_COUNT = 12
 #: 首屏渲染的时间上限（毫秒）：超过就把剩余消息留给懒加载，先把画面放出来
 _BATCH_EAGER_BUDGET_MS = 48
-#: 懒加载一页渲染多少条更早的消息（滚到接近顶部时触发）。
-#: **1 条**：每条消息可能带几十个工具卡，一次物化 3 条实测卡顿 >200ms；
-#: 逐条物化把单次成本拆开，滚动手感更稳。
-#: 懒加载触发距离（距顶部不足该倍数的视口高度时预渲染更早的消息）
 #: 助手消息阅读宽度（像素，0 表示不限；宿主可 setContentMaxWidth 收紧）
 _CONTENT_MAX_WIDTH = 0
 
@@ -117,37 +90,9 @@ class ElaChatView(
 ):
     """聊天消息列表视图（可独立使用，也可由 ``ElaChatWidget`` 组装）。
 
-    **API 分三类（读代码前先分清）**
-
-    1. **宿主 API** —— 建 / 改 / 读消息与外观：``addMessage`` /
-       ``addMessageFromDict`` / ``restoreMessages`` / ``removeMessage`` /
-       ``removeMessagesFrom`` / ``appendText`` / ``beginText`` / ``endText`` /
-       ``beginReasoning`` / ``appendReasoning`` / ``endReasoning`` /
-       ``addToolCall`` / ``setToolCallResult`` / ``setStepStats`` /
-       ``setMessageTitle`` / ``setMessageTimestamp`` / ``setMessageDuration`` /
-       ``setMessageError`` / ``setMessageAttachments`` / ``setReasoningStyle`` /
-       ``setStatsMode`` / ``setToolGrouping`` / ``setAvatar*`` /
-       ``setCopyNotificationEnabled`` / ``setWaitingPlaceholderEnabled`` /
-       ``setContentMaxWidth`` / ``exportSession`` /
-       ``importSession`` / ``messages`` / ``message`` / ``lastMessage`` / ``count``。
-       所有方法 ``messageId`` **首位必填**（唯一一套约定，见 ``ElaChatWidget``）。
-    2. **性能开关（内部 / 只在必要时用）**：``beginBatch`` / ``endBatch``
-       （历史加载骨架 + 渐进渲染）、``setViewportSuspension``
-       （视口外挂起重型查看器）、``setResizeReflowDeferred``
-       （交互 resize 延迟重排）。它们是**渲染调度**，不是业务接口。
-       **单条消息的延迟渲染开关（``setRenderDeferred`` / ``renderDeferred`` /
-       ``flushRender`` / ``hasPendingRender``）只在
-       :class:`~pyqt6_ela_pro.chat.bubble.ElaChatBubble` 上**，view 只在批量
-       渐进渲染路径里内部调用（``_create_message`` / ``_process_render_queue``），
-       宿主要逐条控制得经 ``bubble(messageId)`` 取。
-    3. **内部协议（view ↔ bubble / 供组件内部使用）**：``bubble`` /
-       ``contentWidget`` / ``guardNestedScroll`` / ``holdFollow`` /
-       ``followHeld`` / ``jumpThreshold`` / ``isBatchActive`` 等，宿主一般不需要。
-
-    底层一条不变量：``parts`` 是消息的唯一真源，``text`` / ``reasoning`` /
-    ``tool_calls`` / ``stats`` 由 ``ElaChatMessage.withParts()`` 派生 ——
-    改内容请走上面的宿主 API，别直接对 ``bubble`` 调内部协议（那样会绕过
-    ``_sync_parts`` 的派生结算与 ``_dirty_syncs`` 防抖，数据与界面会分叉）。
+    ``parts`` 是消息的唯一真源，``text`` / ``reasoning`` / ``tool_calls`` /
+    ``stats`` 由 :meth:`ElaChatMessage.withParts` 派生；改内容请走宿主 API，
+    别直接对 ``bubble`` 调内部协议（会绕过派生结算）。
     """
 
     #: 新增消息（参数：消息 id、角色）
@@ -166,16 +111,11 @@ class ElaChatView(
     undoRequested = pyqtSignal(int)
     #: 用户点击「重新生成」（参数：消息 id）
     regenerateRequested = pyqtSignal(int)
-    #: 插入了待答复的工具审批（参数：消息 id、``requestId``）—— **组件不在
-    #: 这里阻塞**，宿主收到后自行挂起后端
+    #: 插入了待答复的工具审批（参数：消息 id、``requestId``）；组件不阻塞，宿主自行挂起后端
     permissionRequested = pyqtSignal(int, str)
     #: 审批已落定（参数：消息 id、``requestId``、reply、answer、feedback）
     permissionReplied = pyqtSignal(int, str, str, str, str)
     #: 交互卡已就绪，请放进输入区 dock（参数：消息 id、partId、卡片）
-    #:
-    #: **审批的交互发生在这里，不在时间线上** —— 摆在历史流里既窄又旧（提问正文
-    #: 被压到折行、候选卡说明被页脚盖住），而用户此刻就在输入区附近。
-    #: :class:`~pyqt6_ela_pro.chat.ElaChatWidget` 接到后调 ``setDockWidget``。
     permissionDockRequested = pyqtSignal(int, str, object)
     #: 某条审批已落定（参数：消息 id、partId）—— dock 据此撤下当前卡、接下一张
     permissionSettled = pyqtSignal(int, str)
@@ -200,8 +140,7 @@ class ElaChatView(
         self._virtual_order: list = []
         self._virtual_prefix: list = []
         self._virtual_prefix_dirty = True
-        #: 消息列表结构变化（增删 / 清空）才需要重建 order / index；
-        #: 滚动时只有高度变化，重建它们是纯浪费。
+        #: 只有消息列表结构变化（增删 / 清空）才需重建 order / index，滚动时不必。
         self._virtual_order_dirty = True
         self._bubbles: dict = {}
         self._stick = True
@@ -246,8 +185,7 @@ class ElaChatView(
         self._scroll.setWidgetResizable(True)
         self._scroll.setFrameShape(QFrame.Shape.NoFrame)
         self._scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        # 上游 V3.0 起 ElaScrollArea 构造默认就是 AsNeeded；这里显式设置一次，
-        # 防上游回退、也让「垂直滚动条看得见、能拖动」的意图就近可读。
+        # 显式设置一次：上游 V3.0 默认已是 AsNeeded，这里防回退并让意图就近可读。
         self._scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         self._content = ChatContent()
         self._content_layout = QVBoxLayout(self._content)
@@ -455,11 +393,7 @@ class ElaChatView(
         return self._bubbles.get(messageId)
 
     def setVirtualPartsEnabled(self, on: bool = True) -> None:
-        """批量加载时是否延迟建分段控件（默认开）。
-
-        关闭时会在下一次导入 / 恢复时立即建全部工具卡与查看器；已处于延迟
-        状态的消息会被当场物化。小会话或需要逐控件断言的测试可以关掉。
-        """
+        """批量加载时是否延迟建分段控件（默认开）；关闭时当场物化已延迟的消息。"""
         self._virtual_parts_enabled = bool(on)
         if not self._virtual_parts_enabled:
             for messageId in list(self._shell_placeholders):
@@ -477,10 +411,9 @@ class ElaChatView(
     def setShellVirtualizationEnabled(
         self, on: bool = True, minMessages: Optional[int] = None
     ) -> None:
-        """批量恢复大量消息时是否连气泡壳一起延迟（默认开，阈值 100 条）。
+        """批量恢复大量消息时是否连气泡壳一起延迟（默认开，阈值 80 条）。
 
-        关闭后所有消息立即建 ``ElaChatBubble``；已延迟的占位消息会被当场
-        物化。小会话 / 需要 ``bubble(id)`` 始终可用的测试可以关掉。
+        关闭后所有消息立即建 ``ElaChatBubble``，已延迟的占位消息当场物化。
         """
         self._virtual_shells_enabled = bool(on)
         if minMessages is not None:
@@ -547,12 +480,8 @@ class ElaChatView(
     def setStrictIds(self, on: bool) -> None:
         """严格模式：操作**不存在的消息**时抛 :class:`KeyError` 而非静默忽略。
 
-        默认关闭 —— 流式场景下「迟到事件」是正常的（消息已被撤回 / 替换，后端还在发
-        分片）。但这让**宿主传错 id** 完全隐形：``setToolCallResult(999, ...)`` 不报错
-        不告警，「工具结果丢了」要到很久以后才被发现。
-
-        **只影响公开 mutator**；内部路径（滚动跟随 / 视口挂起 / 分段同步）在消息消失时
-        必须继续静默。建议在开发 / 调试期打开。
+        默认关闭（流式迟到事件属正常）；开发 / 调试期打开可暴露宿主传错 id。
+        只影响公开 mutator，内部路径（滚动跟随 / 挂起 / 分段同步）继续静默。
         """
         self._strict_ids = bool(on)
 
@@ -572,11 +501,10 @@ class ElaChatView(
     def _require_bubble(
         self, messageId: int, api: str = "", materialize: bool = True
     ) -> ElaChatBubble:
-        """取气泡；非法 id **抛 TypeError**，严格模式下不存在抛 :class:`KeyError`。
+        """取气泡；非法 id 抛 :class:`TypeError`，严格模式下不存在抛 :class:`KeyError`。
 
-        非严格模式下「id 不存在」等价于 ``self._bubbles.get(messageId)``。
-        壳被延迟物化的消息会先 ``_materialize_shell``（``materialize=False``
-        时留给调用方自行处理，如 ``removeMessage`` 不需要建壳）。
+        壳被延迟物化的消息会先 ``_materialize_shell``；``materialize=False``
+        时留给调用方自行处理（如 ``removeMessage`` 不需要建壳）。
         """
         self._require_int_id(messageId, api)
         bubble = self._bubbles.get(messageId)
@@ -595,21 +523,13 @@ class ElaChatView(
         return self._messages[-1] if self._messages else None
 
     def sessionStats(self, limit: int = 0) -> ElaChatSessionStats:
-        """会话级用量汇总（计数 / 当前上下文四路词元 / 使用率 / 累计成本 /
-        工具调用统计 / 思考耗时合计）。
+        """会话级用量汇总（计数 / 当前上下文四路词元 / 使用率 / 累计成本 / 工具统计）。
 
-        口径对齐 opencode ``getSessionContext``：**「当前用量」取最后一条有
-        tokens 的助手消息的最后一步**（多步工具轮里就是最近一次 LLM 调用），
-        ``total_tokens`` = 四路和；累计成本跨全部消息求和。工具统计里的
-        ``tool_rounds`` 是「有工具调用的步骤数」（消息内按 ``step`` 去重）。
-
-        这套数字可以直接喂输入区的上下文圆环::
-
-            stats = view.sessionStats(WINDOW)
-            chat.chatInput().setContextUsage(stats.total_tokens, WINDOW, stats.total_cost_usd)
+        当前用量取最后一条有 tokens 的助手消息的最后一步（对齐 opencode
+        ``getSessionContext``）；``total_tokens`` = 四路和，成本跨全部消息求和。
 
         :param limit: 模型上下文上限（词元）；``> 0`` 时才计算 ``usage_percent``
-        :returns: :class:`~pyqt6_ela_pro.chat.session.ElaChatSessionStats` 快照
+        :returns: :class:`ElaChatSessionStats` 快照
         """
         return ElaChatSessionStats.fromMessages(self.messages(), limit)
 
@@ -626,11 +546,8 @@ class ElaChatView(
     def beginBatch(self) -> None:
         """进入批量加载模式（可嵌套）。
 
-        批量内新增的助手文本消息先建骨架、跳过快照同步与贴底跟随，
-        Markdown 渲染进入队列；``endBatch`` 后**先渲染最新的 ``_BATCH_EAGER_COUNT`` 条**
-        （受 ``_BATCH_EAGER_BUDGET_MS`` 时间上限约束），更早的消息留在懒加载队列，
-        滚到接近顶部时分页渲染（:meth:`_load_older_page`），队列排空后发出
-        :attr:`batchRenderFinished`。
+        批量内新增的助手文本消息先建骨架、跳过快照同步与贴底跟随；``endBatch``
+        后先渲染最新的 ``_BATCH_EAGER_COUNT`` 条，其余留给滚动懒加载。
         """
         self._batch_depth += 1
         if self._batch_depth == 1:
@@ -661,13 +578,7 @@ class ElaChatView(
         return self._batch_depth > 0
 
     def _process_render_queue(self) -> None:
-        """渲染队列中的消息（**从最新一条往前**，只渲染首屏附近的）。
-
-        历史会话打开时用户停在底部，先把最新的 ``_BATCH_EAGER_COUNT`` 条
-        （或 ``_BATCH_EAGER_BUDGET_MS`` 时间上限内能渲染的条数）渲染出来，
-        首屏立刻有内容；更早的消息留在 ``_lazy_ids`` 里，滚到接近顶部时
-        再分页渲染（:meth:`_load_older_page`）。
-        """
+        """渲染队列中的消息（**从最新一条往前**，只渲染首屏附近的）。"""
         if not self._render_queue:
             self._finish_batch_render()
             return
@@ -718,10 +629,8 @@ class ElaChatView(
     ) -> None:
         """设置视口外消息是否挂起重型查看器（默认开启）。
 
-        挂起把离视口较远（上下各 ``2`` 屏）消息的 Markdown 查看器替换为
-        等高透明占位控件（``parts`` / 快照数据不变），滚动回来时重新渲染；
-        流式消息与批量加载中的消息不挂起。消息数少于 ``minMessages``
-        （缺省 80）时不做任何处理。
+        挂起把离视口较远（上下各 2 屏）消息的 Markdown 查看器替换为等高透明
+        占位控件（``parts`` / 快照数据不变）；流式与批量加载中的消息不挂起。
 
         :param on: 是否启用
         :param minMessages: 启用挂起的最小消息数（缺省 80）

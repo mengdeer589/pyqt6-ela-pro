@@ -1,36 +1,25 @@
-"""
-聊天组件主题工具（``pyqt6_ela_pro.chat`` 内部模块）。
-
-集中提供颜色混合与语义色派生，供输入区、工具栏、消息气泡共享，
-避免包内互相导入私有实现（如 ``from .bubble import _blend``）。
-"""
+"""聊天组件主题工具：颜色混合与语义色派生（``pyqt6_ela_pro.chat`` 内部模块）。"""
 
 from __future__ import annotations
 
 from PyQt6.QtGui import QColor, QFont
 from PyQt6ElaWidgetTools import ElaThemeType, eTheme
 
-# ``blend`` 原为本模块私有，现已提到共享层 ``pyqt6_ela_pro._theme``（Shimmer 的
-# 骨架底色、Avatar 的派生底色都要用同一套插值）。这里再导入一次是因为 chat 内部
-# 有 6 处按 ``from ._theme import blend`` 取它 —— 那不是兼容别名，是 chat 的
-# 语义色都集中在本模块的既有约定。
+# ``blend`` 复用共享层 ``pyqt6_ela_pro._theme``，chat 内部的语义色统一从本模块取。
 from .._internal import system_cjk_font_family
 from .._theme import blend
 
 __all__ = ["MONO_FONT_STACK", "blend", "mono_font"]
 
-#: 等宽字体栈（数字 / 耗时 / 统计 / 工具参数的“代理轨迹”质感；
-#: 非中文系统的默认 —— 中文系统收成单族 CJK 字体，见 ``mono_font``）
+#: 等宽字体栈（非中文系统默认；中文系统收成单族 CJK 字体，见 ``mono_font``）
 MONO_FONT_STACK = ("Consolas", "Cascadia Mono", "Courier New")
 
 
 def mono_font(size_px: int = 11) -> QFont:
-    """等宽标签字体（替代 ``mono_css``：库内禁 QSS，字体直接给 ``QFont``）。
+    """等宽标签字体（库内禁 QSS，字体直接给 ``QFont``）。
 
-    中文系统收成**单族雅黑**：多族列表在 Win7 上是慢 shaping 路径且进程级毒化
-    （与内容是否 CJK 无关），而这些标签（耗时 / 工具详情 / 差异）又可能含 CJK，
-    单族 CJK 字体是唯一全免触发的选择 —— 代价是丢掉等宽观感（diff 对齐略降，
-    与终端默认字体的取舍同源，见「下游项目反馈bug.md」§2/§3）。
+    中文系统收成单族雅黑：多族列表在 Win7 上是慢 shaping 路径且进程级毒化，
+    代价是丢掉等宽观感。
     """
     font = QFont()
     cjk_family = system_cjk_font_family()

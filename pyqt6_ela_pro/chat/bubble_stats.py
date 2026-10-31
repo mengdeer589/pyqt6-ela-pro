@@ -27,11 +27,7 @@ class _BubbleStatsMixin:
     """方法组 mixin：状态由 ``ElaChatBubble.__init__`` 建立。"""
 
     def statsBadge(self) -> Optional[StatsBadge]:
-        """获取当前展示的用量徽标（无则返回 ``None``）。
-
-        ``"footer"`` / ``"steps"`` 模式返回最后一个步骤的徽标；``"none"``
-        模式恒为 ``None``（耗时回退到底部 meta 文本）。
-        """
+        """获取当前展示的用量徽标（无则 ``None``；``"none"`` 模式恒为 ``None``）。"""
         if self._stats_mode == "none":
             return None
         for part in reversed(self._parts):
@@ -43,14 +39,11 @@ class _BubbleStatsMixin:
         return None
 
     def setStatsMode(self, mode: str) -> None:
-        """设置用量徽标展示模式（立即生效）。
+        """设置用量徽标展示模式（立即生效；非法值回落 ``"footer"``）。
 
-        - ``"footer"``（默认）：只显示一个徽标（最新步骤位置），内容为
-          整轮汇总（各步求和）；回合结束时停靠到底部行；
-        - ``"steps"``：每步各自一个徽标（服务端原值，不汇总）——调试用；
-        - ``"none"``：不显示徽标，端到端耗时回退到底部 meta 文本。
-
-        非法值回落为 ``"footer"``。每步原始用量始终保留在 ``parts`` 中。
+        ``"footer"``：一个整轮汇总徽标（各步求和）；``"steps"``：每步各自一个
+        徽标；``"none"``：不显示，耗时回退到底部 meta 文本。每步原始用量始终
+        保留在 ``parts`` 中。
         """
         self._stats_mode = mode if mode in _STATS_MODES else "footer"
         self._apply_stats_mode()
@@ -61,16 +54,10 @@ class _BubbleStatsMixin:
         return self._stats_mode
 
     def _apply_stats_mode(self) -> None:
-        """按当前模式显隐 / 刷新各步骤用量徽标（不改变 ``parts`` 原始数据）。
+        """按当前模式显隐 / 刷新各步骤用量徽标（不改 ``parts`` 原始数据）。
 
-        流式回合内**一律不摆徽标**：用量是逐步累计的，中途的数字既不是最终值，又会
-        在「工具调用 → 下一步」的过程中反复跳动（默认 ``"footer"`` 那一行更是还在
-        长的整轮汇总）。回合结束（状态离开 ``Streaming``）后按模式展示：``"footer"``
-        整轮汇总停靠到底部行，``"steps"`` 每步各自一行，``"none"`` 不显示。
-
-        历史恢复时 ``setStepStats`` 只存数据、不建控件；这里按模式**按需**建
-        ``StatsBadge``（footer 每条消息只建最后一个），避免 500 个徽标里 449 个
-        最终不可见却仍付创建 / 布局成本（bug #17）。
+        流式回合内一律不摆徽标（数字未落定且会反复跳动）；历史恢复时按模式
+        按需建 ``StatsBadge``，footer 每条消息只建最后一个。
         """
         stats_parts = [
             part
@@ -107,9 +94,8 @@ class _BubbleStatsMixin:
         else:
             for part in stats_parts:
                 self._ensure_stats_badge(part).setStats(part.stats)
-        # 判据是**消息状态**，不是 ``_stream_ended``：``setParts()`` 恢复 /
-        # ``setStatus(Done)`` 静态收尾都不经过 ``endStream`` —— 拿历史标志当
-        # 「回合已结束」会把恢复出来的整轮汇总徽标留在时间线里，与实时渲染不一致。
+        # 判据是消息状态而不是 ``_stream_ended``：``setParts`` / ``setStatus``
+        # 收尾都不经过 ``endStream``，拿历史标志会把恢复出的汇总徽标留在时间线里。
         if self._status != ElaChatStatusType.Streaming:
             self._dock_step_stats_to_footer()
 
@@ -140,11 +126,8 @@ class _BubbleStatsMixin:
     ) -> None:
         """设置当前步骤的用量统计（``None`` 移除当前步骤记录）。
 
-        每步原始用量记录为 ``parts`` 中的 ``Stats`` 分段（数据不汇总）；
-        界面展示由 :meth:`setStatsMode` 决定——默认 ``"footer"`` 只显示
-        一个整轮汇总徽标（各步求和）。
-
-        ``partId`` 由 :meth:`setParts` 传入时保留原分段 id（存储恢复）。
+        每步原始用量记录为 ``parts`` 中的 ``Stats`` 分段（不汇总），展示由
+        :meth:`setStatsMode` 决定。``partId`` 由 :meth:`setParts` 传入时保留原 id。
         """
         if self._role != ElaChatRoleType.Assistant:
             return
@@ -166,8 +149,7 @@ class _BubbleStatsMixin:
             partId = partId or uuid4().hex[:12]
             badge = None
             if not self._stats_batch:
-                # 历史回放期只登记数据；最终可见的徽标由 _apply_stats_mode
-                # 按需创建（footer 只建最后一个），避免隐藏徽标的创建成本。
+                # 历史回放期只登记数据，可见徽标由 _apply_stats_mode 按需创建
                 badge = StatsBadge(self._parts_container or self._content or self)
                 badge._setStats(stats, deferShow=False)
             self._append_part(
@@ -200,13 +182,7 @@ class _BubbleStatsMixin:
         )
 
     def _dock_step_stats_to_footer(self) -> None:
-        """把展示中的用量徽标停靠到底部行（与操作按钮 / 耗时同一水平布局）。
-
-        ``"steps"`` 模式下中间步骤徽标仍留在各自步骤末尾；``"none"``
-        模式不显示徽标，直接跳过。停靠是**独占**的：换停靠前先把上一枚放回
-        时间线的原下标 —— 重放时每一步徽标都会走到这里一次，不归位就会全堆进
-        footer，与实时渲染不一致。
-        """
+        """把展示中的用量徽标停靠到底部行（停靠是独占的，换目标前先归位）。"""
         if self._stats_layout is None or self._stats_mode == "none":
             return
         target = None

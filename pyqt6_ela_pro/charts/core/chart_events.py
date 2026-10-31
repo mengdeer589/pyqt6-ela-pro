@@ -120,8 +120,7 @@ class _ChartEventsMixin:
     def on(self, eventName: str, handler) -> "ElaChartWidget":
         """注册 ECharts 事件处理器（``chart.on('click', fn)``）。
 
-        handler 接收一个 dict（ECharts params，含 ``type``）。异常被捕获并
-        仅告警一次，不会穿透 Qt 事件循环导致进程 abort。
+        handler 接收 ECharts params dict；异常被捕获并仅告警一次，不穿透 Qt 事件循环。
         """
         if not callable(handler):
             raise TypeError("on(eventName, handler): handler 必须可调用")

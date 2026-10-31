@@ -1,4 +1,4 @@
-"""消息流式 API / 审批 / 错误与字段更新方法组（从 ``ElaChatView`` 拆出）。"""
+"""消息流式 API / 审批 / 错误与字段更新方法组。"""
 
 from __future__ import annotations
 
@@ -70,11 +70,7 @@ class _ViewStreamMixin:
         bubble.endStream(status)
 
     def beginStep(self, messageId: int) -> Optional[int]:
-        """开始指定助手消息的新步骤，返回步骤序号。
-
-        仅推进步骤序号（分段未变），仍发出 ``messageUpdated`` 便于宿主
-        统一观察消息变化。
-        """
+        """开始指定助手消息的新步骤，返回步骤序号（空步骤不递增）。"""
         bubble = self._require_bubble(messageId, "beginStep")
         if bubble is None:
             return None
@@ -138,7 +134,7 @@ class _ViewStreamMixin:
         """为指定消息添加工具调用卡片，返回调用 id。
 
         ``metadata`` 是结构化附加数据（文件变更 / shell 状态 / 诊断等），
-        会原样进入渲染器上下文与工具调用快照。
+        原样进入渲染器上下文与工具调用快照。
         """
         bubble = self._require_bubble(messageId, "addToolCall")
         if bubble is None:
@@ -151,9 +147,7 @@ class _ViewStreamMixin:
                 status=ElaChatToolStatusType.Running,
                 metadata=dict(metadata) if isinstance(metadata, dict) else {},
             )
-            callId = bubble.addToolCall(
-                name, arguments, toolCallId, tool_call=call
-            )
+            callId = bubble.addToolCall(name, arguments, toolCallId, tool_call=call)
         else:
             callId = bubble.addToolCall(name, arguments, toolCallId)
         self._sync_parts(messageId)
@@ -192,11 +186,7 @@ class _ViewStreamMixin:
         self.messageUpdated.emit(messageId)
 
     def addSteerNotice(self, messageId: int, text: str) -> str:
-        """在指定消息内追加一条插话回执，返回分段 id。
-
-        插话（steer）= 生成中把新指令**送进正在跑的这一轮**，而不是排队等
-        它跑完。回执留在同一条助手消息内（``↳ <text>``），不插用户气泡。
-        """
+        """在指定消息内追加一条插话回执（``↳ <text>``），返回分段 id。"""
         bubble = self._require_bubble(messageId, "addSteerNotice")
         if bubble is None:
             return ""
@@ -210,10 +200,8 @@ class _ViewStreamMixin:
     ) -> str:
         """标记一次上下文压缩开始（``queued=True`` 表示已排队、尚未开跑），返回分段 id。
 
-        **库不实现压缩算法**（摘要 / 收缩循环 / 词元估算都在 provider 侧），
-        只在时间线上如实表达「这里发生过压缩」并接住摘要。
-
-        ``reason`` 只进 journal 原始事件（诊断用），时间线卡片不展示它。
+        库只表达「这里发生过压缩」并接住摘要，压缩算法归 provider。
+        ``reason`` 只进 journal 原始事件（诊断用），时间线卡片不展示。
         """
         bubble = self._require_bubble(messageId, "beginCompaction")
         if bubble is None:
@@ -250,14 +238,11 @@ class _ViewStreamMixin:
         self.messageUpdated.emit(messageId)
 
     def beginPermission(self, messageId: int, request) -> str:
-        """在指定消息内插入一张工具审批卡，返回分段 id。
+        """在指定消息内插入一张工具审批卡，返回分段 id（不阻塞事件循环）。
 
-        **只画卡 + 发 ``permissionRequested``，绝不阻塞** —— 在 Qt 里挂起等
-        用户点按钮会卡死事件循环。宿主拿到信号后自行挂起后端，用户点完卡片
-        后组件发 ``permissionReplied``。「始终允许」的规则也归宿主持久化。
-
-        :param request: :class:`~pyqt6_ela_pro.chat.message.ElaChatPermission`
-            或等价的 ``dict``（会被 ``fromDict`` 转换）
+        用户点完卡片后组件发 ``permissionReplied``；「始终允许」的持久化归宿主。
+        ``request`` 接受 :class:`~pyqt6_ela_pro.chat.message.ElaChatPermission`
+        或等价 ``dict``。
         """
         bubble = self._require_bubble(messageId, "beginPermission")
         if bubble is None:
@@ -302,17 +287,12 @@ class _ViewStreamMixin:
         return bubble.permissionCard(requestId) if bubble is not None else None
 
     def permissionAnswers(self, messageId: int, requestId: str) -> dict:
-        """取问答型审批的答案（``{key: [label, ...]}``；未答的 key 不在字典里）。
+        """取问答型审批的答案（``{key: [label, ...]}``，未答的 key 不在字典里）。
 
-        批准型、或该请求不存在 / 已落定无答案时返回**空字典**。
-
-        与 ``permissionReplied.answer`` 的区别：那条信号给的是**已编码**的 JSON 串
-        （单选塌缩成标量），这里给的是**未塌缩**的原始分组形式 —— 宿主在
-        「等用户答完、还没点提交」的中间态想知道当前进度时用它（用户答到一半
-        可能切走、关窗口，这时候连信号都没发过）。
-
-        **优先读 dock 上的交互卡**（等待期），落定后才退回时间线上的记录卡
-        （那时记录卡已无交互态，答案只能从已落定的载荷里取）。
+        批准型、或该请求不存在 / 已落定无答案时返回空字典。与
+        ``permissionReplied.answer`` 的区别：那条信号给的是已编码的 JSON 串
+        （单选塌缩成标量），这里给未塌缩的原始分组形式，供宿主在「用户答到
+        一半、还没提交」时读进度。
         """
         self._require_int_id(messageId, "permissionAnswers")
         card = self.interactivePermissionCard(messageId, requestId)
@@ -329,7 +309,7 @@ class _ViewStreamMixin:
         }
 
     def interactivePermissionCard(self, messageId: int, requestId: str):
-        """取**仍在 dock 里等待用户操作**的交互卡（不在 dock 阶段返回 ``None``）。"""
+        """取仍在 dock 里等待用户操作的交互卡（不在 dock 阶段返回 ``None``）。"""
         self._require_int_id(messageId, "interactivePermissionCard")
         bubble = self._bubbles.get(messageId)
         if bubble is None:
@@ -384,7 +364,7 @@ class _ViewStreamMixin:
         self.messageUpdated.emit(messageId)
 
     def setMessageDuration(self, messageId: int, durationMs: float) -> None:
-        """设置指定消息的总耗时（显示在底部 meta 层，同时发出 ``messageUpdated``）。"""
+        """设置指定消息的总耗时（显示在底部 meta 层）。"""
         bubble = self._require_bubble(messageId, "setMessageDuration")
         if bubble is None:
             return
@@ -395,12 +375,10 @@ class _ViewStreamMixin:
     def setMessageError(
         self, messageId: int, message: str, errorType: str = ""
     ) -> None:
-        """设置指定消息的错误文本与类型。
+        """设置指定消息的错误文本与类型（``message`` 空串清除错误）。
 
-        :param message: 面向用户的错误文本（空串清除错误）
-        :param errorType: 错误类型（``"RateLimit"`` / ...）。**单独存字段而不是
-            拼进 ``message``** —— 拼进去类型就丢了，错误卡无法判断该不该给
-            「重试」按钮，宿主也拿不到结构化信息。
+        ``errorType`` 单独存字段而不是拼进 ``message`` —— 拼进去类型就丢了，
+        错误卡无法判断该不该给「重试」按钮。
         """
         bubble = self._require_bubble(messageId, "setMessageError")
         if bubble is None:
@@ -425,14 +403,10 @@ class _ViewStreamMixin:
         return (message.error, message.error_type)
 
     def clearMessageError(self, messageId: int) -> None:
-        """清除指定消息的错误（发出 ``messageUpdated``）。
+        """清除指定消息的错误（``Error`` 状态一并落成 ``Stopped``）。
 
-        「重试」前必须先调它 —— 否则上一轮的错误卡会**留在界面上**，而新的
-        流式内容正在同一条消息里生成，看起来像同时既有错误又在输出。
-
-        消息状态为 ``Error`` 时一并落成 ``Stopped``（保留「失败的尝试」记录）：
-        错误文案已清空却留着 ``Error`` 状态，导出 / 恢复出来的是「出错但没
-        错误」的自相矛盾数据。
+        「重试」前必须先调它，否则旧错误卡会留在界面上与新流式内容并存。
+        清空文案却留着 ``Error`` 状态会导出「出错但没错误」的自相矛盾数据。
         """
         bubble = self._require_bubble(messageId, "clearMessageError")
         if bubble is None:
@@ -453,7 +427,7 @@ class _ViewStreamMixin:
         self.messageUpdated.emit(messageId)
 
     def setMessageTitle(self, messageId: int, title: str) -> None:
-        """设置指定消息的头部名称 / 模型名（发出 ``messageUpdated``）。"""
+        """设置指定消息的头部名称 / 模型名。"""
         bubble = self._require_bubble(messageId, "setMessageTitle")
         if bubble is None:
             return
@@ -462,7 +436,7 @@ class _ViewStreamMixin:
         self.messageUpdated.emit(messageId)
 
     def setMessageTimestamp(self, messageId: int, timestamp: str) -> None:
-        """设置指定消息的头部时间文本（发出 ``messageUpdated``）。"""
+        """设置指定消息的头部时间文本。"""
         bubble = self._require_bubble(messageId, "setMessageTimestamp")
         if bubble is None:
             return

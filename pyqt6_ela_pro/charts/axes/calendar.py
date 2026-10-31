@@ -18,15 +18,9 @@ from .base import Coord
 class CalendarCoord(Coord):
     """日历坐标系：GitHub 式 周×星期 网格（ECharts ``calendar``）。
 
-    option 键：``calendar``：``range``（``2026`` / ``"2026"`` /
-    ``["2026-01-01", "2026-12-31"]``，缺省当前年）、``orient``
-    （``"horizontal"`` 默认 / ``"vertical"``）、``cellSize``（px 或 ``"auto"``）、
-    ``dayLabel`` {show, firstDay（0=周日 … 6=周六，或 "sunday"/"monday"）}、
-    ``monthLabel`` {show}、``yearLabel`` {show}、``splitLine``
-    {show, lineStyle}、``itemStyle`` {color, borderColor, borderWidth}。
-
-    行 / 列 = 星期与周序（orient 决定转置）；``mapPoint(date)`` 单参 →
-    单元格中心；``cellRect(date)``；``dateAt(pos)`` 反查。
+    ``calendar.range`` 收年份 / 月份 / 单日期 / ``[start, end]``，缺省当前年；
+    ``orient`` 决定行列是否转置。``mapPoint(date)`` → 单元格中心，
+    ``cellRect(date)`` / ``dateAt(pos)`` 互查。
     """
 
     kind = "calendar"
@@ -73,12 +67,7 @@ class CalendarCoord(Coord):
 
     @classmethod
     def _clamp_year(cls, year):
-        """年份夹到 ``date`` 支持的区间（1..9999），越界回退当前年。
-
-        ``{"calendar": {"range": 10000}}`` 原先让 ``date(10000, 1, 1)`` 抛
-        ``ValueError``，而 ``_make_coord`` 的兜底只是 ``coord = None`` →
-        **整张日历热力图静默空白**，看不出是年份越界。
-        """
+        """年份夹到 ``date`` 支持的区间（1..9999），越界回退当前年（否则整图静默空白）。"""
         try:
             y = int(year)
         except (TypeError, ValueError, OverflowError):
@@ -89,12 +78,7 @@ class CalendarCoord(Coord):
 
     @classmethod
     def _resolve_range(cls, rng):
-        """``calendar.range`` → ``(start, end)``。
-
-        支持年份（``2026`` / ``"2026"``）、月份（``"2026-01"``）、单日期、
-        ``[start, end]`` 或 ``["2026"]`` / ``["2026-01", "2026-03"]``；
-        非法 / 缺省回退当前年。**月份 / 年份数组不再静默变成全年**。
-        """
+        """``calendar.range`` → ``(start, end)``；非法 / 缺省回退当前年。"""
         today = date.today()
         year = today.year
 
@@ -155,7 +139,7 @@ class CalendarCoord(Coord):
 
     @staticmethod
     def _month_end(first: date) -> date:
-        """某月最后一天（``date`` 自带下月一号减一天）。"""
+        """某月最后一天。"""
         if first.month == 12:
             return date(first.year, 12, 31)
         return date(first.year, first.month + 1, 1) - timedelta(days=1)
@@ -195,9 +179,7 @@ class CalendarCoord(Coord):
         d = date(self.start.year, self.start.month, 1)
         while d <= self.end:
             out.append(d)
-            # ``date`` 的 year 上限是 9999：range 落在 9999 年时
-            # ``date(d.year + 1, 1, 1)`` 抛 ValueError，而这里跑在
-            # ``paintAxes`` 的调用链上 → 整张日历热力图静默空白。
+            # 9999 年再加一月抛 ValueError，而这里跑在 paintAxes 链上 → 整图静默空白。
             if d.year >= _MAX_DATE_YEAR:
                 break
             if d.month == 12:
@@ -279,8 +261,7 @@ class CalendarCoord(Coord):
         d = self.start
         while d <= self.end:
             yield d
-            # ``date`` 上限是 9999-12-31，再加一天抛 OverflowError —— 跑在
-            # heatmap 的 layout 里 → 整张日历热力图静默空白。
+            # 9999-12-31 再加一天抛 OverflowError（跑在 heatmap layout 里 → 整图静默空白）。
             if d.year >= _MAX_DATE_YEAR:
                 break
             d += timedelta(days=1)
@@ -288,17 +269,16 @@ class CalendarCoord(Coord):
     def _weekday_label_rows(self) -> dict:
         """星期标签序号 → 标签（GitHub 只标 周一/周三/周五）。
 
-        ``dayLabel.nameMap`` 可覆盖：数组按 ECharts 约定 **0 = 周日** … 6 = 周六；
-        也接受 ``{0: "SUN", ...}`` 形式的 dict（键同样是 0 = 周日）。
+        ``dayLabel.nameMap`` 可覆盖：数组 / dict 的键都按 ECharts 约定 **0 = 周日**。
         """
         base = {row: label for row, label in ((0, "周一"), (2, "周三"), (4, "周五"))}
         raw = self._day_label.get("nameMap")
         if isinstance(raw, (list, tuple)) and len(raw) >= 7:
-            return {
-                row: str(raw[(row + 1) % 7]) for row in base
-            }
+            return {row: str(raw[(row + 1) % 7]) for row in base}
         if isinstance(raw, dict):
-            return {row: str(raw.get((row + 1) % 7, label)) for row, label in base.items()}
+            return {
+                row: str(raw.get((row + 1) % 7, label)) for row, label in base.items()
+            }
         return base
 
     def _month_name(self, month: int) -> str:
@@ -309,8 +289,7 @@ class CalendarCoord(Coord):
         if isinstance(raw, dict):
             if month in raw:
                 return str(raw[month])
-            # 0 基 dict（{0: "Jan", ...}）——只有存在键 0 时才按 0 基解释，
-            # 否则 ``{2: "Feb"}`` 在 3 月会命中 2 而错显示成 2 月
+            # 0 基 dict 只在存在键 0 时启用，否则 ``{2: "Feb"}`` 在 3 月会错显示成 2 月
             if 0 in raw and (month - 1) in raw:
                 return str(raw[month - 1])
         return _MONTH_LABELS[month - 1]
@@ -342,7 +321,7 @@ class CalendarCoord(Coord):
         day_font = self._label_font(day_style)
         p.setFont(day_font)
         p.setPen(parse_color(day_style.get("color") or T("color.text.tertiary")))
-        # 星期标签（周一/周三/周五；行号按 firstDay 换算）
+        # 星期标签（行号按 firstDay 换算）
         if self.show_week_labels:
             for local_row, label in self._weekday_label_rows().items():
                 row = (local_row - self._row_offset) % 7
@@ -365,7 +344,7 @@ class CalendarCoord(Coord):
                         Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter,
                         label,
                     )
-        # 月份标签：每月 1 日所在格（去重；跨年逐月遍历）
+        # 月份标签：每月 1 日所在格（去重）
         month_style = self._label_style("month")
         month_font = self._label_font(month_style)
         month_fm = QFontMetricsF(month_font)
@@ -463,7 +442,7 @@ class CalendarCoord(Coord):
         try:
             d = self._first_column_start() + timedelta(days=week_index * 7 + weekday)
         except OverflowError:
-            # range 落在 9999 年末尾时，最后几列会越出 ``date`` 上限
+            # range 落在 9999 年末尾时，最后几列会越出 date 上限
             return None
         if d < self.start or d > self.end:
             return None

@@ -1,69 +1,15 @@
-"""
-工具结果富渲染注册表（``pyqt6_ela_pro.chat``）。
+"""工具结果富渲染注册表（``pyqt6_ela_pro.chat``）。
 
-**问题**：``ToolCallCard`` 只会把 ``arguments`` / ``result`` 当纯文本显示。
-编码 agent 里最高频的动作是「看 diff」，但改代码类工具的结果是一坨 JSON，
-用户必须展开、滚动、盯着一坨括号找变化。opencode 为此做了 1800 行
-``tool-renderer.tsx``，把 diff / 图片 / 终端输出各写一个渲染器。
+``ToolCallCard`` 默认把 ``arguments`` / ``result`` 当纯文本显示；宿主可注册渲染器
+接管内容区（头部 / 折叠 / 错误竖线 / 忙碌环仍归卡片）。库内不内置具体渲染器，
+渲染什么是宿主的产品决策。
 
-**这里提供的是那个「注册表」抽象本身**，库内不内置任何具体渲染器 ——
-渲染什么、怎么渲染是**宿主的产品决策**（就像
-:func:`~pyqt6_ela_pro.chat.blocks.toolDefaultOpen` 一样交给宿主注入）。
+三条硬约束：渲染器 widget 必须持 Python 引用（``ToolCallCard`` 内部持有）；工厂
+跑在 GUI 线程的点击槽里，异常会被卡片兜住并落回默认文本 body；工厂里不要做重活。
+结果变化时卡片会调 widget 的 ``updateToolResult``（有就调）。
 
-.. code-block:: python
-
-    # 宿主：把 patch / edit 的结果渲染成 diff
-    def buildDiff(ctx: ToolRenderContext) -> QWidget:
-        widget = QWidget()
-        layout = QVBoxLayout(widget)
-        for entry in ctx.parsedArguments().get("files", []):
-            layout.addWidget(UnifiedDiffView(entry["diff"], parent=widget))
-        return widget
-
-    registerToolRenderer("patch", buildDiff,
-                         subtitle=lambda args: ("files", "3 个文件"))
-
-**与 opencode 的关键差异：我们只替换 body，不替换整个卡片。**
-
-opencode 的 ``ToolDisplay`` 用 ``<Dynamic>`` 分发**整个组件**，每个渲染器都要
-自己包一层 60 行的 ``BasicTool``（头部 / 图标 / 状态 / 展开逻辑），
-13 个渲染器复述 13 遍。本模块的渲染器**只填内容区**，头部、chevron、宽度
-省略、错误竖线、忙碌环、默认展开策略全部保留在 ``ToolCallCard`` 里。代价是
-宿主改不了头部布局；收益是现有三条工具卡回归守卫（副标题去重 / 运行中不显示
-参数 / default-open 纯函数）一条都不用改，且扩展点只有一个。
-
-**生命周期与线程约束**（三条硬要求，违反会进程崩溃）：
-
-1. **必须持 Python 引用** —— 卡片会把返回的 widget ``addWidget`` 进布局，
-   但那只转移 C++ 所有权，Python 包装器会被 GC，之后调用其方法就是解引用已
-   释放内存（与 ``setItemDelegate`` 同一死法）。``ToolCallCard`` 内部持有
-   ``_renderer_widget`` 引用来保证不回收；宿主**不需要**、也**不应该**自己
-   再去 ``del``。
-2. **工厂在 GUI 线程的点击槽里被调用** —— 里面抛出的 Python 异常会穿过 C++
-   边界导致进程直接终止（无 traceback）。``ToolCallCard`` 用 ``try/except``
-   包住并落回默认文本 body，宿主渲染器里的 bug 不会让聊天窗口消失。
-3. **不要在工厂里做重活** —— 它跑在「用户点开卡片」的那一帧里。数据量大的
-   解析 / 网络请求请放后台线程，结果用信号回传。
-
-**结果更新协议（可选）**：Solid 的响应式在 Qt 里没有对应物，这里切成两步 ——
-建卡时给一份**不可变快照**（:class:`ToolRenderContext`，无引用 → 无悬垂风险），
-之后结果变化时卡片**推送**给 widget（若它有 ``updateToolResult`` 方法）：
-
-.. code-block:: python
-
-    class DiffView(QWidget):
-        def updateToolResult(self, result: str, status: str) -> None:
-            self._reparse(result)      # 可选方法：有就调，没有就跳过
-
-折叠状态下工具才完成的情况不需要额外处理：内容区是**首次展开时**才构建的，
-工厂拿到的快照天然是当下最新的。
-
-**``subtitle`` 契约**：签名是 ``(arguments: str) -> (key, value)``，与
-:func:`~pyqt6_ela_pro.chat.blocks.toolSubtitleParts` 同形。**必须返回
-``(键, 值)`` 而不是裸字符串 —— 参数摘要的去重机制是按键排除的**
-（``toolArgumentPairs(..., excludeKey=键)``），宿主不声明来源键，参数里
-的同一个值就会在副标题和参数摘要各出现一次。确实归因不到键时返回
-``("", "")``。
+``subtitle`` 签名是 ``(arguments) -> (key, value)``，返回的键会自动从参数摘要里
+排除，避免同一值重复出现。
 """
 
 from __future__ import annotations
@@ -88,8 +34,7 @@ __all__ = [
 
 
 #: 上下文工具（连续出现时会被折进分组卡，跳过自定义渲染）。
-#: 与 :data:`pyqt6_ela_pro.chat.blocks.CONTEXT_TOOLS` 同值；此处独立声明是
-#: 为了让 ``renderers`` **不 import** ``blocks``（否则 blocks 要用它就成环）。
+#: 独立声明是为了让 ``renderers`` 不 import ``blocks``（否则成环）。
 _CONTEXT_TOOLS = frozenset({"read", "glob", "grep", "list"})
 
 
@@ -119,9 +64,8 @@ class ToolRenderContext:
     def parsedArguments(self) -> dict:
         """解析参数为字典（容错，永不抛异常）。
 
-        ``arguments`` 是**模型给的内容**，直接塞进 ``QLabel`` 前必须设
-        ``setTextFormat(Qt.TextFormat.PlainText)`` —— 默认 ``AutoText`` 会把
-        ``a < b`` / ``Tom & Jerry`` 里的 ``&``、``<`` 当富文本吃掉。
+        ``arguments`` 是模型给的内容，塞进 ``QLabel`` 前必须设 ``PlainText``，
+        否则 ``a < b`` 里的 ``&``、``<`` 会被当富文本吃掉。
         """
         return parseToolArguments(self.arguments)
 
@@ -149,13 +93,8 @@ _REGISTRY: dict = {}
 def parseToolArguments(arguments) -> dict:
     """容错解析工具参数为字典。
 
-    - ``dict`` 原样返回；
-    - 非法 JSON / 空串 / 非字典 JSON（如 ``[1,2]``）-> ``{}``；
-    - **非 JSON 的纯文本**（流式半截参数、模型直接吐的命令行）-> ``{"": 原文}``，
-      让副标题 / 参数摘要还能把它显示出来，而不是整段消失。
-
-    最后一条是有意的：参数是**分片流式到达**的，展开前常常只有半截
-    ``"path": "src/a`` —— 当成坏 JSON 丢掉的话卡片上就一片空白。
+    ``dict`` 原样返回；非法 JSON / 空串 / 非字典 JSON -> ``{}``；非 JSON 纯文本
+    （流式半截参数、模型直接吐的命令行）-> ``{"": 原文}``，避免卡片一片空白。
     """
     if isinstance(arguments, dict):
         return arguments
@@ -179,21 +118,10 @@ def registerToolRenderer(
 ) -> None:
     """注册一个工具结果渲染器（模块导入时调用一次即可）。
 
-    :param name: 工具名（大小写敏感，建议小写）
-    :param factory: ``(ToolRenderContext) -> QWidget``；返回 ``None`` 表示不接管，
-        落回默认纯文本 body
-    :param subtitle: ``(arguments) -> (键, 值)``，用于折叠态副标题；**返回的键
-        会自动从参数摘要里排除**（防「3 个文件 files=[...]」这种重复）
-    :param groupable: 是否仍参与上下文工具分组。``None``（默认）时
-        **上下文工具（read / glob / grep / list）自动退出分组** —— 它们连续
-        出现时会被折进 ``ContextToolGroupCard``，而那张卡只画一行汇总摘要，
-        会把你的渲染器整个绕过。非上下文工具默认保持可分组。
-    :param replace: 名字已被占用时是否允许覆盖（默认抛 :class:`ValueError`）
-
-    :raises ValueError: 名字为空 / 不可调用 / 已被占用且 ``replace=False``
-
-    **静默覆盖会掩盖 bug**（两个插件抢同一个名字、后注册的悄悄赢），所以这里
-    拒绝而不是照抄 opencode 的 ``state[name] = input``。
+    ``factory`` 是 ``(ToolRenderContext) -> QWidget``，返回 ``None`` 表示不接管；
+    ``subtitle`` 是 ``(arguments) -> (键, 值)``，返回的键会自动从参数摘要里排除；
+    ``groupable=None`` 时上下文工具自动退出分组；``replace=False`` 时重名抛
+    ``ValueError``（静默覆盖会掩盖插件抢名字的 bug）。
     """
     key = str(name or "").strip()
     if not key:
@@ -214,7 +142,7 @@ def registerToolRenderer(
 
 
 def unregisterToolRenderer(name: str) -> bool:
-    """注销渲染器（原先未注册返回 ``False``）。"""
+    """注销渲染器（未注册返回 ``False``）。"""
     return _REGISTRY.pop(str(name or "").strip(), None) is not None
 
 
@@ -230,10 +158,7 @@ def toolRendererNames() -> list:
 
 
 def toolRendererGroupable(name: str) -> bool:
-    """该工具是否仍参与上下文工具分组（未注册返回 ``True``）。
-
-    未注册的工具行为与注册表引入前完全一致，所以默认 ``True``。
-    """
+    """该工具是否仍参与上下文工具分组（未注册返回 ``True``，与引入注册表前一致）。"""
     entry = _REGISTRY.get(str(name or "").strip())
     return True if entry is None else entry.groupable
 
@@ -241,10 +166,7 @@ def toolRendererGroupable(name: str) -> bool:
 def toolRendererSubtitle(name: str, arguments) -> Tuple[str, str]:
     """取注册表副标题；未注册或未提供 ``subtitle`` 时返回 ``("", "")``。
 
-    **异常一律吞掉落回空副标题**：``subtitle`` 由宿主提供，而调用点在
-    ``_sync_header``（可能处于 Qt 回调链上），宿主的一个 bug 不该让整张
-    工具卡崩掉。调用方拿 ``("", "")`` 后会走原有的
-    :func:`~pyqt6_ela_pro.chat.blocks.toolSubtitle` 兜底。
+    异常一律吞掉落回空副标题（调用点在 Qt 回调链上，宿主 bug 不该崩掉卡片）。
     """
     entry = _REGISTRY.get(str(name or "").strip())
     if entry is None or entry.subtitle is None:

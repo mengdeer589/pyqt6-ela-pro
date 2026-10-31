@@ -67,10 +67,7 @@ def disconnectCharts(group: str = None) -> None:
 
 
 def registerSeries(type_name: str, cls) -> None:
-    """注册系列渲染器：``type_name``（如 "bar"）→ SeriesRenderer 子类。
-
-    同名重复注册（换类）会覆盖并记录一次 stderr 告警，便于排查冲突。
-    """
+    """注册系列渲染器：``type_name``（如 "bar"）→ SeriesRenderer 子类；同名换类覆盖并告警一次。"""
     if not type_name:
         raise ValueError("registerSeries: type_name 不能为空")
     key = str(type_name)
@@ -85,10 +82,7 @@ def registerSeries(type_name: str, cls) -> None:
 
 
 def registerComponent(name: str, cls) -> None:
-    """注册图表组件：``name``（如 "markLine"）→ 组件类。
-
-    同名重复注册（换类）会覆盖并记录一次 stderr 告警，便于排查冲突。
-    """
+    """注册图表组件：``name``（如 "markLine"）→ 组件类；同名换类覆盖并告警一次。"""
     if not name:
         raise ValueError("registerComponent: name 不能为空")
     key = str(name)
@@ -159,21 +153,9 @@ def _needs_grid_coord(series_opts) -> bool:
 def _opt_float(value, default):
     """把 option 里的取值安全转成 float，失败回退 ``default``。
 
-    ``default`` 传 ``None`` 时表示「转换失败就返回 None」而不是回退数值 ——
-    宿主的 ``dispatchAction({"type": "showTip", "x": "abc"})`` 这类要靠它
-    区分「没给坐标」与「坐标是 0」。
-
-    ``fontSize`` 之类由调用方提供的值可能是 ``None``、``"14px"``、``"large"`` 等；
-    裸 ``float()`` 会在 ``Title.height()`` / ``Legend._font()`` 里抛
-    ``TypeError`` / ``ValueError``，而这两处由 ``resizeEvent`` / ``paintEvent``
-    无保护地调用 —— 异常穿透 Qt 回调边界会让进程 0xC0000409 静默终止。
-    与 ``axes.AxisModel.labelFont`` 的既有防御保持一致。
-
-    **``OverflowError`` 必须列进来**：它继承 ``ArithmeticError`` 而不是
-    ``ValueError``，而 ``int(float("inf"))`` / ``float(10**400)`` 抛的正是它
-    （option 里写 ``{"splitNumber": Infinity}`` 就可达）。漏掉它 = 一个
-    ``except (TypeError, ValueError)`` 看起来齐全、实则漏一个子类。
-    本包所有「把 option 外部值转数值」的容错点都按这条统一。
+    ``default=None`` 表示「转换失败返回 None」而不是回退数值（用于区分「没给
+    坐标」与「坐标是 0」）。``OverflowError`` 必须列进 except：它继承
+    ``ArithmeticError``，``int(float("inf"))`` 抛的正是它。
     """
     try:
         result = float(value)
@@ -256,11 +238,7 @@ def _anchor_px(value, total: float, default: float) -> float:
 
 
 def _now() -> float:
-    """单调秒（``benchmark`` 计时用）。
-
-    用 ``time.monotonic`` 而非 ``time.time``：后者受系统时钟调整影响，
-    一次基准测试跨越 NTP 校正就会算出负耗时。
-    """
+    """单调秒（``benchmark`` 计时用；``time.time`` 受系统时钟调整影响，会算出负耗时）。"""
     return time.monotonic()
 
 

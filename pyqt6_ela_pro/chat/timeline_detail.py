@@ -1,8 +1,7 @@
 """时间线密度设置（``pyqt6_ela_pro.chat.timeline_detail``）。
 
-对齐 opencode 的 ``timelineDetail``：每个分区（思考 / shell / 编辑 / 子代理 /
-通知 / 工具）各有「出现方式」与「细节展开方式」两档。库只负责把设置翻译成
-控件的可见性与默认开合，**不重建文档**（避免流式缓冲丢失与滚动跳变）。
+对齐 opencode 的 ``timelineDetail``：每个分区各有「出现方式」与「细节展开方式」。
+库只把设置翻译成控件可见性与默认开合，不重建文档。
 """
 
 from __future__ import annotations

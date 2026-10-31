@@ -54,32 +54,14 @@ from ._helpers import CARD_V_PADDING, LAYOUT_SPACING, _collapsed_detail
 class PermissionCard(_ThemeAwareMixin, ElaScrollPageArea):
     """工具审批卡（``kind == Permission``）。
 
-    **库不阻塞**：卡片只收集点击并发信号，挂起后端是宿主的事（见
-    :class:`~pyqt6_ela_pro.chat.message.ElaChatPermission` 的流程说明）。
-    在 Qt 里真的 ``wait()`` 等用户点按钮会卡死事件循环。
+    **库不阻塞**：卡片只收集点击并发信号，挂起后端是宿主的事（Qt 里真的等按钮
+    会卡死事件循环）。两种形态由 ``permission.questions`` 是否为空决定：空 = 批准型
+    （允许一次 / 长按始终允许 / 拒绝），非空 = 逐题向导。
 
-    两种形态，由 ``permission.questions`` 是否为空决定（**不另设标志位**）：
-
-    - **批准型**（``questions`` 为空）：``允许一次`` / ``始终允许``（**长按
-      700ms** 才生效，防误触的持久授权）/ ``拒绝…`` 三个动作 + 可选的理由输入行；
-    - **问答型**（``questions`` 非空）：**逐题向导**（对齐 opencode 的
-      ``session-question-dock.tsx``）—— 头部「N / M 个问题」+ 可点的进度段，
-      中间是当前那道的题面 + 候选卡（两行：标题 + 说明，可多选），末行是
-      「输入自己的答案」，页脚 ``忽略`` / ``上一步`` / ``下一步|提交``。
-
-    **已落定**：折叠成一行结果摘要（仍可点开看当时的详情与答案）。
-
-    「始终允许」只发信号，**规则存哪、怎么匹配由宿主决定**；库不持有任何
-    权限状态。
-
-    问答型的答案编码见 :meth:`_build_answer`。
+    「始终允许」只发信号，规则存哪、怎么匹配由宿主决定；库不持有权限状态。
     """
 
-    #: 用户做出选择（参数：reply、answer、feedback）
-    #:
-    #: ``reply`` 取 :class:`~pyqt6_ela_pro.chat.message.ElaChatPermissionStatusType`
-    #: 里的 ``Allowed`` / ``Always`` / ``Rejected`` / ``Cancelled``。问答型的
-    #: ``answer`` 是 ``json.dumps({key: str | [str, ...]})``，批准型为空串。
+    #: 用户做出选择（reply / answer / feedback）；``reply`` 取 ElaChatPermissionStatusType。
     replied = pyqtSignal(str, str, str)
 
     #: 「始终允许」的长按时长（毫秒）。持久授权误触代价高，点一下不够。
@@ -94,8 +76,7 @@ class PermissionCard(_ThemeAwareMixin, ElaScrollPageArea):
         self._theme_mode = eTheme.getThemeMode()
         self.setMinimumHeight(0)
         self.setMaximumHeight(16777215)
-        # 圆角 0 + paintEvent 不画 = **透明**。本控件住在审批 dock 里，dock 本身
-        # 就是那张卡；再画一层就成了「卡中卡」：两套圆角、两条边框、一次额外内缩。
+        # 圆角 0 + paintEvent 不画 = 透明：dock 本身就是那张卡，再画一层成「卡中卡」。
         self.setBorderRadius(0)
         self._permission: Optional[ElaChatPermission] = None
         self._responding = False
@@ -130,17 +111,13 @@ class PermissionCard(_ThemeAwareMixin, ElaScrollPageArea):
         self._title = ColorText(self)
         self._title.setTextFormat(Qt.TextFormat.PlainText)
         title_row.addWidget(self._title)
-        # 题目的短标签（``ElaChatQuestion.header``）**放在标题行里，不单独占一行**。
-        # 单独一行时它看起来就像「题面莫名换行了」，而且白白吃掉一行垂直空间。
+        # 题目短标签放在标题行里：单独占行看起来像题面莫名换行，还白吃一行高度。
         self._tag = ColorText(self)
         self._tag.setTextFormat(Qt.TextFormat.PlainText)
         self._tag.hide()
         title_row.addWidget(self._tag)
         title_row.addStretch(1)
-        # 右边是**一组**进度：「2 / 2」紧挨着段条。
-        # 之前「2 / 2」跟在短标签后面、段条又被推到最右，同一条信息被拆到两个
-        # 地方，读起来像两句话；现在左右分工明确 —— 左边说「在答什么」，右边说
-        # 「答到第几」。
+        # 右边是一组进度：「2 / 2」紧挨段条；左边说「在答什么」，右边说「答到第几」。
         self._progress = ColorText(self)
         self._progress.setTextFormat(Qt.TextFormat.PlainText)
         self._progress.hide()
@@ -171,8 +148,7 @@ class PermissionCard(_ThemeAwareMixin, ElaScrollPageArea):
         )
         self._detail.hide()
         layout.addWidget(self._detail)
-        # 大量 diff 必须能折叠 —— 一次 ``git diff`` 动辄上千行，全量摊在卡片里会把
-        # 整条消息撑到几千像素，用户连「要不要批」都来不及看。
+        # 大量 diff 必须能折叠：一次 git diff 上千行，全量摊开会把消息撑到几千像素。
         self._detail_expanded = False
         #: 详情折叠态归属的请求 id（换请求才复位折叠）
         self._detail_request = ""
@@ -186,23 +162,16 @@ class PermissionCard(_ThemeAwareMixin, ElaScrollPageArea):
         # ── 问答型：题面 + 提示 + 选项区 ─────────────────────────────────
         self._question_box = QWidget(self)
         question_layout = QVBoxLayout(self._question_box)
-        # 顶部 4px + 段间距 10px ≈ opencode 的 ``gap:16px`` 减一点；标题行和题面
-        # 挨太近会糊成一段
+        # 顶部 4px + 段间距 10px ≈ opencode 的 gap:16px 减一点；标题行与题面挨太近会糊成一段。
         question_layout.setContentsMargins(0, 4, 0, 0)
         question_layout.setSpacing(10)
         self._question_text = ColorText(self._question_box)
         self._question_text.setTextFormat(Qt.TextFormat.PlainText)
         self._question_text.setWordWrap(True)
         question_layout.addWidget(self._question_text)
-        # 选项区是**普通容器，不是滚动区**。
-        #
-        # 用 ``QScrollArea`` 的话，布局只能看到它那个无意义的 ``sizeHint()``（一个
-        # 小值），于是内容被压扁、明明放得下也弹滚动条（实测：166px 的三行选项被压到
-        # 69px，第二个选项切掉半截）。改成「自己测内容再 ``setFixedHeight``」也不对
-        # —— 测出来的宽度依赖布局本身，两边互相喂误差（题面一度被撑到 250px）。
-        # 候选行是普通控件、行高固定，容器的 sizeHint 就是内容高度，布局自然给对。
-        # **不设上限**：题目选项 seldom 超过 6 个；真很多，一屏高的问题卡会把消息区
-        # 挤小，但输入区仍在、用户能滚消息区 —— 比「内容被裁到够不着」好。
+        # 选项区是普通容器不是滚动区：QScrollArea 的 sizeHint 是无意义小值，会压扁
+        # 内容；「自测内容再 setFixedHeight」又会与布局互相喂误差。候选行行高固定，
+        # 容器 sizeHint 就是内容高度，不设上限（内容被裁到够不着更糟）。
         self._options_host = QWidget(self._question_box)
         self._options_box = QVBoxLayout(self._options_host)
         self._options_box.setContentsMargins(0, 0, 0, 0)
@@ -210,14 +179,11 @@ class PermissionCard(_ThemeAwareMixin, ElaScrollPageArea):
         question_layout.addWidget(self._options_host)
         self._question_box.hide()
         layout.addWidget(self._question_box)
-        self._option_buttons: list = []  # 兼容旧测试：当前题的全部候选卡
+        self._option_buttons: list = []  # 当前题的全部候选卡
         self._custom_edit = None
 
         # ── 批准型的动作区（问答型不用） ───────────────────────────────
-        # 三个动作**按重要性分档**，不是三个等权重的文字按钮：
-        # 允许一次 = 主动作（实心强调色）／始终允许 = 次要承诺（描边）／拒绝 =
-        # 危险（文字 + 危险色）。原先用 ElaChatToolBar（消息页脚那排小图标按钮的
-        # 容器）时三个键长得一模一样，用户扫一眼分不出该点哪个。
+        # 三个动作按重要性分档：允许一次 = 实心强调色，始终允许 = 描边，拒绝 = 文字 + 危险色。
         self._actions = QWidget(self)
         actions_layout = QHBoxLayout(self._actions)
         actions_layout.setContentsMargins(0, 0, 0, 0)
@@ -233,9 +199,7 @@ class PermissionCard(_ThemeAwareMixin, ElaScrollPageArea):
             lambda: self._emit_reply(ElaChatPermissionStatusType.Allowed, "", "")
         )
         actions_layout.addWidget(self._allow_button)
-        # 「始终允许」是**持久授权**：点一下就放行以后的同类请求，误触代价
-        # 比「允许一次」高一个量级 —— 改成按住 700ms 才生效（对齐 opencode 的
-        # 长按确认语义）。短按不发长按信号，所以不会误批；`clicked` 不接。
+        # 「始终允许」是持久授权，误触代价高 —— 按住 700ms 才生效；短按不发 longPressed。
         self._always_button = ElaLongPressButton(
             "始终允许",
             variant="outlined",
@@ -294,8 +258,7 @@ class PermissionCard(_ThemeAwareMixin, ElaScrollPageArea):
         )
         self._back_button.clicked.connect(self._go_back)
         footer_layout.addWidget(self._back_button)
-        # 主动作 = 实心强调色，一眼分得出「这一步该点哪个」。快捷键**只在键盘上
-        # 有效、不写在按钮上** —— 内联提示文字比按钮本身还抢眼（实测）。
+        # 主动作 = 实心强调色；快捷键只在键盘上生效、不写在按钮上（内联提示比按钮抢眼）。
         self._next_button = ElaButton(
             "下一步",
             variant="solid",
@@ -314,16 +277,10 @@ class PermissionCard(_ThemeAwareMixin, ElaScrollPageArea):
     # -- 尺寸契约 ----------------------------------------------------------
 
     def sizeHint(self) -> QSize:  # noqa: N802 (Qt 命名)
-        """按**内容布局**报高度；宽度交给父布局（0 = 别替我决定）。
+        """按内容布局报高度；宽度交给父布局（0 = 别替我决定）。
 
-        别继承 ``QAbstractScrollArea`` 那套：它的 ``sizeHint()`` 不是内容高度
-        契约（按视口 + 框架估算）。审批 dock 正是靠它给卡片分配高度 ——
-        实测卡片实际 249px 而继承来的 ``sizeHint`` 报 268px，选项多时差得更多，
-        dock 与卡片之间就出现一截来源不明的空白（回归测试
-        ``TestLayoutContract::test_card_gets_its_size_hint``）。
-
-        内容高度取**布局的 minimumSize**：卡片里有可换行的题面与候选说明，
-        ``sizeHint()`` 会按「不换行」估算而偏小。
+        不能继承 ``QAbstractScrollArea`` 的 ``sizeHint()``（它按视口 + 框架估算，
+        不是内容高度契约）；高度取布局的 ``minimumSize``，否则可换行文本会算小。
         """
         return QSize(0, self.layout().minimumSize().height())
 
@@ -335,22 +292,16 @@ class PermissionCard(_ThemeAwareMixin, ElaScrollPageArea):
     def setPermission(self, permission: Optional[ElaChatPermission]) -> None:
         """设置审批请求（``None`` 隐藏整张卡）。
 
-        换了一个**新的** request（``request_id`` 变了）时重置向导状态；同一
-        request 只是状态推进（如 pending -> allowed）则**保留**草稿，这样宿主
-        「先 setResponding(True) 再回填」的两段式流程不会把用户已选的东西抹掉。
+        新 request（``request_id`` 变了）重置向导状态；同一 request 的状态推进保留
+        草稿，否则宿主「先 setResponding(True) 再回填」的两段式会抹掉用户已选。
 
-        **这里不调 ``show()``** —— 卡片由
-        :meth:`~pyqt6_ela_pro.chat.docks.ElaChatPermissionDock.setCard` 在收下它
-        的那一刻才显示。``bubble.beginPermission`` 建卡时**故意不给 parent**（气泡
-        不知道 dock 的存在），若在此处 show，一个无父控件会被 Qt 当成**顶层窗口**
-        弹出来：用户看到「小窗一闪 -> 变成输入区上的卡片」（实测截图），连点几次就
-        同时弹出好几个窗口。
+        这里不调 ``show()``：卡片由 dock 在收下它的那一刻显示；无父控件在这里 show
+        会被 Qt 当成顶层窗口弹出来。
         """
         previous = self._permission
         self._permission = permission
-        # 只在「新请求进入等待」时清 responding。落定那次 setPermission 是
-        # replied.emit() 的**同步回环**（_on_permission_replied -> setPermission），
-        # 无条件清会把刚置上的 responding 又抹掉，双击守卫直接失效。
+        # 只在「新请求进入等待」时清 responding：落定那次 setPermission 是
+        # replied.emit() 的同步回环，无条件清会抹掉刚置上的 responding。
         is_new = previous is None or (
             permission is not None
             and previous is not None
@@ -370,10 +321,7 @@ class PermissionCard(_ThemeAwareMixin, ElaScrollPageArea):
         return self._permission
 
     def setResponding(self, on: bool) -> None:
-        """设置「回复已在途」——期间禁用全部可交互部件，防双击重复提交。
-
-        对齐 opencode 的 ``responding`` 状态：请求在飞的时候整张卡一起置灰。
-        """
+        """设置「回复已在途」——期间禁用全部可交互部件，防双击重复提交。"""
         self._responding = bool(on)
         self._sync_actions()
         self._sync_options_enabled()
@@ -430,14 +378,8 @@ class PermissionCard(_ThemeAwareMixin, ElaScrollPageArea):
     def _build_answer(self) -> str:
         """把向导状态编码成 ``permissionReplied`` 的 ``answer``。
 
-        规则（对齐 opencode 的 ``Object.fromEntries(flatMap(...))``）：
-
-        - **单选塌缩成标量**：``{"q0": "选项 A"}``；
-        - **多选发整个数组**：``{"q1": ["A", "B"]}``；
-        - **未答题整条不进 payload**（不是空串、不是空数组）—— 模型据此知道
-          「用户没答这道」，而空数组会被误读成「用户答了『一个都不选』」；
-        - **自定义答案与候选项互斥**：写了自定义答案，这道题就答它（多选时
-          仍是单元素数组），因为「选项 A 或我自己的话」没法同时成立。
+        单选塌缩成标量，多选发数组，未答题整条不进 payload（空数组会被误读成
+        「一个都不选」），自定义答案与候选项互斥。
         """
         payload = {}
         for question in self._questions():
@@ -450,9 +392,8 @@ class PermissionCard(_ThemeAwareMixin, ElaScrollPageArea):
     def _sync_all(self) -> None:
         """刷新整张交互卡。
 
-        **本控件只负责「正在等用户操作」这个状态**：落定之后它立刻被销毁，时间线上
-        留下的是另一张 :class:`PermissionRecord`。所以这里**没有** settled 分支 ——
-        一张卡同时管两态时，标题 / 图标 / 显隐全都是双份条件，越写越乱。
+        本控件只负责「正在等用户操作」：落定后它立刻被销毁，时间线上留下的是
+        :class:`PermissionRecord`，所以这里没有 settled 分支。
         """
         permission = self._permission
         if permission is None:
@@ -460,9 +401,8 @@ class PermissionCard(_ThemeAwareMixin, ElaScrollPageArea):
         is_question = permission.isQuestion
         self._question_box.setVisible(is_question)
         self._footer.setVisible(is_question)
-        # 动作区的显隐只有 ``_sync_actions`` 一处说了算（它还要看 responding）；
-        # question 分支也必须调它 —— 否则同一张卡从批准型切到问答型时，批准三键
-        # 与已展开的拒绝理由行会留在问答卡上。
+        # 动作区显隐只有 _sync_actions 一处说了算；question 分支也要调它，否则
+        # 从批准型切到问答型时批准三键与拒绝理由行会留在卡上。
         if is_question:
             self._sync_header(permission)
             self._sync_detail(permission)
@@ -517,8 +457,7 @@ class PermissionCard(_ThemeAwareMixin, ElaScrollPageArea):
     def _sync_detail(self, permission: ElaChatPermission) -> None:
         """交互期间只显示宿主给的 detail（diff / 命令行）。
 
-        **答案摘要不在这里渲染** —— 那是 :class:`PermissionRecord` 的活：交互卡
-        落定即销毁，没必要为一闪而过的状态再写一套。
+        答案摘要归 :class:`PermissionRecord`：交互卡落定即销毁，没必要再写一套。
         """
         if permission.request_id != self._detail_request:
             # 只在新请求时复位折叠；同一 request 的状态刷新（``setResponding``
@@ -530,9 +469,7 @@ class PermissionCard(_ThemeAwareMixin, ElaScrollPageArea):
     def _sync_detail_text(self, detail: str) -> None:
         """写入详情，并按「行数 + 单行长度」双上限决定是否折叠。
 
-        两个上限缺一不可：``git diff`` 是「行数多但每行短」，minified 文件 /
-        一整行 base64 是「行数少但单行巨长」。只卡行数会被后者炸穿，只卡字符数
-        会被前者撑成几千像素。
+        两个上限缺一不可：``git diff`` 行多但每行短，minified / base64 行少但单行巨长。
         """
         if not detail:
             self._detail.setText("")
@@ -569,8 +506,6 @@ class PermissionCard(_ThemeAwareMixin, ElaScrollPageArea):
         self._tag.setText(f"\u00b7 {question.header}" if question.header else "")
         self._tag.setVisible(bool(question.header))
         self._question_text.setText(question.question or question.header)
-        # 「选择一个答案」只在**真的有候选项**时才有意义（只留自定义输入框时
-        # 这句话是废话）
         rows = []
         for index, option in enumerate(question.options):
             rows.append(
@@ -590,19 +525,14 @@ class PermissionCard(_ThemeAwareMixin, ElaScrollPageArea):
         self._option_buttons = rows
         self._refresh_rows()
         if self._editing == question.key:
-            # 同一题刷新（``setPermission`` 两段式回填）：编辑器原地恢复，
-            # 草稿由 ``_refresh_rows`` 回填进新行
+            # 同一题刷新（setPermission 两段式回填）：编辑器原地恢复，草稿由 _refresh_rows 回填。
             self._enter_editing(question.key)
         else:
             # 切题 / 换请求：旧编辑态作废（草稿已在 ``_clear_options`` 暂存）
             self._editing = ""
 
     def _on_row_focused(self, index: int) -> None:
-        """记住键盘焦点行号。
-
-        **不轮询 ``hasFocus()``**：它要求窗口已激活，测试里（以及某些嵌套滚动
-        场景下）根本不成立，于是方向键导航会静默失灵。行自己报上来最可靠。
-        """
+        """记住键盘焦点行号（不轮询 ``hasFocus()``：它要求窗口已激活，会静默失灵）。"""
         self._focus_row = int(index)
 
     def _make_row(
@@ -621,16 +551,14 @@ class PermissionCard(_ThemeAwareMixin, ElaScrollPageArea):
         row.editCommitted.connect(lambda text, q=question: self._on_commit(q, text))
         row.moveFocus.connect(self._move_focus)
         row.rowFocused.connect(self._on_row_focused)
-        # 数字键 / Ctrl+⏎ / Alt+← / Esc 必须由**持有全部行**的这一层派发 ——
-        # 焦点常驻在候选行上，键盘事件发给行、不冒泡回卡片。
+        # 数字键 / Ctrl+⏎ / Alt+← / Esc 由持有全部行的这一层派发：焦点常驻在行上，
+        # 键盘事件发给行、不冒泡回卡片。
         row.globalKey.connect(self._on_global_key)
         return row
 
     def _clear_options(self) -> None:
-        # 正在编辑的自定义草稿要先存下来：``setPermission`` 的刷新会走到这里
-        # 销毁行控件，重建后草稿若不在 ``_drafts`` 里就永远找不回来了。
-        # **不在这里清 ``_editing``**：``_sync_question`` 还要按它决定是否
-        # 把编辑器原地恢复（同一题刷新）还是丢弃（切到别的题）。
+        # 编辑中的草稿先存下来：刷新会销毁行控件，重建后只能从 _drafts 找回。
+        # 不在这里清 _editing：_sync_question 还要按它决定原地恢复还是丢弃。
         if self._editing:
             row = self._custom_row(self._editing)
             if row is not None and row.editorText():
@@ -644,17 +572,10 @@ class PermissionCard(_ThemeAwareMixin, ElaScrollPageArea):
         self._option_buttons = []
 
     def _refresh_rows(self) -> None:
-        """把 ``_answers`` / ``_custom`` 同步到当前题的每一张卡。
+        """把 ``_answers`` / ``_custom`` 同步到当前题的每一张卡，并刷新进度段。
 
-        顺带刷新进度段 —— 答完一道就该点亮一段，攒到切题时才更新会让「已答 /
-        未答」的分界看起来随机。
-
-        **自定义行的勾选态只认 ``_custom_on``**：它的 ``value()`` 是空串，而
-        ``picked`` 里装的是**自定义文本**，``row.value() in picked`` 永远为假
-        —— 于是提交了自定义答案那一行仍然不高亮、标记也不勾，提交完再点那个
-        圆点还会把答案取消掉（用户报的现象：「单选时最后那项怎么都选不中」，
-        单选 / 多选都中招）。对齐 opencode 的 ``data-picked={on()}``
-        （``on = customOn[tab]``，与有没有文字无关）。
+        自定义行的勾选态只认 ``_custom_on``：它的 ``value()`` 是空串，用
+        ``row.value() in picked`` 会让自定义答案永远不高亮、再点还取消答案。
         """
         question = self._current_question()
         if question is not None:
@@ -684,13 +605,8 @@ class PermissionCard(_ThemeAwareMixin, ElaScrollPageArea):
     def _on_mark_clicked(self, question, value: str) -> None:
         """点标记 / 按 Space。
 
-        普通候选行 = 切换该行的勾选（``value`` 非空）；自定义行（``value`` 为
-        空串）= **选中并展开编辑器**，一步到位就能开始输入（对齐 opencode 的
-        ``customToggle`` —— 原实现「没敲内容就不给勾」，那个哑操作正是「点了
-        没反应」的来源，而示例页写的又是「可只点标记勾上」，两边对不上）。
-
-        单选下标记**不提供「再点一次取消」**：它是 radio，再点只会保持选中并
-        重新展开输入框（要换答案点其它候选项）。取消语义只挂在多选上。
+        普通候选行切换勾选；自定义行（``value`` 空串）选中并展开编辑器。单选下
+        标记不提供「再点取消」（radio），取消语义只挂多选。
         """
         if value:
             already = value in (self._answers.get(question.key) or ())
@@ -731,10 +647,8 @@ class PermissionCard(_ThemeAwareMixin, ElaScrollPageArea):
             self._answers[key] = picked
         else:
             self._answers[key] = [value] if checked else []
-        # 选了候选项 -> 取消「自定义选中」（两者互斥，见 _build_answer）
+        # 选了候选项 -> 取消「自定义选中」（两者互斥，见 _build_answer）；输入框一起收起。
         self._custom_on[key] = False
-        # 输入框也一起收起：否则单选下候选项亮了、上一行还摊着个编辑器，
-        # 同一题里两个答案并排看着像同时选中了
         self._close_custom_editor(key)
         self._refresh_rows()
 
@@ -745,12 +659,7 @@ class PermissionCard(_ThemeAwareMixin, ElaScrollPageArea):
         return None
 
     def _close_custom_editor(self, key: str) -> None:
-        """收起自定义答案的输入框。
-
-        ``_editing`` 是**卡片**层的状态机，行上的 ``setEditing(False)`` 才是
-        收起编辑器本身 —— 两边要一起动，否则 ``_refresh_rows`` 会因为
-        ``row.isEditing()`` 为真而跳过草稿回填。
-        """
+        """收起自定义答案的输入框（``_editing`` 与行上的 ``setEditing(False)`` 要一起动）。"""
         if self._editing != key:
             return
         self._editing = ""
@@ -759,11 +668,9 @@ class PermissionCard(_ThemeAwareMixin, ElaScrollPageArea):
             row.setEditing(False)
 
     def _commit_editing(self) -> None:
-        """落定**正在编辑**的自定义答案（空文本等于没写，``commitEdit`` 自会跳过）。
+        """落定正在编辑的自定义答案（空文本等于没写，``commitEdit`` 自会跳过）。
 
-        对齐 opencode ``next()`` 的 ``if (editing) commitCustom()``：用户敲完
-        文字习惯直接点「下一步 / 提交」，不会先按 Enter；不在这里补一次提交，
-        那段文字会被静默丢掉（实测 payload 是 ``{}``）。
+        用户敲完字习惯直接点「下一步 / 提交」，不在这里补一次提交那段文字会丢。
         """
         if not self._editing:
             return
@@ -773,14 +680,12 @@ class PermissionCard(_ThemeAwareMixin, ElaScrollPageArea):
 
     def _enter_editing(self, key: str) -> None:
         self._editing = key
-        # 展开编辑器 = 选中自定义（对齐 opencode 的 ``customOpen``）：单选下
-        # 候选项随之取消，否则两根圆点同时亮着；多选下也遵守本库的互斥契约。
+        # 展开编辑器 = 选中自定义：单选下候选项随之取消，否则两根圆点同时亮着。
         self._custom_on[key] = True
         self._answers.pop(key, None)
         row = self._custom_row(key)
         if row is not None:
-            # 编辑器里已有内容（Esc 保留的未提交草稿 / 行重建后恢复的草稿）就
-            # 不要用已提交值覆盖 —— 那会把用户刚敲的字抹掉。
+            # 编辑器里已有内容（未提交草稿）就不要用已提交值覆盖。
             if not row.editorText():
                 row.setEditorText(self._drafts.get(key) or self._custom.get(key, ""))
             row.setEditing(True)
@@ -820,8 +725,7 @@ class PermissionCard(_ThemeAwareMixin, ElaScrollPageArea):
             self._segments.append(segment)
         for index, segment in enumerate(self._segments):
             question = questions[index]
-            # 与 ``_build_answer`` / ``answers()`` 同一口径（``_current_values``）：
-            # 只看 ``_custom`` 有没有文本会把「已取消勾选」的自定义答案判成已答。
+            # 与 answers() 同一口径（_current_values）：只看 _custom 有文本会把已取消勾选的答案判成已答。
             answered = bool(self._current_values(question))
             segment.setState(index == self._tab, answered)
         self._segment_box.setVisible(len(questions) > 1)
@@ -829,9 +733,7 @@ class PermissionCard(_ThemeAwareMixin, ElaScrollPageArea):
     def _sync_footer(self) -> None:
         """页脚：按钮文案随题号变，「上一步」只在有得退时出现。
 
-        配色**不用手工注入** —— 三个都是 :class:`~pyqt6_ela_pro.ela_button.
-        ElaButton`，它们自己连 ``themeModeChanged`` 取色（`text` 弱化 /
-        `outlined` 中性 / `solid+primary` 主动作）。
+        配色不用手工注入 —— 三个都是 ElaButton，自己跟随主题取色。
         """
         questions = self._questions()
         last = self._tab >= len(questions) - 1
@@ -873,7 +775,7 @@ class PermissionCard(_ThemeAwareMixin, ElaScrollPageArea):
         questions = self._questions()
         if not 0 <= index < len(questions) or index == self._tab:
             return
-        # 走之前把这一题编辑框里的文字落定（草稿只在「行还在」时才是答案）
+        # 走之前把这一题编辑框里的文字落定（草稿只在「行还在」时才是答案）。
         self._commit_editing()
         self._tab = index
         self._focus_row = 0
@@ -899,7 +801,7 @@ class PermissionCard(_ThemeAwareMixin, ElaScrollPageArea):
             for button in self._action_buttons():
                 button.setEnabled(pending)
             if permission.isPending:
-                # 用 isHidden 判据（isVisible 要求整条父链已显示，未 show 时恒 False）
+                # 用 isHidden 判据（isVisible 要求整条父链已显示，未 show 时恒 False）。
                 self._feedback_row.setVisible(
                     not self._feedback_row.isHidden() and pending
                 )
@@ -927,8 +829,7 @@ class PermissionCard(_ThemeAwareMixin, ElaScrollPageArea):
         self._emit_reply(ElaChatPermissionStatusType.Rejected, "", text)
 
     def _emit_reply(self, reply: str, answer: str, feedback: str) -> None:
-        # 两道闸：responding（回复在途，宿主可置）与 **已落定**（双击的第二下）。
-        # 后者才是真正的兜底 —— 落定后动作区已撤掉，但程序化调用仍能打到这里。
+        # 两道闸：responding（回复在途）与已落定（双击的第二下）。
         if self._responding or self._permission is None:
             return
         if not self._permission.isPending:
@@ -941,11 +842,7 @@ class PermissionCard(_ThemeAwareMixin, ElaScrollPageArea):
         mode = self._theme_mode
         permission = self._permission
         text = text_color(mode)
-        # 标题 = **主文本色**（opencode ``question-header-title``：
-        # ``14px / medium / var(--v2-text-text-base)``，与题面同色同级）。
-        # 此前 pending 态用 ``blend(base, text, 0.35)`` 染成灰 —— 整条头部于是
-        # 弱得读不出，而它恰恰是「现在需要你做什么」这句话本身。绿 / 红只属于
-        # 记录卡（``PermissionRecord``），交互卡永远只处理等待态。
+        # 标题用主文本色、与题面同级（弱化会读不出「现在需要你做什么」）。
         self._title.setTextColor(text)
         self._title.setTextPixelSize(14)
         self._title.setTextWeight(QFont.Weight.Medium)
@@ -971,8 +868,7 @@ class PermissionCard(_ThemeAwareMixin, ElaScrollPageArea):
         for rows in self._rows.values():
             for row in rows:
                 row.applyTheme(mode)
-        # 交互卡只处理等待态：图标只有「提问」/「工具确认」两种，绿 / 红是记录卡的
-        # 语义（``PermissionRecord``），这里不再有第三套分支
+        # 交互卡只处理等待态：图标只有「提问」/「工具确认」两种，绿 / 红是记录卡的语义。
         icon = (
             self._QUESTION_ICON
             if permission is not None and permission.isQuestion
@@ -985,22 +881,17 @@ class PermissionCard(_ThemeAwareMixin, ElaScrollPageArea):
             self._sync_footer()
 
     def paintEvent(self, _event) -> None:  # noqa: N802
-        """**不画卡面**。
-
-        本控件住在 :class:`~pyqt6_ela_pro.chat.docks.ElaChatPermissionDock` 里，
-        dock 本身就是那张卡（圆角 + 边框）。这里再画一层就成了「卡中卡」：两套圆角
-        半径、两条边框、一次额外内缩，视觉上立刻显得脏。
-        """
+        """不画卡面：dock 本身就是那张卡（圆角 + 边框），再画一层成「卡中卡」。"""
 
     def _onThemeChanged(self, mode: ElaThemeType.ThemeMode) -> None:
         self._theme_mode = mode
         self._apply_theme()
 
     def keyPressEvent(self, event) -> None:  # noqa: N802
-        """卡片级快捷键（**焦点在卡片本体上时**的兜底路径）。
+        """卡片级快捷键（焦点在卡片本体上时的兜底路径）。
 
-        主路径是候选行的 :attr:`QuestionOptionCard.globalKey` 信号 —— 焦点常驻
-        在行上，键盘事件发给行、不冒泡回卡片。
+        主路径是候选行的 :attr:`QuestionOptionCard.globalKey` 信号：焦点常驻在行上，
+        键盘事件发给行、不冒泡回卡片。
         """
         if not self._handle_shortcut(event):
             super().keyPressEvent(event)
@@ -1008,8 +899,8 @@ class PermissionCard(_ThemeAwareMixin, ElaScrollPageArea):
     def _on_global_key(self, action: str) -> None:
         """候选行转上来的卡片级快捷键。
 
-        ``digit:<n>`` 只能在这一层派发：单行只知道自己的序号，不知道总共几行，
-        而 ``1``–``9`` 的语义是「选中整组候选卡的第 n 个」（与焦点在哪一行无关）。
+        ``digit:<n>`` 只能在这一层派发：单行只知道自己的序号，而 1–9 的语义是
+        「选中整组候选卡的第 n 个」。
         """
         if not self._live():
             return

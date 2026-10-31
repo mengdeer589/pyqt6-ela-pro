@@ -32,12 +32,9 @@ from ._shared import (
 class BarSeriesRenderer(SeriesRenderer):
     """柱状图。
 
-    option 键：
-    - ``stack``: str，同名堆叠（正值向上累加、负值向下累加）；
-    - ``barWidth``: 像素（>1）或占槽位比例（0~1]）；
-    - ``itemStyle.borderRadius``: 圆角 px（数值或数值列表，取最大）；
-    - yAxis 为 ``category`` 时自动切换为水平条形；
-    - ``anim_t`` 高度生长动画；setOption 时 prev_data 逐柱插值。
+    ``stack``：同名堆叠（正值向上、负值向下累加）；``barWidth``：像素（>1）或
+    占槽位比例（0~1]）；``itemStyle.borderRadius``：圆角 px（列表取最大）。
+    yAxis 为 ``category`` 时自动切换为水平条形。
     """
 
     def __init__(self, chart, opt):
@@ -118,8 +115,7 @@ class BarSeriesRenderer(SeriesRenderer):
             radius = max((_to_float(r, 0.0) for r in radius), default=0.0)
         radius = _to_float(radius, 0.0)
 
-        # numpy 快路径：数值 / [x, y] 序列向量化取值。逐项 parseDataPoint
-        # cProfile 下是 bar 布局的主要 tottime 项。
+        # numpy 快路径：数值 / [x, y] 序列向量化取值（逐项 parseDataPoint 是布局热点）
         data = self.data()
         np_x, np_y = _numeric_xy(data)
         if np_x is not None:
@@ -246,15 +242,8 @@ class BarSeriesRenderer(SeriesRenderer):
         return formatValue(x)
 
     def _cat_labels_bulk(self, cat_axis, xs):
-        """批量取类别标签（``xs`` 为 x 序列）。
-
-        与逐项 ``_cat_label`` 等价，但把「类别轴有无标签」这个判断提到
-        循环外 —— 逐项判断是逐图元重复的属性访问与
-        ``formatValue`` 调用（cProfile 下合计占 tottime 约 8%）；
-        ``formatValue``（实测占 bar 布局 tottime 8%）。
-
-        ``cat_axis`` 不是 category 轴时（即数值轴）：逐项结果只取决于 x，
-        仍逐项走 ``formatValue``，只是省掉了重复的类型判断。
+        """批量取类别标签（``xs`` 为 x 序列）：等价于逐项 ``_cat_label``，但把
+        「是否 category 轴」的判断提到循环外。
         """
         is_cat = cat_axis.type == "category" and bool(cat_axis.categories)
         if not is_cat:
@@ -286,8 +275,7 @@ class BarSeriesRenderer(SeriesRenderer):
     def _animated_rect(self, bar, anim_t, coord):
         """柱在给定动画进度下的矩形（``paint`` 与 ``hitTest`` 共用）。
 
-        命中必须用**画出来的那份**几何：动画期柱高还在生长，用终态矩形去
-        命中就会「点低处的柱、亮高处的柱」。
+        命中必须用画出来的那份几何：动画期柱高还在生长，用终态矩形会点错柱。
         """
         y_t = self._animated_value(bar, anim_t)
         v1 = bar["v0"] + y_t
@@ -318,15 +306,9 @@ class BarSeriesRenderer(SeriesRenderer):
             p.setFont(font)
             p.setPen(self.labelColor())
             fm = QFontMetricsF(font)
-        # 外观在循环外解析一次（uniformItemStyleResolved 走 O(1) 快路径）。
-        # 逐图元调 itemColor / itemOpacity / itemBorder / _bar_radius 时，
-        # 逐图元调四个方法 = 4 次属性查找，实测合计占单帧 tottime
-        # 约 25%。为 None 时
-        # 说明存在 per-item itemStyle，退回逐项查找。
+        # 外观在循环外解析一次（uniformItemStyleResolved 是 O(1) 快路径）；
+        # None = 存在 per-item itemStyle，退回逐项查找。
         uni = self.uniformItemStyleResolved()
-        # 统一外观下的主色与 pen 也提到循环外：colorForSeries 会走
-        # palette()（带缓存但仍有 dict 查找），材料多时是 tottime 前三。
-        # 颜色仍逐柱拷贝（下面要 setAlphaF），pen / brush 可整段复用。
         if uni is not None:
             uni_color = uni["color"] or self.chart.colorForSeries(self)
             uni_has_border = uni["borderColor"] is not None and uni["borderWidth"] > 0
@@ -343,8 +325,7 @@ class BarSeriesRenderer(SeriesRenderer):
             if r.width() <= 0 or r.height() <= 0:
                 continue
             if uni is not None:
-                # 统一外观：直接取循环外解析好的值（颜色仍需逐项拷贝，
-                # 因为下面会 setAlphaF 改它）
+                # 颜色逐柱拷贝（下面会改 alpha），其余外观整段复用
                 color = parse_color(uni_color)
                 alpha = uni["opacity"]
                 border_color, border_w = uni["borderColor"], uni["borderWidth"]
@@ -382,7 +363,7 @@ class BarSeriesRenderer(SeriesRenderer):
                 color.setAlphaF(color.alphaF() * alpha)
             p.setBrush(color)
             if uni is not None:
-                # 统一描边：pen 已在循环外建好，逐柱新建 QPen 是纯浪费
+                # pen 已在循环外建好，逐柱新建 QPen 是纯浪费
                 p.setPen(uni_pen if uni_has_border else Qt.PenStyle.NoPen)
             elif border_color is not None and border_w > 0:
                 p.setPen(QPen(border_color, border_w))
@@ -409,10 +390,7 @@ class BarSeriesRenderer(SeriesRenderer):
         return max(0.0, min(radius, rect.width() / 2, rect.height() / 2))
 
     def _paint_bar_label(self, p: QPainter, rect: QRectF, bar: dict, fm):
-        """柱数据标签（默认柱顶 / 横条右端，``label.position`` 可改）。
-
-        返回 ``(labelRect, text)``，供双击编辑命中；无文本时返回 None。
-        """
+        """柱数据标签（默认柱顶 / 横条右端）；返回 ``(labelRect, text)`` 供双击编辑命中。"""
         text = self.labelText(bar["index"], bar["y"], bar["label"])
         if not text:
             return None
@@ -452,24 +430,10 @@ class BarSeriesRenderer(SeriesRenderer):
 
     # -- 交互 -------------------------------------------------------------
     def hitTest(self, pos: QPointF):
-        """柱命中检测：命中框（外扩 2px）内**第一根**柱，命中则返回 None。
+        """柱命中检测：命中框（外扩 2px）内第一根柱。
 
-        线性扫描是正确实现：柱数量与绘制区宽度同量级（几十至几百根），
-        扫描成本可忽略，且语义唯一（返回第一根而不是最层或最近者）。
-
-        **曾为二分索引，已撤回**：它是为「2 万根柱」这个**不存在的**
-        场景写的（实测 2 万根的 hitTest 占 2330ms/200 次，但真实业务不会给
-        几十根柱实时悬停）。为它引入了两处非饱定性：柱可能**互相重叠**（
-        实测 74/200 与线性扫描不一致）、且**二分后还要再检另一轴**（
-        实测 1095/3000 不一致）。特别住：它会把「为不存在的问题优化得很
-        优雅」变成一段难以验证的代码，而且下一次改动柱宽下限就可能静默改坏它。
-
-        要真正优化柱命中，先用 ``benchmark()`` 确认柱数量是真实需求（见 AGENTS.md
-        「大数据性能」小节）。
-
-        动画期用 ``_animated_rect`` 现算几何（与 ``paint`` 同一份公式），
-        而不是 ``bar["rect"]``（终态）—— 否则点动画中尚未长到的那根柱会
-        命中旁边的柱。
+        线性扫描即正确实现：柱数与绘图区宽度同量级，且语义是「第一根」而非最近者；
+        二分索引会让重叠柱与跨轴判定出现不一致。动画期用 ``_animated_rect`` 现算几何。
         """
         coord = self.chart.coordFor(self.opt)
         if not isinstance(coord, GridCoord):

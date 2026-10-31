@@ -31,13 +31,8 @@ from ._shared import (
 class RadarSeriesRenderer(SeriesRenderer):
     """雷达图（自绘蛛网坐标：圈环 + 轴线 + 维度标签）。
 
-    option 键：
-    - ``indicator``: [{"name","max"}, ...]（维度定义，缺省 max 按数据）；
-    - ``data``: [{"name": "系列A", "value": [v1, ...]}, ...]（每条一个多边形，
-      也接受纯数值列表）；
-    - ``shape``: "polygon" / "circle"；
-    - ``areaStyle``: {"opacity": 0.25}（半透明填充，不给则不填充）；
-    - ``splitNumber``: 圈环数（默认 5）。
+    支持 ``indicator`` / ``data`` / ``shape`` / ``areaStyle`` / ``splitNumber`` /
+    ``axisName`` / ``splitLine`` / ``axisLine``，以及顶层 ``radar`` 组件。
     """
 
     def __init__(self, chart, opt):
@@ -50,8 +45,7 @@ class RadarSeriesRenderer(SeriesRenderer):
 
     def layout(self, rect: QRectF) -> None:
         self._polys = []
-        # 顶层 ``radar`` 组件（ECharts 标准写法）：indicator / center / radius。
-        # 系列自己的同名键优先（本库示例用过 ``series.indicator``）。
+        # 顶层 ``radar`` 组件提供 indicator / center / radius，系列同名键优先。
         radar_opt = single_option(self.chart._option.get("radar"), "radar") or {}
         self._radar_opt = radar_opt
         indicators = self.opt.get("indicator")
@@ -102,9 +96,7 @@ class RadarSeriesRenderer(SeriesRenderer):
                 hi = lo + 1e-6
             inds[j]["min"], inds[j]["max"] = lo, hi
         self._indicators = inds
-        center_opt = (
-            self.opt.get("center") or radar_opt.get("center") or ["50%", "50%"]
-        )
+        center_opt = self.opt.get("center") or radar_opt.get("center") or ["50%", "50%"]
         if not isinstance(center_opt, (list, tuple)):
             center_opt = [center_opt, center_opt]
         self._center = QPointF(
@@ -187,7 +179,9 @@ class RadarSeriesRenderer(SeriesRenderer):
         c_text = _text_color("color.text.secondary")
         # axisName / splitLine / axisLine（ECharts 键）
         radar_opt = getattr(self, "_radar_opt", None) or {}
-        axis_name_opt = dict(self.opt.get("axisName") or radar_opt.get("axisName") or {})
+        axis_name_opt = dict(
+            self.opt.get("axisName") or radar_opt.get("axisName") or {}
+        )
         split_line_opt = dict(self.opt.get("splitLine") or {})
         axis_line_opt = dict(self.opt.get("axisLine") or {})
         if not bool(axis_name_opt.get("show", True)):
@@ -283,11 +277,7 @@ class RadarSeriesRenderer(SeriesRenderer):
         p.restore()
 
     def _animated_polygon(self, poly, anim_t):
-        """多边形在给定动画进度下的顶点（``paint`` 与 ``hitTest`` 共用）。
-
-        入场动画把多边形从中心「张开」到最终形状，所以命中必须用同一份插值
-        —— 否则动画进行中命中的是还没张开的那块区域。
-        """
+        """多边形在给定动画进度下的顶点（``paint`` 与 ``hitTest`` 共用）。"""
         return [
             QPointF(
                 self._center.x() + (pt.x() - self._center.x()) * anim_t,
@@ -313,21 +303,17 @@ class RadarSeriesRenderer(SeriesRenderer):
             "value": list(vals),
             "series": self.name,
             "dataIndex": index,
-            # 数据项颜色（ECharts colorBy='data'）—— tooltip 圆点 / 事件 params
-            # 都用它；拿系列色的话两条多边形会是同一个颜色，等于没区分。
+            # 数据项颜色：tooltip 圆点与事件 params 都用它，拿系列色两条多边形会同色。
             "color": self.itemColor(index, default=poly["color"]),
             # 标题 = 数据项名（ECharts radar formatTooltip 的 header）
             "title": name,
-            # 逐维度 (指标名, 值)：Tooltip 渲染成多行，替代原来的 "[...]" 裸列表
+            # 逐维度 (指标名, 值)：Tooltip 渲染成多行
             "rows": rows,
         }
 
     def hitTest(self, pos: QPointF):
         anim_t = self._anim_t
-        # 多个多边形重叠时取**边界离光标最近**的那个。ECharts 是 z 序最上层，
-        # 但雷达多边形大量重叠 / 包含，z 序会让后画的那条永远抢走命中 ——
-        # 实测悬停在「预算」的边线上（离它 0.3px、离「实际」18.5px）仍报「实际」，
-        # 用户无法用鼠标区分数据源。倒序遍历 + 严格小于：距离相同仍归最上层。
+        # 重叠时取边界离光标最近的那个：z 序会让后画的多边形永远抢走命中。
         best = None
         best_dist = float("inf")
         for k in range(len(self._polys) - 1, -1, -1):

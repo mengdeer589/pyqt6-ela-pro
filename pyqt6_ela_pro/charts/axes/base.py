@@ -35,11 +35,8 @@ class Coord:
     """坐标系协议基类。
 
     子类必须实现 ``layout`` / ``mapPoint`` / ``paintAxes`` /
-    ``paintTooltipMarker``。可选：
-    ``setSeries(series_opts)`` 接收原始系列 option 列表用于范围统计；
-    ``invertX(pos)`` 由像素反推主轴数据值（tooltip axis 触发用）；
-    ``invertPoint(pos)`` 像素 → 数据（``convertFromPixel``）；
-    ``containPoint(pos)`` 像素是否落在坐标系内（``containPixel``）。
+    ``paintTooltipMarker``；``setSeries`` / ``invertX`` / ``invertPoint`` /
+    ``containPoint`` 可选。
     """
 
     #: 坐标系种类名（"grid" / "polar" / "singleAxis" / "calendar"），
@@ -61,7 +58,7 @@ class Coord:
         raise NotImplementedError
 
     def paintAxes(self, p: QPainter) -> None:
-        """绘制轴线 / 刻度 / 网格 / 标签（主题感知，T() 实时取色）。"""
+        """绘制轴线 / 刻度 / 网格 / 标签。"""
         raise NotImplementedError
 
     def paintTooltipMarker(
@@ -88,12 +85,7 @@ class Coord:
 
 
 class AxisModel:
-    """坐标轴模型：category（list[str]）或 value（自动 nice ticks）。
-
-    ECharts 轴键：``type`` / ``data`` / ``name`` / ``min`` / ``max`` /
-    ``boundaryGap`` / ``inverse`` / ``scale`` / ``nameLocation`` / ``nameGap`` /
-    ``interval`` / ``minInterval`` / ``maxInterval`` / ``splitNumber`` /
-    ``axisLabel`` / ``axisTick`` / ``axisLine`` / ``splitLine`` / ``splitArea``。
+    """坐标轴模型：``category``（list[str]）或 ``value``（自动 nice ticks）。
 
     :param default_type: opt 未给 ``type`` 时的兜底
     """
@@ -114,13 +106,11 @@ class AxisModel:
         except (TypeError, ValueError, OverflowError):
             self.grid_index = 0
         raw_type = str(opt.get("type") or default_type).strip().lower()
-        #: ``type: "time"`` 在内部按 value 轴计算（数值 = 毫秒），只换刻度 /
-        #: 标签的生成方式与最小值 / 最大值解析（日期字符串）。
+        #: ``type: "time"`` 内部按 value 轴（毫秒）计算，只换刻度 / 标签生成方式。
         self.is_time = raw_type == "time"
         self.type = "value" if self.is_time else raw_type
         self.name = str(opt.get("name") or "")
-        #: ``xAxis`` / ``yAxis`` 的 ``position``（bottom/top 或 left/right）。
-        #: 空串表示由 :class:`GridCoord` 按索引给默认值。
+        #: ``xAxis`` / ``yAxis`` 的 ``position``；空串 = 由 :class:`GridCoord` 按索引给默认值。
         self.position = str(opt.get("position") or "").strip().lower()
         #: 同侧多轴的外扩偏移（px）；0 表示贴绘图区边缘。
         try:
@@ -137,8 +127,7 @@ class AxisModel:
         #: ``windowOffset()`` 的记忆化缓存（类别一变就作废，见 property setter）
         self._window_offset_cache = None
         self.categories = [str(c) for c in (opt.get("data") or [])]
-        #: dataZoom 全量类别缓存：``categories`` 可能被窗口替换，
-        #: 本属性始终保留完整列表，供窗外类别映射与窗口偏移换算
+        #: dataZoom 全量类别缓存：``categories`` 可能被窗口替换，本属性始终是完整列表。
         self._all_categories = list(self.categories)
         self.min = opt.get("min")
         self.max = opt.get("max")
@@ -156,10 +145,8 @@ class AxisModel:
         self.vmin = 0.0
         self.vmax = 1.0
         self._ticks = [0.0, 1.0]
-        #: 数据真实全量范围（由渲染器 ``_fix_value_axis`` 写入）。dataZoom
-        #: 用它当「全量」而不是 ``vmin/vmax`` —— 后者在缩放后只是窗口子集，
-        #: 而 ``setSeries`` 给的又可能是「未修正」的范围（横向柱 / 堆叠 /
-        #: K 线 / 箱线的真实范围要到系列 layout 才算得出来）。
+        #: 数据真实全量范围（渲染器 ``_fix_value_axis`` 写入）；dataZoom 拿它当
+        #: 「全量」——``vmin/vmax`` 缩放后只是窗口子集。
         self._data_extent = None
         #: ``_data_extent`` 的代次（dataZoom 用它判断「全量范围变了没有」）
         self._extent_epoch = 0
@@ -178,11 +165,7 @@ class AxisModel:
     # -- 时间轴 ----------------------------------------------------------
     @staticmethod
     def toNumber(value):
-        """日期 / ISO 字符串 / 数字 → 毫秒时间戳（失败 None）。
-
-        数字按毫秒处理（ECharts ``time`` 轴同口径）；``datetime`` / ``date``
-        与 ``(y, m, d[, H, M, S])`` 元组转本地时区时间戳。
-        """
+        """日期 / ISO 字符串 / 数字 → 毫秒时间戳（失败 None）；数字按毫秒处理。"""
         if value is None or isinstance(value, bool):
             return None
         if isinstance(value, (int, float)):
@@ -381,9 +364,8 @@ class AxisModel:
         data_max: float = None,
         segments: int = 5,
     ) -> None:
-        """按数据范围计算 value / log 轴 nice ticks（min/max/scale 可覆盖端点）。
+        """按数据范围计算 value / log 轴 nice ticks；非法 min/max 降级为未设置。
 
-        非法 min/max（空字符串 / 非数值 / NaN 等输入）降级为未设置；
         ``minInterval`` / ``maxInterval`` 约束刻度步长。
         """
         if self.is_time:
@@ -415,13 +397,8 @@ class AxisModel:
             pass
         self.vmin, self.vmax, self._ticks = niceTicks(lo, hi, segments)
         self._apply_interval_constraints()
-        # **用户边界必须自洽**，否则轴会塌掉。
-        #
-        # ``min`` 大于数据最大值时（``{"min": 100}`` 配 ``data: [1, 2]``），
-        # niceTicks 拿到的区间是退化的，覆盖后 ``vmin == vmax`` → span 为 0 →
-        # **所有刻度映射到同一像素**、标签叠成一团、数据也画在同一行。
-        # ``min > max`` 更糟：span 为负，点被画到坐标区之外。
-        # 下面两个守卫把退化区间撑开；不合法的那一侧直接忽略。
+        # 用户边界必须自洽：``min`` 大于数据最大值时区间退化，覆盖后
+        # ``vmin == vmax`` → 所有刻度映射到同一像素；``min > max`` 更糟（span 为负）。
         if user_lo is not None and user_hi is not None and user_hi <= user_lo:
             user_hi = None  # min >= max：忽略 hi，交给下面按 lo 撑开
         if user_lo is not None:
@@ -458,15 +435,12 @@ class AxisModel:
         start = math.floor(self.vmin / new_step) * new_step
         end = math.ceil(self.vmax / new_step) * new_step
         if not math.isfinite(start) or not math.isfinite(end):
-            # maxInterval 极小（1e-320）时 vmin/step 溢出成 inf，随后
-            # int(round(inf)) 抛 OverflowError（setOption 调用方直接崩）。
+            # 极小 maxInterval 会让 vmin/step 溢出成 inf，int(round(inf)) 抛 OverflowError。
             return
         count = int(round((end - start) / new_step))
         if count > _MAX_TICKS:
-            # **maxInterval 只把 step 变小、不限制刻度总数**，所以 count 直接
-            # 等于「跨度 / maxInterval」。实测数据跨 1 配 ``maxInterval=1e-6``
-            # → 约 200 万刻度、单帧 3.5 秒；1e-9 直接挂死。宁可少一根网格线
-            # 也不能毁掉整帧，所以这里放大 step 重新等分（端点保持不变）。
+            # ``maxInterval`` 只缩小步长、不限刻度总数：跨 1 配 1e-9 会生成
+            # 上亿刻度并挂死整帧，这里放大步长重新等分（端点保持不变）。
             self.vmin, self.vmax, self._ticks = _clamp_tick_count(
                 start, end, new_step, _MAX_TICKS
             )
@@ -480,8 +454,8 @@ class AxisModel:
     def _set_log_extent(self, data_min, data_max, segments: int = 5) -> None:
         """log 轴范围：正值过滤 + 按数量级生成刻度。
 
-        非正值在 :meth:`GridCoord.setSeries` 收数据时已经跳过；这里再兜一层，
-        避免宿主直接调用 ``setExtent(-1, 0)`` 把轴打塌。
+        非正值在 :meth:`GridCoord.setSeries` 已跳过，这里再兜一层，避免
+        ``setExtent(-1, 0)`` 把轴打塌。
         """
         lo = _to_float(data_min, None)
         hi = _to_float(data_max, None)
@@ -533,10 +507,8 @@ class AxisModel:
     def map(self, value, start: float, end: float, *, local: bool = False) -> float:
         """数据值 → [start, end] 区间内的像素坐标。
 
-        category 轴不 clamp：窗口外类别返回越界坐标，由各系列的
-        clipRect 裁剪。``local=True`` 表示 value 已是窗口内下标。
-        ``boundaryGap=false`` 时类别落在边界而非 band 中心；
-        ``inverse`` 反转方向。
+        category 轴不 clamp（窗口外类别由系列 clipRect 裁掉）；``local=True``
+        表示 value 已是窗口内下标。
         """
         if self.is_time:
             value = self.toNumber(value)
@@ -611,8 +583,8 @@ class AxisModel:
             return
         start = max(0.0, min(100.0, float(start)))
         end = max(start, min(100.0, float(end)))
-        # 全量窗口 = 非窗口态：渲染器可以按数据真实范围重设轴（横向柱 /
-        # 堆叠 / K 线 / 箱线的真实范围只有系列 layout 才算得出来）。
+        # 全量窗口 = 非窗口态：渲染器可按数据真实范围重设轴（横向柱 / 堆叠 /
+        # K 线的范围要等系列 layout 才算得出来）。
         self._windowed = start > 1e-9 or end < 100.0 - 1e-9
         if self.is_time:
             span = hi - lo
@@ -638,8 +610,7 @@ class AxisModel:
             self._ticks = _log_ticks(self.vmin, self.vmax, self.log_base)
             return
         # 与 ``setExtent`` 同口径：全正取 0 基线、全负顶取 0（``scale`` 可关），
-        # 用户 ``min`` / ``max`` 优先。少了这一步，横向柱 / K 线的全量窗口
-        # 会把 0 基线排除在外（柱子基线被裁）。
+        # 用户 ``min`` / ``max`` 优先；少了这一步柱子基线会被裁掉。
         user_lo = _opt_bound(self.min)
         user_hi = _opt_bound(self.max)
         if user_lo is None and lo > 0 and not self.scale:
@@ -661,8 +632,8 @@ class AxisModel:
             segments = max(1, int(self.opt.get("splitNumber", 5)))
         except (TypeError, ValueError, OverflowError):
             segments = 5
-        # **只取刻度，不用 niceTicks 的扩展端点**：它会向外扩到 step 边界
-        # （20000~180000 配 step=50000 → 0~200000），窗口就被抹平成全量。
+        # 只取刻度、不用 niceTicks 的扩展端点：它会向外扩到 step 边界，
+        # 窗口就被抹平成全量。
         _, _, self._ticks = niceTicks(self.vmin, self.vmax, segments)
         self._apply_interval_constraints()
 
@@ -684,9 +655,8 @@ class AxisModel:
             return self.categories.index(s)
         all_cats = getattr(self, "_all_categories", None) or []
         if s in all_cats:
-            # 窗外类别返回**窗口内**越界下标（左侧为负、右侧 ≥ n），由各系列
-            # 的 clipRect 裁掉；原先返回全量下标，窗口之前的类别会被当成
-            # 窗口内前半段、折线直接横穿绘图区。
+            # 窗外类别返回**窗口内**越界下标（左侧为负、右侧 ≥ n），由系列
+            # clipRect 裁掉；返回全量下标会让折线横穿绘图区。
             return all_cats.index(s) - self.windowOffset()
         return 0
 
@@ -704,11 +674,8 @@ class AxisModel:
     def windowOffset(self) -> int:
         """dataZoom 类别窗口在全量类别中的起始下标（无窗口时 0）。
 
-        **必须记忆化**：实现是 ``_all_categories.index(categories[0])`` —— 线性
-        扫描，1M 个类别单次 ~2.4ms；而它会被 ``localIndex`` → ``mapPoint``
-        **逐点**调用（符号清单 133 个点就 320ms，实测「category 1M 缩放一步」
-        339ms 里 320ms 是这 135 次 ``list.index``）。缓存随 ``categories``
-        赋值作废（property setter）。
+        必须记忆化：实现是 ``_all_categories.index(categories[0])`` 线性扫描，
+        而它被 ``localIndex`` 逐点调用。缓存随 ``categories`` 赋值作废。
         """
         cached = self._window_offset_cache
         if cached is not None:
@@ -765,10 +732,7 @@ class AxisModel:
         return opt if isinstance(opt, dict) else {}
 
     def labelFont(self) -> QFont:
-        """axisLabel 字体（``axisLabel.fontSize`` / ``fontWeight`` → font.xs / 400）。
-
-        未设置的键回退顶层 ``textStyle``（``fontSize`` / ``fontWeight``）。
-        """
+        """axisLabel 字体；未设置的键回退顶层 ``textStyle``。"""
         style = merged_text_style(self.chart, self.axisLabelOption())
         try:
             size = float(style.get("fontSize", T("font.xs")))
@@ -804,10 +768,8 @@ class AxisModel:
     def formatTickLabel(self, value, index=None) -> str:
         """``axisLabel.formatter``（字符串模板 ``{value}`` 或 callable）→ 文本。
 
-        value 轴 formatter 收到数值（整数值按 JS 习惯转 int）；
-        category 轴收到类别字符串。callable 的第二个参数是**刻度下标**
-        （与 ECharts 的 ``formatter(value, index)`` 对齐；旧的一参 callable
-        仍兼容）。
+        callable 的第二个参数是**刻度下标**（与 ECharts 的
+        ``formatter(value, index)`` 对齐，一参 callable 仍兼容）。
         """
         label = self.axisLabelOption()
         formatter = label.get("formatter")

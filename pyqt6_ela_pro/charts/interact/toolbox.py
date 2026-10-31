@@ -15,22 +15,11 @@ from .._utils import warn_key, warn_once
 
 
 class ToolboxComponent:
-    """右上角图标按钮组（**真实 ``ElaIconButton`` 子控件**，不再自绘）。
+    """右上角图标按钮组（真实 ``ElaIconButton`` 子控件）。
 
-    option::
-
-        "toolbox": {"feature": ["saveAsImage", "saveAsSvg", "dataZoom", "restore", "zoomIn", "zoomOut"]}
-
-    - saveAsImage / saveAsSvg：``chart.saveImage()`` / ``saveImage(format="svg")``；
-    - restore：重置全部 dataZoom 组件窗口 + 恢复所有系列显隐；
-    - dataZoom：切换 inside 缩放可用状态（``chart._dataZoomEnabled``，按钮
-      ``IsSelected`` 反映「缩放开着」）；
-    - zoomIn / zoomOut：``chart.zoomStep(0.7)`` / ``chart.zoomStep(1 / 0.7)``。
-
-    按钮是 chart 的子控件：悬停 / 按下 / 禁用 / 深浅主题全交给 ``ElaIconButton``
-    （图标来自 Ela 图标字体，配色跟 ``eTheme``），组件只负责摆放与动作分发 ——
-    ``layout()`` 每帧幂等 ``move()``，不重建控件。可注入
-    ``comp.on_action = fn(name)`` 回调观察点击。
+    option: ``"toolbox": {"feature": ["saveAsImage", "saveAsSvg", "dataZoom",
+    "restore", "zoomIn", "zoomOut"]}``。``layout()`` 每帧幂等 ``move()`` 不重建
+    控件；可注入 ``comp.on_action = fn(name)`` 观察点击。
     """
 
     optionKey = "toolbox"

@@ -1,17 +1,8 @@
-"""
-charts 折线降采样适配层（tsdownsample，可选依赖）。
+"""charts 折线降采样适配层（tsdownsample，可选依赖）。
 
-- ``available()``：tsdownsample 是否可用（numpy 的可用性独立判断，见 ``np``）；
-- ``is_sorted(x)``：x 是否单调不减（tsdownsample 算法要求有序 x，
-  非单调时返回空结果，调用方须退化为不采样）；
-- ``analyze_x(x)``：一次性分析时间基（单调性 / 步长 / 记录中断位置），
-  调用方按数据身份缓存，替代每次布局都跑的 ``is_sorted``；
-- ``downsample_indices(x, y, n_out, algorithm, assume_sorted)``：按算法返回
-  采样点下标（uint64 ndarray），失败 / 不可用返回 None。
-
-算法名对齐 tsdownsample：minmax / m4 / lttb / minmaxLTTB。
-未安装 tsdownsample 时只关闭这些算法（调用方退化到 ``bucket_minmax_indices``
-的 numpy 按桶抽稀）；只有 numpy 也缺失时才走原始全量路径，不崩溃。
+``analyze_x`` 一次性分析时间基，``downsample_indices`` 返回采样点下标；
+tsdownsample 缺失时调用方退化到 ``bucket_minmax_indices``，numpy 也缺失时
+走全量路径。
 """
 
 from __future__ import annotations
@@ -56,9 +47,7 @@ __all__ = [
 
 ALGORITHMS = _ALGORITHMS
 
-#: 各算法对 ``n_out`` 的下界与整除要求（越界即 Rust panic，实测）。
-#: ``minmax`` 要求 n_out >= 4 且为偶数；``m4`` 要求 n_out >= 8 且是 4 的倍数；
-#: ``lttb`` / ``minmaxLTTB`` 要求 n_out >= 3。``n_out == 2`` 会让前三个全部 panic。
+#: 各算法对 ``n_out`` 的下界与整除要求（越界即 Rust panic）：minmax ≥4 偶数；m4 ≥8 且 4 的倍数；lttb / minmaxLTTB ≥3。
 _ALGORITHM_LIMITS = {
     "minmax": (4, 2),
     "m4": (8, 4),
@@ -80,14 +69,8 @@ def available() -> bool:
 def bucket_minmax_indices(y, n_out: int):
     """纯 numpy 的「按桶 min/max」抽稀；返回升序下标数组，失败返回 ``None``。
 
-    与 tsdownsample 的 ``minmax`` 同类（每桶保留最小 / 最大两点，视觉上是
-    包络保形），但有两条它做不到的能力：
-
-    1. **不要求 x 有序** —— 按**下标**分桶，乱序 / 重复 x 的数据也能抽稀
-       （方形波、回环轨迹这类 line 数据的 x 往往不单调）；
-    2. **不依赖 tsdownsample** —— 只装 numpy 的宿主同样能拿到按像素级的绘制量。
-
-    ``n_out`` 会被规整成偶数（每桶两点），且至少 4。
+    按**下标**分桶，不要求 x 有序（乱序 / 重复 x 也能抽稀），也不依赖
+    tsdownsample；``n_out`` 会规整成偶数且至少 4。
     """
     if np is None or y is None:
         return None
@@ -134,12 +117,9 @@ def bucket_minmax_indices(y, n_out: int):
 
 
 def is_sorted(x) -> bool:
-    """x 是否单调**严格**递增（NaN / inf / 重复值均视为非法，返回 False）。
+    """x 是否单调**严格**递增（NaN / inf / 重复值均视为非法）。
 
-    只依赖 numpy；tsdownsample 缺失时仍可用于窗口裁剪 / 中断分析。
-
-    必须是**严格**递增而不是「不减」：tsdownsample 内部对 x 做 searchsorted，
-    遇到重复值会算出越界下标并直接 Rust panic（``index out of bounds``）。
+    必须严格递增：tsdownsample 对 x 做 searchsorted，重复值会越界 Rust panic。
     """
     if np is None or x is None:
         return False
@@ -165,15 +145,9 @@ _EMPTY_F64 = None
 def analyze_x(x):
     """一次性分析 x 的时间基：单调性、步长、记录中断位置。
 
-    返回 ``(monotone, strict, step, gap_pos, gap_dur)``：
-
-    - ``monotone``：非降且全有限 —— ``searchsorted`` 窗口可用；
-    - ``strict``：严格递增且全有限 —— tsdownsample 可用、中断检测有定义；
-    - ``step``：正差的**中位数**（抽样估计；抗浮点抖动与重复值）；
-    - ``gap_pos`` / ``gap_dur``：``diff > 4.1 × step`` 的位置（int64 下标）
-      与时长 —— 即「记录中断」。序列过短 / 非严格递增 / 非有限时为两个空数组。
-
-    调用方**按数据身份缓存**结果：这是 O(n) 的一次性开销，不是每帧成本。
+    返回 ``(monotone, strict, step, gap_pos, gap_dur)``：``monotone`` = 非降且
+    全有限；``strict`` = 严格递增；``step`` = 正差中位数；``gap_*`` =
+    ``diff > 4.1 × step`` 的位置与时长。调用方应按数据身份缓存（O(n) 一次性）。
     """
     global _EMPTY_I64, _EMPTY_F64
     if np is None:
@@ -214,19 +188,10 @@ def downsample_indices(
 ):
     """按算法对 (x, y) 降采样，返回采样点下标 ndarray；失败返回 None。
 
-    三道闸门，任一不满足就返回 None 走全量路径（**返回 None 而不是抛**——
-    这条路走的是 Qt 回调链，抛出去就是 0xC0000409 静默终止）：
-
-    1. x 严格递增（``is_sorted``）—— 重复值 / 非单调会让 Rust 侧 searchsorted
-       越界 panic。调用方可用 ``assume_sorted=True`` 声明「已按数据身份验过」
-       （每帧重扫是 O(n)：1M≈1.4ms、5M≈7ms，见 ``analyze_x``）；
-    2. ``n_out`` 满足该算法的下界与整除要求；
-    3. 真正的调用再包一层 ``except BaseException``。
-
-    第 3 条的 ``BaseException`` 不是笔误：tsdownsample 的 panic 以
-    ``pyo3_runtime.PanicException`` 抛出，它**继承 BaseException 而不是
-    Exception**，``except Exception`` 接不住（实测 mro 为
-    ``[PanicException, BaseException, object]``）。
+    三道闸门：x 严格递增（可用 ``assume_sorted=True`` 声明已验过）、
+    ``n_out`` 满足算法下界与整除要求、调用包 ``except BaseException``。
+    返回 None 而不是抛 —— 这条路走 Qt 回调链，抛出即 0xC0000409 静默终止。
+    tsdownsample 的 panic 是 ``PanicException``，继承 BaseException。
     """
     if not _AVAILABLE or np is None or x is None or y is None:
         return None

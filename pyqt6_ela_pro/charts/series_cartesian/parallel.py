@@ -26,10 +26,8 @@ from ._shared import _datum_list, _lerp
 class ParallelSeriesRenderer(SeriesRenderer):
     """平行坐标：自带多条垂直轴，每行数据一条折线穿轴，半透明多系列。
 
-    维度名来源：顶层 option ``parallelAxis``（[{"name":..,"min":..,"max":..}
-    或字符串列表]）；缺省时若本系列 data 第一行全为字符串则取其为维度名
-    （该行不参与绘制），否则自动生成 dim0..dimN。
-    数据：每行一个等长数值列表。
+    维度名取顶层 ``parallelAxis``（dict 或字符串列表）；缺省时若 data 第一行
+    全为字符串则取它作维度名（该行不参与绘制），否则生成 dim0..dimN。
     """
 
     def __init__(self, chart, opt):
@@ -84,7 +82,13 @@ class ParallelSeriesRenderer(SeriesRenderer):
         if rows and all(isinstance(x, str) for x in rows[0]):
             names = rows[0]
             return [
-                {"name": n, "min": None, "max": None, "nameStyle": None, "labelStyle": None}
+                {
+                    "name": n,
+                    "min": None,
+                    "max": None,
+                    "nameStyle": None,
+                    "labelStyle": None,
+                }
                 for n in names
             ], rows[1:]
         n = max((len(r) for r in rows), default=0)
@@ -168,7 +172,7 @@ class ParallelSeriesRenderer(SeriesRenderer):
             )
         )
         color = self.color()
-        # lineStyle：{"color", "width", "opacity"}（ECharts parallel 语义）
+        # lineStyle：{"color", "width", "opacity"}
         line_style = self.opt.get("lineStyle") or {}
         if isinstance(line_style.get("color"), str) and line_style["color"]:
             color = parse_color(line_style["color"])

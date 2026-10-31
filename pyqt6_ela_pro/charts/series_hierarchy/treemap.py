@@ -29,14 +29,8 @@ from ._shared import (
 class TreemapSeriesRenderer(SeriesRenderer):
     """矩形树图（squarified 布局，父子分层渲染）。
 
-    option 键：
-    - ``data``: [{"name","value","children":[...]}]；
-    - ``breadcrumb``: {"show": True}：顶部路径条（ECharts 默认显示）；
-    - ``label``: {"show": True, "fontSize": px}（名称标签，矩形过小省略）；
-    - ``gapWidth``: 矩形间隙 px（默认 1）；
-    - 颜色：顶层分支取调色板（``itemStyle.color`` 可覆盖），
-      子级同色相逐级递减明度；
-    - 交互：点击父块下钻，点击空白 / 面包屑返回上级（``resetDrill()`` 回顶层）。
+    支持 ``data`` / ``breadcrumb`` / ``label`` / ``gapWidth``；点击父块下钻，
+    点击空白 / 面包屑返回上级（``resetDrill()`` 回顶层）。
     """
 
     def __init__(self, chart, opt):
@@ -89,7 +83,7 @@ class TreemapSeriesRenderer(SeriesRenderer):
             node.style_index = order[0]
             node.path = path
             order[0] += 1
-            self._nodes.append(node)  # 父先子后，绘制顺序正确（子覆盖父）
+            self._nodes.append(node)
             if not node.children or r.width() < 10 or r.height() < 10:
                 return
             inner = QRectF(r).adjusted(1, 1, -1, -1)

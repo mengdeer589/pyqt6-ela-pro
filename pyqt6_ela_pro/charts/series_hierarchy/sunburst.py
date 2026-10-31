@@ -25,12 +25,8 @@ from ._shared import _assign_branch_colors, _build_hierarchy, _label_font, _pars
 class SunburstSeriesRenderer(SeriesRenderer):
     """旭日图（层级环形扇区，中心向外）。
 
-    option 键：
-    - ``data``: [{"name","value","children":[...]}]（层级；value 缺省累计子级）；
-    - ``radius``: ["15%","90%"]（内孔 / 外半径，相对短边一半）；
-    - ``label``: {"show": True, "minAngle": 8（小于该度数省略标签）,
-      "fontSize": px}（标签沿角度旋转）；
-    - 动画：anim_t 控制角扫掠展开。
+    支持 ``data``（层级，value 缺省累计子级）/ ``radius`` / ``label``；
+    ``anim_t`` 控制角扫掠展开，点击可下钻。
     """
 
     def __init__(self, chart, opt):
@@ -247,7 +243,7 @@ class SunburstSeriesRenderer(SeriesRenderer):
 
     def hitTest(self, pos: QPointF):
         if self._anim_t < 1.0:
-            # 扫掠角按 anim_t 展开：终态扇区位置此刻还没画出来。
+            # 扫掠角按 anim_t 展开，终态扇区位置此刻还没画出来。
             return None
         if not self._nodes:
             return None

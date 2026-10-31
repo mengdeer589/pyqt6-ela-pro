@@ -35,12 +35,7 @@ def _text_color(key="color.text.primary"):
 
 
 def _label_font(series, style=None):
-    """层级 / 关系类系列的标签字体（``fontSize`` / ``fontWeight`` + 顶层兜底）。
-
-    这些系列的标签样式不以 ``label`` 为唯一来源（树图 / 雷达 / 仪表各有自己的
-    ``label`` / ``title`` / ``axisName`` 子 option），所以把**实际使用的样式
-    dict** 传进来统一解析。
-    """
+    """层级 / 关系类系列的标签字体（样式 dict 统一解析 + 顶层兜底）。"""
     merged = merged_text_style(
         getattr(series, "chart", None), style if isinstance(style, dict) else {}
     )
@@ -64,9 +59,7 @@ def _series_palette_color(chart, index):
 def _parse_named_values(data):
     """解析 [{"name","value"}] / 数值 → ``[(原下标, name, value)]``。
 
-    **保留负值与原始下标**：饼图 / 漏斗里负值只应得到 0 角度，不能整条删掉
-    （删掉会让后续项的 ``itemStyle`` / ``dataIndex`` 整体前移，红色画到别的
-    数据上）；仪表盘量程含负值时负值更是正常业务数据。
+    保留负值与原始下标：删负值会让后续项的 itemStyle / dataIndex 整体前移。
     """
     out = []
     for index, item in enumerate(data or []):
@@ -174,11 +167,7 @@ def _assign_branch_colors(chart, roots):
 
 
 def _squarify(items, rect):
-    """squarified 布局：items [(key, value)] 按面积填充 rect。
-
-    返回 {key: QRectF}。经典 Bruls 算法：按值降序沿短边分行，
-    行内保持长宽比尽量接近 1。
-    """
+    """squarified 布局：items [(key, value)] 按面积填充 rect，返回 {key: QRectF}。"""
     result = {}
     if not items or rect.width() <= 0 or rect.height() <= 0:
         return result

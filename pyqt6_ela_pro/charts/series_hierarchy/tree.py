@@ -27,12 +27,8 @@ from ._shared import (
 class TreeSeriesRenderer(SeriesRenderer):
     """树图（按层级布局）。
 
-    option 键：
-    - ``data``: [根节点 {"name","children":[...]}]（多根取首个为主，其余并列显示）；
-    - ``orient``: "LR"（默认，左根右叶）/ "TB"（上根下叶）；
-    - ``edgeShape``: "polyline"（默认正交折线）/ "curve"（贝塞尔曲线）；
-    - ``label``: {"show": True, "fontSize": px}（节点名称）；
-    - ``symbolSize``: 节点圆点直径 px（默认 8）。
+    支持 ``data`` / ``orient``（"LR" / "TB"）/ ``edgeShape``（"polyline" /
+    "curve"）/ ``label`` / ``symbolSize``。
     """
 
     def __init__(self, chart, opt):

@@ -115,10 +115,9 @@ def _clip_detail(detail: str) -> str:
 
 
 def _collapsed_detail(detail: str, expanded: bool) -> tuple:
-    """按「行数 + 单行长度」双上限算详情展示文本。
+    """按「行数 + 单行长度」双上限算详情文本，返回 ``(shown, overflow, total_lines)``。
 
-    返回 ``(shown, overflow, total_lines)``。交互卡与记录卡共用这一份 ——
-    两处各写一份时，交互卡那版在短详情上会拼出「… 还有 -5 行」。
+    交互卡与记录卡共用这一份，避免两处对短详情算出负数行数。
     """
     full = _clip_detail(detail)
     lines = full.split("\n") if full else []
@@ -136,15 +135,9 @@ _WRITE_TOOLS = ("edit", "write", "patch", "apply_patch")
 
 
 def toolDefaultOpen(name: str, arguments=None, ok: bool = True) -> bool:
-    """库默认策略：**只有失败的工具调用默认展开**。
+    """库默认策略：只有失败的工具调用默认展开（失败原因必须可见）。
 
-    失败时用户必须看到原因，折叠起来等于把最重要的信息藏起来 —— 这条规则
-    与工具语义无关，任何宿主都成立。其余一律折叠：默认折叠是安全的一侧，
-    展开的成本（视觉噪音、展开动画、渲染开销）远大于收益。
-
-    宿主可用 :meth:`ElaChatBubble.setToolDefaultOpen` 换成自己的策略，典型
-    需求是「shell / 写文件类默认展开」—— 见
-    :func:`toolDefaultOpenCoding`。
+    宿主可用 :meth:`ElaChatBubble.setToolDefaultOpen` 换策略，见 :func:`toolDefaultOpenCoding`。
     """
     if not ok:
         return True
@@ -152,17 +145,9 @@ def toolDefaultOpen(name: str, arguments=None, ok: bool = True) -> bool:
 
 
 def toolDefaultOpenCoding(name: str, arguments=None, ok: bool = True) -> bool:
-    """编码 agent 场景的展开策略（供宿主注入，示例实现）。
+    """编码 agent 场景的展开策略（示例实现）。
 
-    在库默认之上加两条编码 agent 特有的判断：
-
-    - **shell / bash 默认展开** —— 命令与输出是多行文本，折叠起来几乎读不到；
-    - **纯删除永远折叠** —— 删除的 diff 对用户是噪音，展开没有价值
-      （对应 opencode 的 ``deletionOnly`` 判断：只看是否所有条目都是删除）；
-    - 写文件类（edit / write / patch）仍走默认折叠，但**非纯删除时展开**
-      —— 改动内容需要被看到。
-
-    纯函数：宿主可先调 :func:`toolDefaultOpen` 再叠加自己的规则。
+    shell / bash 默认展开；写文件类在非纯删除时展开；纯删除永远折叠。
     """
     if toolDefaultOpen(name, arguments, ok):
         return True
@@ -170,15 +155,14 @@ def toolDefaultOpenCoding(name: str, arguments=None, ok: bool = True) -> bool:
     if key in SHELL_TOOLS:
         return True
     data = parseToolArguments(arguments) if arguments else {}
-    # 只在**有证据**表明这是真实改动时才展开：参数里没有任何 diff 信息就保持
-    # 折叠（安全的一侧）。空参数不该让每次写文件调用都自动摊开。
+    # 只在参数里有真实改动证据时展开：空参数不该让每次写文件调用都自动摊开。
     if key in _WRITE_TOOLS and data and not _deletionOnly(data):
         return True
     return False
 
 
 def _deletionOnly(data: dict) -> bool:
-    """参数里是否**只有**删除项（对齐 opencode 的同名判断）。"""
+    """参数里是否只有删除项。"""
     if not data:
         return False
     # files 数组：全部 type == "delete"
@@ -212,8 +196,7 @@ def avatarPixmap(iconName, size: int, color: QColor) -> QPixmap:
     )
     cached = _AVATAR_PIXMAP_CACHE.get(key)
     if cached is not None:
-        # 返回值可能是共享 pixmap：调用方只画不就地改，但仍给独立包装器，
-        # 避免 ``cacheKey`` 相同的缓存对象被宿主改掉（同 ``svg_to_pixmap`` 的教训）。
+        # 缓存值可能是共享 pixmap：给独立包装器，避免宿主就地改到缓存对象。
         return QPixmap(cached)
     try:
         icon = ElaIcon.getInstance().getElaIcon(iconName, QColor(color))
@@ -234,8 +217,7 @@ def normalizeAvatarShape(shape) -> str:
 def _load_avatar_pixmap(source, size: int) -> Optional[QPixmap]:
     """把自定义头像来源解析为 ``QPixmap``（失败返回 ``None``）。
 
-    支持：``QPixmap`` / ``QImage`` / ``QIcon`` / ``bytes``（原始图片数据或
-    UTF-8 SVG 数据）/ SVG 数据字符串 / 图片或 SVG 文件路径。
+    支持 ``QPixmap`` / ``QImage`` / ``QIcon`` / ``bytes`` / SVG 数据 / 文件路径。
     """
     if source is None:
         return None
@@ -282,9 +264,7 @@ def toolIconName(name: str):
 def toolSubtitleParts(arguments) -> tuple:
     """返回 ``(命中的键, 值)``；未命中返回 ``("", "")``。
 
-    与 :func:`toolSubtitle` 同一套选取逻辑，但把**键**也带出来 —— 参数摘要
-    需要据此排除，避免同一个值在副标题和参数里各出现一次
-    （``read(path="a.py")`` 会显示两遍 ``a.py``）。
+    把键一并带出，参数摘要据此排除同值（否则 ``read(path="a.py")`` 会显示两遍）。
     """
     data = parseToolArguments(arguments)
     for key in _SUBTITLE_KEYS:
@@ -307,11 +287,7 @@ _ELIDE_SOURCE_MAX = 160
 
 
 def _elide_source(text: str, cap: int, fm: QFontMetrics) -> str:
-    """按目标像素宽度限制 ``elidedText`` 的源串长度。
-
-    展示区只有 ``cap`` 像素宽，源串再长也不会多显示一个字符；按平均字符宽
-    反推所需字符数，避免把 4KB 的 shell command 整串喂给字体测量。
-    """
+    """按目标像素宽度反推 ``elidedText`` 的源串上限，避免把 4KB 命令整串喂给字体测量。"""
     if len(text) <= 64:
         return text
     needed = int(max(0, cap) / max(1.0, float(fm.averageCharWidth()))) + 8
@@ -321,9 +297,7 @@ def _elide_source(text: str, cap: int, fm: QFontMetrics) -> str:
 def _preview_value(value) -> str:
     """有界地序列化一个参数值（大容器只序列化前 ``_PREVIEW_ITEMS`` 项）。
 
-    dict 分支走 ``itertools.islice``：``list(value.items())`` 会把**全部**
-    键值对先物化一遍，docstring 承诺的「有界」就打了折（万级键的 dict 白付
-    一次列表构造）。
+    dict 分支走 ``itertools.islice``：``list(value.items())`` 会先把全部键值对物化一遍。
     """
     if isinstance(value, dict):
         total = len(value)
@@ -344,16 +318,12 @@ def _preview_value(value) -> str:
 def toolArgumentPairs(arguments, limit: int = 3, excludeKey: str = "") -> list:
     """提取 ``key=value`` 形式的参数摘要（最多 ``limit`` 个）。
 
-    副标题已经展示过的值**不该在参数里再出现一次**（纯噪音）：
-    ``read(path="a.py")`` 因此只显示一次 ``a.py``，而不是副标题 + ``path=a.py``
-    各一份。大容器（长列表 / 大对象）走**有界预览**，不会为了最终只留 47 个
-    字符先把整个值全量序列化一遍。
+    副标题已展示过的值不再重复（``read(path="a.py")`` 只显示一次 ``a.py``）；
+    大容器走有界预览，不会为了留 47 个字符先全量序列化。
 
     :param limit: 最多返回几条
-    :param excludeKey: 要排除的键。调用方**自己**决定传什么：通用路径传
-        :func:`toolSubtitleParts` 探测到的键；宿主注册了渲染器的工具传它
-        ``subtitle`` 声明的来源键（那个键可能压根不是字符串，自动探测选不中，
-        也可能根本不对应任何参数，比如「3 个文件」）。留空则不做排除。
+    :param excludeKey: 要排除的键；调用方自己决定传什么（``toolSubtitleParts`` 探测到的键，
+        或宿主渲染器 ``subtitle`` 声明的来源键）。留空则不做排除。
     """
     data = parseToolArguments(arguments)
     pairs = []
@@ -383,8 +353,7 @@ def formatDuration(durationMs: float) -> str:
     except (TypeError, ValueError, OverflowError):
         return ""
     if not math.isfinite(seconds):
-        # inf // 60 是 nan，int(nan) 抛 ValueError —— 宿主 / 后端给个 inf 就能
-        # 在 Qt 槽链上炸掉整个进程，这里按「未统计」处理。
+        # inf // 60 是 nan，int(nan) 抛 ValueError —— 会在 Qt 槽链上炸掉进程。
         return ""
     if seconds < 60:
         return f"{seconds:.1f}s"
@@ -418,11 +387,9 @@ def _iter_heading_matches(pattern, text):
 def extractReasoningHeading(text: str) -> str:
     """从推理文本中抽取标题（ATX / 加粗行 / Setext），并清洗行内标记。
 
-    按模式优先级（ATX > 加粗 > Setext）返回**首个清洗后非空**的命中；
-    仅识别显式 Markdown 标题，普通正文不返回首行，避免与思考正文重复展示。
-    与 :class:`_HeadingScanner` 的增量结果保持一致（同一语义两套实现）——
-    **含「单行超长视为不可能」这一条**：增量扫描器为控成本跳过超长行，
-    全量抽取此前不设上限，一行 300 字符的加粗文本会让两者给出不同结果。
+    按模式优先级返回首个清洗后非空的命中；只认显式 Markdown 标题，普通正文不返回首行
+    （避免与思考正文重复）。与 :class:`_HeadingScanner` 保持同一语义，含「单行超长视为
+    不可能」这一条。
     """
     if not text:
         return ""
@@ -438,11 +405,9 @@ def extractReasoningHeading(text: str) -> str:
 class _HeadingScanner:
     """增量标题扫描器：逐分片喂入，结果与 ``extractReasoningHeading(全文)`` 一致。
 
-    按行跟踪「上一完整行 + 当前行」：完整行的命中不可撤销（``_found``），
-    当前行的命中是临时的（``_carry_found``，行继续增长可能失效后重算），
-    结果按 ``_HEADING_PATTERNS`` 优先级（ATX > 加粗 > Setext）取最早命中；
-    单行超过 ``_HEADING_LINE_LIMIT`` 视为不可能（展示层截断到 60 字符）。
-    每分片开销与分片长度成正比，避免长思考文本的逐片全量正则扫描。
+    按行跟踪「上一完整行 + 当前行」：完整行命中不可撤销，当前行命中是临时的（行继续
+    增长可能失效）；单行超过 ``_HEADING_LINE_LIMIT`` 视为不可能。每分片开销与分片长度
+    成正比，避免长思考文本的逐片全量正则扫描。
     """
 
     def __init__(self) -> None:

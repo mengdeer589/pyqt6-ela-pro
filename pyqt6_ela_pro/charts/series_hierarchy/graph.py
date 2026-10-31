@@ -27,19 +27,8 @@ from ._shared import _dist, _label_font, _series_palette_color, _text_color
 class GraphSeriesRenderer(SeriesRenderer):
     """关系图（节点 + 边）。
 
-    option 键：
-    - ``data`` / ``nodes``: [{"name","symbolSize","value","category","itemStyle"}]；
-    - ``categories``: ["分类"] 或 [{"name","itemStyle":{"color"}}]（节点分类着色）；
-    - ``links``: [{"source","target"}]（名称或下标）；
-    - ``layout``: "force"（默认，斥力 + 引力迭代 ~80 轮，确定性随机种子
-      保证可复现）/ "circular"（均布圆环）；
-    - ``force``: {"seed": 42, "iterations": 80, "repulsion": 1.0}；
-    - ``label``: {"show": True, "fontSize": px}（节点名称）；
-    - ``symbolSize``: 默认节点直径 px（节点级 symbolSize 优先）；
-    - ``draggable``: True 时按住节点拖拽调整位置（拖拽后位置固定，布局重算
-      不覆盖；ECharts 默认 False）；
-    - ``roam``: True / "scale" / "move" 开启滚轮缩放 + 空白处拖拽平移，
-      ``zoom`` 为初始缩放倍数，``resetRoam()`` 复位。
+    支持 ``data`` / ``nodes`` / ``categories`` / ``links`` / ``layout`` /
+    ``force`` / ``label`` / ``symbolSize`` / ``draggable`` / ``roam`` / ``zoom``。
     """
 
     def __init__(self, chart, opt):
@@ -48,8 +37,7 @@ class GraphSeriesRenderer(SeriesRenderer):
         self._edges = []  # [(i, j)]
         self._drag_index = None
         self._fixed: dict = {}  # 拖拽后的固定位置 {节点下标: QPointF}
-        #: 力导布局记忆化（见 ``_force_positions``）。条目 ``(key, positions)``，
-        #: ``positions`` 是**归一化 [0,1] 坐标**的 list，调用方只读。
+        #: 力导布局记忆化：条目 ``(key, positions)``，positions 为归一化坐标。
         self._force_cache = None
         self._pan = QPointF()
         self._pan_start = None
@@ -62,7 +50,7 @@ class GraphSeriesRenderer(SeriesRenderer):
             self._zoom = 1.0
 
     def _parse_roam(self):
-        """``roam`` → ``(scale 可否缩放, move 可否平移)``。共用 ``parse_roam``。"""
+        """``roam`` → ``(可缩放, 可平移)``。"""
         return _parse_roam(self.opt.get("roam", False))
 
     def _parse(self):
@@ -171,8 +159,7 @@ class GraphSeriesRenderer(SeriesRenderer):
             if fixed is not None:
                 pos = QPointF(fixed)
             else:
-                # 力导结果在归一化 [0,1] 空间里，缩放到绘图区（circular 分支
-                # 已经是像素坐标，故按模式区分）
+                # 力导结果是归一化 [0,1] 坐标；circular 分支已是像素坐标。
                 if mode == "circular":
                     pos = QPointF(positions[i][0], positions[i][1])
                 else:
@@ -232,15 +219,12 @@ class GraphSeriesRenderer(SeriesRenderer):
             layout_pos = self._inverse(pos)
             self._fixed[self._drag_index] = layout_pos
             self._nodes[self._drag_index]["pos"] = layout_pos
-            # 拖节点改的是**渲染器自己的几何**（``_nodes[i]["pos"]``），
-            # 必须走 invalidateLayout 让布局缓存与系列层位图一起失效 ——
-            # 只 update() 的话两个缓存都留着旧值，拖动看起来完全没反应。
+            # 拖拽改的是渲染器几何，必须 invalidateLayout 让布局与位图缓存一起失效。
             self.chart.invalidateLayout()
             self.chart.update()
             return True
         if self._pan_start is not None:
-            # 相对「本次按下时的 pan」累加：直接用 pos-start 会在第二次拖动
-            # 时把之前的平移量丢掉（画面跳回原点）。
+            # 相对本次按下的 pan 累加，否则第二次拖动会丢掉之前的平移量。
             self._pan = self._pan_origin + (QPointF(pos) - self._pan_start)
             self.chart.invalidateLayout()  # 同上：pan 改的是绘制变换
             self.chart.update()
@@ -289,19 +273,8 @@ class GraphSeriesRenderer(SeriesRenderer):
     def _force_positions(self, nodes, edges, force_opt):
         """力导布局结果（带记忆化）。
 
-        ``_force_layout`` 是**纯函数**：随机种子固定，且全程在归一化 [0,1]
-        空间里迭代（结果随后才按 ``plot`` 缩放），所以它的输出只取决于
-        「节点数 + 边集合 + seed / iterations / repulsion」。
-
-        而 ``layout`` 会被**每一次** ``_layout_all`` 调 —— resize、悬停引起的
-        重排、主题切换、图例显隐……每次都把 O(n² × iterations) 的纯 Python
-        双层循环重跑一遍。实测 400 节点 / 80 轮 ≈ **1.8 秒**，而这些场景
-        根本没改数据。
-
-        记忆化的键覆盖全部输入：节点数、边集合（``edges`` 是 ``(源下标, 目标下标)``
-        元组的 list，**顺序敏感**）、三个参数。
-        ``_fixed``（拖拽固定位置）在 ``_force_layout`` **之后**才应用，不进
-        布局计算，所以拖拽节点不需要让缓存失效。
+        ``_force_layout`` 是纯函数，但每次 ``_layout_all`` 都会重跑
+        O(n² × iterations) 的双层循环（400 节点 / 80 轮约 1.8s），故按全部输入缓存。
         """
         seed = int(_to_float(force_opt.get("seed"), 42))
         iterations = max(10, int(_to_float(force_opt.get("iterations"), 80)))
@@ -323,14 +296,9 @@ class GraphSeriesRenderer(SeriesRenderer):
         return positions
 
     def _force_layout(self, nodes, edges, force_opt, seed, iterations, repulsion):
-        """Fruchterman-Reingold 简化力导布局（确定性随机种子）。
-
-        在归一化 [0,1] 空间内迭代；输出与 ``plot`` 无关（缩放由调用方做），
-        这正是 :meth:`_force_positions` 能记忆化的前提。
-        """
+        """Fruchterman-Reingold 简化力导布局（确定性种子，归一化 [0,1] 空间）。"""
         n = len(nodes)
         rng = random.Random(seed)
-        # 归一化 [0,1] 空间内迭代
         pos = [[rng.random(), rng.random()] for _ in range(n)]
         area = 1.0
         k = math.sqrt(area / max(1, n)) * repulsion
@@ -377,14 +345,7 @@ class GraphSeriesRenderer(SeriesRenderer):
         return pos
 
     def _node_centroid(self):
-        """所有节点的质心（动画收缩的锚点）。
-
-        **必须挡空列表**：``paint`` 侧有 ``if not self._nodes: return`` 兜着，
-        而 ``hitTest`` 没有这层 —— 空节点集（data 为空 / layout 还没跑）会
-        直接 ``ZeroDivisionError``。而 ``hitTest`` 的异常被
-        ``_hitItemWithSeries`` 的 try/except 吞掉，症状是「静默命中不到任何
-        节点」，排查时完全看不出是被零除吃掉了。
-        """
+        """所有节点的质心（动画收缩的锚点）；空节点集返回原点，避免命中路径零除。"""
         n = len(self._nodes)
         if not n:
             return QPointF()
@@ -394,11 +355,7 @@ class GraphSeriesRenderer(SeriesRenderer):
         )
 
     def _animated_points(self, anim_t):
-        """动画进度下的屏幕坐标（``paint`` 与 ``hitTest`` 共用）。
-
-        入场动画把每个节点从质心处「张开」到最终位置，所以命中必须用同一
-        份插值 —— 否则动画进行中悬停命中的是还没飞到那儿的节点。
-        """
+        """动画进度下的屏幕坐标（``paint`` 与 ``hitTest`` 共用同一份插值）。"""
         center = self._node_centroid()
         out = []
         for nd in self._nodes:
@@ -478,8 +435,7 @@ class GraphSeriesRenderer(SeriesRenderer):
         best_d = 1e9
         if not self._nodes:
             return None
-        # 入场动画里节点向质心收缩（``paint`` 的 ``anim_pos``），命中必须用
-        # 同一份公式，否则动画期悬停会命中一个「还没到那儿」的节点。
+        # 命中必须与 ``paint`` 用同一份动画插值，否则动画期会命中还没到位的节点。
         pts = self._animated_points(self._anim_t)
         for i, nd in enumerate(self._nodes):
             d = _dist(pos, pts[i])

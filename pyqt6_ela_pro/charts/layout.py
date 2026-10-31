@@ -25,9 +25,7 @@ def layout_cache_key(chart) -> tuple:
 def layout_all(chart, force: bool = False) -> None:
     """全量布局：组件条带 / 坐标系 / 系列 / 组件几何。
 
-    组件条带：竖直 visualMap 占右侧，timeline 占最底部、dataZoom 在其上；
-    坐标系与系列避开全部条带，组件各自落在专属条带内（互不遮挡）。
-    布局缓存：键命中直接返回；动画进行中不缓存（每帧重算）。
+    布局缓存键命中直接返回；动画进行中不缓存（每帧重算）。
     """
     if force:
         chart._layout_key = None
@@ -90,8 +88,7 @@ def layout_all(chart, force: bool = False) -> None:
         )
         cursor -= size
 
-    # dataZoom 窗口必须先写回坐标轴，再排系列：系列按当前轴窗口做
-    # 「窗口裁剪 + 采样」，顺序反了就是「新轴 + 旧采样」的错配。
+    # dataZoom 窗口必须先写回坐标轴再排系列，否则是「新轴 + 旧采样」的错配。
     for component in chart._components:
         apply_window = getattr(component, "applyWindow", None)
         if not callable(apply_window):
@@ -122,9 +119,8 @@ def layout_all(chart, force: bool = False) -> None:
                 ),
                 f"系列布局异常（{renderer.name}）: {exc!r}",
             )
-    # 系列 layout 会修正 value 轴的真实范围（横向柱 / 堆叠 / K 线 / 箱线）。
-    # dataZoom 的全量必须在这之后重捕一次，否则它会拿「未修正的范围」把轴
-    # 改回去 —— 默认自动滚轮组件跨 setOption 存活，任何图都会中招。
+    # 系列 layout 会修正 value 轴的真实范围，dataZoom 的全量必须在这之后重捕，
+    # 否则它会拿未修正的范围把轴改回去。
     refreshed = False
     for component in chart._components:
         refresh = getattr(component, "refreshValueExtent", None)
@@ -139,8 +135,7 @@ def layout_all(chart, force: bool = False) -> None:
                 f"全量范围重捕失败（{component.__class__.__name__}）: {exc!r}",
             )
     if refreshed:
-        # 全量变了 → 窗口要按新全量重放；本帧系列几何还是旧轴算的，
-        # 失效布局键让下一帧按新轴重排（一帧内自愈，肉眼不可见）。
+        # 全量变了 → 本帧几何还是旧轴算的，失效布局键让下一帧按新轴重排。
         for component in chart._components:
             apply_window = getattr(component, "applyWindow", None)
             if not callable(apply_window):

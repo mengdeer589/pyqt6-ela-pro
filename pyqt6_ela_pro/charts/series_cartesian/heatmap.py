@@ -26,20 +26,10 @@ from ._shared import (
 class HeatmapSeriesRenderer(SeriesRenderer):
     """热力图。
 
-    - Grid 直角热力：xAxis / yAxis 均为 category，数据项 [x, y, value]
-      （x/y 为类别名或下标），按 band 填格；
-    - 日历热力：``coordinateSystem: "calendar"``，数据项 [日期, value]，
-      GitHub 风格逐格填充（无数据日也铺浅色底格，属引擎扩展）。
-      ``calendar.itemStyle``（color / borderColor / borderWidth / borderRadius）
-      控制空日底色与格子间距圆角。
-
-    数据项可携带 ECharts 风格 tooltip：``{"value": [日期, 值],
-    "tooltip": {"formatter": "557万 tokens · 4轮消息"}}``（formatter 支持
-    字符串模板或 callable(params)，命中时优先于系列 ``tooltip.formatter``）。
-
-    色带：默认 ``color.primary.subtle`` → ``color.primary`` 按值线性插值；
-    option 含 ``visualMap``（顶层）时按 ``visualMap.min/max`` 与
-    ``visualMap.inRange.colors`` 映射。
+    Grid 直角：x/y 轴均为 category，数据项 [x, y, value]，按 band 填格。日历：
+    ``coordinateSystem: "calendar"``，数据项 [日期, value]，无数据日铺浅色底格。
+    色带默认 ``color.primary.subtle`` → ``color.primary``，有 ``visualMap`` 时按其
+    min/max 与 ``inRange.colors`` 映射。
     """
 
     def __init__(self, chart, opt):
@@ -83,8 +73,8 @@ class HeatmapSeriesRenderer(SeriesRenderer):
     def _colors_and_range(self, items):
         """→ (colors, vmin, vmax)：visualMap 优先，否则默认色带 + 数据范围。
 
-        **必须读组件实例的活值**：``calculable`` 拖把手改的是实例
-        ``min/max``，读 option 静态值会让拖动完全不改配色。
+        必须读组件实例的活值：``calculable`` 拖动改的是实例 min/max，读 option
+        静态值会让拖动完全不改配色。
         """
         vm = self.visualMapComponent()
         colors = None
@@ -148,8 +138,8 @@ class HeatmapSeriesRenderer(SeriesRenderer):
             if entry is None:
                 cells.append(
                     {
-                        # 空日不是数据项：dataIndex 必须为 None，不能拿「日序号」
-                        # 冒充（会让事件的 dataIndex 与 series.data 完全对不上）。
+                        # 空日不是数据项：dataIndex 必须为 None（拿「日序号」冒充
+                        # 会让事件的 dataIndex 与 series.data 完全对不上）。
                         "index": None,
                         "rect": cell,
                         "value": None,
@@ -299,10 +289,7 @@ class HeatmapSeriesRenderer(SeriesRenderer):
         p.restore()
 
     def _cell_fill_color(self, cell: dict, hovered, anim_t: float) -> QColor:
-        """单元格填充色：仅命中格加亮，其余保持原样（不做整图淡化）。
-
-        ``emphasis.itemStyle.color`` 可覆盖命中格颜色（ECharts 语义）。
-        """
+        """单元格填充色：仅命中格加亮（``emphasis.itemStyle.color`` 可覆盖），其余保持原样。"""
         index = cell.get("index")
         if hovered is not None and index == hovered:
             emphasis = self.emphasisColor(index)

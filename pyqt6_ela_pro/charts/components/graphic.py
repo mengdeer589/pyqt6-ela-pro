@@ -26,24 +26,8 @@ def lerp_color(c1, c2, t: float) -> QColor:
 class GraphicComponent:
     """绝对定位图形元素：circle / rect / text / line。
 
-    option（顶层）::
-
-        "graphic": [
-            {"type": "circle", "left": 40, "top": 40,
-             "shape": {"cx": 0, "cy": 0, "r": 20},
-             "style": {"fill": "#3F5E8C", "stroke": "#..."}},
-            {"type": "rect", "left": "center", "top": 20,
-             "shape": {"x": -40, "y": 0, "width": 80, "height": 24, "r": 4},
-             "style": {"fill": "#..."}},
-            {"type": "text", "left": 12, "top": 12,
-             "style": {"text": "水印", "fill": "#98A0AC", "fontSize": 14}},
-            {"type": "line", "left": 0, "top": 0,
-             "shape": {"x1": 0, "y1": 0, "x2": 100, "y2": 40},
-             "style": {"stroke": "#...", "lineWidth": 2}},
-        ]
-
-    ``left`` / ``top`` 为相对图表内容区的像素偏移，或 ``"center"``
-    （水平 / 垂直居中锚点）；shape 内坐标相对该锚点。未知类型静默跳过。
+    ``left`` / ``top`` 为相对图表内容区的像素偏移、``"center"`` / ``"middle"``
+    或 ``"N%"``；``shape`` 内坐标相对该锚点。未知类型静默跳过。
     """
 
     optionKey = "graphic"
@@ -61,17 +45,8 @@ class GraphicComponent:
     def _anchor(self, el: dict) -> QPointF:
         """元素锚点：``left`` / ``top`` 解析成内容区内的绝对坐标。
 
-        支持三类写法（ECharts 语义）：
-
-        * 数值 —— 相对内容区左上角的**像素**偏移；
-        * ``"center"`` —— 该轴居中；
-        * ``"middle"`` —— 垂直居中（ECharts 官方拼写；``top: "middle"`` 是
-          最常见的一处，原先只认 ``"center"`` 而静默按 0 处理 → 水印类
-          纵向居中的文字全贴到顶边）；
-        * ``"30%"`` —— 相对内容区宽 / 高的百分比。
-
-        百分比与 ``"middle"`` 原先都落进 ``_to_float`` 的兜底分支（0），
-        **不报错也不告警**，只是元素悄悄跑到左上角。
+        数值 = 像素偏移，``"center"`` / ``"middle"`` = 该轴居中，``"30%"`` =
+        相对内容区宽 / 高；无法解析的值按 0 处理。
         """
         return QPointF(
             self._anchor_axis(el.get("left", 0), self.rect.left(), self.rect.width()),
@@ -141,9 +116,8 @@ class GraphicComponent:
                     text_italic(style.get("fontStyle")),
                 )
             )
-            # ``fill: "none"`` 要跟 circle / rect 一样被认出来：直接喂给
-            # ``QColor`` 会得到**无效颜色**，而无效 pen 的文字**根本不画**
-            # —— 用户写「不要文字」结果得到空白，且没有任何报错。
+            # ``fill: "none"`` 必须显式识别：喂给 QColor 会得到无效色，而无效
+            # pen 的文字根本不画（用户写「不要文字」得到空白且无报错）。
             fill = style.get("fill")
             if fill == "none" or fill is False:
                 return
@@ -188,10 +162,5 @@ class GraphicComponent:
             p.setPen(Qt.PenStyle.NoPen)
 
     def hitTest(self, pos: QPointF):
-        """恒返回 None —— graphic 是**装饰元素**，不参与命中。
-
-        ECharts 的 graphic 同为纯覆盖层（要交互得自己接 ``chart.on("click")``
-        自己做坐标判定）。保留本方法只为把这个决定写成代码而不是留白：
-        ``core`` 的命中分发只问 ``_HOVERABLE_COMPONENTS``，graphic 不在其中。
-        """
+        """恒返回 None —— graphic 是装饰元素，不参与命中（``_HOVERABLE_COMPONENTS`` 不含它）。"""
         return None

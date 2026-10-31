@@ -1,14 +1,4 @@
-"""
-聊天 dock 组件（``pyqt6_ela_pro.chat``）。
-
-- :class:`ElaChatQueueDock`：排队消息 dock（输入区上方，可折叠），``N 条排队消息``
-  + 首条预览，展开后每条支持「立即发送 / 编辑 / 移除」；
-- :class:`ElaChatInputDock`：可替换输入区的通用 dock 容器，``replace=True`` 时输入区
-  不可用；
-- :class:`ElaChatPermissionDock`：审批 / 提问的交互 dock。
-
-三者都是 ``ElaScrollPageArea`` 卡面。
-"""
+"""聊天 dock 组件：排队消息 / 可替换输入区 / 审批交互（均为 ``ElaScrollPageArea`` 卡面）。"""
 
 from __future__ import annotations
 
@@ -227,7 +217,9 @@ class ElaChatQueueDock(_ThemeAwareMixin, ElaScrollPageArea):
             size="small",
             parent=row,
         )
-        send.setToolTip("送进当前回合，不打断生成" if self._working else "立即发送这一条")
+        send.setToolTip(
+            "送进当前回合，不打断生成" if self._working else "立即发送这一条"
+        )
         send.clicked.connect(
             lambda _checked=False, mid=message["id"]: self._activate_row(mid)
         )
@@ -287,12 +279,7 @@ class ElaChatQueueDock(_ThemeAwareMixin, ElaScrollPageArea):
 
 
 class ElaChatInputDock(_ThemeAwareMixin, ElaScrollPageArea):
-    """可替换输入区的通用 dock 容器（权限 / 提问卡片等）。
-
-    内容槽走 :class:`~pyqt6_ela_pro._ownership.ContentSlot`（AGENTS.md 要求带内容槽
-    的容器一律用它），**释放策略由调用方选**：默认 ``Borrowed`` 只是
-    ``setParent(None)`` 交还，``Owned`` 才由本 dock ``deleteLater()``。
-    """
+    """可替换输入区的通用 dock 容器；内容槽走 ``ContentSlot``，默认 ``Borrowed``。"""
 
     #: dock 内容变化（参数：是否有内容）
     changed = pyqtSignal(bool)
@@ -341,9 +328,8 @@ class ElaChatInputDock(_ThemeAwareMixin, ElaScrollPageArea):
     ) -> bool:
         """设置 dock 内容；``replace=True`` 表示替换输入区（输入区不可用）。
 
-        ``ownership`` 默认 ``Borrowed``（交还调用方），选 ``Owned`` 时由本 dock 负责
-        ``deleteLater()``。返回是否挂载成功 —— 自挂 / 挂祖先 / 非 QWidget / 宿主已死
-        都会被拒。
+        ``ownership`` 默认 ``Borrowed``（交还调用方），``Owned`` 时由本 dock
+        ``deleteLater()``。返回是否挂载成功。
         """
         self._updating = True
         try:
@@ -392,12 +378,7 @@ class ElaChatInputDock(_ThemeAwareMixin, ElaScrollPageArea):
         self.changed.emit(False)
 
     def _on_slot_changed(self, widget) -> None:
-        """内容被**外部**销毁时收起 dock。
-
-        显式 ``setWidget`` / ``clear`` 自己发 ``changed``（``_updating`` 期间跳过），
-        避免一次替换发两遍。此处**不动布局** —— ``widgetChanged(None)`` 也可能来自
-        ``destroyed``，此刻 Qt 自己的布局清理可能还没跑完。
-        """
+        """内容被外部销毁时收起 dock（此处不动布局，见 ``_ownership`` 约定）。"""
         if self._updating or widget is not None:
             return
         self._replace = False
@@ -415,13 +396,9 @@ class ElaChatInputDock(_ThemeAwareMixin, ElaScrollPageArea):
 
 
 class ElaChatPermissionDock(_ThemeAwareMixin, ElaScrollPageArea):
-    """审批 / 提问的交互 dock（输入区**上方**，不占用输入区）。
+    """审批 / 提问的交互 dock（输入区上方，一次只显示一张卡）。
 
-    **不复用** :class:`ElaChatInputDock`：那个的语义是「**替换**输入区」
-    （``replace=True`` 时输入区被禁用），审批卡不是输入 —— 塞进去等于 hijack 输入框，
-    用户等待期间连字都打不了，而审批往往并不要求「此刻不许说话」。
-
-    一次只显示一张卡；其余请求用一行「还有 N 个待答复」提示。
+    不复用 :class:`ElaChatInputDock`：那个会**替换**输入区，审批期间用户仍需能输入。
     """
 
     #: dock 是否有内容（参数：是否有卡片）
@@ -449,9 +426,8 @@ class ElaChatPermissionDock(_ThemeAwareMixin, ElaScrollPageArea):
     def setCard(self, card: Optional[QWidget]) -> None:  # noqa: N802
         """设置当前交互卡（``None`` 收起整个 dock）。
 
-        **显示时机在这里，不在卡片自己身上。** ``bubble.beginPermission`` 建卡时不给
-        parent，卡片若自己 ``show()``，Qt 会把这个无父控件当**顶层窗口**弹出来 ——
-        用户看到「小窗一闪 -> 变成输入区上那张卡」，连点几次就同时弹出好几个窗口。
+        显示时机只在这里：卡片自己 ``show()`` 时若尚无 parent，Qt 会把它当顶层
+        窗口弹出来。
         """
         self._detach()
         if card is None:
@@ -494,11 +470,8 @@ class ElaChatPermissionDock(_ThemeAwareMixin, ElaScrollPageArea):
     def _detach(self) -> None:
         if self._card is None:
             return
-        # **dock 只是借用卡片，所有权在气泡**（``bubble._interactive_cards``）：
-        # 落定时由气泡 deleteLater，气泡销毁时由 ``_reset_part_state`` 收。
-        # 这里绝不能 deleteLater —— 撤下后 part 仍是 pending，气泡会把它重新
-        # 顶回 dock：冲刷过就是 setParent 到已释放对象（0xC0000409），没冲刷
-        # 则卡稍后被 DeferredDelete 删掉、从 dock 里凭空消失。
+        # dock 只借用卡片，所有权在气泡（``bubble._interactive_cards``）：
+        # 这里 deleteLater 会让卡片被 DeferredDelete 删掉而从 dock 凭空消失。
         if not is_deleted(self._card):
             self._layout.removeWidget(self._card)
             self._card.setParent(None)

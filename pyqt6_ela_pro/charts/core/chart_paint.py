@@ -50,16 +50,15 @@ class _ChartPaintMixin:
     def showLoading(self, type: str = "default", opts: dict = None) -> None:
         """显示加载遮罩（ECharts ``showLoading``）。
 
-        opts：``text`` / ``color`` / ``textColor`` / ``maskColor`` /
-        ``fontSize`` / ``showSpinner`` / ``spinnerRadius`` / ``lineWidth``。
+        opts：``text`` / ``color`` / ``textColor`` / ``maskColor`` / ``fontSize``
+        / ``showSpinner`` / ``spinnerRadius`` / ``lineWidth``。
         """
         self._ensure_alive()
         self._loading = True
         self._loading_type = str(type or "default")
         self._loading_opts = dict(opts or {})
         if self._loading_opts.get("showSpinner", True):
-            # 持续动效：Reduced/Disabled 下不转。角度冻结在当前值 —— 遮罩与文字
-            # 都照常画，只是不再转，所以看起来是「有遮罩但静止」。
+            # 持续动效：Reduced/Disabled 下不转，遮罩与文字照常画。
             start_idle_loop(self._spinner_timer, SPINNER_TICK_MS)
         self.update()
 
@@ -135,38 +134,16 @@ class _ChartPaintMixin:
     ) -> dict:
         """性能剖析：分项测量各阶段耗时（诊断用，不改变任何状态）。
 
-        **为什么需要它**：大数据量下「慢」的归因必须靠实测，不能猜。本机
-        100 万点 / 单系列实测（offscreen，1200x700）::
-
-            ingestMs  15.0    摄入（setOption 全程）
-            layoutMs  19.6    布局（坐标 + 系列几何，含采样与坐标映射）
-            paintMs  107.4    绘制（纯光栅化，画到离屏 QImage）
-            frameMs  127.0    → 远超 60 Hz 预算 16.7 ms
-
-        **关键结论：瓶颈在绘制，不在点数也不在摄入。** 采样后只画 2256 个
-        点却仍要 107 ms —— 说明成本来自「每段抗锯齿折线的光栅化」而非点数
-        规模。因此优化方向是绘制阶段（分层位图缓存 / GPU 直绘），而不是
-        继续优化采样或数据摄入。
-
         :param frames: 重复帧数（取平均，降低单帧噪声）。默认 8。
-        :param forceLayout: 每次都强制重排（``_layout_all(force=True)``），
-            绕过布局缓存。传 ``False`` 测的是「命中缓存的稳态」——那才是
-            悬停 / 动画期的真实成本。
-        :param perSeries: 是否额外测**每条系列**的布局 / 绘制耗时。多系列
-            场景下总耗时只说明「慢」，逐系列读数才能定位到具体哪条曲线。
-        :returns: 各项耗时（毫秒）与规模信息。**所有时间单位为毫秒（ms）**。
-            ``seriesTimings`` 为逐系列读数（``perSeries=False`` 时为 ``[]``），
-            每项含 ``name`` / ``type`` / ``dataPoints`` / ``drawnPoints`` /
-            ``layoutMs`` / ``paintMs``。键集合由测试钉住。
+        :param forceLayout: 每次都强制重排，绕过布局缓存；``False`` 测命中缓存的稳态。
+        :param perSeries: 是否额外测每条系列的布局 / 绘制耗时。
+        :returns: 各项耗时（毫秒）与规模信息；``seriesTimings`` 为逐系列读数。
         """
         frames = max(1, int(frames))
-        # 记录需复原的状态。``setOption(notMerge=True)`` 内部会重置图例
-        # 选中态（``_series_state``）并重新起动画，所以二者都要在测量
-        # **之后**按调用前的值覆盖，否则 benchmark 会顺手改掉用户的图例。
+        # 记录需复原的状态：notMerge 会重置图例选中态并重新起动画，测量后要还原。
         was_anim = self.anim.isRunning()
         saved_state = dict(self._series_state)
-        # 悬浮提示：``notMerge`` 会 ``tooltip.hide()``。tooltip 自身持有
-        # 全部状态，直接留一个对象引用即可复原。
+        # notMerge 会 tooltip.hide()；tooltip 自身持有全部状态，留引用即可复原。
         saved_tip = (
             self.tooltip,
             self.tooltip.active,
@@ -175,8 +152,7 @@ class _ChartPaintMixin:
             self.tooltip._marker_pos,
         )
         try:
-            # 固定到终态：动画每帧都在变，会让布局缓存永久失效，测出来的
-            # 是「动画中」而非「稳态」的成本。
+            # 固定到终态：动画每帧变化会让布局缓存永久失效，测出的是动画中成本。
             self.anim.stop()
             self.anim.setProgress(1.0)
             # -- 摄入：setOption 全程（含合并 / 快照 / 重建） --
@@ -185,8 +161,7 @@ class _ChartPaintMixin:
             ingest_ms = _elapsed_ms(t0)
             self.anim.stop()
             self.anim.setProgress(1.0)
-            # ``notMerge`` 清空了图例选中态，测量前先复原 —— 否则被隐藏的
-            # 系列也会被计入布局 / 绘制耗时。
+            # 复原图例选中态，否则隐藏系列也会计入耗时。
             self._series_state = dict(saved_state)
             for r in self._series:
                 r.visible = self._seriesVisible(r.name)
@@ -219,39 +194,22 @@ class _ChartPaintMixin:
         return self._benchmark_reduce(ingest_ms, layout_ms, paint_ms, series_timings)
 
     def _benchmark_series(self) -> list:
-        """逐系列测量布局 / 绘制耗时（每项跑一轮，不取平均）。
+        """逐系列测量布局 / 绘制耗时（每条系列单独跑一轮，不取平均）。
 
-        多系列场景下总耗时只回答「慢不慢」，答不出「哪条慢」。本方法把每条
-        可见系列**单独**跑一遍布局与绘制，代价是总耗时约翻倍（仅诊断时用）。
-
-        每条系列独测：关掉其余系列的可见性，避免把邻居的成本算到它头上
-        （先画的系列会受益于「后画的还没覆盖这块区域」，同测才有可比性）。
-
-        **只跑一轮**，不按 ``frames`` 取平均：逐系列读数用于横向比较「谁更
-        慢」，量级差异远大于单轮噪声；而重复取平均在 8 系列 × 20 万点下会
-        把一次 benchmark 拖到分钟级（实测 ``_render`` 单轮 122 ms）。
-
-        **``layoutMs`` 读数含「其余系列被隐藏」的重排成本**：折线系列的
-        布局会扫描全量 ``series_opts`` 重建槽位，故单测一条线时该值仍与
-        总系列数相关（实测各折线均为 ~660 ms，而总布局 635 ms）。故该值
-        只宜**横向比较同一批读数**（同轮、同条件），不可当作「这条线的
-        布局绝对成本」。``paintMs`` 无此问题（绘制确实只画可见系列）。
+        关掉其余系列避免成本串味。``layoutMs`` 仍与总系列数相关（折线布局会扫描
+        全量 series_opts），只宜横向比较同一批读数；``paintMs`` 无此问题。
         """
         out = []
         saved_state = dict(self._series_state)
-        # 在进入循环前**快照**目标列表：循环内会把 ``r.visible`` 置为
-        # False，而那正是循环的跳过条件 —— 直接遍历 ``self._series`` 会
-        # 在第一轮之后全部被跳过（实测 3 条系列只返回 1 条）。
+        # 先快照目标列表：循环内会把 r.visible 置 False，直接遍历 self._series
+        # 会跳过后续项。
         targets = [r for r in self._series if getattr(r, "visible", True)]
         try:
             for target in targets:
                 # 只留目标系列可见
                 for r in self._series:
                     r.visible = r is target
-                # 布局跑一次即可拿到几何 —— 逐系列读数要的是「这条线自身
-                # 多贵」，重复 frames 轮取平均在多系列大数据下会拖到分钟级
-                # （8 系列 × 6 帧实测 16 s），而布局幂等、单轮噪声远小于
-                # 系列间的量级差异。
+                # 单轮即可：布局幂等，重复取平均在系列 × 大数据下会拖到分钟级。
                 self.invalidateLayout()
                 t0 = _now()
                 self._layout_all(force=True)
@@ -275,18 +233,12 @@ class _ChartPaintMixin:
             for r in self._series:
                 r.visible = self._seriesVisible(r.name)
             self.invalidateLayout()
-        # 按「每单位几何的绘制成本」降序：多系列下真正可比的指标是密度，
-        # 绝对 paintMs 会被图元数直接带偏（bar 20k 图元 515 ms vs 折线
-        # 2256 点 32 ms，看着差 16 倍，实际每图元只差 3 倍）。
+        # 按每图元绘制成本降序：绝对 paintMs 会被图元数带偏。
         out.sort(key=lambda d: -(d["paintMs"] / max(1, d["drawnPoints"])))
         return out
 
     def _render_to_painter(self) -> None:
-        """把当前内容画到离屏 QImage（走与 ``paintEvent`` 相同的绘制路径）。
-
-        不直接用 ``paintEvent``：那需要真实可见的控件，且 Qt 的合成 /
-        窗口交换等待会计入读数，把「算法成本」和「系统等待」混在一起。
-        """
+        """把当前内容画到离屏 QImage（与 ``paintEvent`` 同绘制路径，排除窗口合成开销）。"""
         img = QImage(
             max(1, self.width()),
             max(1, self.height()),
@@ -304,18 +256,9 @@ class _ChartPaintMixin:
     def _benchmark_reduce(self, ingest_ms, layout_ms, paint_ms, series_timings) -> dict:
         """汇总 benchmark 结果。
 
-        返回键集合**固定**（由 ``tests/ela_chart_widget/test_chart_benchmark.py``
-        钉住）—— 诊断接口靠 key 取值，键悄悄变动会让调用方静默拿到 ``None``，
-        比没有这个接口更糟。
-
-        规模字段的口径：
-
-        - ``dataPoints``：**单个可见系列**的最大数据量（多系列时不是总和；
-          ``totalDataPoints`` 才是总和）；
-        - ``drawnPoints``：所有可见系列**实际绘制**的点数之和（已被采样
-          压缩到视口像素量级，故远小于数据量）；
-        - ``seriesTimings``：逐系列读数，按 ``paintMs`` 降序（最慢的在前），
-          用于定位具体是哪条曲线吃掉了帧时间。
+        返回键集合固定（测试钉住）—— 诊断接口靠 key 取值，键变动会让调用方静默
+        拿到 ``None``。``dataPoints`` 是单个可见系列的最大数据量（``totalDataPoints``
+        才是总和），``drawnPoints`` 是实际绘制点数，``seriesTimings`` 按 paintMs 降序。
         """
         largest = 0
         total_data = 0
@@ -408,11 +351,9 @@ class _ChartPaintMixin:
     def invalidateLayout(self) -> None:
         """使布局缓存失效（下次绘制 / 布局时全量重排）。
 
-        同时递增 ``_geometry_epoch``（进 ``_series_layer_key``）—— 渲染器除了
-        图表级状态还有自己那份几何（下钻焦点、roam 平移缩放、treemap / sankey
-        布局），那些变更一律经本方法通知，否则系列层位图会被原样贴回
-        （实测旭日图下钻后位图逐字节不变，表现为「点了没反应」）。
-        「哪些状态必须走这里」的清单见 AGENTS.md「charts」。
+        同时递增 ``_geometry_epoch``（进 ``_series_layer_key``）：渲染器自己的几何
+        （下钻焦点、roam、treemap / sankey 布局）变更一律经本方法通知，否则系列层
+        位图会被原样贴回。
         """
         self._layout_key = None
         self._geometry_epoch += 1
@@ -436,11 +377,7 @@ class _ChartPaintMixin:
             self._layout_all()
             self._paint_content(p)
         except Exception as exc:  # noqa: BLE001
-            # **这里原来只有 try/finally 没有 except** —— 任何漏网的异常都会
-            # 穿过 Qt 回调边界 = 0xC0000409 静默终止（零 traceback）。
-            # 已知入口：``backgroundColor`` 传 list / dict 时 ``QColor(bg)`` 抛
-            # TypeError，而它在 ``_paint_content`` 的逐块守卫之外。
-            # 绘制失败退化成「这一帧画得不全」，不能拖垮整个进程。
+            # 异常穿出 Qt 回调边界 = 0xC0000409 静默终止；绘制失败只跳过本帧剩余内容。
             warn_once("paint-event", f"绘制异常（已跳过本帧剩余内容）: {exc!r}")
         finally:
             # 无论任何绘制路径抛异常，QPainter 都必须收尾，
@@ -450,8 +387,7 @@ class _ChartPaintMixin:
     def _background_color(self) -> QColor:
         """``backgroundColor`` → QColor，非法值回退主题底色。
 
-        宿主可能传 list / dict / 任何非 str 值（``QColor(list)`` 是 TypeError），
-        所以这里不能直接构造。
+        宿主可能传 list / dict 等非 str 值（``QColor(list)`` 会抛 TypeError）。
         """
         bg = self._option.get("backgroundColor")
         if isinstance(bg, QColor):
@@ -468,10 +404,8 @@ class _ChartPaintMixin:
     def _series_layer_key(self):
         """系列层位图缓存键（``None`` 表示本帧不缓存）。
 
-        **只包含影响系列外观的状态**：option 版本 / ``_geometry_epoch`` /
-        视口尺寸 / 主题 / dataZoom 窗口 / 逐系列可见性 / hover 命中 / 动画进度。
-        后两项（hover、几何纪元）少一个就会「贴回旧外观」，逐项理由与踩坑见
-        AGENTS.md「charts」。
+        只包含影响系列外观的状态：option 版本 / ``_geometry_epoch`` / 尺寸 / 主题 /
+        dataZoom 窗口 / 逐系列可见性 / hover 命中 / 选中态 / 图例悬停。
         """
         if self.anim.isRunning():
             return None  # 动画每帧几何都在变，缓存无意义
@@ -517,16 +451,9 @@ class _ChartPaintMixin:
     def _paint_series_cached(self, p: QPainter, t: float) -> None:
         """绘制系列层（命中缓存则整幅位图贴回）。
 
-        为什么值得：实测 8 系列 × 20 万点（1200×700）单帧绘制中
-        **系列占 99.7%**（914 ms/3 帧 vs 坐标轴 2.9 ms/3 帧）。而悬停
-        每移动一像素就 ``update()`` 一次 —— 200 次移动实测 40.7 秒
-        （每次 203 ms），交互完全不可用。
-
-        缓存命中时只做一次 ``drawImage``，悬停 / 动画期的重绘成本从
-        「重建全部折线路径」降到「贴一张位图」。
-
-        失效条件全部在 ``_series_layer_key`` 里；坐标轴、组件、图例、
-        标题、tooltip **不缓存**（它们要么本来就便宜，要么逐帧变化）。
+        系列绘制占单帧成本绝大部分，而悬停每移动一像素就重绘一次；缓存命中时
+        只做一次 ``drawImage``。失效条件全部在 ``_series_layer_key`` 里；坐标轴 /
+        组件 / 图例 / 标题 / tooltip 不缓存。
         """
         key = self._series_layer_key()
         if key is None:
@@ -537,9 +464,7 @@ class _ChartPaintMixin:
             return
         w, h = max(1, self.width()), max(1, self.height())
         dpr = self.getDevicePixelRatio()
-        # 每维都要 ``max(1, ...)``：DPR < 1 时 ``int(round(1 * 0.5))`` 走银行家
-        # 舍入得 **0**，QImage(0, h) 是空图，QPainter 画上去什么都不出 ——
-        # 而外面那层 ``max(1, self.width())`` 让人以为已经防住了。
+        # 每维都要 ``max(1, ...)``：DPR < 1 时银行家舍入会得 0，QImage(0, h) 是空图。
         img = QImage(
             max(1, int(round(w * dpr))),
             max(1, int(round(h * dpr))),
@@ -559,10 +484,9 @@ class _ChartPaintMixin:
         p.drawImage(0, 0, img)
 
     def _paint_series(self, p: QPainter, t: float) -> None:
-        """逐系列绘制（单系列异常不影响整图，且至少可见一次）。
+        """逐系列绘制（单系列异常不影响整图）。
 
-        图例悬停高亮（``_legend_hover``）：命中系列正常绘制，其余降到 35%
-        不透明度 —— 对齐 Plotly「悬停图例条目高亮对应 trace」的行为。
+        图例悬停高亮：命中系列正常绘制，其余降到 35% 不透明度。
         """
         highlight = self._legend_hover
         focus_series = None
@@ -606,9 +530,8 @@ class _ChartPaintMixin:
     def _paint_content(self, p: QPainter) -> None:
         """内容绘制体（坐标轴 → 系列 → 组件 → 图例/标题/提示框/遮罩）。
 
-        从 ``paintEvent`` 抽出，使 ``benchmark`` 能画到离屏 QImage 上测
-        **纯绘制成本**（不掺入窗口合成 / 交换等待）。**绘制顺序不可调换**
-        （画家算法）。
+        从 ``paintEvent`` 抽出，供 ``benchmark`` 画到离屏 QImage。绘制顺序
+        不可调换（画家算法）。
         """
         p.setRenderHint(QPainter.RenderHint.TextAntialiasing)
         t = self.anim.t

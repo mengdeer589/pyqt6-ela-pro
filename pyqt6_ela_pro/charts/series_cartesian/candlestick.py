@@ -21,12 +21,9 @@ from ._shared import _axis_label, _datum_list, _fix_value_axis, _lerp
 class CandlestickSeriesRenderer(SeriesRenderer):
     """K线（OHLC）。数据项：[开, 收, 最低, 最高]（或 {"value": [...]}）。
 
-    配色遵循 ECharts 默认（红涨绿跌）：``itemStyle.color``（涨）/ ``color0``（跌）、
-    ``itemStyle.borderColor`` / ``borderColor0``；缺省涨用 ``color.danger``、
-    跌用 ``color.success``（与库主题语义一致）。
-
-    option 键：``barWidth``（实体宽 px，缺省为 band 的 60%，上限 24）；
-    setOption 同长度数据逐值插值。
+    配色遵循 ECharts 语义：``itemStyle.color`` / ``color0`` 为涨 / 跌，
+    ``borderColor`` / ``borderColor0`` 同理；缺省涨用 ``color.danger``、
+    跌用 ``color.success``。``barWidth``：实体宽 px（缺省 band 的 60%，上限 24）。
     """
 
     def __init__(self, chart, opt):

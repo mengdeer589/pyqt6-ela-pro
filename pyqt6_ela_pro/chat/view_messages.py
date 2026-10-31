@@ -29,7 +29,9 @@ def _with_created_at(message: ElaChatMessage, createdAt: float) -> ElaChatMessag
     return replace(message, created_at=float(createdAt))
 
 
-def _with_identity(message: ElaChatMessage, identity=None, mentions=None, delivery="") -> ElaChatMessage:
+def _with_identity(
+    message: ElaChatMessage, identity=None, mentions=None, delivery=""
+) -> ElaChatMessage:
     """把可选的 agent / 模型 / mention / 投递方式写到新快照上。"""
     if identity is not None:
         message = message.withIdentity(*identity)
@@ -43,9 +45,8 @@ def _with_identity(message: ElaChatMessage, identity=None, mentions=None, delive
 def _settle_restored(message: ElaChatMessage) -> ElaChatMessage:
     """恢复出来的消息一律落定：消息状态与未完成工具都不留在途态。
 
-    存储里可能留下 ``streaming`` 的消息 / ``pending`` / ``running`` 的工具
-    （生成中导出、进程被杀）。恢复后不会再有事件把它们收尾，留着就是永久
-    转圈；与 ``journal.settleOpen``、气泡的 ``_abortStream`` 同口径。
+    存储里可能留下生成中导出的 ``streaming`` / ``pending`` 记录，恢复后不再
+    有事件收尾；与 ``journal.settleOpen`` 同口径。
     """
     failed = message.status == ElaChatStatusType.Error or bool(message.error)
     target = (
@@ -85,11 +86,8 @@ class _ViewMessagesMixin:
     ) -> int:
         """添加一条消息，返回消息 id。
 
-        ``messageId`` 可由调用方指定（乐观 UI 先行渲染）。**该 id 已被占用时
-        抛 :class:`ValueError`** —— 静默重号会让旧气泡既留在界面上又不在索引里
-        （``removeMessage`` / ``clear()`` 都清不到），快照还出现两个同 id 消息
-        （与 :meth:`addMessageFromDict` 同一口径）。客户端生成的幂等键请走
-        ``ElaChatWidget.sendUserMessage``（那里做过重复发送对账）。
+        ``messageId`` 可由调用方指定（乐观 UI 先行渲染）；**该 id 已被占用时
+        抛 :class:`ValueError`**（静默重号会让旧气泡既留在界面上又不在索引里）。
         """
         if messageId is not None and messageId in self._bubbles:
             raise ValueError(
@@ -116,15 +114,9 @@ class _ViewMessagesMixin:
     def addMessageFromDict(self, data, messageId: Optional[int] = None) -> int:
         """从 :meth:`ElaChatMessage.toDict` 的输出恢复一条消息，返回消息 id。
 
-        存储模块的**读回**入口：与 :meth:`addMessage` 的区别是它会重建完整的
-        分段时间线（思考 / 正文 / 工具 / 步骤用量）以及消息级字段（标题、
-        时间、耗时、错误、附件），而不只是一个纯文本气泡。
-
-        ``messageId`` 为 ``None`` 时沿用 ``data`` 里的 ``id``（跨重启保持稳定，
-        分段 id 也一并保留）；若该 id 已被占用则**抛 ValueError 而不是静默
-        重号** —— 静默重号会让两条消息共用一个 id，后一条按 id 永远取不到，
-        宿主却以为恢复成功了。需要顺序追加、不在乎 id 的话用
-        :meth:`restoreMessages`（它一律重新分配）。
+        会重建完整分段时间线（思考 / 正文 / 工具 / 步骤用量）与消息级字段。
+        ``messageId`` 为 ``None`` 时沿用 ``data`` 里的 ``id``；id 已占用抛
+        :class:`ValueError`（不静默重号）。
 
         :raises ValueError: id 已被占用，或助手消息的分段无法重建
         """
@@ -171,14 +163,9 @@ class _ViewMessagesMixin:
     def _validate_preserve_ids(self, rows, against_existing: bool = True) -> None:
         """校验 ``preserveIds=True`` 的整批 id（重复 / 与现有消息撞号即抛）。
 
-        **只读校验**：调用方（``restoreMessages`` / ``importSession``）必须在
-        写入前调用 —— 尤其是 ``importSession(clear=True)``，先清空再校验会让
-        坏 bundle 把当前会话整个清掉后才抛异常。
-
-        ``against_existing=False``：只查**批内重复**。``importSession(clear=True)``
-        用这个口径 —— 它随后就 ``clear()``，与当前消息撞号本无害（``clear``
-        是验证过的语义：整会话替换），再拦会让「往仍有消息的视图里导入重叠
-        id 的 bundle」必须先手动 clear 才能成功。
+        **只读校验**：调用方必须在写入前调用，否则坏 bundle 会先把当前会话清掉
+        才抛异常。``against_existing=False`` 只查批内重复（``importSession`` 随后
+        就 ``clear()``，与现有消息撞号无害）。
         """
         stored = [_as_int(data.get("id")) for data in rows if isinstance(data, dict)]
         stored = [messageId for messageId in stored if messageId > 0]
@@ -195,16 +182,13 @@ class _ViewMessagesMixin:
             )
 
     def restoreMessages(self, items, preserveIds: bool = False) -> list:
-        """批量恢复消息（存储模块的**读回**入口），返回恢复后的消息 id 列表。
+        """批量恢复消息（存储模块的读回入口），返回恢复后的消息 id 列表。
 
-        按给定顺序追加；``preserveIds=False``（默认）时消息 ``id`` 一律
-        **重新分配** —— 历史数据里的 id 很可能与当前会话已有的冲突。
-        ``preserveIds=True`` 时保留存储里的 id（跨重启稳定）；本批内部重号或
-        与现有消息撞 id 时抛 :class:`ValueError`，且**先校验后写入、一条都不
-        落**（不会留下半恢复状态）。
+        按给定顺序追加；``preserveIds=False``（默认）时 id 一律重新分配。
+        ``preserveIds=True`` 保留存储 id，本批重号或与现有消息撞号抛
+        :class:`ValueError`，且**先校验后写入**（不留半恢复状态）。
 
-        整体包在 :meth:`beginBatch` / :meth:`endBatch` 之间，大批量加载走
-        渐进渲染路径（骨架先建，Markdown 按时间片补齐）。
+        整体包在 :meth:`beginBatch` / :meth:`endBatch` 之间，大批量走渐进渲染。
         """
         rows = list(items or ())
         if preserveIds:
@@ -220,8 +204,7 @@ class _ViewMessagesMixin:
         )
         if virtual_list:
             self._virtual_list_mode = True
-        # 壳虚拟化（80~200 条）启用「滚远收回占位」；spacer 模式由虚拟列表自己
-        # 管理回收，不再走 shell 回收。
+        # 壳虚拟化（80~200 条）启用「滚远收回占位」；spacer 模式自己管理回收。
         self._shell_recycling = bool(shell_virtual and not virtual_list)
         restored = []
         self.beginBatch()
@@ -251,10 +234,8 @@ class _ViewMessagesMixin:
                     else:
                         if not self._bubbles[messageId].setParts(message.parts):
                             continue
-                        # 快照**当场结算**，只有 Markdown 渲染延迟（``setParts`` 在延迟
-                        # 模式下只把分段登记成待渲染）。反过来会把「parts 为空」这件事
-                        # 泄露给读路径：``messages()`` / ``exportSession`` 在渲染队列排空
-                        # 之前拿到的都是空消息，导出会静默丢内容。
+                        # 快照当场结算，只有 Markdown 渲染延迟：否则读路径
+                        # （messages() / exportSession）会拿到空消息，导出静默丢内容。
                         self._sync_parts(messageId)
                 self._apply_message_fields(messageId, message)
                 self.messageAdded.emit(messageId, message.role)
@@ -266,9 +247,7 @@ class _ViewMessagesMixin:
     def _apply_message_fields(self, messageId: int, message) -> None:
         """把消息级字段（标题 / 时间 / 耗时 / 错误 / 附件 / 创建时间）恢复到气泡与快照。
 
-        必须走 **view 级**方法：``bubble.setDuration()`` 之类只改控件，不改
-        ``_messages`` 里的快照 —— 那样恢复出来的消息 ``duration_ms`` / ``error``
-        会是 0 / 空，而界面却显示着耗时，看着自相矛盾。
+        必须走 view 级方法：``bubble.setDuration()`` 之类只改控件不改快照。
         """
         bubble = self._bubbles.get(messageId)
         if bubble is None:
@@ -295,16 +274,12 @@ class _ViewMessagesMixin:
             self._update_snapshot(
                 messageId, lambda m, at=message.created_at: _with_created_at(m, at)
             )
-        # 消息级状态也要还原：只信 parts 的派生字段而不还原 status，会把
-        # 「被停止」「出错」的历史消息显示成 Done（错误文案为空时尤其隐蔽）。
-        # 有错误文案时不覆盖 —— ``setMessageError`` 已把状态置为 Error，
-        # 存储里的 ``status`` 可能还是上一轮的 Done。
+        # 消息级状态也要还原：只信 parts 的派生字段会把「被停止」「出错」的历史
+        # 消息显示成 Done。有错误文案时不覆盖 —— ``setMessageError`` 已置 Error。
         if message.status and not message.error:
             status = message.status
             if status == ElaChatStatusType.Streaming:
-                # 生成中导出 / 崩在途的消息：分段已被 ``setParts`` 结算，状态也
-                # 必须一起落定（与 journal 的 ``settleOpen`` 同口径）—— 否则
-                # 底部行永久隐藏、挂起调度永远跳过它，且没有任何路径再收尾。
+                # 生成中导出 / 崩在途的消息：状态与分段一起落定（同 journal.settleOpen）。
                 status = ElaChatStatusType.Stopped
             # 状态未变时跳过：setStatus 会重复跑 _apply_stats_mode。
             if bubble.status() != status:
@@ -316,15 +291,8 @@ class _ViewMessagesMixin:
     def exportSession(self, session=None, extra=None) -> dict:
         """导出整会话快照（消息时间线 + 会话元数据 + 视图外观选项）。
 
-        - ``messages``：``ElaChatMessage.toDict()`` 列表（权威数据是 ``parts``）；
-        - ``session``：:class:`ElaChatSessionInfo`（或字典），
-          ``message_count`` 按当前消息数重算；
-        - ``view``：思考形态 / 用量模式 / 工具分组 / 头像可见 / 用户气泡宽度 /
-          内容最大宽度（均为 JSON 安全值；头像来源与主题属宿主 / 全局设置，
-          不在 bundle 内）；
-        - ``extra``：宿主自定义 JSON 数据，原样带回（组件不解释）。
-
-        输出可直接 ``json.dumps`` 落库；读回见 :meth:`importSession`。
+        ``messages`` 是 ``ElaChatMessage.toDict()`` 列表（权威数据是 ``parts``）；
+        ``extra`` 原样带回。输出可直接 ``json.dumps`` 落库；读回见 :meth:`importSession`。
         """
         if isinstance(session, ElaChatSessionInfo):
             info = session
@@ -361,19 +329,11 @@ class _ViewMessagesMixin:
     def importSession(self, bundle, clear: bool = True) -> int:
         """从 :meth:`exportSession` 的 bundle 恢复整会话，返回恢复的消息条数。
 
-        - ``clear=True``（默认）：先校验（**批内 id 重复即抛、一条都不落**）再清空
-          当前消息，**保留消息 id 与分段 id**（跨重启稳定）；``clear=False``：
-          追加到现有消息之后，id 重新分配。与**当前仍在的消息**撞号**不算冲突**
-          —— clear 随后就把它们清掉了，所以可以「往仍有消息的视图里整会话替换」。
-        - 视图外观选项在写入消息**之前**应用（思考形态决定分段控件建卡形态）；
-          缺失 / 非法字段保持当前值不动。
-        - 非 dict / ``messages`` 非列表抛 :class:`ValueError`；``messages`` 里
-          的非字典行跳过（存储损坏行不应变成空消息）。
-        - 会话元数据（标题 / 时间…）留在 bundle 里由宿主读取 —— 视图不持有
-          会话状态；多话题切换见 ``ElaChatSessionInfo`` 的接口契约。
-
-        注意：输入草稿与排队队列是 widget 状态，不在 bundle 内；多会话切换时
-        宿主自行 ``chat.clearQueue()`` / 清空输入。
+        - ``clear=True``（默认）：先校验（批内 id 重复即抛）再清空，保留消息 id；
+          ``clear=False``：追加并重新分配 id。与当前消息撞号不算冲突。
+        - 视图外观选项在写入消息**之前**应用（思考形态决定分段控件建卡形态）。
+        - 非 dict / ``messages`` 非列表抛 :class:`ValueError`，非字典行跳过。
+        - 会话元数据留在 bundle 里由宿主读取；输入草稿与排队队列不在 bundle 内。
         """
         if not isinstance(bundle, dict):
             raise ValueError("importSession: bundle 必须是 dict")
@@ -383,11 +343,9 @@ class _ViewMessagesMixin:
         rows = [row for row in rows if isinstance(row, dict)]
         if clear:
             # 先校验后清空：坏 bundle（批内重复 id）不能把当前会话清掉再抛。
-            # 不查「与现有消息撞号」—— clear 随后就清空它们，撞号无害。
             self._validate_preserve_ids(rows, against_existing=False)
         if clear:
-            # 先清空再应用视图选项：``clear()`` 会重置披露状态，反过来会把刚
-            # 恢复的 timeline_detail / disclosure 又抹掉。
+            # 先清空再应用视图选项：``clear()`` 会重置披露状态。
             self.clear()
         self._apply_session_view(bundle.get("view"))
         return len(self.restoreMessages(rows, preserveIds=clear))
@@ -463,10 +421,8 @@ class _ViewMessagesMixin:
             hasParts = bool(snapshot.parts)
             if snapshot.id != messageId:
                 snapshot = snapshot.withId(messageId)
-        # **判据是「有没有正文可渲染」，不是「text 是不是空串」**：带 parts 的
-        # 历史消息（``toDict`` / ``exportSession`` 产出的现代存档）正文在 parts
-        # 里、``text`` 传的是空串，早先因此全部走了同步渲染 —— 批量加载几百条
-        # 的主流路径反而绕开了时间片，主线程一次性渲染全部 Markdown。
+        # 判据是「有没有正文可渲染」，不是「text 是不是空串」：带 parts 的历史
+        # 消息正文在 parts 里、text 是空串，只看 text 会让批量加载走同步渲染。
         deferred = (
             self._batch_depth > 0
             and role == ElaChatRoleType.Assistant
@@ -543,8 +499,7 @@ class _ViewMessagesMixin:
                 )
             )
         if self._virtual_list_mode and messageId not in self._virtual_bubble_ids:
-            # 新消息在末尾：登记进 spacer 列表，避免 bottom spacer 把它的高度
-            # 再算一遍（否则新消息上方凭空多出一段等于自身高度的空白）。
+            # 登记进 spacer 列表，否则 bottom spacer 会把它的高度再算一遍。
             self._virtual_bubble_ids.append(messageId)
             self._virtual_prefix_dirty = True
             if not self._virtual_window_timer.isActive():
@@ -557,9 +512,8 @@ class _ViewMessagesMixin:
         else:
             self._sync_parts(messageId)
         if emitAdded:
-            # 恢复路径（``addMessageFromDict`` / ``restoreMessages``）传
-            # ``emitAdded=False``：它们要在字段 / 分段全部还原完之后再发一次，
-            # 否则宿主在信号回调里读到的是「parts 为空、字段未恢复」的半成品。
+            # 恢复路径传 ``emitAdded=False``：字段 / 分段全部还原完之后再发一次，
+            # 否则宿主在信号回调里读到的是半成品。
             self.messageAdded.emit(messageId, role)
         self._follow_bottom()
         return messageId
@@ -663,8 +617,7 @@ class _ViewMessagesMixin:
         bubble.toolToggled.connect(self._on_tool_toggled)
         self._bubbles[messageId] = bubble
         if insert_index is None:
-            # spacer 虚拟列表里 bottom spacer 在 stretch 之前；新气泡必须插在
-            # 它**之前**，否则会落到占位下方（间距被重复计一次）。
+            # spacer 虚拟列表里新气泡必须插在 bottom spacer 之前，否则会落到占位下方。
             if self._virtual_list_mode and self._virtual_bottom_spacer is not None:
                 insert_index = self._content_layout.indexOf(self._virtual_bottom_spacer)
             if insert_index is None or insert_index < 0:
@@ -755,8 +708,7 @@ class _ViewMessagesMixin:
     def removeMessage(self, messageId: int) -> None:
         """移除指定消息（非 int id 抛 ``TypeError``；严格模式下不存在抛 ``KeyError``）。"""
         # 删消息前必须先作废未答复审批：交互卡在 dock 上，气泡删了卡还活着，
-        # 用户点一下就会走进已销毁对象（0xC0000409）。widget.removeMessage
-        # 早已这么做，这里补上让 view 层直接调用同样安全。
+        # 用户点一下就会走进已销毁对象（0xC0000409）。
         self._require_int_id(messageId, "removeMessage")
         bubble = self._bubbles.get(messageId)
         virtual_exists = self._virtual_list_mode and messageId in self._message_index
@@ -783,8 +735,7 @@ class _ViewMessagesMixin:
     def removeMessagesFrom(self, messageId: int) -> list:
         """批量移除 id >= ``messageId`` 的全部消息（撤回 / 重新生成用）。
 
-        单趟过滤消息列表，避免逐条删除造成的 O(n²) 列表重建；
-        被移除的每条仍按原语义发出 ``messageRemoved``。
+        单趟过滤消息列表，避免逐条删除的 O(n²) 重建；每条仍发 ``messageRemoved``。
 
         :returns: 被移除的消息 id 列表（按原顺序）
         """
@@ -794,8 +745,7 @@ class _ViewMessagesMixin:
             return []
         removed_set = set(removed)
         # 两趟：先作废全部待答复审批，再摘气泡。取消会同步发 ``permissionSettled``
-        # 触发 dock promote —— 边取消边摘会让 promote 取到「马上要被删」的气泡
-        # 里的交互卡，摘完就成死卡。
+        # 触发 dock promote，边取消边摘会让 promote 拿到马上要删的卡。
         for mid in removed:
             bubble = self._bubbles.get(mid)
             if bubble is not None:
@@ -854,11 +804,9 @@ class _ViewMessagesMixin:
         self._virtual_order_dirty = True
         self._render_queue.clear()
         self._render_timer.stop()
-        # **渐进渲染被打断时必须自己收尾**：``beginBatch`` 关掉了视口刷新，而恢复
-        # 只在 ``_finish_batch_render`` 里。这里把队列清空、计时器停掉，那次
-        # ``endBatch`` 之后再没人会走到那个函数 —— 视口就永久不再重绘（连空态和
-        # 之后新增的消息都不显示）。``_batch_depth > 0`` 时不用管：``endBatch``
-        # 归零时队列已空，会走 ``_finish_batch_render``。
+        # 渐进渲染被打断时必须自己收尾：``beginBatch`` 关掉了视口刷新，而恢复
+        # 只在 ``_finish_batch_render`` 里；这里清空队列后再没人走到那里，视口
+        # 就永久不再重绘。``_batch_depth > 0`` 时 ``endBatch`` 会兜住。
         if self._batch_depth <= 0 and not self._scroll.viewport().updatesEnabled():
             self._scroll.viewport().setUpdatesEnabled(True)
             self._scroll.viewport().update()
@@ -949,15 +897,9 @@ class _ViewMessagesMixin:
     def _sync_parts(self, messageId: int) -> None:
         """标记助手消息的分段快照待同步（读取时统一结算）。
 
-        真正的 ``withParts`` 重算推迟到 ``messages()`` / ``message()`` /
-        ``lastMessage()`` 读取前；宿主不读快照时零开销（每次写入只有一次 ``set.add``）。
-
-        快照里的 ``text`` 只含**已落定**内容（``part.text`` 的语义），所以流式期间读到
-        空串、回合结束才是完整正文 —— 要实时预览请读 ``bubble(messageId).text()``。
-
-        **无 parts、但有消息级派生字段**（``stats`` / ``tool_calls`` /
-        ``reasoning``）的旧格式消息不参与同步：``withParts(())`` 会把这些字段
-        全部抹掉，而气泡那边只有纯文本（`setText` 不会补出 Tool/Stats 段）。
+        ``withParts`` 重算推迟到读快照前，宿主不读时零开销。快照里的 ``text``
+        只含已落定内容，流式期间读为空串（实时预览读 ``bubble(id).text()``）。
+        无 parts、派生字段只在消息级的旧格式消息不参与同步（会被抹掉）。
         """
         bubble = self._bubbles.get(messageId)
         if bubble is None or bubble.role() != ElaChatRoleType.Assistant:
@@ -981,11 +923,7 @@ class _ViewMessagesMixin:
         )
 
     def _flush_pending_syncs(self) -> None:
-        """结算全部待同步的分段快照。
-
-        **单趟遍历**：逐条 ``_update_snapshot`` 会各扫一遍列表，批量恢复 /
-        多消息同时脏时是 O(脏条数 × 总条数)。
-        """
+        """结算全部待同步的分段快照（单趟遍历，避免 O(脏条数 × 总条数)）。"""
         if not self._dirty_syncs:
             return
         dirty = self._store.take_dirty()
@@ -1004,8 +942,7 @@ class _ViewMessagesMixin:
     def _on_bubble_stream_finished(self, messageId: int) -> None:
         bubble = self._bubbles.get(messageId)
         status = bubble.status() if bubble is not None else ElaChatStatusType.Done
-        # endStream 会同步结束正文段（分段状态 Done），需一并同步到快照，
-        # 否则消息态为 done 而 parts 里仍残留 streaming。
+        # endStream 会同步结束正文段，需一并同步到快照，否则 parts 里仍残留 streaming。
         self._sync_parts(messageId)
         self._update_snapshot(messageId, lambda m: m.withStatus(status))
         self.messageStreamFinished.emit(messageId, status)

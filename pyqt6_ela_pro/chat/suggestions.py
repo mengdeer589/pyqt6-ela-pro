@@ -1,16 +1,4 @@
-"""
-聊天输入区补全组件（``pyqt6_ela_pro.chat``）。
-
-- :class:`ElaChatSuggestion`：补全候选项快照（命令 / ``@`` 引用）；
-- :class:`SuggestionPopup`：基于 ``ElaScrollPageArea`` + ``ElaListView``
-  的无焦点补全列表（内嵌在输入卡上方，不抢编辑器焦点）；取色交给
-  ``ElaListView`` 自己的 style，本组件不设 QSS（理由见类 docstring）。
-
-宿主通过 ``ElaChatInput.setMentionProvider`` 提供 ``@`` 引用候选，
-选中后由输入区插入文本并发出选择信号。
-
-命名规范与库内一致（``camelCase``）。
-"""
+"""聊天输入区补全组件：候选项快照 + 无焦点补全列表（``pyqt6_ela_pro.chat``）。"""
 
 from __future__ import annotations
 
@@ -49,18 +37,8 @@ class ElaChatSuggestion:
 class SuggestionPopup(ElaScrollPageArea):
     """补全浮层：``ElaScrollPageArea`` 卡面 + ``ElaListView`` 列表。
 
-    刻意**不**接管列表的取色与字号：``ElaListView`` 自带 ``ElaListViewStyle``
-    （``QProxyStyle``），它自己连 ``eTheme::themeModeChanged`` 并在
-    ``drawControl`` 里用 ``ElaThemeColor(BasicText)`` 画 item 文本。所以既
-    不需要 ``_ThemeAwareMixin``，也**不能**用 QSS 去改颜色 / 字号 ——
-    实测那种 QSS 渲染结果与不写完全一致（0 / 19800 像素差异，纯死代码），
-    反而会踩两个坑：
-
-    - ``color:`` 无效（style 硬编码 ``BasicText``，无视 palette）；
-    - ``setStyleSheet()`` 会**整体替换** ``ElaListView`` 构造函数里那条
-      ``#ElaListView{background-color:transparent;}``（``ElaListView.cpp:14``），
-      一旦漏写 ``background: transparent`` 列表底色立刻变不透明
-      （实测 19772 像素变化）。
+    取色与字号交给 ``ElaListView`` 自带的 ``ElaListViewStyle``，本组件不设 QSS
+    （``color:`` 无效，且 ``setStyleSheet`` 会整体替换它的透明底规则）。
     """
 
     #: 候选项被激活（参数：``ElaChatSuggestion``）

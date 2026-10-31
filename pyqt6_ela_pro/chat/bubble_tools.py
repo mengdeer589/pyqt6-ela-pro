@@ -1,4 +1,4 @@
-"""气泡工具调用 / 每步面板方法组（从 ``ElaChatBubble`` 拆出）。"""
+"""气泡工具调用 / 每步面板方法组。"""
 
 from __future__ import annotations
 
@@ -64,17 +64,11 @@ class _BubbleToolsMixin:
         self._tool_grouping = bool(on)
 
     def setToolDefaultOpen(self, policy) -> None:
-        """注入「哪些工具卡默认展开」的策略。
+        """注入「哪些工具卡默认展开」的策略 ``policy(toolName, arguments, ok) -> bool``。
 
-        ``policy(toolName, arguments, ok) -> bool``，仅在**新建**工具卡时被调用；
-        已存在的卡片不受影响（否则会把用户手动折叠的卡片弹开）。
-
-        为什么做成可注入的纯函数而不是硬编码：「shell 要不要默认展开」「纯删除
-        要不要折叠」都是**宿主的产品决策**，与工具语义强相关。库默认只保留一条
-        与领域无关且普遍正确的规则（失败时展开），其余交给宿主。编码 agent 场景
-        可直接用 :func:`~pyqt6_ela_pro.chat.blocks.toolDefaultOpenCoding`。
-
-        :param policy: 可调用对象；传 ``None`` 恢复库默认
+        只在新建卡片时被调用（已存在的卡片不受影响）。库默认只保留「失败展开」，
+        编码 agent 可用 :func:`~pyqt6_ela_pro.chat.blocks.toolDefaultOpenCoding`；
+        传 ``None`` 恢复库默认。
         """
         self._tool_open_policy = policy if callable(policy) else toolDefaultOpen
 
@@ -99,8 +93,7 @@ class _BubbleToolsMixin:
     ) -> str:
         """添加一个工具调用，返回调用 id（上下文工具自动归组）。
 
-        ``tool_call`` 由恢复路径传入**已完成**的快照：卡片构造时就带上结果与
-        最终状态，省掉「先建卡再 setResult」的第二次头部同步。
+        ``tool_call`` 由恢复路径传入已完成快照，卡片构造时即带结果与最终状态。
         """
         if self._role != ElaChatRoleType.Assistant:
             return ""
@@ -128,9 +121,8 @@ class _BubbleToolsMixin:
             id=callId, name=name, arguments=arguments or ""
         )
         if not call.id:
-            # 存储里缺 ``tool_call.id`` 的旧数据：用刚分配的 call id 补齐。
-            # 不补的话卡片按空 id 登记，回填结果时按生成 id 找不到同一条调用，
-            # 上下文分组卡会把整个 tool_call 换成 None（数据丢失）。
+            # 旧数据缺 tool_call.id：用刚分配的 call id 补齐，否则回填结果时找不到
+            # 同一条调用，分组卡会把整个 tool_call 换成 None（数据丢失）。
             call = replace(call, id=callId)
         name = call.name
         arguments = call.arguments
@@ -139,16 +131,14 @@ class _BubbleToolsMixin:
         key = (name or "").lower()
         is_context = key in CONTEXT_TOOLS
         failed = call.status == ElaChatToolStatusType.Error
-        # 宿主给上下文工具注册了渲染器 -> 默认退出分组：分组卡只画一行汇总
-        # 摘要，会把渲染器整个绕过（那宿主注册它就毫无意义）。
+        # 宿主给上下文工具注册了渲染器 -> 退出分组：分组卡只画一行摘要，
+        # 会把渲染器整个绕过。
         groupable = toolRendererGroupable(name)
         if is_context and not groupable:
             self._finish_tool_group()
         if is_context and self._tool_grouping and groupable:
             if self._group_card is None:
-                # 分组卡同样走展开策略：策略问的是「这次探索要不要默认摊开」，
-                # 上下文工具合并后单卡就是整个分组的代表，只对单调用问一次、
-                # 却不管分组，会让同一策略在两条路径上表现不一致。
+                # 分组卡同样走展开策略，否则同一策略在单卡 / 分组两条路径上不一致
                 self._group_card = ContextToolGroupCard(
                     container,
                     defaultOpen=self._tool_default_open(name, arguments, not failed),
@@ -161,12 +151,9 @@ class _BubbleToolsMixin:
             card = ToolCallCard(
                 parent=container,
                 tool_call=call,
-                # shell 类工具的 pending 期间允许展开（命令与输出是多行文本）；
-                # 清单与默认展开策略共用 blocks.SHELL_TOOLS，别各写一份。
+                # shell 类工具 pending 期间允许展开（命令与输出是多行文本）
                 allowOpenWhilePending=key in SHELL_TOOLS,
-                # 建卡时结果还没到，ok 传 True（不是失败）；失败展开由
-                # ToolCallCard.setResult(ok=False) 单独处理。传 False 会被
-                # 策略读成「已失败」-> 每张卡都自动展开。
+                # 建卡时结果还没到，ok 传 True（失败展开由 setResult 单独处理）
                 defaultOpen=self._tool_default_open(
                     call.name, call.arguments, not failed
                 ),
@@ -192,8 +179,7 @@ class _BubbleToolsMixin:
         self._part_widgets[callId] = card
         self._move_step_stats_to_end(self._step_index)
         if self._bulk_build:
-            # 回放期间只登记；收尾统一 show + 刷新摘要，避免每个工具都触发
-            # 一次面板 show / 全量 parts 扫描（bug #17）。
+            # 回放期间只登记，收尾统一 show + 刷新摘要
             self._bulk_panels.add(panel)
         else:
             panel.show()

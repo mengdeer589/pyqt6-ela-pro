@@ -1,27 +1,7 @@
 """聊天组件模拟后端（``pyqt6_ela_pro.chat``）。
 
-:class:`ElaChatMockBackend` 不需要任何真实模型服务，用 ``QTimer`` 在 GUI
-线程按脚本逐步发出流式事件，信号与真实 worker（``llmStarted`` /
-``chunkReceived`` / ``toolStarted`` / ``toolEnded`` / ``statsReady`` /
-``turnFinished``）完全同构，可直接交给
-:class:`~pyqt6_ela_pro.chat.binder.ElaChatStreamBinder` 映射到聊天组件。
-
-典型用途：
-
-- 组件测试（``tickMs=0`` 快进）；
-- 示例页演示多步时间线（思考 → 上下文工具 → 步骤统计 → 失败工具 →
-  正文 → 步骤统计）；
-- 无后端用户快速体验聊天组件。
-
-用法::
-
-    mock = ElaChatMockBackend(tickMs=30, thinkLevel="normal")
-    binder = ElaChatStreamBinder(chat)
-    mock.llmStarted.connect(binder.beginRound)
-    mock.chunkReceived.connect(lambda c: ...)   # reasoning / answer 分派
-    ...
-    turn = mock.ask("你好")                      # 返回回合 token
-    # ... turnFinished.connect(binder.finish) 收尾时会原样带回该 token
+``ElaChatMockBackend`` 用 ``QTimer`` 在 GUI 线程按脚本发流式事件，信号与真实
+worker 同构，可直接交给 ``ElaChatStreamBinder``。``tickMs=0`` 用于测试快进。
 """
 
 from __future__ import annotations
@@ -171,16 +151,10 @@ class ElaChatMockBackend(QObject):
     # -- 命令接口（与真实 worker 同构） ------------------------------------
 
     def ask(self, text: str, attachments=None) -> Optional[int]:
-        """开始一个模拟回合（已有回合在跑时先取消），返回**回合 token**。
+        """开始一个模拟回合（已有回合在跑时先取消），返回回合 token。
 
-        token 是这一轮的落定凭据：:attr:`turnFinished` 原样带回，宿主交给
-        ``binder.finish(token)`` —— 收尾只认自己那一次 signal。真实 worker 的
-        ``cancel()`` 是异步的（要等轮询命中，旧回合的 ``turnFinished`` 可能晚
-        到几十毫秒），没有 token 时那个迟到的信号会把新回合直接收掉
-        （分片全被 ``isOpen()`` 丢弃 → 用户看到「发出去了、正文全空」）。
-
-        :returns: 回合 token；未受理（宿主已关门 / 取消的回调里另起了一回合）
-            返回 ``None``。**不要再当 bool 用** —— 真值即代表已受理。
+        token 是这一轮的落定凭据（``turnFinished`` 原样带回）；未受理时返回
+        ``None``。真值即代表已受理，不要当 bool 用。
         """
         if self._running:
             self.cancel()

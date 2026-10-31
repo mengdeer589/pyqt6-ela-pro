@@ -1,8 +1,4 @@
-"""直角坐标系列（10 个）；导入本包即经 ``registerSeries`` 注册全部系列。
-
-本包是原 ``series_cartesian.py`` 的结构化拆分：``__init__`` 只做再导出
-与注册，实现按系列分布在同包子模块里。
-"""
+"""直角坐标系列：导入本包即经 ``registerSeries`` 注册全部系列。"""
 
 from __future__ import annotations
 

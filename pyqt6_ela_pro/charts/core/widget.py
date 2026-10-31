@@ -1,4 +1,4 @@
-"""ElaChartWidget 主控件（生命周期 / option / 查询 / 绘制编排）。（``pyqt6_ela_pro.charts`` 内部模块）。"""
+"""ElaChartWidget 主控件（生命周期 / option / 查询 / 绘制编排）。"""
 
 from __future__ import annotations
 
@@ -45,25 +45,8 @@ class ElaChartWidget(
 ):
     """类 ECharts 图表控件（Ela 主题感知，纯 QPainter 自绘）。
 
-    用法::
-
-        chart = ElaChartWidget(parent)
-        chart.setOption({"title": {"text": "销量"},
-                          "xAxis": {"type": "category", "data": ["一", "二"]},
-                          "series": [{"type": "line", "name": "A", "data": [3, 5]}]})
-        chart.setOption({"series": [{"data": [4, 6]}]})  # ECharts 合并语义
-        chart.on("click", lambda p: print(p["seriesName"]))
-
-    ECharts 实例 API：``setOption``（默认合并）/ ``getOption`` / ``resize`` /
-    ``dispatchAction`` / ``on``&``off`` / ``convertToPixel`` /
-    ``convertFromPixel`` / ``containPixel`` / ``showLoading``&``hideLoading`` /
-    ``getDataURL`` / ``appendData`` / ``clear`` / ``dispose``&``isDisposed``。
-
-    resizeEvent 自动重排；构造时连接 ``eTheme.themeModeChanged``，
-    主题切换后实时换肤重绘（配色经 ``_tokens.T`` 逐帧取色）。
-
-    性能：``_layout_all`` 带布局缓存 + 脏标记，悬停 / 无动画重绘不再
-    全量重排；动画进行中按历史行为每帧重算。
+    ``setOption`` 默认按 ECharts 语义合并；``resize`` / ``dispatchAction`` /
+    ``on``&``off`` 等实例 API 与 ECharts 对齐。布局带缓存，动画期每帧重排。
     """
 
     #: 图例切换系列显隐：(系列名, 是否可见)
@@ -130,9 +113,8 @@ class ElaChartWidget(
         self._axis_hover = []
         self._opt_version = 0  # option 版本号（setOption 递增）
         self._layout_key = None  # 布局缓存键（脏标记）
-        #: 渲染器内部几何状态的版本号（``invalidateLayout()`` 递增）。
-        #: 进 ``_series_layer_key`` —— 少了它，下钻 / roam 之后系列层位图
-        #: 会被原样贴回（见该方法 docstring）。
+        #: 渲染器内部几何版本号（``invalidateLayout()`` 递增）；进系列层缓存键，
+        #: 否则下钻 / roam 后位图会被原样贴回。
         self._geometry_epoch = 0
         #: 生命周期 / ECharts 事件
         self._disposed = False
@@ -198,8 +180,8 @@ class ElaChartWidget(
         self.itemClicked.connect(self._forward_click)
         self.brushChanged.connect(self._forward_brush_selected)
         self.toolboxTriggered.connect(self._forward_toolbox)
-        # 主题连接走 _internal 的统一机制（两条防线：destroyed 上的模块级函数 +
-        # 槽自身 ``is_deleted`` 自愈）。别在这里手写 eTheme.themeModeChanged.connect
+        # 主题连接走 _internal 的统一机制（destroyed 兜底 + 槽内 is_deleted 自愈），
+        # 别手写 eTheme.themeModeChanged.connect。
         connect_theme_signal(self, self._on_theme_changed)
 
     def _disconnect_theme(self, *_args) -> None:
@@ -213,8 +195,6 @@ class ElaChartWidget(
     # ---------------------------------------------------------------- API
     #: ECharts 事件名 → Qt 信号（``on``/``off`` 的转发源）
     _chartEvent = pyqtSignal(str, dict)
-
-    # -- 事件（on / off）：ECharts 事件名与载荷 ---------------------------
 
     # -- dispatchAction 分派实现 ------------------------------------------
     def _dispatch_legend(self, action: str, payload: dict) -> bool:
@@ -261,10 +241,7 @@ class ElaChartWidget(
             else:  # legendToggleSelect
                 self._legendSelectToggle(name)
         if action != "legendToggleSelect":
-            # **每个名字都要发**。原先只发 ``names[0]``：动作明明应用到了
-            # 全部系列（上面的循环），宿主挂在 ``legendToggled`` 上同步自己
-            # 的状态时却只收到第一个 —— 剩下那些静默不同步，表现为「批量
-            # 取消选中后宿主 UI 只更新了一项」。
+            # 每个名字都要发：批量动作下宿主才能逐项同步。
             # ``legendToggleSelect`` 走 ``_legendSelectToggle``，它自己发。
             for name in names:
                 visible = (
@@ -292,10 +269,8 @@ class ElaChartWidget(
             return False
         if not apply_action(payload):
             return False
-        # **不要在这里再 emit 一次** ``dataZoomChanged`` —— ``applyAction`` 内部
-        # 末尾已经 ``_emit_changed()``，而那条信号经 ``_forward_data_zoom`` 转成
-        # ECharts ``datazoom`` 事件。在此处补发会让 dispatchAction 路径把事件发两遍
-        # （滚轮 / 拖拽路径只发一遍，两条路径行为不一致）。
+        # 不再 emit ``dataZoomChanged``：``applyAction`` 末尾已发，补发会让
+        # dispatchAction 路径重复发 ECharts ``datazoom`` 事件。
         return True
 
     def _dispatch_show_tip(self, payload: dict) -> bool:
@@ -439,10 +414,6 @@ class ElaChartWidget(
                 return i
         return -1
 
-    # -- convertToPixel / convertFromPixel / containPixel -----------------
-
-    # -- showLoading / hideLoading ----------------------------------------
-
     # -- 导出 / 图片 -------------------------------------------------------
     def getDataURL(self, opts: dict = None) -> str:
         """导出为 data URL（ECharts ``getDataURL``）。
@@ -455,11 +426,9 @@ class ElaChartWidget(
         return self._exporter.data_url(opts)
 
     def saveImage(self, path: str = None, *, format: str = None) -> str:
-        """保存当前图表（``path=None`` 弹保存对话框）。
+        """保存当前图表（``path=None`` 弹保存对话框；``svg`` 走矢量导出）。
 
-        格式按 ``format`` 或扩展名判定：``svg`` → 矢量导出（``QSvgGenerator``，
-        矢量图元 + 位图符号内嵌）；``jpg`` / ``jpeg`` → JPEG（自动压到主题底）；
-        其余走 PNG。返回实际保存路径，未保存返回 ``""``。
+        :returns: 实际保存路径，未保存返回 ``""``。
         """
         self._ensure_alive()
         target = path
@@ -487,8 +456,8 @@ class ElaChartWidget(
             self._hide_annotation_editor()
             self._annotation_editor.deleteLater()
             self._annotation_editor = None
-        # 组件一并解挂：事件过滤器 / 定时器虽然 parent 在 chart 上会跟着销毁，
-        # 但组件可能持有 chart 之外的东西（宿主句柄、注册的全局回调）。
+        # 组件一并解挂：事件过滤器 / 定时器会随 parent 销毁，但组件可能持有
+        # chart 之外的东西（宿主句柄、注册的全局回调）。
         self._dispose_components(include_host=True)
         self._host_components.clear()
         self._components = []
@@ -500,12 +469,7 @@ class ElaChartWidget(
         return bool(self._disposed)
 
     def _ensure_alive(self) -> None:
-        """公开 API 的 dispose 守卫（对齐 ECharts：已销毁实例再调用直接报错）。
-
-        ``dispose()`` 之后控件仍在 ``deleteLater`` 队列里，若继续 ``setOption``
-        会重建 Title / Legend / DataZoom 并往待删控件上装事件过滤器 ——
-        「看起来还活着」的假象比抛错更难排查。
-        """
+        """公开 API 的 dispose 守卫（对齐 ECharts：已销毁实例再调用直接报错）。"""
         if self._disposed:
             raise RuntimeError("ElaChartWidget 已 dispose，不能再调用图表 API")
 
@@ -517,10 +481,8 @@ class ElaChartWidget(
     def _setSeriesVisible(self, name, visible: bool) -> None:
         name = str(name)
         self._series_state[name] = bool(visible)
-        # 回写 option：_rebuild 每次都会重放 legend.selected，若不同步，用户点了
-        # 图例之后一次常规的数据刷新（setOption({"series": ...}) 合并）就会把
-        # 显隐状态悄悄还原成旧值。**dict / 数组两种写法都要写**（多图例是
-        # 公开支持的写法，只认 dict 时用户开关会被下一次 setOption 静默还原）。
+        # 回写 option：_rebuild 会重放 legend.selected，不同步会在下次 setOption
+        # 把显隐状态还原；dict / 数组两种写法都要写。
         legend_opt = self._option.get("legend")
         legend_entries = (
             legend_opt
@@ -573,11 +535,7 @@ class ElaChartWidget(
         name = str(name)
         self._item_state[name] = bool(visible)
         self._write_legend_selected(name, visible)
-        hidden = {
-            str(item)
-            for item, shown in self._item_state.items()
-            if not shown
-        }
+        hidden = {str(item) for item, shown in self._item_state.items() if not shown}
         for renderer in self._series:
             setter = getattr(renderer, "setHiddenItems", None)
             if not callable(setter):
@@ -614,12 +572,9 @@ class ElaChartWidget(
     )
 
     def setInteractive(self, enabled: bool) -> None:
-        """交互总开关：关闭后所有鼠标交互失效（提示框 / 图例 / 缩放 / 刷选 /
-        时间轴 / 工具箱），绘制与数据不变。
+        """交互总开关：关闭后所有鼠标交互失效，绘制与数据不变。
 
-        **打开 = 全开**：置 ``True`` 时会**清空逐功能开关**（``setInteractionEnabled``
-        设过的覆盖）—— 语义是「把交互恢复成完整状态」。宿主用总开关做「交互: 开/关」
-        按钮时，用户期望点开就是全开，而不是保留上轮单独关掉的那几项。
+        打开 = 全开：置 ``True`` 会清空逐功能开关（``setInteractionEnabled`` 的覆盖）。
 
         :param enabled: ``False`` 变为静态图（动画与程序化 API 不受影响）
         """
@@ -670,11 +625,7 @@ class ElaChartWidget(
                 continue
 
     def hitRadius(self) -> float:
-        """命中半径（px）：``tooltip.hitRadius`` / Plotly 风格的 ``hoverdistance``。
-
-        默认 10px（库内原值）。曲线 / 散点的 ``hitTest`` 都走它，宿主可按
-        数据密度调小（避免密集点「抢命中」）或调大（触摸场景）。
-        """
+        """命中半径（px）：``tooltip.hitRadius`` / Plotly ``hoverdistance``，默认 10。"""
         tooltip_opt = self._option.get("tooltip")
         raw = None
         if isinstance(tooltip_opt, dict):
@@ -698,16 +649,10 @@ class ElaChartWidget(
     WHEEL_ZOOM_DEFAULT = True
 
     def setWheelZoomEnabled(self, enabled: bool) -> None:
-        """内置滚轮缩放开关（**默认开**：曲线 / 柱状等直角坐标图开箱即用）。
+        """内置滚轮缩放开关（默认开，直角坐标图开箱即用）。
 
-        与 ``dataZoom`` 选项的关系：
-
-        * option 里自己配了 ``dataZoom`` → 完全听用户的，本开关不再插手
-          （``setWheelZoomEnabled(False)`` 也不会删掉用户配置的组件）；
-        * 没配 → 打开时自动挂一个 ``inside`` 组件（``zoomOnMouseWheel`` /
-          ``moveOnMouseMove`` 均为 True，对齐 ECharts 默认值）：**滚轮缩放 +
-          按住拖动平移**；``setDragMode("zoom"/"select"/"lasso")`` 会把拖拽让给
-          刷选，``setWheelZoomEnabled(False)`` 直接移除它。
+        option 里配了 ``dataZoom`` 就完全听用户的（本开关不删用户组件）；没配时
+        自动挂 ``inside`` 组件（滚轮缩放 + 拖动平移），拖拽模式可把它让给刷选。
         """
         enabled = bool(enabled)
         self._wheel_zoom_enabled = enabled
@@ -779,13 +724,7 @@ class ElaChartWidget(
         return comp
 
     def _ensure_wheel_zoom(self) -> None:
-        """无 ``dataZoom`` 的直角坐标图自动挂 ``inside`` 组件（滚轮缩放 + 拖拽平移）。
-
-        语义对齐 ECharts ``inside`` 的默认值：``zoomOnMouseWheel`` 与
-        ``moveOnMouseMove`` 都是 True —— 滚轮缩放、按住拖动平移。
-        框选 / 套索模式（``setDragMode``）会把平移关掉、把拖拽让给刷选；
-        点击（按下→原地松开 ≤4px）仍走 ``_press_ctx`` 补发的 ``itemClicked``。
-        """
+        """无 ``dataZoom`` 的直角坐标图自动挂 ``inside`` 组件（滚轮缩放 + 拖拽平移）。"""
         if not self._wheel_zoom_enabled or self._auto_wheel_zoom() is not None:
             return
         if self._component("dataZoom") is not None:
@@ -822,13 +761,8 @@ class ElaChartWidget(
     def setDragMode(self, mode: str) -> None:
         """切换拖拽模式（Plotly ``dragmode`` 语义）。
 
-        * ``"pan"`` —— 拖拽平移 + 滚轮缩放（ECharts ``inside`` 默认行为）；
-        * ``"zoom"`` —— 拖拽**框选即缩放**（默认，松手把 x 范围缩到选框）；
-        * ``"select"`` —— 矩形框选（结果走 ``brushChanged``，不缩放）；
-        * ``"lasso"`` —— 套索选择（同上，任意多边形）。
-
-        实现方式：dataZoom ``inside`` 的拖拽平移与 brush 的拖拽接管互斥，
-        按模式开关两者；``zoom`` 复用 brush 的选框几何。
+        ``pan`` 平移 / ``zoom`` 框选即缩放（默认）/ ``select`` 矩形框选 /
+        ``lasso`` 套索选择。dataZoom 平移与 brush 拖拽互斥，按模式开关。
         """
         key = str(mode or "").strip().lower()
         if key not in self.DRAG_MODES:
@@ -857,12 +791,8 @@ class ElaChartWidget(
             brush.opt["type"] = "lasso" if key == "lasso" else "rect"
 
     def _ensure_brush_component(self):
-        """取 brush 组件；option 里没配就按需建一个（``setDragMode`` 用）。
-
-        宿主没写 ``brush`` 选项时也要能用 ``dragmode``（Plotly 模式条的框选 /
-        套索按钮就是这么工作的）。建出来的实例挂进 ``_host_components``，
-        跨 ``setOption`` 存活。
-        """
+        """取 brush 组件；option 没配就按需建一个（挂进 ``_host_components``
+        跨 setOption 存活）。"""
         brush = self._component("brush")
         if brush is not None:
             return brush
@@ -897,12 +827,9 @@ class ElaChartWidget(
         return bool(self._double_click_reset)
 
     def resetView(self) -> None:
-        """把视图还原到初始状态：全部 dataZoom 窗口回到 ``0..100`` +
-        各协调器的漫游 / 缩放复位 + 提示框与悬停态清空。
+        """视图还原到初始状态（dataZoom 窗口 / 漫游缩放 / 悬停态）。
 
-        等价于 Plotly 模式条的「reset axes」；双击默认走这里
-        （``setDoubleClickReset(False)`` 可关）。只影响视图，不动数据 / 图例显隐
-        （图例请用 ``toolbox`` 的 restore 或 ``dispatchAction(legendAllSelect)``）。
+        只影响视图，不动数据与图例显隐（图例用 ``dispatchAction(legendAllSelect)``）。
         """
         comp = self._component("dataZoom")
         if comp is not None and hasattr(comp, "reset_window"):
@@ -944,19 +871,10 @@ class ElaChartWidget(
         return result
 
     def addComponent(self, comp) -> None:
-        """挂接宿主自定义组件，**跨 ``setOption`` 存活**。
+        """挂接宿主自定义组件，跨 ``setOption`` 存活（``_rebuild`` 不会重建 / dispose 它）。
 
-        两条路，别混：
-
-        * **要跟着 option 走**（每次 ``setOption`` 按新 option 重建实例）就用
-          :func:`registerComponent` —— 把类按 ``optionKey`` 注册，再在 option 里
-          写同名键。
-        * **纯运行时挂件**（宿主自己管刷新）用这里。它进 ``_host_components``，
-          ``_rebuild`` 只重建 option 里的那些，不会丢它、也不会 ``dispose`` 它。
-
-        组件只需鸭子类型实现 ``optionKey``（可选）/ ``layout(rect)`` /
-        ``paint(painter, anim_t)`` / ``hitTest(pos)``；``onMousePress`` 等鼠标钩子
-        有则调用。摘除用 :meth:`removeComponent`。
+        要跟着 option 重建的组件请用 :func:`registerComponent`。组件按鸭子类型
+        实现 ``optionKey`` / ``layout`` / ``paint`` / ``hitTest`` 等钩子。
         """
         if comp is None:
             return
@@ -992,16 +910,8 @@ class ElaChartWidget(
     def _dispose_components(self, include_host: bool = False) -> None:
         """丢弃旧组件前调用其 ``dispose()``（没实现就跳过）。
 
-        组件通过 duck typing 自愿解挂：``DataZoomComponent`` 摘事件过滤器、
-        ``ChartTimeline`` 停定时器。``dispose`` 跑在 ``_rebuild`` 里，而
-        ``_rebuild`` 可能由 ``ChartTimeline.goto()`` 从定时器回调触发 ——
-        所以实现里只做「停止投递」与清 chart 上的登记，不去碰已析构的 C++ 对象。
-
-        ``include_host=False``（``_rebuild`` 路径）**跳过**宿主经 ``addComponent``
-        注入的组件 —— 它们不是被丢弃，而是被原样挂回去，由宿主自己负责刷新。
-
-        ``include_host=True``（``dispose()`` 路径）全收：图表都没了，宿主挂件
-        留着只会继续持有已失效的 chart。
+        ``include_host=False``（``_rebuild`` 路径）跳过宿主经 ``addComponent``
+        注入的组件；``include_host=True``（``dispose`` 路径）全收。
         """
         hosts = set() if include_host else {id(c) for c in self._host_components}
         for comp in self._components:
@@ -1020,8 +930,6 @@ class ElaChartWidget(
     def _onBrushSelected(self, items) -> None:
         """brush 组件选区变化 → ``brushChanged`` 信号。"""
         self.brushChanged.emit(list(items or []))
-
-    #: 底部组件条带顺序（从外到内，最外层贴近画布底边）
 
     # ------------------------------------------------------------- Qt 事件
     def mousePressEvent(self, event) -> None:
@@ -1043,8 +951,7 @@ class ElaChartWidget(
         self._interaction.leave(event)
 
     def _on_theme_changed(self, _mode) -> None:
-        # 配色全部经 T() 实时取，重绘即生效；主题可能影响字体度量等布局
-        # 输入，保守失效布局缓存（下一次绘制全量重排一次）
+        # 配色经 T() 实时取；主题可能影响字体度量，保守失效布局缓存。
         if self._annotation_editor is not None and self._annotation_editor.isVisible():
             self._hide_annotation_editor()
         self._layout_key = None
@@ -1058,11 +965,8 @@ class ElaChartWidget(
     def _call_hook(self, owner, hook_name: str, *args) -> bool:
         """调组件 / 渲染器的鼠标钩子，异常隔离并去重上报。
 
-        **所有钩子都必须走这里。** 这些钩子跑在 Qt 的事件回调链上，未捕获的
-        Python 异常会穿过 C++ 边界 → 进程直接 0xC0000409 终止、**零
-        traceback**。而钩子实现里全是坐标换算与 option 取值，宿主传进来的
-        option 一个畸形值就能让某个系列崩掉整个应用。原先只有 ``wheelEvent``
-        有这层保护，move / press / release / double-click 六处都是裸调。
+        钩子跑在 Qt 事件回调链上，未捕获异常会穿过 C++ 边界导致进程
+        0xC0000409 终止（零 traceback），所以所有钩子都必须走这里。
         """
         hook = getattr(owner, hook_name, None)
         if not callable(hook):
@@ -1093,7 +997,3 @@ class ElaChartWidget(
             if self._call_hook(renderer, hook_name, *args):
                 return True
         return False
-
-    # -- tooltip 聚合 ------------------------------------------------------
-
-    # -- 选中态（ECharts selectedMode / selectchanged） --------------------

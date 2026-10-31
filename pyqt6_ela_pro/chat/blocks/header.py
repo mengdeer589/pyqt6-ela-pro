@@ -57,10 +57,7 @@ from ._helpers import (
 
 
 class _AvatarBadge(QWidget):
-    """头像徽标（默认正圆；``setShape`` 可切圆角方形 / 直角方形）。
-
-    默认主题色底 + ElaIcon 字形；支持自定义图片 / SVG（按当前形状裁切）。
-    """
+    """头像徽标：主题色底 + ElaIcon 字形，可换自定义图片 / SVG（按形状裁切）。"""
 
     def __init__(self, role: str, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
@@ -70,8 +67,8 @@ class _AvatarBadge(QWidget):
         self._border = QColor()
         self._icon: Optional[QPixmap] = None
         self._custom: Optional[QPixmap] = None
-        #: 自定义头像按 (宽, 高, DPR) 缩放后的缓存：paintEvent 每帧都做
-        #: SmoothTransformation 很贵，而固定尺寸下缩放结果是不变量。
+        #: 自定义头像按 (宽, 高, DPR) 缩放后的缓存：固定尺寸下缩放结果是不变量，
+        #: 避免 paintEvent 每帧重做 SmoothTransformation。
         self._scaled_custom: Optional[QPixmap] = None
         self._scaled_custom_key: Optional[tuple] = None
         self._shape = AVATAR_DEFAULT_SHAPE
@@ -93,10 +90,7 @@ class _AvatarBadge(QWidget):
     # -- 形状 --------------------------------------------------------------
 
     def setShape(self, shape: str) -> None:
-        """设置头像形状（``"circle"`` / ``"rounded"`` / ``"square"``）。
-
-        非法值回落为默认（``"circle"``）。
-        """
+        """设置头像形状（``"circle"`` / ``"rounded"`` / ``"square"``；非法值回落默认）。"""
         shape = normalizeAvatarShape(shape)
         if shape == self._shape:
             return
@@ -110,11 +104,7 @@ class _AvatarBadge(QWidget):
     # -- 自定义头像 --------------------------------------------------------
 
     def setImage(self, source: ElaChatAvatarSource) -> None:
-        """设置自定义头像图（``None`` 清除并回退到内置图标）。
-
-        支持 SVG 数据字符串、SVG / 位图文件路径、``bytes`` 图片数据、
-        ``QPixmap`` / ``QImage`` / ``QIcon``。
-        """
+        """设置自定义头像图（``None`` 清除并回退内置图标）。"""
         self._custom = _load_avatar_pixmap(source, AVATAR_SIZE * 2)
         self._scaled_custom = None
         self._scaled_custom_key = None
@@ -214,10 +204,8 @@ class _AvatarBadge(QWidget):
         painter.drawPath(clip)
         self._stroke_shape(painter)
         if self._icon is not None and not self._icon.isNull():
-            # 位图本身已按 DPR 渲染（``QIcon::pixmap`` 跟随应用 DPR），但**居中必须
-            # 按逻辑尺寸算**并把落点对齐到设备像素网格：用物理尺寸居中（``(30-23)//2``）
-            # 会让图标落在 3.75 设备像素上，叠加 SmoothPixmapTransform 一重采样就发虚
-            # —— 125% / 150% 缩放下最明显（表现为头像「糊」且偏左上）。
+            # 位图本身已按 DPR 渲染，但居中必须按逻辑尺寸算、落点对齐设备像素网格：
+            # 用物理尺寸居中会让图标落在半像素上，SmoothPixmapTransform 重采样后发虚。
             dpr = self._icon.devicePixelRatio() or 1.0
             painter.drawPixmap(
                 self._device_aligned_offset(
@@ -265,8 +253,7 @@ class _StatusDot(QWidget):
             return
         self._active = on
         if on:
-            # 持续动效：Reduced/Disabled 下不启动（停掉，不是放慢 —— 转得更慢的
-            # 呼吸看起来像卡住而不是在忙）。停掉时 paintEvent 画满不透明度的静态点。
+            # 持续动效：Reduced / Disabled 下不启动（停掉而不是放慢）；停掉时画不透明静态点。
             start_idle_loop(
                 self._timer, STATUS_DOT_BREATH_MS, on_stop=self._settleStaticDot
             )
@@ -284,10 +271,7 @@ class _StatusDot(QWidget):
         self.update()
 
     def _settleStaticDot(self) -> None:
-        """呼吸循环停掉 → 相位归到「亮着」并重画。
-
-        停掉时若停在低相位就是一个若隐若现的灰点，看不出「正在生成」。
-        """
+        """呼吸循环停掉 → 相位归到「亮着」并重画（停在低相位就看不出正在生成）。"""
         self._phase = False
         self.update()
 
@@ -295,9 +279,8 @@ class _StatusDot(QWidget):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         color = QColor(self._color)
-        # 判据是「呼吸循环有没有真的在跑」而不是 _active：动效策略可能在运行期把
-        # 循环停掉（_active 仍是 True），那时必须画**满不透明度**的静态点 ——
-        # 停在低相位就是一个若隐若现的灰点，看不出「正在生成」。
+        # 判据是「呼吸循环有没有真的在跑」而不是 _active：动效策略可能在运行期停掉
+        # 循环，那时必须画满不透明度的静态点，否则看起来像卡住。
         breathing = idle_loop_running(self._timer)
         color.setAlpha(255 if (not breathing or self._phase) else 110)
         painter.setPen(Qt.PenStyle.NoPen)
@@ -329,8 +312,8 @@ class MessageHeader(ElaThemeWidget):
         self._texts.setSpacing(1)
         self._title_label = ElaText(self)
         self._title_label.setWordWrap(False)
-        # 标题 / 时间 / 状态都可能是宿主或模型给的文本（模型名、自定义名），
-        # AutoText 会把 "<b>" / "<img src=...>" 真解析。
+        # 标题 / 时间 / 状态都可能是外部文本（模型名、自定义名），PlainText 防止
+        # AutoText 把 "<b>" / "<img src=...>" 真解析。
         self._title_label.setTextFormat(Qt.TextFormat.PlainText)
 
         self._subtitle_row = QWidget(self)
@@ -501,10 +484,9 @@ class MessageHeader(ElaThemeWidget):
     def _apply_theme(self) -> None:
         mode = self._theme_mode
         muted = muted_color(mode, 0.5).name()
-        # 标题不用 QSS：颜色即主题 BasicText（ElaText 默认色），字体按要求走 QFont。
-        # 名称 / 模型名可能是中文：中文系统收成单族雅黑 —— 多族列表 + Segoe UI
-        # 缺 CJK 字形在 Win7 上都是慢 shaping 路径且进程级毒化（见「下游项目反馈
-        # bug.md」§3）；非中文系统保持「拉丁走 Segoe UI、中文逐字形回退雅黑」。
+        # 标题色走主题 BasicText（ElaText 默认），字体走 QFont。名称可能是中文：
+        # 中文系统收成单族雅黑（多族列表在 Win7 上是慢 shaping 路径且进程级毒化），
+        # 非中文系统保持拉丁优先 + 中文逐字形回退。
         title_font = QFont(self._title_label.font())
         cjk_family = system_cjk_font_family()
         title_font.setFamilies(

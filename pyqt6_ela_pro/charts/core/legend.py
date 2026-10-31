@@ -32,14 +32,10 @@ if TYPE_CHECKING:
 class Legend:
     """图例组件（ECharts ``legend``）。
 
-    option：``show`` / ``orient`` / ``top|bottom|left|right`` / ``data``
-    （条目白名单与排序）/ ``selected``（{name: bool} 初始显隐）/ ``itemWidth`` /
-    ``itemHeight`` / ``itemGap`` / ``textStyle`` / ``selectedMode``
-    （``"multiple"`` 默认 / ``"single"``）。条目由 ElaChartWidget 按系列名
-    注入（``setItems([(name, color), ...])``，color 仅为兜底值）——绘制时
-    色块经 chart 实时取系列当前色，主题切换后无需重建即生效。
-    横向条目超过 ``maxRows``（默认 3）自动分页；``type: "scroll"`` 强制单行
-    分页（‹ › + 页码），多个系列不再溢出绘图区。
+    条目由 ElaChartWidget 注入（``setItems([(name, color), ...])``，color 仅为
+    兜底值）；绘制时按系列名实时取色，主题切换无需重建。``data`` 兼作条目
+    白名单与排序。横向条目超过 ``maxRows``（默认 3）或 ``type: "scroll"`` 时
+    自动分页（‹ › + 页码）。
     """
 
     #: 条目点击回调：chart 注入 ``legend.on_toggle = chart._legendSelectToggle``
@@ -133,7 +129,7 @@ class Legend:
 
     # -- 布局 -------------------------------------------------------------
     def _entry(self, name: str):
-        """单条目的 (宽, 高) 与字体。"""
+        """单条目的 (宽, 高)。"""
         font = self._font()
         fm = QFontMetricsF(font)
         iw, ih = self.itemWidth(), self.itemHeight()
@@ -296,7 +292,6 @@ class Legend:
             # 悬停高亮：该条目文字转强调色（对齐 Plotly 图例 hover）
             if enabled and self.chart._legend_hover == name:
                 text_c = QColor(T("color.primary"))
-            # 色块（圆角小方块）
             p.setPen(Qt.PenStyle.NoPen)
             p.setBrush(swatch)
             box = QRectF(r.left(), r.center().y() - ih / 2, iw, ih)

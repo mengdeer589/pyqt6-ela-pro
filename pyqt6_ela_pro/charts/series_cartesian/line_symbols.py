@@ -33,8 +33,8 @@ class _LineSymbolMixin:
         indices = list(range(0, length, interval))
         if not indices:
             return []
-        # 向量化映射（与折线点同一条快路径）：逐点 ``mapPoint`` 在 category 轴上
-        # 每点 ~6µs 起（大类别数时更贵），几十上百个符号也要毫秒级
+        # 向量化映射（与折线点同一条快路径）：逐点 mapPoint 在 category 轴上
+        # 每点 ~6µs 起，上百个符号也要毫秒级。
         np_ = _ds.np
         if not single and np_ is not None and self._np_y is not None:
             try:
@@ -86,10 +86,8 @@ class _LineSymbolMixin:
         return items
 
     def _symbol_points(self, coord, single, interval: int):
-        """按原始数据下标间隔取符号点（对齐「每 N 个点画一个形状」）。
-
-        从原始序列每 ``interval`` 个数据点取一个并映射到屏幕坐标；
-        数值 x 轴仅保留当前绘图窗口（vmin..vmax）内的点。
+        """按原始数据下标每 ``interval`` 个点取一个并映射到屏幕坐标；
+        数值 x 轴只保留当前绘图窗口（vmin..vmax）内的点。
         """
         pts = []
         lo = hi = None

@@ -1,4 +1,4 @@
-"""气泡思考段方法组（从 ``ElaChatBubble`` 拆出）。"""
+"""气泡思考段方法组。"""
 
 from __future__ import annotations
 
@@ -30,10 +30,9 @@ class _BubbleReasoningMixin:
     """方法组 mixin：状态由 ``ElaChatBubble.__init__`` 建立。"""
 
     def setReasoningStyle(self, style: str) -> None:
-        """设置思考展示形态：``"collapse"``（可折叠块，默认）/ ``"inline"``。
+        """设置思考展示形态：``"collapse"``（默认）/ ``"inline"``。
 
-        对已有思考段**原位重建**（内容 / 耗时 / 流式状态保留，不丢数据），
-        与 ``setToolGrouping`` / ``setStatsMode`` 一致：立即生效。
+        对已有思考段原位重建（内容 / 耗时 / 流式状态保留）。
         """
         style = (
             style
@@ -154,8 +153,7 @@ class _BubbleReasoningMixin:
         if self._parts_layout is None:
             return
         row = self.thinkingRow()
-        # 先摘自身再取目标下标：``removeWidget`` 会让其后的控件整体前移，
-        # 用摘除前的下标插入会落到目标之后（内联形态下思考行被顶到正文下方）
+        # 先摘自身再取目标下标：removeWidget 会让其后的控件整体前移
         self._parts_layout.removeWidget(row)
         index = self._parts_layout.indexOf(before)
         if index < 0:
@@ -173,9 +171,8 @@ class _BubbleReasoningMixin:
     def reasoningBlock(self) -> ReasoningBlock:
         """获取当前折叠式思考块（``collapse`` 形态）。
 
-        已有思考段返回其控件；**流式回合内**没有段时按需创建。非流式且不存在
-        思考段时抛 ``RuntimeError`` —— 「取控件」的读取操作不应凭空追加分段、
-        污染 ``parts`` 与序列化结果。
+        流式回合内没有段时按需创建；非流式且不存在思考段时抛 ``RuntimeError``
+        —— 读取操作不凭空追加分段。
         """
         if self._reasoning_style != ElaChatReasoningStyleType.Collapse:
             raise RuntimeError("inline 形态请使用 inlineReasoningViewer()")
@@ -195,8 +192,8 @@ class _BubbleReasoningMixin:
     def inlineReasoningViewer(self) -> ElaMarkdownViewer:
         """获取当前内联思考查看器（需先 ``setReasoningStyle(Inline)``）。
 
-        与 :meth:`reasoningBlock` 同一契约：**读取不改配置、不凭空建分段**；
-        形态不对或非流式且没有思考段时抛 ``RuntimeError``。
+        与 :meth:`reasoningBlock` 同一契约：读取不建分段，形态不对或非流式且
+        没有思考段时抛 ``RuntimeError``。
         """
         if self._reasoning_style != ElaChatReasoningStyleType.Inline:
             raise RuntimeError("当前不是 inline 形态，请先 setReasoningStyle()")
@@ -216,9 +213,7 @@ class _BubbleReasoningMixin:
     def setReasoning(self, text: str, durationMs: Optional[float] = None) -> None:
         """整体设置当前思考段内容（可选耗时，结束后自动收起）。
 
-        与 :meth:`setText` 同为「整体替换」：先收尾在途思考段（缓冲落定、控件
-        收起），再复用**当前步骤**已有的思考段，没有才新建。重复调用不会留下
-        永久转圈的孤儿段，也不会把两次内容拼起来。
+        先收尾在途思考段再复用当前步骤已有段，重复调用不会留下孤儿段或拼接内容。
         """
         if self._role != ElaChatRoleType.Assistant:
             return
@@ -256,10 +251,7 @@ class _BubbleReasoningMixin:
         self._current_reasoning_id = None
 
     def reasoning(self) -> str:
-        """获取全部思考文本（无思考内容返回空串）。
-
-        与 :meth:`text` 同为纯读取：流式期间含在途分片，但不写回 ``part.text``。
-        """
+        """获取全部思考文本（无思考内容返回空串；纯读取，不写回 ``part.text``）。"""
         return "".join(
             self.partText(part)
             for part in self._parts
@@ -278,11 +270,8 @@ class _BubbleReasoningMixin:
     def beginReasoning(self, partId: Optional[str] = None) -> None:
         """开始思考（折叠块展示「思考中」；内联形态附状态行）。
 
-        同一步骤内重复开始思考时**复用已有思考块**继续追加，避免后到的
-        思考内容插到正文之后造成「思考与正文混排」。
-
-        ``partId`` 由 :meth:`setParts` 传入时**强制新建**分段（不再复用同
-        步骤已有块），用于从存储恢复时保留原分段 id。
+        同一步骤内重复开始会复用已有思考块继续追加；``partId`` 由
+        :meth:`setParts` 传入时强制新建分段（恢复时保留原分段 id）。
         """
         if self._role != ElaChatRoleType.Assistant:
             return
@@ -303,8 +292,7 @@ class _BubbleReasoningMixin:
             self._current_reasoning_id = existing
             part = self._find_part(existing)
             if part is not None and part.status != ElaChatStatusType.Streaming:
-                # 复用已落定的思考段继续追加：状态要回到 Streaming，
-                # 否则流式期间读 parts() 会看到 Done（切形态时按已结束重建）。
+                # 复用已落定的思考段继续追加：状态要回到 Streaming
                 self._replace_part(
                     existing, part.withStatus(ElaChatStatusType.Streaming)
                 )
@@ -326,11 +314,7 @@ class _BubbleReasoningMixin:
             widget.setMarkdown("")
 
     def appendReasoning(self, chunk: str) -> None:
-        """追加思考文本（流式）。
-
-        文本先入缓冲（读取时物化）；内联形态的标题由增量扫描器维护，
-        不再逐分片全量正则扫描。
-        """
+        """追加思考文本（流式）；内联形态的标题由增量扫描器维护。"""
         if not chunk:
             return
         if self._current_reasoning_id is None:
@@ -364,8 +348,7 @@ class _BubbleReasoningMixin:
         if isinstance(widget, ReasoningBlock):
             widget.end(durationMs)
         elif isinstance(widget, ElaMarkdownViewer):
-            # 内联形态：必须结束查看器自身的流式状态，否则光标定时器
-            # 会一直保留（思考完成后仍不停闪烁）。
+            # 内联形态：必须结束查看器自身的流式状态，否则光标定时器会一直保留
             if widget.isStreaming():
                 widget.endStream()
             if self._thinking_row is not None:

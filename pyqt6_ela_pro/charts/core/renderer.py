@@ -36,15 +36,8 @@ if TYPE_CHECKING:
 class SeriesRenderer:
     """系列渲染器协议基类。
 
-    子类实现 ``layout(rect)`` / ``paint(p, anim_t)`` / ``hitTest(pos)``。
-    坐标映射经 ``self.chart.coordFor(self.opt)`` 取得 Coord 后
-    ``coord.mapPoint(x, y)``。
-
-    可选扩展：
-    - ``valueAtIndex(index)`` → dict（{"name","value","series","color"}），
-      供 tooltip axis 触发取数；
-    - ``self.prev_data``：上次 option 前的旧 data 列表（core 自动注入），
-      用于旧→新插值动画。
+    子类实现 ``layout(rect)`` / ``paint(p, anim_t)`` / ``hitTest(pos)``；
+    坐标映射经 ``self.chart.coordFor(self.opt)`` 取得 Coord。
     """
 
     def __init__(self, chart: "ElaChartWidget", opt: dict):
@@ -57,8 +50,8 @@ class SeriesRenderer:
         self.id = str(self.opt.get("id") or "")
         #: 系列显隐（legend 点击切换；初始状态由 widget 按 legend.selected 注入）
         self.visible = True
-        #: **最近一次绘制所用的动画进度**（core 在 paint / 命中分发前写入）。
-        #: ``hitTest`` 靠它判断「现在是否处于动画中」，见该方法 docstring。
+        #: **最近一次绘制所用的动画进度**（core 在 paint / 命中分发前写入）；
+        #: ``hitTest`` 靠它判断当前是否处于动画中。
         self._anim_t = 1.0
         #: 上次 option 的旧数据（core 注入，用于动画插值）
         self.prev_data = None
@@ -82,11 +75,9 @@ class SeriesRenderer:
     def hitTest(self, pos: QPointF):
         """命中检测 → ``{"name","value","series",...}`` 或 None。
 
-        **默认实现在动画期一律返回 None**：``anim_t`` 是绘制期变量，而子类的
-        几何来自 ``layout()``（终态），用终态几何命中会指到「动画结束后才会到
-        的位置」—— 用户看到的是高亮 / tooltip 落在错误的图元上。想支持动画期
-        命中的子类在自己的 ``hitTest`` 里用 ``self._anim_t`` 复算几何即可。
-        完整规则与已实现清单见 AGENTS.md「charts」。
+        默认实现在动画期一律返回 None：``anim_t`` 是绘制期变量，而子类几何来自
+        ``layout()``（终态），用终态几何命中会指错图元。需要动画期命中的子类
+        可在自己的 ``hitTest`` 里用 ``self._anim_t`` 复算几何。
         """
         if self._anim_t < 1.0:
             return None
@@ -105,35 +96,22 @@ class SeriesRenderer:
         return t
 
     def requestSeriesRepaint(self) -> None:
-        """请求下一帧重绘**系列层**（持续动效每帧推进外观时用）。
+        """请求下一帧重绘系列层（持续动效每帧推进外观时用）。
 
-        只 ``chart.update()`` 不够：系列层位图缓存键里没有任何逐帧变化量，
-        相位推进后仍然贴回同一张位图 —— 表现为「只有鼠标移动（hover 进键）
-        时动效才动」。几何没变，所以也**不能**用 ``invalidateLayout()``
-        （会连带全量重排，百万点图表上每 40ms 一次）。
+        只 ``chart.update()`` 不够：系列层位图缓存键不含相位，会贴回同一张位图。
+        几何没变，所以不能用 ``invalidateLayout()``（会连带全量重排）。
         """
         chart = self.chart
         chart.invalidateSeriesLayer()
         chart.update()
 
     def data(self) -> list:
-        """系列原始 data 列表（None 容灾）。
+        """系列原始 data（``list`` / ``ElaNumericBuffer``；缺省返回空 list）。
 
-        接受两种承载：``list``（默认）与 ``ElaNumericBuffer``（大数组零拷贝
-        摄入的产物，见 ``charts.data``）。**不能只认 list** ——``setOption``
-        会把大数值数组包成缓冲区，只认 list 会让整条曲线静默消失。
-
-        返回值对外语义与 list 一致（``Sequence``：可 ``len`` / 下标 / 迭代 /
-        与 list 比较），既有的 40 余处只读调用点无需改动。内部热路径
-        （``layout`` / 采样 / 范围统计）请用 :meth:`dataView`，它不做任何
-        list 化。
-
-        **裸 ndarray 会就地包成 ``ElaNumericBuffer`` 再返回**，因为 ndarray 的
-        ``__eq__`` 不返回 bool：``if renderer.data() == other:`` 会在它上面抛
-        ``ValueError: The truth value of an array ... is ambiguous``，而这行
-        常出现在 Qt 回调里 = 0xC0000409。``ElaNumericBuffer`` 的 ``__eq__``
-        走 list 比较，契约与返回值宣称的一致。短数组（< ``_BUFFER_MIN_LEN``）
-        不包装，所以裸 ndarray 确实会到这里。
+        对外语义与 list 一致（可 len / 下标 / 迭代 / 比较），内部热路径请用
+        :meth:`dataView`。裸 ndarray 会就地包成 ``ElaNumericBuffer`` 再返回：
+        ndarray 的 ``__eq__`` 不返回 bool，在 Qt 回调里比较会抛异常导致
+        0xC0000409；包装件走 list 比较。
         """
         d = self.opt.get("data")
         if isinstance(d, list):
@@ -141,21 +119,15 @@ class SeriesRenderer:
         if isinstance(d, _cdata.ElaNumericBuffer):
             return d
         if _cdata.isBufferLike(d):
-            # 包一次并**写回 opt**：`_data_ref` 等调用方要求同一 data 对象
-            # 反复拿到的是同一实例（采样缓存键含 id(data)，每次新建包装件会让
-            # 键每帧变化 → 降采样缓存永不命中，布局耗时 22 倍）。
+            # 写回 opt：调用方要求同一 data 对象反复拿到同一实例
+            # （采样缓存键含 id(data)，每次新建包装件会让缓存永不命中）。
             wrapped = _cdata.ElaNumericBuffer(d)
             self.opt["data"] = wrapped
             return wrapped
         return []
 
     def dataView(self):
-        """系列数据的**只读视图**（内部热路径专用，不做任何拷贝）。
-
-        与 :meth:`data` 判据相同但语义更明确：返回的就是 ``opt["data]``
-        本身，不做任何 list 化。内部热路径（``layout`` / 采样 / 范围统计）
-        统一走这里。
-        """
+        """系列数据的只读视图（内部热路径专用，不做拷贝 / list 化）。"""
         d = self.opt.get("data")
         if isinstance(d, list) or _cdata.isBufferLike(d):
             return d
@@ -164,9 +136,8 @@ class SeriesRenderer:
     def valueStats(self) -> dict:
         """有限 y 值的统计（min / max / 下标 / sum / count），按数据身份缓存。
 
-        markLine / markPoint 的 average / max / min 走这里 —— 原先它们用
-        ``_SeriesMarkBase._points()`` 逐点物化整份数据，30 万点每次布局
-        175ms（纯折线 0.87ms），而布局缓存键含 dataZoom 窗口，缩放每步都重付。
+        markLine / markPoint 的 average / max / min 走这里；逐点物化整份数据
+        在缩放时每步都要重付，所以缓存。
         """
         data = self.dataView()
         key = (id(data), len(data))
@@ -230,10 +201,8 @@ class SeriesRenderer:
     def uniformItemStyle(self):
         """系列级统一 ``itemStyle``；``None`` = 存在逐项 itemStyle。
 
-        **O(1) 判据是「容器类型」而非抽样** —— 紧凑数值容器必是纯数值序列，
-        ``list`` 必须全量扫（带 dict 项的列表本就不是百万级场景）。原先的
-        32 项探窗会静默漏掉 ``[1]*500 + [{"itemStyle": …}]``，见 AGENTS.md
-        「charts」。
+        紧凑数值容器直接判为均匀（元素类型在包装时已校验）；``list`` 必须全量扫，
+        抽样会漏掉少量带 ``itemStyle`` 的 dict 项。
         """
         data = self.opt.get("data")
         try:
@@ -270,16 +239,10 @@ class SeriesRenderer:
         return self.itemStyleOf(item)
 
     def uniformItemStyleResolved(self) -> dict:
-        """一次性解析「全系列统一」的外观，供绘制循环**循环外**取用。
+        """一次性解析「全系列统一」的外观，供绘制循环循环外取用。
 
-        返回 ``{"color": QColor|None, "opacity": float, "borderColor": ...,
-        "borderWidth": float, "borderRadius": float|None}``。仅当
-        ``uniformItemStyle()`` 判定为均匀时可用（否则返回 ``None``）。
-
-        用途：bar / scatter 逐图元绘制时，若每根柱子都调
-        ``itemColor`` / ``itemOpacity`` / ``itemBorder`` / ``_bar_radius``，
-        素材多时就是每图元 4 次方法调用。绘制循环外解析一次，
-        循环内只做数组取值即可。
+        返回 ``{"color", "opacity", "borderColor", "borderWidth", "borderRadius"}``；
+        仅当 ``uniformItemStyle()`` 判定为均匀时可用（否则 ``None``）。
         """
         if self.uniformItemStyle() is None:
             return None
@@ -362,8 +325,7 @@ class SeriesRenderer:
     def visualMapComponent(self):
         """绑定到本系列的 ``visualMap`` 组件（显式绑定优先 → 通用件）；没有返回 None。
 
-        必须按「系列身份」取，不能拿第一个 ``mapColor``：多个系列共用同一个
-        visualMap 时，别的系列的分段色才不会被第一个抢走。
+        必须按系列身份取：多个系列共用 visualMap 时不能把别的系列的分段色抢走。
         """
         idx = getattr(self, "_series_index", 0)
         sid = str(self.opt.get("id") or "")
@@ -465,8 +427,8 @@ class SeriesRenderer:
     def blursOtherItems(self) -> bool:
         """hover 是否淡化同系列其它项（ECharts 只在 ``focus='self'`` 时 blur）。
 
-        ``none``（默认）与 ``series`` 都不淡化：默认就淡化会让每次鼠标移动
-        重画全部图元（密集散点纯属浪费），也不是 ECharts 语义。
+        ``none``（默认）与 ``series`` 都不淡化：默认淡化会让每次鼠标移动重画
+        全部图元，也不是 ECharts 语义。
         """
         return self.emphasisFocus() == "self"
 
@@ -548,9 +510,7 @@ class SeriesRenderer:
     def labelFontSize(self) -> float:
         """标签字号（``label.fontSize`` → 顶层 ``textStyle.fontSize`` → font.xs）。"""
         try:
-            return max(
-                6.0, float(self.labelTextStyle().get("fontSize", T("font.xs")))
-            )
+            return max(6.0, float(self.labelTextStyle().get("fontSize", T("font.xs"))))
         except (TypeError, ValueError, OverflowError):
             return float(T("font.xs"))
 
@@ -589,8 +549,8 @@ class SeriesRenderer:
     def labelText(self, index, value, name=None) -> str:
         """按 ``label.formatter`` 生成标签文本（缺省显示数值）。
 
-        文本优先级：系列 ``labelTexts`` 覆盖（双击编辑写入）→ 数据项
-        ``label.text``（字面量）/ ``label.formatter`` → 系列 ``label.formatter``。
+        优先级：系列 ``labelTexts`` 覆盖（双击编辑写入）→ 数据项 ``label.text``
+        / ``label.formatter`` → 系列 ``label.formatter``。
         """
         # 1) 双击编辑写入的按点覆盖
         overrides = self._source_opt.get("labelTexts")
@@ -633,8 +593,7 @@ class SeriesRenderer:
     def setLabelText(self, index, text) -> bool:
         """覆盖某个数据点的标签文本（写入 ``series.labelTexts[str(index)]``）。
 
-        空字符串 = 删除覆盖、恢复默认数值文案。不改 data 形状，因此不会破坏
-        大数组的 numpy / LOD 快路径。
+        空字符串 = 删除覆盖；不改 data 形状，因此不破坏大数组的 LOD 快路径。
         """
         try:
             idx = int(index)
@@ -658,8 +617,8 @@ class SeriesRenderer:
     def labelHitTest(self, pos: QPointF):
         """数据点标签命中：返回 ``(dataIndex, rect, text)``，未命中 None。
 
-        命中框由各渲染器在 ``paint`` 时写入 ``_label_rects``（与画出来的
-        标签完全一致）；``label.editable: false`` 可关闭单个系列的编辑。
+        命中框由各渲染器在 ``paint`` 时写入 ``_label_rects``；
+        ``label.editable: false`` 可关闭单个系列的编辑。
         """
         if not self.labelShown():
             return None
@@ -677,21 +636,16 @@ class SeriesRenderer:
     def nearestIndexAt(self, x):
         """按 x 值找最近的数据下标（value / time 轴的 axis tooltip 用）。
 
-        默认 ``None``（该系列不支持按 x 反查，调用方跳过）。category 轴不走
-        这里 —— 它的 ``invertX`` 本来就是类目下标。
+        默认 ``None``（该系列不支持按 x 反查）；category 轴不走这里。
         """
         return None
 
     def _sampling_params(self):
         """``sampling`` option 解析（折线 / 散点等大系列共用）。
 
-        ECharts 语义：``sampling`` 可为 False / 字符串（``minmax`` / ``m4`` /
-        ``lttb`` / ``minmaxLTTB``）/ dict
-        {``algorithm``, ``threshold``, ``pointsPerPixel``}；返回
-        ``(enabled, threshold, pointsPerPixel, algorithm)``。
-
-        **这里只表达用户意图**（是否抽稀）——能不能抽由调用方的三层兜底决定
-        （tsdownsample → numpy 按桶 min/max → 纯 Python 等距）。
+        ``sampling`` 可为 False / 算法名（``minmax`` / ``m4`` / ``lttb`` /
+        ``minmaxLTTB``）/ dict（``algorithm`` / ``threshold`` / ``pointsPerPixel``）；
+        返回 ``(enabled, threshold, pointsPerPixel, algorithm)``。
         """
         sopt = self.opt.get("sampling", True)
         enabled = bool(sopt)

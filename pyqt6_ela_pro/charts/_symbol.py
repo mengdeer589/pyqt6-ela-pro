@@ -1,7 +1,6 @@
 """ECharts symbol 形状子集（纯 QPainterPath，供 scatter/line/graph/tree 等共用）。
 
-支持：``circle`` / ``rect`` / ``roundRect`` / ``triangle`` / ``diamond`` /
-``pin`` / ``arrow``；未知形状回退 ``circle``（不抛异常）。
+未知形状回退 ``circle``，不抛异常。
 """
 
 from __future__ import annotations
@@ -99,14 +98,9 @@ def symbolPixmap(
 ) -> QPixmap:
     """符号的**预渲染位图**（点量大时批量贴图用）。
 
-    实测 5556 个点（r=2，AA 开）：逐点 ``drawEllipse`` 14.7ms、合并成一条
-    ``QPainterPath`` **204ms**（AA 椭圆路径光栅化极贵）、**QPixmap + 贴图 3.5ms**
-    —— 所以「量大 + 同尺寸同色」的符号一律走位图贴图。
-
-    位图按 ``dpr`` 以物理像素渲染并 ``setDevicePixelRatio``，高 DPI 下不发虚。
-
-    **返回副本**（对齐 ``svg_icon`` 的教训：缓存里存的活动对象一旦被调用方
-    就地改写 —— 例如 ``fill(red)`` —— 之后所有调用方都会拿到被改过的图）。
+    逐点 ``drawEllipse`` 与合并 ``QPainterPath`` 在大量点上都很慢，位图贴图快
+    一个数量级；按 ``dpr`` 以物理像素渲染。**返回副本**：缓存里的活动对象一旦
+    被调用方就地改写，之后所有调用方都会拿到被改过的图。
     """
     fill = parse_color(color)
     stroke = parse_color(border_color) if border_color is not None else None
@@ -132,7 +126,9 @@ def symbolPixmap(
     try:
         painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
         painter.setBrush(fill)
-        painter.setPen(QPen(stroke, width) if stroke is not None else QPen(Qt.PenStyle.NoPen))
+        painter.setPen(
+            QPen(stroke, width) if stroke is not None else QPen(Qt.PenStyle.NoPen)
+        )
         center = QPointF(physical / 2.0, physical / 2.0)
         painter.drawPath(symbolPath(key[0], center, size * dpr))
     finally:

@@ -1,16 +1,4 @@
-"""聊天状态栏组件（``pyqt6_ela_pro.chat``）。
-
-:class:`ElaChatStatusBar` 是一条宿主状态栏：左侧弱化信息（模型 / 服务地址
-等），右侧状态文本（支持 ``info`` / ``busy`` / ``success`` / ``error``
-四档语义配色），可选 ``busy`` 时在状态前显示 ``ElaProgressRing``。
-
-用法::
-
-    bar = ElaChatStatusBar(parent)
-    bar.setInfo("Spark-X2.5-4B-FP8 @ 127.0.0.1:8000/v1")
-    bar.setStatus("生成中…", level="busy")
-    bar.setStatus("完成", level="success")
-"""
+"""聊天状态栏组件（左侧弱化信息 + 右侧语义配色状态，``pyqt6_ela_pro.chat``）。"""
 
 from __future__ import annotations
 
@@ -124,9 +112,13 @@ class ElaChatStatusBar(ElaThemeWidget):
         if self._level == "busy":
             color = accent_color(mode)
         elif self._level == "success":
-            color = blend(text_color(mode), statusColor(mode, ElaStatusRoleType.Success), 0.35)
+            color = blend(
+                text_color(mode), statusColor(mode, ElaStatusRoleType.Success), 0.35
+            )
         elif self._level == "error":
-            color = blend(text_color(mode), statusColor(mode, ElaStatusRoleType.Error), 0.45)
+            color = blend(
+                text_color(mode), statusColor(mode, ElaStatusRoleType.Error), 0.45
+            )
         else:
             color = muted_color(mode, 0.65)
         self._status_label.setTextColor(color)

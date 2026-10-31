@@ -31,14 +31,10 @@ from .base import AxisModel, Coord
 class GridCoord(Coord):
     """直角坐标系：grid 边距 + 多 x/y 轴 + 网格 / 区域 / 刻度 / 标签。
 
-    option 键：``grid``（left/right/top/bottom 默认 48/24/40/36、``show``、
-    ``containLabel``、``borderColor`` / ``borderWidth`` / ``backgroundColor``）、
-    ``xAxis`` / ``yAxis``（单个 dict 或数组，见 AxisModel）。边距支持数值 px
-    或 ``"N%"``。``mapPoint(x, y)``：x 为类别名/下标或数值，y 为数值；
-    可选 ``x_axis_index`` / ``y_axis_index`` 指定轴。
-
-    多轴通过 :meth:`axis_view` 返回绑定到某对轴的轻量视图；系列渲染器继续
-    读 ``coord.x_axis`` / ``coord.y_axis``，无需逐个改。
+    ``grid`` 边距默认 left/right/top/bottom = 48/24/40/36（数值 px 或
+    ``"N%"``）；``xAxis`` / ``yAxis`` 可以是单个 dict 或数组。多轴经
+    :meth:`axis_view` 返回绑定到某对轴的视图，系列仍读 ``coord.x_axis`` /
+    ``coord.y_axis``。
     """
 
     kind = "grid"
@@ -53,11 +49,7 @@ class GridCoord(Coord):
         super().__init__(chart, option)
         self.grid_index = max(0, int(grid_index))
         grid_list = grid_options(self.option.get("grid"))
-        grid = (
-            grid_list[self.grid_index]
-            if self.grid_index < len(grid_list)
-            else {}
-        )
+        grid = grid_list[self.grid_index] if self.grid_index < len(grid_list) else {}
         if axes is not None:
             # 多网格：各网格**共享同一批 AxisModel**（轴窗口 / dataZoom 只写一份）
             self.x_axes, self.y_axes = axes
@@ -143,13 +135,9 @@ class GridCoord(Coord):
     def _extent(self, data, positive_x: bool = False, positive_y: bool = False):
         """带缓存的数值范围 ``(x0, x1, y0, y1)``（缺失维度为 ``None``）。
 
-        缓存是**缩放 / 平移流畅度的关键**：``setSeries`` 在每次重建
-        （缩放、平移、数据更新、图例切换都会触发）时都重算全量范围，
-        百万点逐点扫描要 400 ms 以上。范围只取决于数据本身，与窗口无关，
-        因此按「数据对象身份 + 长度 + 正值过滤」缓存后，缩放时这一步接近零成本。
-
-        缓存值同时**持有数据对象的强引用**（见 ``_EXTENT_CACHE`` 的说明），
-        否则对象被回收后 ``id`` 会被复用，把别的数据的范围当成自己的。
+        范围只取决于数据本身、与窗口无关，所以按「数据对象身份 + 长度 +
+        正值过滤」缓存；缓存值同时**持有数据对象的强引用**，否则对象回收后
+        ``id`` 被复用会把别的数据的范围当成自己的。
         """
         if data is None:
             return None
@@ -174,14 +162,11 @@ class GridCoord(Coord):
         return self._numpy_extent(data, positive_x, positive_y)
 
     def _numpy_extent(self, data, positive_x: bool = False, positive_y: bool = False):
-        """numpy 快速路径：返回 ``(x0, x1, y0, y1)``（缺失维度为 ``None``）或 None。
+        """numpy 快速路径：``(x0, x1, y0, y1)``（缺失维度 None）或 None。
 
-        纯数值列表：x 按下标语义（0 .. n-1）；[x, y] 列表：取两列；
-        含字典 / None / 混合形式返回 None（调用方回退 Python 循环）。
-
-        走 ``nanmin`` / ``nanmax``：``None`` 间隙在缓冲里是 NaN，用 ``min``/``max``
-        会让整个轴范围变成 NaN。但**它们只跳 NaN 不跳 inf**，所以先把非有限值
-        掩成 NaN —— 完整清单与后果见 AGENTS.md「charts」。
+        纯数值列表 x 按下标语义；``[x, y]`` 列表取两列；结构型数据返回 None
+        由调用方回退 Python 循环。用 ``nanmin`` / ``nanmax``（只跳 NaN 不跳
+        inf），所以先把非有限值掩成 NaN。
         """
         if data is None or _ds.np is None:
             return None
@@ -256,14 +241,8 @@ class GridCoord(Coord):
             positive_x = xaxis.type == "log"
             positive_y = yaxis.type == "log"
             data = s.get("data")
-            # ``data: 5`` / ``3.5`` / ``True`` 这类**标量**不是合法序列（ECharts
-            # 也不接受），但它此前一路走到下面的 ``enumerate(data)`` 抛 TypeError，
-            # 而 ``_rebuild`` 调 ``setSeries`` 没有 try —— 异常直接冒给
-            # ``setOption`` 的调用方。降级成空数据，与「数据为空」同路径。
-            #
-            # 注意判据不能用 ``isBufferLike``：它**故意不认** list / tuple
-            # （逐元素拷贝对百万级列表是性能灾难，见 data.isBufferLike 的
-            # docstring），那样会把正常数据全清空。
+            # ``data: 5`` / ``True`` 这类**标量**不是合法序列（ECharts 也不接受），
+            # 降级成空数据；判据不能用 ``isBufferLike``（它故意不认 list / tuple）。
             if data is None:
                 data = []
             elif not _cdata.isBufferLike(data) and not isinstance(data, (list, tuple)):
@@ -303,8 +282,7 @@ class GridCoord(Coord):
                     xs[xi].append(float(x))
         for i, axis in enumerate(self.y_axes):
             if axis.type in ("value", "log"):
-                # 新数据到了：上一轮的「真实全量」作废，等系列 layout 重算
-                # （``_fix_value_axis`` 会写入含堆叠 / 高低价的正确范围）。
+                # 新数据到了：上一轮的「真实全量」作废，等系列 layout 重算。
                 axis._data_extent = None
                 vals = ys[i]
                 axis.setExtent(min(vals), max(vals)) if vals else axis.setExtent(
@@ -370,7 +348,7 @@ class GridCoord(Coord):
         return height
 
     def _apply_axis_margins(self, rect: QRectF) -> None:
-        """按轴位置预留标签空间（右侧 Y / 顶部 X 是新功能，必须自动留白）。"""
+        """按轴位置预留标签空间（右侧 Y / 顶部 X 也要留白）。"""
         left = [
             a
             for a in self.y_axes
@@ -404,14 +382,14 @@ class GridCoord(Coord):
                 if isinstance(coord, GridCoord)
             )
         if self.contain_label or grid_count > 1:
-            # 多网格时不显式开 containLabel 也要按标签实际宽度留白：
-            # 窄网格 + 长轴名会压到相邻网格（各网格共享默认边距 48/24）。
+            # 多网格不显式开 containLabel 也要按标签实际宽度留白，
+            # 否则窄网格 + 长轴名会压到相邻网格。
             self.m_left = max(self.m_left, left_need)
             self.m_right = max(self.m_right, right_need)
             self.m_bottom = max(self.m_bottom, bottom_need)
             self.m_top = max(self.m_top, top_need)
             return
-        # 非 containLabel：主轴保持既有边距（向后兼容），副轴 / 右 / 上必须留白。
+        # 非 containLabel：主轴保持既有边距，副轴 / 右 / 上必须留白。
         if any(a is not self.y_axes[0] for a in left):
             self.m_left = max(self.m_left, left_need)
         if right:
@@ -443,17 +421,9 @@ class GridCoord(Coord):
     ):
         """批量映射（numpy 数组进 → ``(px, py)`` 两个数组）；不支持时返回 ``None``。
 
-        与 :meth:`mapPoint` 逐点**同语义**，只是把「每点 ~6µs 的 Python 调用链」
-        换成一次向量化运算（实测 1M 点 2.4s → 数十 ms；采样后 2.6k 点也从
-        16ms 降到 <1ms）。以下情形返回 ``None`` 让调用方退回逐点：
-
-        * 缺 numpy；
-        * 轴类型不在 ``value`` / ``category`` / ``log`` 内；
-        * category 轴的 x 不是数值（类别名无法向量化）。
-
-        非有限坐标不做过滤：由调用方按 ``isfinite`` 决定是否断开（保持
-        ``mapPoint`` 把 NaN 交给调用方处理的既有约定）。log 轴的非正值
-        产出 NaN。
+        与 :meth:`mapPoint` 同语义，只是向量化；缺 numpy / 轴类型不支持 /
+        category 的 x 非数值时返回 ``None``。非有限坐标不过滤，由调用方按
+        ``isfinite`` 断开。
         """
         np_ = _ds.np
         if np_ is None or xs is None or ys is None:
@@ -540,12 +510,8 @@ class GridCoord(Coord):
     def _interval_step(self, axis: AxisModel, horizontal: bool, option_key: str) -> int:
         """标签 / 刻度 / 网格线的抽稀步长（``interval: 'auto'`` 语义）。
 
-        **为什么必须有**：坐标轴现在是「有多少刻度画多少」——1M 个类别的 x 轴
-        会画 1M 个标签 + 1M 条刻度（实测单帧 11.8s + 3.5s，比系列绘制贵两个
-        数量级）。抽稀后绘制量与像素宽度挂钩，与数据量解耦。
-
-        判据：沿轴方向「一个标签占的像素」不够放时按倍数跳。显式 ``interval``
-        （数字 / callable）优先，用户说了算。
+        绘制量与像素宽度挂钩、与数据量解耦；显式 ``interval``（数字 /
+        callable）优先。
         """
         opt = axis.axisLabelOption() if option_key == "axisLabel" else None
         if opt is None:
@@ -564,8 +530,7 @@ class GridCoord(Coord):
             return max(1, int(interval) + 1)
         if callable(interval):
             return 1
-        # 每次绘制只算一次：同一次 paintAxes 里标签 / 刻度 / 网格 / 分隔区
-        # 会各问一次，样本量文本不能重复付（记忆化按轴 + 方向 + 画布尺寸）。
+        # 一次 paintAxes 内标签 / 刻度 / 网格 / 分隔区各问一次，按轴 + 方向记忆化。
         memo = getattr(self, "_step_memo", None)
         if memo is None:
             memo = self._step_memo = {}
@@ -590,8 +555,7 @@ class GridCoord(Coord):
             # y 轴：沿轴方向是标签**高度**（一行）
             extent = float(fm.height())
         else:
-            # x 轴：沿轴方向是标签**宽度**；量最多 32 个样本取最宽
-            # （全量量文本会把「画不出来」换成「量不完」）
+            # x 轴：沿轴方向是标签**宽度**，最多量 32 个样本取最宽。
             extent = 0.0
             step_sample = max(1, count // 32)
             ticks = axis.ticks() if axis.type != "category" else None
@@ -608,10 +572,9 @@ class GridCoord(Coord):
         return int(math.ceil(need / spacing))
 
     def _axis_positions(self, axis: AxisModel, horizontal: bool, step: int = 1):
-        """轴刻度位置列表 ``[(px, py, label, index)]``（category 用本地下标映射）。
+        """轴刻度位置列表 ``[(px, py, label, index)]``。
 
-        ``step`` 是抽稀步长（``_interval_step``）：**category 轴按它跳着枚举**，
-        1M 个类别的轴才不会在这里先造出 1M 个元组（光这一步就要 ~0.3s）。
+        category 轴按 ``step`` 跳着枚举 —— 1M 类别才不会先造出 1M 个元组。
         """
         out = []
         step = max(1, int(step))
@@ -631,14 +594,10 @@ class GridCoord(Coord):
                 tv = ticks[i]
                 if horizontal:
                     py = axis.map(tv, self.plot.bottom(), self.plot.top())
-                    out.append(
-                        (self.plot.left(), py, axis.formatTickLabel(tv, i), i)
-                    )
+                    out.append((self.plot.left(), py, axis.formatTickLabel(tv, i), i))
                 else:
                     px = axis.map(tv, self.plot.left(), self.plot.right())
-                    out.append(
-                        (px, self.plot.bottom(), axis.formatTickLabel(tv, i), i)
-                    )
+                    out.append((px, self.plot.bottom(), axis.formatTickLabel(tv, i), i))
         return out
 
     def _axis_sides(self):
@@ -697,7 +656,7 @@ class GridCoord(Coord):
     def _paint_split_lines(self, p: QPainter) -> None:
         for axis, horizontal, primary in self._axis_sides():
             opt = axis.splitLineOption()
-            # ECharts 默认：value / log 轴显示网格线，category 轴不显示。
+            # ECharts 默认：value / log 轴显示网格线、category 不显示；
             # 副轴默认不画（否则两套网格叠在一起），显式 show 可开。
             default_show = axis.type in ("value", "log") and primary
             if not bool(opt.get("show", default_show)):
@@ -808,8 +767,8 @@ class GridCoord(Coord):
                     axis, False, self._interval_step(axis, False, "axisLabel")
                 )
             )
-            # 标签框宽度按**实测文本宽**算，上限取相邻刻度间距（否则会压到
-            # 相邻标签）。原先固定 80px，长日期标签两端被硬裁、且无省略号。
+            # 标签框宽度按实际文本宽算，上限取相邻刻度间距，
+            # 否则长日期标签会被硬裁且没有省略号。
             spacing = 80.0
             if len(positions) >= 2:
                 xs = sorted({round(pos[0], 3) for pos in positions})
@@ -831,7 +790,9 @@ class GridCoord(Coord):
                         )
                     )
                     rect = (
-                        QRectF(px - box_w / 2, line - 5 - fm.height(), box_w, fm.height())
+                        QRectF(
+                            px - box_w / 2, line - 5 - fm.height(), box_w, fm.height()
+                        )
                         if top_side
                         else QRectF(px - box_w / 2, line + 5, box_w, fm.height())
                     )
@@ -983,9 +944,8 @@ class GridCoord(Coord):
 class _GridAxisView(GridCoord):
     """绑定到一对 ``(xAxisIndex, yAxisIndex)`` 的 GridCoord 视图。
 
-    共享 ``plot`` / ``rect``，只把 ``x_axis`` / ``y_axis`` 换成所选轴。
-    继承 ``GridCoord`` 是为了让系列 / 组件里既有的
-    ``isinstance(coord, GridCoord)`` 判断继续成立。
+    共享 ``plot`` / ``rect``，只把 ``x_axis`` / ``y_axis`` 换成所选轴；继承
+    ``GridCoord`` 是为了让既有的 ``isinstance(coord, GridCoord)`` 判断成立。
     """
 
     def __init__(self, owner: GridCoord, x_axis_index: int, y_axis_index: int):

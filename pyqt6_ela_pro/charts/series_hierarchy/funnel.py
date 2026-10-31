@@ -24,13 +24,8 @@ from ._shared import _label_font, _parse_named_values, _series_palette_color
 class FunnelSeriesRenderer(SeriesRenderer):
     """漏斗图（梯形层叠）。
 
-    option 键：
-    - ``data``: [{"name","value"}, ...]；
-    - ``sort``: "descending"（默认）/ "ascending" / "none"；
-    - ``gap``: 层间距 px（默认 2）；
-    - ``minSize``: 最小宽度占比（默认 0.12，相对最大宽度）；
-    - ``label``: {"show": True, "position": "outer|inside", "fontSize": px}；
-    - ``orient``: "vertical"（当前仅支持纵向，自上而下）。
+    支持 ``data`` / ``sort`` / ``gap`` / ``minSize`` / ``label`` /
+    ``funnelAlign`` / ``orient``（当前仅纵向）。
     """
 
     def __init__(self, chart, opt):
@@ -72,7 +67,7 @@ class FunnelSeriesRenderer(SeriesRenderer):
         ]
         if not raw_entries:
             return
-        # 保留原始 data 下标（负值不再被删，否则后续项的 itemStyle 整体前移）
+        # 保留原始 data 下标：删负值会让后续项的 itemStyle / dataIndex 整体前移。
         entries = list(raw_entries)
         sort = str(self.opt.get("sort") or "descending")
         if sort == "descending":
@@ -103,14 +98,8 @@ class FunnelSeriesRenderer(SeriesRenderer):
 
         for slot, (data_index, name, v) in enumerate(entries):
             top_w = width_of(v)
-            # 最后一层收到 ``minSize``（默认 12% 宽），不是「与上一层同宽」——
-            # 原式 ``width_of(v) * min_frac / max(min_frac, 1e-6)`` 在
-            # min_frac>0 时恒等于 width_of(v)，退化成矩形。
-            bot_w = (
-                width_of(entries[slot + 1][2])
-                if slot + 1 < n
-                else max_w * min_frac
-            )
+            # 最后一层收到 ``minSize`` 宽度，而不是与上一层同宽。
+            bot_w = width_of(entries[slot + 1][2]) if slot + 1 < n else max_w * min_frac
             y0 = rect.top() + slot * (h + gap)
             y1 = y0 + h
             if align == "left":

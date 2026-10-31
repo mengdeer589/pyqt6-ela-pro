@@ -204,15 +204,8 @@ class _ChartQueryMixin:
     def palette(self) -> list:
         """当前生效调色板：option["color"] 覆盖，否则默认调色板（主题实时取）。
 
-        **带缓存**：调色板只取决于「option 里的自定义色板」与「当前主题」，
-        而 bar / scatter 的绘制路径会**逐图元**取色，而调色板本身不会逐图元变。
-        未缓存时每次都新建 9 个 QColor，实测占绘制 tottime 的 16%。
-
-        **返回的 QColor 是深拷贝**：调用方（``colorForSeries`` →
-        ``itemColor`` → bar 绘制循环）会逐图元 ``setAlphaF`` 改 alpha，
-        共享实例会让第一次绘制把整个调色板改成半透明（实测：一次 hover
-        之后所有系列颜色都变淡，且新 list 也救不回来 —— 元素本身是共享的）。
-        深拷贝 9 个 QColor 仍远快于每次重建调色板。
+        按（主题, 自定义色板身份）缓存；返回深拷贝的 QColor —— 绘制路径会逐图元
+        ``setAlphaF``，共享实例会把整个调色板改成半透明。
         """
         custom = self._option.get("color")
         has_custom = isinstance(custom, list) and bool(custom)
@@ -222,10 +215,7 @@ class _ChartQueryMixin:
             len(custom) if has_custom else 0,
         )
         hit = self._palette_cache
-        # ``hit[1] is custom`` 这道复核不能省：``setOption`` 换色板时旧 list
-        # 会被释放，新 list **可能拿到同一个 id**，而长度也一样 —— 只比 key
-        # 就会把上一个色板当成当前的，整张图配色错掉且零报错。持强引用
-        # （存进 cache）同时杜绝 id 复用。
+        # ``hit[1] is custom`` 复核不能省：换色板后新 list 可能复用同一 id 与长度。
         if hit is not None and hit[0] == key and hit[1] is custom:
             return [parse_color(c) for c in hit[2]]
         if has_custom:
@@ -238,10 +228,8 @@ class _ChartQueryMixin:
     def colorForSeries(self, series) -> QColor:
         """系列主色：series opt 的 "color" → 全局调色板按序号取色。
 
-        序号取 ``_rebuild`` 时写好的 ``_series_index``，不用
-        ``list.index()`` —— 后者是 O(系列数) 扫描，而本函数在 bar /
-        scatter 的绘制路径上逐图元调用，而 ``list.index()`` 是 O(系列数)扫描
-        —— 系列数与图元数相乘，顺序遍历时效果可惊人。
+        序号取 ``_rebuild`` 写好的 ``_series_index``（本函数在逐图元绘制路径上，
+        不能用 O(系列数) 的 ``list.index()``）。
         """
         if isinstance(series, SeriesRenderer):
             idx = getattr(series, "_series_index", 0)
@@ -338,8 +326,7 @@ class _ChartQueryMixin:
         raw_data = renderer.data()
         if isinstance(data_index, int) and 0 <= data_index < len(raw_data):
             data = raw_data[data_index]
-        # ECharts 的 params.color 是**数据项**颜色（雷达 colorBy='data'、饼图逐扇区），
-        # 命中方给了就用它，别再回落到系列色 —— 否则事件里两个数据源同色。
+        # params.color 是数据项颜色（雷达 colorBy='data'、饼图逐扇区），命中方给了就用它。
         raw_color = hit.get("color")
         item_color = (
             parse_color(raw_color) if raw_color is not None else renderer.color()
@@ -374,11 +361,9 @@ class _ChartQueryMixin:
         return params
 
     def textStyle(self) -> dict:
-        """全局 ``textStyle``（本库扩展：**组件级未设置时的文字外观兜底**）。
+        """全局 ``textStyle``（组件级未设置时的文字外观兜底）。
 
-        只兜底 ``fontSize`` / ``fontWeight`` / ``color``，作用于图例 / 标题 /
-        提示框 / 轴标签 / 数据点标签；组件自己的 ``textStyle``（或
-        ``axisLabel`` / ``label``）同名键优先。
+        组件自己的 ``textStyle`` / ``axisLabel`` / ``label`` 同名键优先。
         """
         style = self._option.get("textStyle")
         return style if isinstance(style, dict) else {}
@@ -561,15 +546,8 @@ class _ChartQueryMixin:
     def _hitItemWithSeries(self, pos: QPointF):
         """命中查询：返回 ``(渲染器, 命中 info)``；无命中 None（silent 系列跳过）。
 
-        **markPoint / markLine 优先**：它们画在系列之上，先判才符合「上层元素
-        拿走悬停」的直觉（原先它们的 ``hitTest`` 是死代码 —— 只遍历
-        ``_series``，组件层从没被问过，于是这两类标注既没 tooltip 也没
-        click）。
-
-        **markArea / graphic 不参与**：前者是半透明**背景区域**，接进来会让
-        「悬停区域内任何位置」都抢走系列的悬停（明确的退化）；后者是纯装饰，
-        ECharts 侧默认也不参与交互。两条都不实现 ``hitTest``，免得留下
-        「看着能用其实从不调」的死代码。
+        markPoint / markLine 优先（画在系列之上）；markArea 是背景区域、graphic
+        是装饰，都不参与命中。
         """
         # 动画进度可能在最后一次 paint 之后又推进了（鼠标事件先到），这里
         # 按当前进度刷新一遍，保证 hitTest 看到的动画阶段是「现在」。
@@ -717,11 +695,8 @@ class _ChartQueryMixin:
         except Exception:
             anchor = None
         if anchor is not None:
-            # **必须先判有限**。``AxisModel.invert`` 返回
-            # ``vmin + frac * (vmax - vmin)``，而 ±1e308 的轴跨度相减会溢出成
-            # inf → 结果是 inf → ``int(inf)`` 抛 ``OverflowError``。这行跑在
-            # ``mouseMoveEvent`` 里，抛出去就是 0xC0000409 静默终止。
-            # 非有限时退回 None（走 item 命中），别让一次悬停干掉进程。
+            # 必须先判有限：轴跨度溢出会得到 inf，随后 int(inf) 抛 OverflowError；
+            # 这行在 mouseMoveEvent 里，抛出就是 0xC0000409 静默终止。
             if isinstance(anchor, (int, float)) and not math.isfinite(anchor):
                 anchor = None
         if anchor is None:
@@ -746,8 +721,7 @@ class _ChartQueryMixin:
                 ):
                     continue
                 if is_category:
-                    # category 轴：每个系列按**自己的** x 轴把像素反查成
-                    # 窗口内类目下标（多 x 轴时类目列表可能不同）。
+                    # 每个系列按自己的 x 轴反查窗口内类目下标（多 x 轴类目列表可能不同）。
                     local = series_coord.x_axis.invert(
                         pos.x(), series_coord.plot.left(), series_coord.plot.right()
                     )
@@ -757,9 +731,7 @@ class _ChartQueryMixin:
                         if primary_index is None:
                             primary_index = index
                 else:
-                    # value / log / time：按 x 值找最近的数据点。此前这里把
-                    # ``invertX`` 的结果直接当**下标**用，``[x, y]`` 形式的
-                    # 折线（时间戳 / 真实数值）因此整条提示框失效。
+                    # value / log / time：按 x 值找最近的数据点（不能把 invertX 结果当下标）。
                     index = r.nearestIndexAt(anchor)
                     if index is not None:
                         info = r.valueAtIndex(index)

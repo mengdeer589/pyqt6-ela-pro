@@ -115,10 +115,7 @@ _GAP_MIN_PIXELS = 4.0
 
 
 def _win_span(win, data_len: int):
-    """窗口 ``(first, last, size)``。
-
-    ``win`` 为 ``None``（全量）/ ``(start, stop)`` 连续段 / 下标 ``ndarray``。
-    """
+    """窗口 ``(first, last, size)``；``win`` 可为 ``None`` / ``(start, stop)`` / 下标数组。"""
     if win is None:
         return 0, data_len - 1, data_len
     if isinstance(win, tuple):
@@ -238,12 +235,7 @@ def _has_explicit_x(item) -> bool:
 
 
 def _label_placement(point, text, fm, position="top", distance=4.0, marker_r=0.0):
-    """数据点标签的落点（ECharts ``label.position``）。
-
-    返回 ``(baseline_anchor, hit_rect)``：``baseline_anchor`` 给
-    ``QPainter.drawText(QPointF, text)``，``hit_rect`` 与画出来的文字一致
-    （双击编辑命中用）。
-    """
+    """数据点标签落点（ECharts ``label.position``）；返回 ``(baseline_anchor, hit_rect)``。"""
     tw = fm.horizontalAdvance(text)
     ascent, descent = fm.ascent(), fm.descent()
     px, py = point.x(), point.y()
@@ -289,10 +281,9 @@ def _datum_list(item):
 def _grid_series_opts(
     chart, axis_kind: str = None, axis_index: int = 0, grid_index: int = None
 ):
-    """当前 option 中落在 grid 坐标系的系列 option 列表（内部引用，零拷贝）。
+    """当前 option 中落在 grid 坐标系的系列 option（内部引用，零拷贝）。
 
-    ``axis_kind`` 为 ``"x"`` / ``"y"`` 时只保留绑定到该轴索引的系列
-    （缺省索引 = 0）；``None`` 表示不过滤。
+    ``axis_kind`` 给 ``"x"`` / ``"y"`` 时只保留绑定到该轴索引的系列（缺省索引 0）。
     """
     out = []
     for s in chart._option_ref().get("series") or []:
@@ -330,13 +321,8 @@ def _finite(v) -> bool:
 def _numeric_xy(data):
     """数值化 ``[(x, y), ...]`` → numpy 数组；不可数值化返回 ``(None, None)``。
 
-    折线已有这套快路径（``LineSeriesRenderer._to_arrays``），但 bar /
-    candlestick / boxplot 的 ``layout`` 仍在逐项调 ``parseDataPoint``
-    ——本优化的先冲来自「逐项调
-    ``parseDataPoint``」（cProfile 下 tottime 前三），而不是柱的绝对数量。
-
-    纯数值序列（x 取下标）与 ``[x, y]`` 对序列走 numpy；含 dict / None /
-    混合形态返回 ``(None, None)``，调用方回退 Python 循环（数据量通常较小）。
+    纯数值序列（x 取下标）与 ``[x, y]`` 对序列走 numpy，其余形态由调用方回退
+    Python 循环（逐项 ``parseDataPoint`` 是 bar / candlestick / boxplot 的布局热点）。
     """
     if _ds.np is None:
         return None, None
@@ -344,11 +330,8 @@ def _numeric_xy(data):
     if not n:
         return None, None
     np_ = _ds.np
-    # **必须先抽样确认元素类型**：``asarray`` 对 ``[1.0, None]`` 会把 None
-    # 变成 NaN 并成功返回（ndim==1），对 ``[[1,2,3]]`` 也会成功返回
-    # （ndim==2, shape[1]==3）。若直接信任返回值，这两种结构型数据会被
-    # 误当数值序列 —— ``[x, y, z]`` 的第三列被静默丢弃、None 间隙被
-    # 当成 NaN 跳过（后者恰好正确，但前者是错误）。
+    # 必须先抽样确认元素类型：asarray 对 [1.0, None] 会把 None 变 NaN、对
+    # [[1,2,3]] 也会成功（ndim==2），直接信任返回值会把 [x, y, z] 的第三列静默丢弃。
     step = max(1, n // 64)
     probes = set(range(0, n, step))
     probes.update(range(min(24, n)))
@@ -385,13 +368,8 @@ _GRID_EXTENT_CACHE_LIMIT = 32
 def _seq_len(value) -> int:
     """序列长度，非序列 / 无长度返回 0。
 
-    **别写 ``len(v or ())``**：``v`` 是裸 ndarray 时 ``or`` 会对它求真值，
-    numpy 抛 ``ValueError: The truth value of an array with more than one
-    element is ambiguous``。这条路径的后果特别隐蔽 —— 异常被 ``_paint_series``
-    的 ``warn_once`` 吞掉（且去重后只报一次），表现为 **bar / candlestick /
-    boxplot 一根都不画、没有任何报错**。而「可直接传 numpy 数组」是本模块
-    明文承诺的用法（``data`` 模块 docstring），短数组（< 256）不包装成
-    ``ElaNumericBuffer``，所以裸 ndarray 确实会走到这里。
+    别写 ``len(v or ())``：裸 ndarray 的真值判断会抛 ValueError，而异常会被
+    绘制层的 warn_once 吞掉 —— 表现为 bar / candlestick / boxplot 一根都不画。
     """
     if value is None:
         return 0
@@ -406,9 +384,8 @@ def _grid_value_extent(
 ):
     """grid 数值轴真实范围（类型感知）：stack 柱按堆叠和。返回 (dmin, dmax) 或 None。
 
-    带缓存（见 ``_GRID_EXTENT_CACHE``）：逐系列 ``layout`` 都会调它，
-    百万点下每次全量遍历会让布局时间放大一个数量级。``axis_kind`` /
-    ``axis_index`` 只筛选**哪些系列**参与（多 y 轴时副轴不能污染主轴范围）。
+    逐系列 ``layout`` 都会调它，结果带缓存（见 ``_GRID_EXTENT_CACHE``）；
+    ``axis_kind`` / ``axis_index`` 只筛选哪些系列参与（副轴不能污染主轴范围）。
     """
     opts = _grid_series_opts(chart, axis_kind, axis_index, grid_index)
     key = (
@@ -435,15 +412,14 @@ def _grid_value_extent(
 def _grid_value_extent_uncached(chart, opts, axis_kind: str = "y") -> tuple:
     """``_grid_value_extent`` 的实际计算（无缓存）。
 
-    ``axis_kind`` 决定读数据项哪一维：``"x"`` 读 ``[x, y]`` 的第一维 /
-    横向柱的标量值，``"y"`` 读第二维 / 标量值。堆叠和只在 y 轴累计
-    （x 轴是类目 / 独立值，不参与堆叠）。
+    ``axis_kind`` 决定读哪一维：``"x"`` 读 ``[x, y]`` 的第一维 / 横向柱标量，
+    ``"y"`` 读第二维 / 标量；堆叠和只在 y 轴累计。
     """
     dmin = None
     dmax = None
 
     def feed(v):
-        """喂一个候选极值；**非有限值必须拒收**（后果见 AGENTS.md「charts」）。"""
+        """喂一个候选极值；非有限值必须拒收（inf 会让轴塌成 0..1）。"""
         nonlocal dmin, dmax
         if v is None or not math.isfinite(v):
             return
@@ -563,13 +539,11 @@ def _fix_value_axis(axis, chart, series_opt=None, axis_kind: str = "y"):
             # log 轴只接受正值；全非正时保持 setSeries 给的默认范围。
             if lo <= 0.0 or hi <= 0.0:
                 return
-        # 记下真实全量范围：dataZoom 的「全量」必须用它，而不是 setSeries
-        # 阶段那份（横向柱的 x 是下标、堆叠柱只算单值、K 线只算收盘价）。
-        # 窗口态下不要用全量覆盖当前窗口 —— 窗口由 dataZoom 负责写回。
+        # 记下真实全量范围（dataZoom 的「全量」靠它，setSeries 阶段那份不准）；
+        # 窗口态下不覆盖当前窗口 —— 窗口由 dataZoom 写回。
         if not getattr(axis, "_windowed", False):
             axis.setExtent(lo, hi)
-            # setExtent 会做 0 基线 / min-max / nice ticks；全量要取**生效后**
-            # 的端点，否则「缩放态」与「全景态」的轴范围会差一档。
+            # 取 setExtent 生效后的端点，否则「缩放态」与「全景态」差一档。
             extent = (float(axis.vmin), float(axis.vmax))
         else:
             extent = (lo, hi)

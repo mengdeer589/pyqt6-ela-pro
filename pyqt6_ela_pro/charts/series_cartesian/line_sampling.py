@@ -28,15 +28,10 @@ class _LineSamplingMixin:
         return index
 
     def _stacked_data(self):
-        """stack 模式：叠加前序同名 stack 可见系列的值（不影响原始 opt）。
+        """stack 模式：叠加前序同名 stack 可见系列的值（不改原始 opt）；无 stacking 返回 None。
 
-        返回叠加后的 data；无 stacking 时返回 ``None``。基线存于
-        ``self._stack_base``（index -> 基线值），tooltip / 标签按原始值展示。
-
-        **结果必须缓存**：本方法每次都新建一整份 list（dict 项还要 ``{**item}``
-        逐个复制），而 ``layout`` 每次 ``_layout_all`` 都会调它一次。下游的
-        采样缓存键里含 data 的**身份**，每次换一份新 list 就永不命中 ——
-        实测 stack 折线的布局耗时差 **22 倍**。
+        基线存于 ``self._stack_base``（index -> 基线值），tooltip / 标签仍按原始值展示。
+        结果必须缓存：每次新建整份 list 会让下游按数据身份命中的采样缓存永不命中。
         """
         stack = self.opt.get("stack")
         if not stack:
@@ -60,17 +55,13 @@ class _LineSamplingMixin:
             strategy = "samesign"
         key = (id(own), tuple((id(s), len(s)) for s in srcs), strategy)
         hit = self._stacked_cache
-        # ``is`` 复核不能省：缓存条目**不持有**源数据（``out`` 里全是新算的
-        # 标量），而 ``setOption`` 换数据后旧对象会被释放，新对象完全可能拿到
-        # 同一个 ``id`` 且长度相同 —— 只比 key 就会把上一份叠加值当成当前的。
-        # 持强引用同时杜绝 id 复用。
+        # ``is`` 复核不能省：缓存条目不持有源数据（out 里全是新算的标量），
+        # setOption 换数据后旧对象释放，新对象可能拿到同一个 id 且长度相同。
         if hit is not None and hit[0] == key and hit[1] is own and hit[2] == srcs:
             self._stack_base = hit[3]
             return hit[4]
 
-        # ECharts ``stackStrategy``：默认 ``samesign`` —— 正值向上、负值向下
-        # **分别**堆叠。原先无条件相加，正负混合的数据会算错（负值被加到
-        # 正值基线上，整条曲线数值与面积基线都不对）。
+        # stackStrategy 默认 samesign：正负分别堆叠（无条件相加会把负值加到正值基线上）。
         all_base: dict = {}
         pos_base: dict = {}
         neg_base: dict = {}
@@ -133,8 +124,7 @@ class _LineSamplingMixin:
     def _to_arrays(self, data):
         """数值化 data → (x_arr|None, y_arr)；x_arr=None 表示纯数值（x=下标）。
 
-        纯数值列表 / [x, y] 列表走 numpy 快速路径；含字典 / None / 混合
-        等复杂形式返回 (None, None)，由调用方回退 Python 路径。
+        纯数值 / [x, y] 序列走 numpy，含字典 / None / 混合形态返回 (None, None)。
         """
         n = len(data)
         if n == 0 or _ds.np is None:
@@ -153,11 +143,8 @@ class _LineSamplingMixin:
         """解析当前 data 到 numpy / Python 双路径，并填充取值缓存。"""
         data = self._stacked_data() or self.dataView()
         self._data_len = len(data)
-        # 身份判据：``is``（配合 ``_data_ref`` 强引用）+ **长度**。两者都要：
-        # - 只比 ``is``：原地增长（appendData 之类先 extend 同一 list）会漏判，
-        #   numpy 视图停留在旧长度上，新点画不出来；
-        # - 只比 ``(id, len)``：id 在对象回收后会被复用，可能把上一份数据的
-        #   numpy 视图当成当前的（``_data_ref`` 强引用从根上排除这一类）。
+        # 身份判据 = ``is``（配 ``_data_ref`` 强引用）+ 长度：只比 is 会漏掉原地
+        # 增长（numpy 视图停在旧长度），只比 (id, len) 会撞 id 复用。
         if data is not self._data_ref or self._data_len != self._cached_len:
             self._np_x = self._np_y = None
             self._y_vals = []
@@ -169,19 +156,15 @@ class _LineSamplingMixin:
                 x_arr = _ds.np.arange(len(data), dtype=_ds.np.float64)
                 pure_index = True
             if y_arr is not None and _ds.available():
-                # tsdownsample 的 Rust 侧只吃 C 连续数组：2D [x, y] 输入取出的
-                # **列视图**（arr[:, 0]）会被静默拒绝、每次都掉进 numpy 兜底
-                # （实测 1M 降采样 0.5ms → 12ms）。按数据身份一次性转出连续
-                # 副本，只付一次；未装 tsdownsample 时不需要，省一份内存。
+                # tsdownsample 只吃 C 连续数组：2D 输入取出的列视图会被静默拒绝，
+                # 每次都掉进 numpy 兜底。按数据身份一次性转连续副本。
                 if not x_arr.flags["C_CONTIGUOUS"]:
                     x_arr = _ds.np.ascontiguousarray(x_arr)
                 if not y_arr.flags["C_CONTIGUOUS"]:
                     y_arr = _ds.np.ascontiguousarray(y_arr)
             self._np_x, self._np_y = x_arr, y_arr
-            # x 时间基一次性分析（单调性 / 步长 / 记录中断位置）：替代原先
-            # **每次布局**都跑的 ``is_sorted``（1M≈1.4ms、5M≈7ms），并供
-            # searchsorted 窗口（连续段走切片视图）与 gap 插入使用。
-            # 纯数值数据（x = 下标）无需扫描：恒单调、无中断。
+            # x 时间基一次性分析（单调性 / 步长 / 记录中断位置），供 searchsorted
+            # 窗口与 gap 插入使用；纯数值数据（x = 下标）无需扫描。
             self._np_x_monotone = self._np_x_strict = False
             self._np_step = 0.0
             self._np_gap_pos = None
@@ -209,8 +192,7 @@ class _LineSamplingMixin:
                         x = axis.toNumber(x)
                     self._x_vals.append(x)
                     self._y_vals.append(y)
-                # x 单调不减？（纯 Python 兜底路径的窗口裁剪走 bisect 快路径；
-                # 只要全部是数值且有序，取窗口就是 O(log n)）
+                # 全数值且有序时窗口裁剪走 bisect（O(log n)）。
                 prev = None
                 ordered = True
                 for x in self._x_vals:
@@ -266,12 +248,8 @@ class _LineSamplingMixin:
     def _window(self, coord):
         """当前可见窗口：``None``（全量）/ ``(start, stop)`` 连续段 / 下标数组。
 
-        - **单调 x 或 category 轴**：连续段 ``(start, stop)`` —— 下游用切片
-          视图，免掩码、免拷贝（``searchsorted`` 取边界，10M 点 ≈ 0.01ms，
-          对比全量布尔掩码 7ms + 40MB 下标数组）；
-        - **乱序 value 轴**：``flatnonzero`` 掩码下标（按数据身份 + 范围缓存，
-          同窗口的 y 缩放 / 重排不重算）；
-        - **全量窗口返回 ``None``**（既不裁剪也不分配）。
+        单调 x 或 category 轴给连续段（下游用切片视图，免掩码免拷贝）；乱序
+        value 轴给 ``flatnonzero`` 掩码下标（按数据身份 + 范围缓存）。
         """
         if not isinstance(coord, GridCoord) or _ds.np is None:
             return None
@@ -305,7 +283,7 @@ class _LineSamplingMixin:
             return self._win_cache
         idx = _ds.np.flatnonzero((x >= lo) & (x <= hi))
         if idx.size >= self._data_len:
-            idx = None  # 全量窗口 = 不做裁剪（保持老行为与性能）
+            idx = None  # 全量窗口不裁剪
         self._win_cache_key = key
         self._win_cache = idx
         return idx
@@ -321,14 +299,9 @@ class _LineSamplingMixin:
     def _py_window(self, axis):
         """纯 Python 兜底路径的可见窗口下标（``None`` = 不做裁剪）。
 
-        **为什么必须有**：没有 numpy 快路径的数据（dict 项 / 混合类型 / 含 None）
-        此前完全没有窗口裁剪 —— stride 抽稀跑在全量数据上，缩放 / 平移后绘制只
-        覆盖窗口的一小段（实测覆盖度 195% / 2000% / 7399%，视觉上「越缩放越稀、
-        平移后曲线跑到屏幕外」）。
-
-        返回 ``range``（有序 / category：惰性、O(log n)）或 ``list[int]``
-        （无序：一次线性扫描），按「数据身份 + 轴范围」缓存 —— 换窗口才重算，
-        不在每帧付扫描成本。
+        没有 numpy 快路径的数据（dict 项 / 混合类型 / 含 None）也要按窗口裁剪，
+        否则缩放 / 平移后抽稀跑在全量上、绘制只覆盖窗口的一小段。返回 ``range``
+        （有序 / category，O(log n)）或 ``list[int]``（无序），按数据身份 + 轴范围缓存。
         """
         n = self._data_len
         if axis is None or n <= 0:
@@ -358,21 +331,16 @@ class _LineSamplingMixin:
                 picked = [i for i, x in enumerate(xs) if lo <= x <= hi]
                 result = picked
             if result is not None and len(result) >= n:
-                result = None  # 全量窗口 = 不做裁剪（保持老行为与性能）
+                result = None  # 全量窗口不裁剪
         self._py_window_key = key
         self._py_window_cache = result
         return result
 
     def _decimate(self, y, x, n_out: int, algo: str, assume_sorted: bool = False):
-        """按算法抽稀，返回**局部**下标数组；不可行时返回 ``None``。
+        """按算法抽稀，返回局部下标数组；不可行时返回 ``None``。
 
-        三层兜底：
-        1. tsdownsample（要求 x 严格递增、n_out 满足算法下界）；
-        2. numpy 按桶 min/max（``bucket_minmax_indices``，不要求 x 有序）；
-        3. 都没有（纯 Python 宿主）由调用方走等距抽稀。
-
-        ``assume_sorted``：调用方已按数据身份验过 x 严格递增（``analyze_x``），
-        免去每次 O(n) 重扫。
+        三层兜底：tsdownsample（要求 x 严格递增）→ numpy 按桶 min/max（不要求
+        有序）→ 调用方等距抽稀。``assume_sorted`` 表示 x 已按数据身份验过严格递增。
         """
         if _ds.np is None or y is None or y.size == 0:
             return None
@@ -409,12 +377,8 @@ class _LineSamplingMixin:
     def _apply_gap_breaks(self, coord, plot_w: float) -> None:
         """按预计算的记录中断位置在采样点之间插入 None 断点。
 
-        两段式规则（见 ``_downsample.analyze_x``）：
-
-        - 数据侧：相邻时间差 > 4.1 × 步长的位置 = 记录中断（一次性预计算）；
-        - 屏幕侧：中断在当前窗口的像素宽度 ≥ ``_GAP_MIN_PIXELS``（4px）才
-          断开 —— 亚像素空洞照常连线（断开反而闪，且桥接亚像素空洞不误导）。
-
+        数据侧：相邻时间差 > 4.1 × 步长即记录中断（一次性预计算）；屏幕侧：
+        中断像素宽 ≥ ``_GAP_MIN_PIXELS`` 才断开（亚像素空洞照常连线，断开反而闪）。
         ``addGaps: false`` / ``connectNulls: true`` 关闭；仅数值 x 轴生效。
         """
         if not bool(self.opt.get("addGaps", True)):
@@ -433,8 +397,7 @@ class _LineSamplingMixin:
             return
         np_ = _ds.np
         arr = np_.asarray(self._point_idx, dtype=np_.int64)
-        # 采样点原始下标严格升序（连续窗口 / 抽稀输出均如此）：二分找中断
-        # 右侧的第一个采样点，断点插在它前面。
+        # 采样点原始下标严格升序：二分找中断右侧的第一个采样点，断点插在它前面。
         js = np_.searchsorted(arr, gap_pos, side="right")
         keep = (js > 0) & (js < arr.size)
         if not keep.any():
@@ -448,7 +411,6 @@ class _LineSamplingMixin:
         idxs = self._point_idx
         for j in sorted(np_.unique(js).tolist(), reverse=True):
             points.insert(j, None)
-            # 与 None 点平行的占位：**必须保持 `_point_idx` 升序**（valueAtIndex
-            # 用二分查最近点，插 -1 会让整个列表失序、命中点画到别处）。
-            # 重复前一个下标即可：该位置的 point 是 None，消费者会跳过。
+            # 占位必须保持 `_point_idx` 升序（valueAtIndex 用二分查最近点，
+            # 插 -1 会失序、命中点画到别处）：重复前一个下标即可，消费者跳过 None。
             idxs.insert(j, idxs[j - 1] if j > 0 else 0)

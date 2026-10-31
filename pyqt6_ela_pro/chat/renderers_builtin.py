@@ -1,12 +1,7 @@
 """可选的内置工具结果渲染器（默认不注册，宿主 opt-in）。
 
-``installBuiltinToolRenderers()`` 只注册高价值的几类：
-- ``shell`` / ``bash`` / ``execute``：复用 ``ElaTerminalView``（ANSI 色彩 /
-  行数上限 / 主题 / 右键复制），关掉它的工具栏与行号槽；
-- ``edit`` / ``write`` / ``patch`` / ``apply_patch``：文件变更 + 懒建 diff。
-
-宿主可先注册自己的实现（``replace=False``），内置安装会**跳过同名**，
-不会覆盖宿主的产品决策。
+``installBuiltinToolRenderers()`` 注册 shell 输出（复用 ``ElaTerminalView``）与
+文件变更（懒建 diff）两类；同名已存在时跳过，不覆盖宿主实现。
 """
 
 from __future__ import annotations
@@ -38,11 +33,7 @@ CONSOLE_MAX_LINES = 2000
 
 
 def cleanAnsi(text: str) -> str:
-    """去掉 ANSI 转义，保留最后一次 ``\\r`` 重画的内容。
-
-    内置 shell 渲染器现在直接交给 :class:`ElaTerminalView`（它自己解析 ANSI
-    并保留颜色），本函数只留给宿主诊断 / 纯文本导出使用。
-    """
+    """去掉 ANSI 转义，保留最后一次 ``\\r`` 重画的内容（纯文本诊断 / 导出用）。"""
     raw = _ANSI_RE.sub("", str(text or ""))
     lines = []
     for line in raw.replace("\r\n", "\n").split("\n"):

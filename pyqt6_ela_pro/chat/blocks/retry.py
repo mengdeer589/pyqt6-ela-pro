@@ -1,10 +1,6 @@
 """自动重试卡（第 N 次重试 + 倒计时）。
 
-与 ``ErrorCard`` 的区别：错误卡是**落定结果**（失败后由用户点重试），重试卡是
-**在途状态**（后端正在按退避策略重试）。两者视觉同级、语义相反，所以卡面共用
-一套材质但分成两个控件。
-
-组件只显示 + 发信号，**不自己重发**：重试由宿主 / binder 驱动。
+与 ``ErrorCard`` 的区别：错误卡是落定结果，重试卡是在途状态。组件只显示 + 发信号，不自己重发。
 """
 
 from __future__ import annotations
@@ -52,9 +48,7 @@ class ElaChatRetryCard(_ThemeAwareMixin, ElaScrollPageArea):
         self._rail_color = QColor(0, 0, 0, 0)
         self.setMinimumHeight(0)
         self.setMaximumHeight(16777215)
-        self.setSizePolicy(
-            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed
-        )
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         self.setBorderRadius(8)
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, False)
 

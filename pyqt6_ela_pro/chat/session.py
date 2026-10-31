@@ -1,21 +1,8 @@
 """
-会话（话题）快照数据模型（``pyqt6_ela_pro.chat``）。
+会话（话题）快照数据模型与会话级用量汇总（``pyqt6_ela_pro.chat``）。
 
-**多话题由宿主管理**：组件是「单话题视图」，多话题按「一话题一 widget」
-放大（``ElaTabBar`` + ``QStackedWidget``，见 ``example/chat_session_page.py``）——
-话题的新建 / 归档 / 切换 / 列表 UI 全是宿主的事，组件侧只用
-``ElaChatWidget.setCurrentSessionId()` 记一个纯标记。
-
-本模块提供：
-
-- :class:`ElaChatSessionInfo`：话题元数据快照（``id`` / 标题 / 创建时间 /
-  消息条数 / 工作目录），成对 ``toDict()`` / ``fromDict()`` 可直接落库；
-- :class:`ElaChatSessionStats`：会话级用量汇总（计数 / 当前上下文四路词元 /
-  使用率 / 累计成本 / 最后活动 / 工具调用统计 / 思考耗时合计），由
-  ``ElaChatView.sessionStats(limit)`` 聚合；
-- 整会话（元数据 + 消息 + 视图外观）的导出 / 导入见
-  ``ElaChatView.exportSession()`` / ``importSession()`` —— 归档 / 恢复话题
-  就是「导出 bundle → 销毁页面；重建页面 → 导入 bundle」。
+多话题由宿主管理（一话题一 widget）；本模块只提供 ``ElaChatSessionInfo`` 元数据
+快照与 ``ElaChatSessionStats`` 用量汇总。
 """
 
 from __future__ import annotations
@@ -103,8 +90,7 @@ def _last_stats(message):
 def _stats_total(stats) -> int:
     """四路词元和；四路全 0 但服务端给了 ``total_tokens`` 时按它折算（老数据）。
 
-    ``reasoning_tokens`` **不计入** —— 它是 ``completion_tokens`` 的子集
-    （见 :class:`~pyqt6_ela_pro.chat.message.ElaChatStats`），再加一遍就是双计。
+    ``reasoning_tokens`` 不计入 —— 它是 ``completion_tokens`` 的子集。
     """
     context = getattr(stats, "contextTokens", None)
     if callable(context):
@@ -157,33 +143,10 @@ def _add_tool_call(call, tool_counts: dict) -> tuple[int, int, int, int]:
 
 @dataclass(frozen=True)
 class ElaChatSessionStats:
-    """会话级用量汇总（对齐 opencode ``getSessionContext`` 的口径）。
+    """会话级用量汇总（口径对齐 opencode ``getSessionContext``）。
 
-    **「当前用量」取最后一条有 tokens 的助手消息的最后一步** —— 多步工具轮里
-    就是最近一次 LLM 调用（不是整轮 merge、也不是全会话求和），它回答的是
-    「现在上下文占了多少」；累计成本则跨全部消息求和。
-
-    字段对齐 opencode 的 context 面板：
-
-    - 计数：``message_count`` / ``user_messages`` / ``assistant_messages``；
-    - 当前上下文：``input_tokens`` / ``output_tokens`` / ``reasoning_tokens``
-      / ``cache_read_tokens`` / ``cache_write_tokens`` / ``total_tokens``（四路和）；
-    - ``usage_percent``：给了 ``limit``（模型上下文上限）时 = 四路和 / limit
-      并夹在 ``0..100``；没给 / 无数据为 ``None``（**不谎报 0%**）；
-    - ``total_cost_usd``：全会话累计（各消息 ``stats.cost_usd`` 求和）；
-    - ``last_activity``：那条「最后有 tokens 的助手消息」的 ``created_at``
-      （对齐 opencode 的 lastActivity）；
-    - 工具统计（同一次遍历产出）：``tool_calls`` / ``tool_rounds`` —— 调用总
-      次数与**轮数**（有工具调用的步骤数合计，消息内按 ``step`` 去重：一个
-      step 并行多个调用算一轮，与 UI「工具面板每步一个」同口径）；
-      ``tool_errors`` / ``tool_aborted`` / ``tool_unsettled`` —— 按
-      :class:`ElaChatToolStatusType` 分档（``unsettled`` = pending + running；
-      ``done`` 可由 ``calls - errors - aborted - unsettled`` 推得）；
-      ``tool_counts`` —— 工具名（小写归一）-> 次数（全部状态都计、空名字不计）；
-    - ``reasoning_ms``：全会话思考段 ``duration_ms`` 合计。
-
-    会话标题 / 提供商 / 模型 / 创建时间属于**宿主会话元数据**
-    （:class:`ElaChatSessionInfo` 或宿主自己的存储），库不推断。
+    「当前用量」取最后一条有 tokens 的助手消息的最后一步；累计成本跨全部消息
+    求和。字段说明见各 ``#:`` 注释。
     """
 
     #: 消息总数（含系统消息）
@@ -269,8 +232,8 @@ class ElaChatSessionStats:
                     tool_unsettled += unsettled
                     steps_with_tools.add(max(1, _as_int(getattr(part, "step", 1), 1)))
             tool_rounds += len(steps_with_tools)
-            # 旧格式（只有消息级字段、没有分段）：回退到 message.tool_calls /
-            # message.reasoning_ms。没有 step 信息，工具按「一条消息一轮」计。
+            # 旧格式（只有消息级字段）：回退到 message.tool_calls / reasoning_ms，
+            # 没有 step 信息，工具按「一条消息一轮」计。
             if not saw_tool:
                 legacy_calls = getattr(item, "tool_calls", ()) or ()
                 legacy_any = False

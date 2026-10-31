@@ -1,16 +1,7 @@
-"""
-charts 包主题令牌适配层（私有）。
+"""charts 包主题令牌适配层（私有）：``T("...")`` 映射到 ``eTheme`` 语义令牌。
 
-将源引擎（InstructionX_UIKit.charts，PyQt6 + 自建令牌）对 ``T("...")``
-的读取，映射到本库 ``eTheme`` / ``ElaThemeType`` 语义令牌：颜色一律
-实时取 ``eTheme.getThemeColor(mode, ...)``，深浅色主题切换后重绘即生效，
-观感与当前 Ela 组件库保持一致。
-
-Ela 主题色中没有的语义色（success / warning / 主色上的浮层文字等）使用
-静态双主题色表（light / dark），并集中在本模块以便审计。字体字号 / 圆角
-/ 动效时长为固定常量（源令牌值）。
-
-对外仅暴露 ``chart_token(mode, key)`` 与 ``T(key)``（实时模式）及少量常量。
+颜色实时取 ``eTheme.getThemeColor(mode, ...)``，主题切换后重绘即生效；
+Ela 主题没有的语义色用本模块的静态双主题色表。
 """
 
 from __future__ import annotations
@@ -96,11 +87,7 @@ def _subtle_primary(mode) -> QColor:
 
 
 def chart_token(mode, key):
-    """读取单个令牌值：颜色返回 ``QColor``（实时主题），数值返回 int/float。
-
-    ``mode`` 是主题模式（``eTheme.getThemeMode()`` 返回值），``key`` 是令牌键
-    （如 ``"color.bg.base"`` / ``"font.xs"``）。
-    """
+    """读取单个令牌值：颜色返回 ``QColor``（实时主题），数值返回 int/float。"""
     if key == "color.primary.subtle":
         return _subtle_primary(mode)
     member = _ELA_COLOR_KEYS.get(key)
@@ -152,10 +139,7 @@ ECHARTS_PALETTE = [
 def palette_for_mode(mode) -> list:
     """当前主题的数据系列调色板（ECharts 默认 9 色，主题无关）。
 
-    **必须每次新建 list**：调用方会 ``setAlphaF`` 改单个元素的 alpha
-    （bar / scatter 逐图元调透明度），返回共享实例会让一次绘制污染全局
-    调色板 —— 表现为「悬浮过某根柱之后所有系列颜色都变了」。而 bar /
-    scatter 的绘制路径逐图元取色，本函数单帧被调上万次，每次新建 9 个
-    QColor 是绘制路径最大的 Python 开销（profiling 占 tottime 16%）。
+    必须每次新建 list：调用方会就地 ``setAlphaF`` 改元素，共享实例会让一次
+    绘制污染全局调色板。
     """
     return [QColor(c) for c in ECHARTS_PALETTE]

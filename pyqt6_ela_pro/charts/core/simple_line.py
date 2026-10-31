@@ -25,10 +25,8 @@ from .renderer import SeriesRenderer
 class SimpleLineSeriesRenderer(SeriesRenderer):
     """内置简易 line 渲染器（接口自测 / 兜底实现）。
 
-    注意：本实现刻意保持简单（直线段 + 圆点，无 smooth/areaStyle/step），
-    **不自动注册**；包入口导入 ``series_cartesian`` 时会注册完整版 ``line``，
-    仅当需要无依赖的最小渲染器做自测时才手动
-    ``registerSeries("line", SimpleLineSeriesRenderer)``。
+    刻意保持简单（直线段 + 圆点，无 smooth / areaStyle / step）且**不自动注册**：
+    包入口会注册完整版 ``line``，需要最小渲染器自测时才手动注册。
     """
 
     def __init__(self, chart, opt):

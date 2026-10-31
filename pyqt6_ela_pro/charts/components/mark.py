@@ -20,10 +20,8 @@ from ..core import (
 class _SeriesMarkBase:
     """markPoint / markLine / markArea 的公共基类。
 
-    core 重建时对每个含同名键的 series 字典实例化一次，并注入
-    ``comp.series_opt``（指向所属系列 option 字典）。本基类负责反查
-    对应的系列渲染器与坐标系。构造时 ``series_opt`` 尚未注入，相关解析
-    一律推迟到 layout / paint。
+    core 重建时对每个含同名键的 series 注入 ``comp.series_opt``；构造期它尚未
+    注入，所以系列 / 坐标解析一律推迟到 layout / paint。
     """
 
     optionKey = ""
@@ -86,11 +84,7 @@ class _SeriesMarkBase:
         return r is not None and r.visible
 
     def _label_option(self, item: dict) -> dict:
-        """标注标签 option：系列级 ``label`` 叠加数据项级 ``label``（项级优先）。
-
-        **返回原始键**（``show`` / ``position`` / ``formatter`` 也在内），
-        外观键的全局兜底走 :meth:`_label_style`。
-        """
+        """标注标签 option：系列级 ``label`` 叠加项级 ``label``（返回原始键）。"""
         base = self.opt.get("label")
         base = dict(base) if isinstance(base, dict) else {}
         item_label = item.get("label") if isinstance(item, dict) else None
@@ -114,10 +108,8 @@ class _SeriesMarkBase:
 class MarkPointComponent(_SeriesMarkBase):
     """数据点标注：最大 / 最小值或指定坐标，圆点（小旗式插针）+ 值文本。
 
-    option（系列级）::
-
-        "markPoint": {"data": [{"type": "max"|"min"},
-                               {"coord": [x, y], "value": v, "name": "..."}]}
+    ``markPoint.data`` 项为 ``{"type": "max"|"min"}`` 或
+    ``{"coord": [x, y], "value": v, "name": "..."}``。
     """
 
     optionKey = "markPoint"
@@ -288,12 +280,7 @@ _TYPE_LABELS = {"average": "平均值", "max": "最大值", "min": "最小值"}
 class MarkLineComponent(_SeriesMarkBase):
     """参考标线：平均值 / 最大 / 最小或指定 yAxis / xAxis，虚线 + 端部标签。
 
-    option（系列级）::
-
-        "markLine": {"data": [{"type": "average"|"max"|"min", "name": "..."},
-                              {"yAxis": v}, {"xAxis": v}]}
-
-    仅作用于 GridCoord 直角坐标（其他坐标系静默跳过）。
+    仅作用于 GridCoord 直角坐标（其它坐标系静默跳过）。
     """
 
     optionKey = "markLine"
@@ -394,12 +381,17 @@ class MarkLineComponent(_SeriesMarkBase):
                             120,
                             fm.height(),
                         )
-                        align = Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignVCenter
+                        align = (
+                            Qt.AlignmentFlag.AlignHCenter
+                            | Qt.AlignmentFlag.AlignVCenter
+                        )
                     else:  # end（默认）
                         rect = QRectF(
                             plot.right() - 120, py - fm.height() - 3, 118, fm.height()
                         )
-                        align = Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
+                        align = (
+                            Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
+                        )
                 else:
                     px = coord.x_axis.map(value, plot.left(), plot.right())
                     if position == "start":
@@ -587,17 +579,9 @@ class MarkLineComponent(_SeriesMarkBase):
 class MarkAreaComponent(_SeriesMarkBase):
     """区间标域：xAxis / yAxis 值对的半透明填充区域。
 
-    option（系列级）::
-
-        "markArea": {"data": [[{"xAxis": a}, {"xAxis": b}],
-                              [{"yAxis": a}, {"yAxis": b}]]}
-
-    填充取主题主色低透明度；category 轴向两侧各扩半个 band。
-
-    **仅在 Grid 直角坐标系下生效**（``layout`` 里 ``isinstance(coord,
-    GridCoord)`` 不成立就静默返回空）。ECharts 的 markArea 依赖轴的
-    ``coord`` 换算，polar / calendar / singleAxis 的区间语义与矩形不等价，
-    本库不做近似 —— 所以挂在饼图 / 雷达这类系列上是不画，而不是画错。
+    填充取主题主色低透明度；category 轴向两侧各扩半个 band。**仅在 Grid 直角
+    坐标系下生效** —— polar / calendar / singleAxis 的区间语义与矩形不等价，
+    本库不做近似（挂在这些系列上是不画，而不是画错）。
     """
 
     optionKey = "markArea"
@@ -666,11 +650,8 @@ class MarkAreaComponent(_SeriesMarkBase):
     def hitTest(self, pos: QPointF):
         """命中半透明背景区域。
 
-        **刻意不接进图表的命中分发**（``core._HOVERABLE_COMPONENTS`` 里没有
-        ``markArea``）：markArea 是铺在数据**底下**的大块半透明区间，接进来
-        之后「悬停区间内任何位置」都会抢走系列的悬停 —— 柱子 / 折线在区间内
-        就再也高亮不了，是明确的退化。ECharts 侧 markArea 同样不参与命中。
-        保留本方法是为了让「不参与」是**显式选择**而不是「忘了接」。
+        **刻意不接进命中分发**（``_HOVERABLE_COMPONENTS`` 里没有 ``markArea``）：
+        它会抢走区间内系列的悬停。保留本方法只为把「不参与」写成显式选择。
         """
         for area in self._areas:
             if area.contains(pos):

@@ -1,9 +1,4 @@
-"""聊天消息内部子块组件（``pyqt6_ela_pro.chat``）。
-
-本包是原 ``blocks.py`` 的结构化拆分：``__init__`` 只做再导出，
-实现按职责分布在同包子模块里（header / collapsible / tool_cards /
-attachments / stats / actions / misc / permission_* / _helpers）。
-"""
+"""聊天消息内部子块组件（``pyqt6_ela_pro.chat``）：本包只做再导出，实现按职责分布在各子模块。"""
 
 from __future__ import annotations
 

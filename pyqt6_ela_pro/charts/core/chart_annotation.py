@@ -35,8 +35,8 @@ class _ChartAnnotationMixin:
     def setAnnotationEditingEnabled(self, enabled: bool) -> None:
         """是否启用内置的标注标签双击行内编辑（默认开）。
 
-        关闭后双击标签只发 ``annotationEditRequested``，不弹编辑器；
-        宿主可自行弹框并调用 :meth:`setAnnotationText` 提交。
+        关闭后双击只发 ``annotationEditRequested``，宿主可自行弹框并调
+        :meth:`setAnnotationText` 提交。
         """
         self._annotation_editable = bool(enabled)
         if not self._annotation_editable:
@@ -234,8 +234,8 @@ class _ChartAnnotationMixin:
     ) -> bool:
         """修改标注标签文本（markPoint / markLine 的 ``name``）。
 
-        系列寻址：``seriesId`` → ``seriesName`` → ``seriesIndex``（都为空时
-        取首个含该组件的系列）。返回是否成功。
+        系列寻址：``seriesId`` → ``seriesName`` → ``seriesIndex``（都为空时取
+        首个含该组件的系列）。返回是否成功。
         """
         wanted = str(componentType or "")
         explicit = seriesId is not None or seriesIndex is not None or bool(seriesName)
@@ -292,9 +292,8 @@ class _ChartAnnotationMixin:
         """修改某个数据点的标签文本（写入 ``series.labelTexts[str(index)]``）。
 
         系列寻址：``seriesId`` → ``seriesName`` → ``seriesIndex``（都为空时取
-        首个可见系列）。空字符串 = 删除覆盖、恢复默认数值文案。默认只失效
-        系列层位图并重绘，不重建坐标系 / 系列（百万点图表上编辑标签不会卡顿）；
-        ``rebuild=True`` 可强制全量重建。返回是否成功。
+        首个可见系列）。空字符串 = 删除覆盖、恢复默认数值文案。默认只失效系列
+        层位图（百万点图表上不卡顿），``rebuild=True`` 强制全量重建。
         """
         renderer = self._resolve_series(seriesName, seriesIndex, seriesId)
         if renderer is None or not hasattr(renderer, "setLabelText"):

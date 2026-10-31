@@ -26,26 +26,12 @@ from ._shared import _axis_index_list
 class DataZoomComponent(QObject):
     """区域缩放：inside（滚轮 + 拖拽平移）/ slider（底部双把手滑块）。
 
-    option::
-
-        "dataZoom": [{"type": "inside"|"slider", "xAxisIndex": 0,
-                      "yAxisIndex": 0, "start": 0, "end": 100,
-                      "yStart": 0, "yEnd": 100}]
-
-    start / end 为 X 轴 0-100 百分比窗口，yStart / yEnd 为 Y 轴窗口（自动
-    滚轮 / 框选组件默认同时启用 XY；显式 dataZoom 给了 yAxisIndex 或在
-    框选 / 滚轮时首次启用 Y，``yZoom: false`` 可禁用）。category 轴以类别
-    子窗口替换 ``axis.categories``，value / log 轴调整 ``vmin/vmax`` 并重算
-    刻度；均为幂等修改（基于缓存的全量数据计算），每次布局重放，不污染原始
-    option。
-
-    inside 的滚轮经 chart 上的事件过滤器拦截（core 未提供 wheel 钩子，
-    重建时旧过滤器会被移除，不会累积）。toolbox 的 dataZoom 开关经
-    ``chart._dataZoomEnabled`` 属性关闭 inside 交互（slider 常可用）。
-
-    **与 brush 共存时的显式优先级**：option 同时配置 brush 时，plot 内
-    左键拖拽归 brush（矩形刷选），inside 仅保留滚轮缩放（见
-    ``onMousePress`` 的 ``_brush_active`` 判断）。
+    ``dataZoom`` 条目支持 ``type`` / ``xAxisIndex`` / ``yAxisIndex`` /
+    ``start`` / ``end`` / ``yStart`` / ``yEnd``；Y 轴窗口需显式
+    ``yAxisIndex`` 或自动滚轮 / 框选组件首次启用（``yZoom: false`` 可禁用）。
+    窗口重放幂等（category 轴换 ``categories`` 子集、value / log 轴调
+    ``vmin/vmax``），不污染原始 option；配 brush 时 plot 内左键拖拽归
+    brush，inside 只保留滚轮。
     """
 
     optionKey = "dataZoom"
@@ -82,10 +68,9 @@ class DataZoomComponent(QObject):
         self._y_zoom_allowed = first.get("yZoom", True) is not False
         #: ``zoomLock``：锁定窗口大小（滚轮不缩放，只能平移）
         self.zoom_lock = first.get("zoomLock") is True
-        #: ``filterMode``：``"filter"`` / ``"none"`` 都只改**轴窗口**，系列数据
-        #: 一条不删（类目轴用 ``_all_categories`` + ``windowOffset`` 保留全局下标）
-        #: —— 这正是 ``"none"`` 的语义；``"weakFilter"`` / ``"empty"`` 未实现，
-        #: 按 filter 处理并留一条告警。
+        #: ``filterMode``：``"filter"`` / ``"none"`` 都只改轴窗口、不删系列数据
+        #: （category 轴靠 ``_all_categories`` + ``windowOffset`` 保留全局下标）；
+        #: 未实现的模式按 filter 处理并留一条告警。
         mode = str(first.get("filterMode") or "filter").strip().lower()
         if mode not in ("filter", "none"):
             warn_once(
@@ -98,9 +83,8 @@ class DataZoomComponent(QObject):
         self.has_slider = any(str(e.get("type")) == "slider" for e in self.entries)
         if not self.has_inside and not self.has_slider and self.entries:
             self.has_inside = True  # 未指明类型时按 inside 处理
-        # 全量范围缓存：``apply`` 懒捕 / ``captureExtent`` 重捕都会写这里。
-        # 必须在构造时初始化 —— host 自动滚轮组件在 ``_rebuild`` 的捕获循环
-        # 之后才创建，首次 ``refreshValueExtent`` 可能早于 ``captureExtent``。
+        # 全量范围缓存：``apply`` 懒捕 / ``captureExtent`` 重捕都写这里；
+        # 必须在构造时初始化 —— 首次 ``refreshValueExtent`` 可能早于 ``captureExtent``。
         self._full_cats = {}
         self._full_range = {}
         self._full_y_cats = {}
@@ -113,9 +97,9 @@ class DataZoomComponent(QObject):
             if entry.get("xAxisIndex") is not None:
                 self._x_axis_indices = _axis_index_list(entry.get("xAxisIndex"))
                 break
-        # 完整轴数据缓存（首次布局时捕获）：按 x 轴索引分桶
-        self._full_cats: dict = {}  # index -> category 轴完整类别
-        self._full_range: dict = {}  # index -> value/log 轴 (vmin, vmax)
+        # 完整轴数据缓存（首次布局时捕获）：按轴索引分桶
+        self._full_cats: dict = {}
+        self._full_range: dict = {}
         self._full_y_cats: dict = {}
         self._full_y_range: dict = {}
         #: 上一次写进 category 轴的 (i0, i1) 窗口（apply 幂等跳过用）
@@ -126,13 +110,9 @@ class DataZoomComponent(QObject):
         self._track = QRectF()
         self._h_start = QRectF()
         self._h_end = QRectF()
-        # 滚轮事件过滤器（core 无 wheel 钩子）。
-        # **解挂旧实例必须放在 ``has_inside`` 判断之外**：只在 ``has_inside`` 为真时
-        # 清理的话，``inside -> slider`` 的切换会留下一个仍挂在 chart 上的孤儿过滤器
-        # —— 它不在 ``chart.components`` 里，UI 的滑块不知道它的存在，但它继续
-        # 拦截滚轮并用**陈旧的** ``_full_cats`` / ``_full_range`` 改坐标轴，实测
-        # 滑块显示 0-100% 而实际窗口已缩到 10-90%，此后两者每帧互相覆盖。
-        # ``dataZoom`` 整块从 option 里删掉时同样要靠 ``dispose()`` 解挂。
+        # 滚轮事件过滤器（core 无 wheel 钩子）。解挂旧实例必须放在
+        # ``has_inside`` 判断之外，否则 inside -> slider 切换会留下仍拦截滚轮的
+        # 孤儿过滤器，它继续用陈旧的 ``_full_cats`` / ``_full_range`` 改坐标轴。
         prev = getattr(chart, "_datazoom_filter", None)
         if prev is not None and prev is not self:
             try:
@@ -197,15 +177,8 @@ class DataZoomComponent(QObject):
     def captureExtent(self) -> None:
         """重捕「全量范围」（``_rebuild`` 在 ``setSeries`` 之后调用，幂等）。
 
-        ``apply()`` 的窗口是相对**全量范围**算的，而全量范围原先只在首次
-        ``apply()`` 时懒捕一次 —— 「空数据起步」的图表会把 ``0~1`` 当全量钉死：
-        数据到了、``setSeries`` 也重算了轴范围，但 dataZoom 随即又把它改回
-        ``0~1``（默认滚轮缩放组件跨 ``setOption`` 存活，必中；症状是「生成 30 万点
-        后图里只有两个点、缩放也没反应」）。数据增长（``appendData`` / 周期
-        ``setOption``）同理。
-
-        类别轴用 ``_all_categories``（全量类别）—— ``categories`` 此时可能已被
-        窗口替换成子集。多 x / 多 y 轴时按索引分桶。
+        ``apply`` 的窗口相对**全量范围**计算，不重捕会让数据增长后仍按旧范围
+        缩放。类别轴用 ``_all_categories``（``categories`` 可能已被窗口替换）。
         """
         self._full_cats = {}
         self._full_range = {}
@@ -252,14 +225,10 @@ class DataZoomComponent(QObject):
                 )
 
     def refreshValueExtent(self) -> bool:
-        """系列 layout 修正轴范围后，只重捕**变过**的 value/log 全量范围。
+        """系列 layout 修正轴范围后，只重捕**变过**的 value / log 全量范围。
 
-        ``layout_all`` 的顺序是「写回窗口 → 坐标系 → 系列」。横向柱 / 堆叠柱 /
-        K 线 / 箱线图的真实值域要到系列 ``layout`` 里才算得出来，所以这里必须
-        在系列之后补一次 —— 否则 dataZoom 会拿「未修正的范围」当全量，把轴
-        改回去（默认自动滚轮组件必中：横向柱三根柱子一样长、堆叠柱上层被裁）。
-
-        只认 ``_extent_epoch`` 变化过的轴，避免每帧复制 1M 个类别列表。
+        横向柱 / 堆叠 / K 线 / 箱线的真实值域要到系列 ``layout`` 才算得出，
+        必须在系列之后补捕，否则 dataZoom 会把轴改回未修正的范围。
         """
         changed = False
         for index, axis in self._axes():
@@ -332,16 +301,14 @@ class DataZoomComponent(QObject):
             n = len(full)
             if n == 0:
                 return
-            # 百分比 → 下标必须带 epsilon：``i0/n*100`` 再乘回去常有 1ulp
-            # 误差（n=3, i0=1 得 0.9999999999999999，int() 退一格）。
+            # 百分比 → 下标要带 epsilon：``i0/n*100`` 再乘回去常有 1ulp 误差
+            # （n=3、i0=1 得 0.9999999999999999，int() 退一格）。
             i0 = int(math.floor(start / 100.0 * n + 1e-9))
             i1 = int(math.ceil(end / 100.0 * n - 1e-9))
             i0 = _clamp(i0, 0, n - 1)
             i1 = _clamp(max(i1, i0 + 1), 1, n)
-            # 幂等快速路径：窗口没变、且轴内容仍是上一次写的窗口时跳过 ——
-            # 每次布局 apply 会跑两次（applyWindow + 组件 layout），而
-            # 重建类目列表在 1M 个字符串上是 O(n) 复制（实测是 category
-            # 1M 帧的头号开销）。len 检查兜住外部改写 categories 的情况。
+            # 幂等快速路径：窗口没变且轴内容仍是上次写的窗口时跳过 —— 重建
+            # 1M 类别列表是 O(n) 复制，是 category 1M 帧的头号开销。
             if (i0, i1) != applied_cats.get(index) or len(axis.categories) != i1 - i0:
                 axis.categories = full[i0:i1]  # 切片本身就是新 list，别再包一层
                 applied_cats[index] = (i0, i1)
@@ -386,7 +353,7 @@ class DataZoomComponent(QObject):
         self.y_start = self.y_init_start
         self.y_end = self.y_init_end
         self.apply()
-        self.chart.invalidateLayout()  # 窗口变化 → 失效布局缓存
+        self.chart.invalidateLayout()
         self.chart.update()
         self._emit_changed(before)
 
@@ -424,11 +391,9 @@ class DataZoomComponent(QObject):
     def applyWindow(self) -> None:
         """布局**前置**钩子：把窗口写回坐标轴（``_layout_all`` 在排系列前调用）。
 
-        顺序是硬要求：系列按当前轴窗口采样（``_window``）、按窗口做
-        坐标映射。放在组件 ``layout()``（系列之后）里 apply 会得到「轴已缩放、
-        曲线仍是**旧窗口**的采样」的错配 —— 而那一帧结束时布局缓存键（含
-        dataZoom 窗口）已经命中，下一次布局直接 early-return，错配**永久留下**，
-        表现就是「缩放后曲线变稀、窗口里只剩几个点」。
+        顺序是硬要求：系列按当前轴窗口采样与映射。放到组件 ``layout()``
+        （系列之后）会得到「轴已缩放、曲线仍是旧窗口采样」的错配，而布局
+        缓存键命中后错配会永久留下。
         """
         self.apply()
 
@@ -458,11 +423,9 @@ class DataZoomComponent(QObject):
         if not self.has_slider or self._track.isNull():
             return
         p.save()
-        # 轨道
         p.setPen(Qt.PenStyle.NoPen)
         p.setBrush(QColor(T("color.bg.muted")))
         p.drawRoundedRect(self._track, 4, 4)
-        # 选中区间
         sel = QRectF(
             self._x_of(self.start),
             self._track.top(),
@@ -473,7 +436,6 @@ class DataZoomComponent(QObject):
         fill.setAlpha(70)
         p.setBrush(fill)
         p.drawRoundedRect(sel, 4, 4)
-        # 把手
         for r in (self._h_start, self._h_end):
             p.setPen(QPen(QColor(T("color.border.strong")), 1))
             p.setBrush(QColor(T("color.bg.elevated")))
@@ -534,9 +496,8 @@ class DataZoomComponent(QObject):
     def _inside_move_enabled(self) -> bool:
         """``inside`` 的拖拽平移是否可用（ECharts ``moveOnMouseMove``，默认 True）。
 
-        实例属性优先：``ElaChartWidget.setDragMode`` 用它把同一个拖拽手势在
-        「平移 / 刷选」之间切换；默认开启的那个滚轮缩放组件则显式关掉它
-        （滚轮缩放不该顺带把拖拽也拿走）。
+        实例属性优先：``setDragMode`` 用它把同一个拖拽手势在「平移 / 刷选」
+        之间切换。
         """
         override = getattr(self, "moveOnMouseMove", None)
         if isinstance(override, bool):
@@ -550,9 +511,7 @@ class DataZoomComponent(QObject):
     def _inside_wheel_enabled(self, event=None) -> bool:
         """``inside`` 的滚轮缩放是否可用（ECharts ``zoomOnMouseWheel``）。
 
-        支持 ``True`` / ``False`` / ``"shift"`` / ``"ctrl"`` / ``"alt"`` ——
-        字符串形态要求对应修饰键按下（ECharts 同款），没有事件对象时按
-        「只要不是 False 就允许」处理。
+        支持 True / False / "shift" / "ctrl" / "alt"；字符串形态要求对应修饰键按下。
         """
         override = getattr(self, "zoomOnMouseWheel", None)
         if isinstance(override, bool):
@@ -592,18 +551,8 @@ class DataZoomComponent(QObject):
     def _span_limits(self):
         """``minSpan`` / ``maxSpan``：取**所有** dataZoom 条目的约束交集。
 
-        ECharts 是「每个 ``dataZoom[i]`` 各有各的 minSpan/maxSpan」，而本引擎只有
-        一个共享窗口（``self.start`` / ``self.end``，两个条目共用），所以唯一自洽的
-        语义就是取交集：``minSpan`` 取最大、``maxSpan`` 取最小。
-
-        原先只读 ``entries[0]``，于是约束挂在 slider 上而 inside 排在前面时
-        （``[{"type": "inside"}, {"type": "slider", "minSpan": 40}]``）``minSpan``
-        被整条丢掉 —— 实测滑块能一路拖到 10% 窗口；反过来的组合里 slider 自己的
-        ``maxSpan`` 也会被 inside 的 ``maxSpan`` 顶掉。两条都只影响同一条 option
-        里同时配 inside + slider 的场景（单条目时行为不变）。
-
-        约束自相矛盾（``minSpan > maxSpan``）时由 ``_clamp_span`` 的应用顺序决定：
-        先抬到 minSpan 再压到 maxSpan，即 maxSpan 胜出。
+        本引擎只有一个共享窗口（``self.start`` / ``self.end``），所以
+        ``minSpan`` 取最大、``maxSpan`` 取最小；自相矛盾时 maxSpan 胜出。
         """
         min_span = None
         max_span = None
@@ -642,7 +591,7 @@ class DataZoomComponent(QObject):
         return self.applyAction(payload) or changed
 
     def applyAction(self, payload: dict) -> bool:
-        """``dispatchAction({"type": "dataZoom", ...})``：
+        """``dispatchAction({"type": "dataZoom", ...})``。
 
         支持 ``start`` / ``end``（百分比）与 ``startValue`` / ``endValue``
         （category 轴为类别名或下标，value 轴为数值）；可选 ``zoomLock``
@@ -771,12 +720,10 @@ class DataZoomComponent(QObject):
         return False
 
     def onWheel(self, event) -> bool:
-        """chart.wheelEvent 钩子：消费滚轮缩放并返回 True。
+        """chart.wheelEvent 钩子：命中（plot 内 / slider 轨道）则缩放并返回 True。
 
-        事件到达 chart 的 ``wheelEvent`` 时由 ``ElaChartWidget`` 调用；
-        命中（plot 内 / slider 轨道）则缩放并返回 True，由 chart 层
-        ``event.accept()`` 显式消费 —— 祖先滚动区不会再滚动（页面
-        滚轮与图表缩放同时触发的修复核心）。
+        返回 True 时由 chart 层 ``event.accept()`` 显式消费 —— 祖先滚动区
+        不会再跟着滚动。
         """
         if not self._inside_enabled() or self.zoom_lock:
             return False
@@ -790,8 +737,7 @@ class DataZoomComponent(QObject):
             pos = QPointF()
         if not self._wheel_hit(pos):
             return False
-        # ``zoomOnMouseWheel`` 只管 plot 内的滚轮；slider 轨道上滚轮是滑块自身
-        # 的行为（ECharts 同款），不受该键影响。
+        # ``zoomOnMouseWheel`` 只管 plot 内的滚轮；slider 轨道上的滚轮不受它影响。
         if self._plot_at(pos).contains(pos) and not self._inside_wheel_enabled(event):
             return False
         try:
@@ -806,8 +752,7 @@ class DataZoomComponent(QObject):
     def eventFilter(self, obj, ev) -> bool:
         if obj is self.chart and ev.type() == QEvent.Type.Wheel:
             if self.onWheel(ev):
-                # 显式 accept + 返回 True：事件既不再向 widget 传递，
-                # 状态也为「已消费」（防止祖先滚动区据此滚动）
+                # 显式 accept + 返回 True：事件不再向 widget 传递，状态也为「已消费」。
                 try:
                     ev.accept()
                 except Exception:  # noqa: BLE001
@@ -822,13 +767,15 @@ class DataZoomComponent(QObject):
             return
         factor = 0.8 if delta_y > 0 else 1.25
         coord = self.chart.coordAt(pos)
-        x_axis = getattr(coord, "x_axis", None) if isinstance(coord, GridCoord) else None
+        x_axis = (
+            getattr(coord, "x_axis", None) if isinstance(coord, GridCoord) else None
+        )
         old_span = self.end - self.start
         if old_span > 0:
             new_span = _clamp(old_span * factor, 4.0, 100.0)
             frac = _clamp((pos.x() - plot.left()) / plot.width(), 0.0, 1.0)
-            # inverse 轴的像素方向与数据方向相反：不翻转锚点，鼠标下的
-            # 数据点在缩放时会漂走。
+            # inverse 轴的像素方向与数据方向相反：不翻转锚点，鼠标下的数据点
+            # 在缩放时会漂走。
             if x_axis is not None and getattr(x_axis, "inverse", False):
                 frac = 1.0 - frac
             anchor = self.start + frac * old_span
@@ -853,7 +800,7 @@ class DataZoomComponent(QObject):
                 self.y_start = _clamp(self.y_start, 0.0, 100.0 - span)
                 self.y_end = self.y_start + span
         self.apply()
-        self.chart.invalidateLayout()  # 窗口变化 → 失效布局缓存
+        self.chart.invalidateLayout()
         self.chart.update()
         self._emit_changed(before)
 
@@ -877,15 +824,15 @@ class DataZoomComponent(QObject):
         self.start += shift
         self.end += shift
         self.apply()
-        self.chart.invalidateLayout()  # 窗口变化 → 失效布局缓存
+        self.chart.invalidateLayout()
         self.chart.update()
 
     # -- 鼠标钩子 ------------------------------------------------------------
     def _brush_active(self) -> bool:
         """brush 是否正在接管拖拽（``setDragMode`` 按模式开关它的 ``enabled``）。
 
-        只看「组件存在」会让 ``setDragMode("pan")`` 失效：dataZoom 会永远给刷选
-        让位，而刷选自己又因为 ``enabled=False`` 不起手 —— 拖拽两边都不响应。
+        只看「组件存在」会让 ``setDragMode("pan")`` 失效：刷选自己
+        ``enabled=False`` 不起手，dataZoom 又一直让位，拖拽两边都不响应。
         """
         for comp in self.chart.components:
             if getattr(comp, "optionKey", "") == "brush":

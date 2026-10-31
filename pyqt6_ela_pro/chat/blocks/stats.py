@@ -27,11 +27,7 @@ from ..message import (
 
 
 class StatsBadge(ElaThemeWidget):
-    """底部层用量行（单行 mono：``↑128 ↓96 · 总计 224 · 缓存 64`` + 悬停明细）。
-
-    数值由气泡按展示模式注入：默认 ``"footer"`` 模式为整轮汇总
-    （各步求和），``"steps"`` 模式为单个步骤的服务端原值。
-    """
+    """底部层用量行（单行 mono + 悬停明细）；数值由气泡按展示模式注入（整轮汇总 / 单步原值）。"""
 
     def __init__(self, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
@@ -83,8 +79,7 @@ class StatsBadge(ElaThemeWidget):
             parts.append(f"缓存写 {stats.cache_write_tokens}")
         self._label.setText("  ·  ".join(parts))
         if deferShow:
-            # 最终显隐由 _apply_stats_mode 决定：footer 模式只有最后一个可见，
-            # 回放期把 500 个徽标都 show 出来纯属浪费（bug #17）。
+            # 最终显隐由 _apply_stats_mode 决定：footer 模式下大部分徽标永远不显示。
             self._apply_theme()
             return
         self._label.show()
@@ -109,8 +104,7 @@ class StatsBadge(ElaThemeWidget):
             return
         self._tooltip_text = text
         self._label.setToolTip(text)
-        # 隐藏徽标不建 ElaToolTip：footer 模式下大部分步骤徽标永远不显示，
-        # 每个都建一个提示框纯浪费（bug #17）。显示时 showEvent 补建。
+        # 隐藏徽标不建 ElaToolTip：footer 模式下大部分步骤徽标永不显示，显示时 showEvent 补建。
         if self.isVisible():
             self._bind_tooltip()
 

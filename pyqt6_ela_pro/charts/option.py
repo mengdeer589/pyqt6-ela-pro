@@ -1,8 +1,4 @@
-"""ECharts 风格 option：合并、拷贝、紧凑数据归一化。
-
-纯函数模块（不依赖 Qt 控件 / 渲染器），供 ``core.ElaChartWidget`` 与
-``appendData`` / ``getOption`` 共用。
-"""
+"""ECharts 风格 option：合并、拷贝、紧凑数据归一化（纯函数，无 Qt 依赖）。"""
 
 from __future__ import annotations
 
@@ -12,14 +8,9 @@ from . import data as _cdata
 
 
 def _hold_value(v):
-    """合并 / 存入 option 时的取值策略：**大数组按引用，其余深拷贝**。
+    """合并 / 存入 option 时的取值策略：大数组按引用，其余深拷贝。
 
-    ``copy.deepcopy`` 对百万级 float list 是纯浪费（本机 100 万点约
-    60~95 ms），而这些数组图表从不在内部修改它们。``ElaNumericBuffer`` /
-    ndarray 一律按引用持有，其余走原有深拷贝路径。
-
-    注意：按引用持有意味着**调用方在 setOption 之后不得原地修改该数组**
-    （与 InstructionX 的口径一致，见 ``charts.data`` 模块 docstring）。
+    按引用持有意味着调用方在 ``setOption`` 之后不得原地修改该数组。
     """
     if _cdata.isBufferLike(v):
         return v
@@ -36,32 +27,19 @@ def _deep_merge(dst: dict, src: dict) -> dict:
     return dst
 
 
-#: setOption 合并时按 ECharts 组件数组「逐项合并」的顶层键。
-#: ``visualMap`` 也在这里 —— 它天生是数组语义（多个色带各绑一个系列），
-#: 整体替换会让「只改第 1 个」静默丢掉其余色带。
+#: setOption 合并时按组件数组「逐项合并」的顶层键；``visualMap`` 天生是
+#: 数组语义（多个色带各绑一个系列），整体替换会丢掉其余色带。
 _MERGE_ARRAY_KEYS = frozenset({"series", "dataZoom", "graphic", "visualMap"})
-#: 坐标轴数组：**只按下标**逐项合并（轴的 ``name`` 是轴名，不是身份；
-#: 按 name 匹配会把「给第 2 条轴改名」合并到同名的第 1 条上）
+#: 坐标轴数组：只按下标逐项合并（轴的 ``name`` 是轴名不是身份，
+#: 按 name 匹配会把「给第 2 条轴改名」合并到同名的第 1 条上）。
 _AXIS_ARRAY_KEYS = frozenset({"xAxis", "yAxis", "singleAxis"})
 
 
 def _match_option_index(new_item, old_list: list, index: int) -> int:
     """组件 / 系列数组项匹配（ECharts 语义）：``id`` → ``name`` → 序号。
 
-    返回旧列表下标；未匹配返回 -1（调用方按「新增一项」处理）。
-
-    **显式给了 ``id`` 且没匹配上时必须返回 -1，不能回退到序号。** ECharts 的
-    ``mappingByIndex`` 写得很明确（``echarts/src/util/model.ts``）：
-
-        (2) If new option has id, it can only set to a hole or append to the
-            last. It should not be merged to the existings with different id.
-            Because id should not be overwritten.
-
-    回退到序号的后果是**静默毁掉一个系列**：``[a, b]`` + ``[{"id": "zzz"}]``
-    会把 ``b`` 位置上的系列替换成 ``zzz``，``a`` 整个消失且无任何告警；而
-    ECharts 期望 3 个系列。若新项只带 ``id`` 不带 ``name`` / ``type``，更糟 ——
-    幸存者保留旧系列的 ``name`` / ``type`` 却拿到新数据，图上出现一个用户
-    根本没要求过的系列。
+    显式给了 ``id`` 且没匹配上时必须返回 -1，不能回退到序号 —— 否则会
+    静默覆盖旧系列（ECharts ``mappingByIndex``：带 id 的新项只能填洞或追加）。
     """
     if isinstance(new_item, dict):
         new_id = new_item.get("id")
@@ -76,8 +54,8 @@ def _match_option_index(new_item, old_list: list, index: int) -> int:
             for i, old in enumerate(old_list):
                 if isinstance(old, dict) and old.get("name") == new_name:
                     return i
-    # 序号回退只认 dict 旧项：``None`` / 数字是「空洞」，交给调用方填洞，
-    # 否则 ``_deep_merge(None, ...)`` 直接抛 TypeError（JSON 里的 null 可达）。
+    # 序号回退只认 dict 旧项：``None`` / 数字是空洞，否则
+    # ``_deep_merge(None, ...)`` 抛 TypeError（JSON 里的 null 可达）。
     if 0 <= index < len(old_list) and isinstance(old_list[index], dict):
         return index
     return -1
@@ -86,22 +64,17 @@ def _match_option_index(new_item, old_list: list, index: int) -> int:
 def _merge_option_array(old_list: list, new_list: list) -> list:
     """ECharts 风格组件数组合并（``series`` / ``dataZoom`` / ``graphic``）。
 
-    新项按 ``id`` → ``name`` → 序号匹配旧项并深合并；未匹配的新项追加；
-    旧列表中未被匹配的项保留（ECharts ``setOption`` 合并语义：合并模式下
-    传空数组不会删除旧项，需 ``notMerge=True`` 或 ``clear()``）。
-    标量数组无法逐项合并时整体替换。
+    新项按 ``id`` → ``name`` → 序号匹配旧项并深合并，未匹配的追加；旧项保留
+    （合并模式下传空数组不删项，需 ``notMerge=True`` 或 ``clear()``）。
     """
     old_list = list(old_list or [])
     new_list = list(new_list or [])
     if any(not isinstance(item, dict) for item in new_list):
         # 标量数组无法逐项合并 → 整体替换（逐项按引用持有，见 ``_hold_value``）。
         return [_hold_value(i) for i in new_list]
-    # **旧项一律按引用复用、匹配项就地合并**：``old_list`` 就是 ``_option``
-    # 里的内部列表（首次写入时已经深拷贝过），再拷一遍纯属浪费 —— 而
-    # ``[x,y]`` 形式的结构化数据（时间序列 / 散点 / 热力）不走
-    # ``ElaNumericBuffer``，这里每拷一次就是百万级 Python 对象的复制。
-    # 实测 500k 点：原先「旧列表一次 + 匹配项一次 + 新数据一次」共 3 份，
-    # 合并一次 1834ms；改为按引用后只剩新数据这一份。
+    # 旧项按引用复用、匹配项就地合并：``old_list`` 就是 ``_option`` 的内部
+    # 列表（首次写入已深拷贝），而 ``[x, y]`` 结构化数据不走 ElaNumericBuffer，
+    # 每拷一次就是百万级对象复制。
     result = list(old_list)
     used = set()
     for i, new_item in enumerate(new_list):
@@ -112,8 +85,8 @@ def _merge_option_array(old_list: list, new_list: list) -> list:
             result[idx] = _normalize_series_entry(merged)
             used.add(idx)
         elif i < len(result) and not isinstance(result[i], dict) and i not in used:
-            # 旧项是 ``None`` / 数字（JSON 里的 ``null`` 很常见）：填洞而不是
-            # 追加，否则 ``series`` 里会多出一个被 ``_rebuild`` 丢掉的空位。
+            # 旧项是 ``None`` / 数字（JSON 的 null）：填洞而不是追加，
+            # 否则 ``series`` 里会多出一个被丢弃的空位。
             result[i] = _copy_series_entry(new_item)
             used.add(i)
         else:
@@ -131,14 +104,10 @@ def _axis_option_list(value) -> list:
 
 
 def _merge_axis_option(old, new):
-    """坐标轴合并：单对象与数组**互相等价**，一律按下标逐项合并。
+    """坐标轴合并：单对象与数组互相等价，一律按下标逐项合并。
 
-    单对象 = 「只给第 0 条」（ECharts 语义）。只认 list → list 的话，多轴图上
-    一句 ``setOption({"xAxis": {"axisLabel": …}})`` 会把 2 条轴**塌成 1 条**
-    （第二条连同 ``data`` 一起消失，且没有任何告警）。
-
-    返回形状跟旧值：旧值是 dict 就回 dict（不逼 ``getOption()`` 改变形状），
-    旧值是数组就回数组。
+    单对象 = 「只给第 0 条」；只认 list → list 会把多轴塌成一条。返回形状
+    跟旧值（dict 回 dict、数组回数组），``getOption()`` 形状不漂移。
     """
     old_is_list = isinstance(old, (list, tuple))
     result = [_hold_value(item) for item in _axis_option_list(old)]
@@ -166,10 +135,8 @@ def _int_attr(obj, name: str) -> int:
         return 0
 
 
-#: 各系列渲染器存放「几何图元」的属性名（取最大长度者）。
-#: 折线存 ``_points``、bar 存 ``_bars``、scatter 存 ``_dots``、pie 存
-#: ``_sectors`` …… 早期实现只读折线的属性名，导致 bar / scatter 的规模恒为
-#: 0（实测 8 系列里两条读数为 0）。这里列出各渲染器实际使用的名字。
+#: 各系列渲染器存放「几何图元」的属性名（取最大长度者）：折线 ``_points``、
+#: bar ``_bars``、scatter ``_dots``、pie ``_sectors``……
 _SERIES_GEOM_ATTRS = (
     "_points",
     "_bars",
@@ -198,11 +165,8 @@ def _series_type_name(r) -> str:
 
 
 def _series_data_len(r) -> int:
-    """系列数据量。
-
-    优先用折线的 ``_data_len``（它已是最终生效的数据长度，stack 叠加后也
-    正确）；其余系列回退到 ``data()`` 的长度 —— 几何属性只反映**绘制**
-    规模（采样后），不能当数据量用。
+    """系列数据量：优先折线的 ``_data_len``（stack 叠加后也正确），
+    其余回退 ``data()`` 长度 —— 几何属性只反映采样后的绘制规模。
     """
     n = _int_attr(r, "_data_len")
     if n:
@@ -229,9 +193,7 @@ def _series_geom_len(r) -> int:
 def _animation_enabled(cur_option: dict, new_option: dict) -> bool:
     """本次 setOption 是否可能用到过渡动画数据（旧数据快照）。
 
-    与 ``_start_animation`` 的判定保持一致：任一侧的 ``animation`` 不是
-    显式 ``False`` 就认为可能要用。宁可多算一次快照，也不能出现「该播动画
-    却拿不到旧数据」的空插值。
+    任一侧 ``animation`` 不是显式 False 就认为可能要用 —— 宁可多算一次快照。
     """
     for opt in (cur_option, new_option):
         if isinstance(opt, dict) and opt.get("animation", True) is False:
@@ -242,8 +204,7 @@ def _animation_enabled(cur_option: dict, new_option: dict) -> bool:
 def _snapshot_series_data(r):
     """取系列旧数据用于插值：大数组按引用，其余物化成 list。
 
-    快照的用途只是「上一帧画过什么」，插值时按下标读；缓冲区按引用持有
-    不会读到错位数据（``_rebuild`` 之后 ``prev_data`` 即被弃用）。
+    快照只用于「上一帧画过什么」，``_rebuild`` 之后即被弃用。
     """
     d = r.data()
     if _cdata.isBufferLike(d):
@@ -254,13 +215,8 @@ def _snapshot_series_data(r):
 def _normalize_series_entry(entry):
     """把 series 项**直接**的 ``data`` 大数值数组包成紧凑存储（就地）。
 
-    只认 series 项自己的 ``data``，不碰 ``xAxis.data`` 等其它按 list 语义
-    读取的键（包装会破坏它们）；也不递归 —— ``markPoint.data`` /
-    ``graphic[].data`` 等嵌套数据形态各异，交给既有渲染路径。
-
-    ``toBuffer`` 只接受「扁平数值序列」，遇到 dict / ``[x, y]`` 对 /
-    heatmap 的 ``[x, y, v]`` 一律返回 ``None``，故本函数对结构型数据是
-    无操作，语义零变化。
+    只认 series 自己的 ``data``（不碰 ``xAxis.data`` 等按 list 语义读取的
+    键），也不递归；``toBuffer`` 对结构型数据返回 None，故语义零变化。
     """
     if not isinstance(entry, dict):
         return entry
@@ -271,11 +227,9 @@ def _normalize_series_entry(entry):
 
 
 def _copy_option_shallow_arrays(option: dict) -> dict:
-    """``notMerge`` 全量替换用的拷贝：**大数组按引用，其余深拷贝**。
+    """``notMerge`` 全量替换用的拷贝：大数组按引用，其余深拷贝。
 
-    与 ``copy.deepcopy`` 的唯一区别就是数组不再逐元素复制，语义上仍然保证
-    ``self._option`` 与调用方传入的 dict 不共享可变结构（只有只读的大数组
-    共享 —— 见 ``_hold_value`` 的说明）。
+    ``self._option`` 与调用方传入的 dict 不共享可变结构，只有只读的大数组共享。
     """
     if not isinstance(option, dict):
         return {}
@@ -327,9 +281,7 @@ def _merge_option(dst: dict, src: dict) -> dict:
         elif k in _AXIS_ARRAY_KEYS and isinstance(v, (dict, list)):
             dst[k] = _merge_axis_option(dst.get(k), v)
         elif k == "series" and isinstance(v, list):
-            # series 首次出现（dst 侧还不是 list）：逐项拷贝并包装大数组。
-            # 少了这一支，默认的合并模式会把整个 series 深拷贝一遍 ——
-            # 而首次注入的那份数据正是最该零拷贝的。
+            # series 首次出现：逐项拷贝并包装大数组，别把首次注入的数据深拷贝一遍。
             dst[k] = [_copy_series_entry(s) for s in v]
         elif isinstance(v, dict) and isinstance(dst.get(k), dict):
             _merge_option(dst[k], v)

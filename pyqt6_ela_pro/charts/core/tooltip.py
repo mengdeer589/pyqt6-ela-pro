@@ -44,14 +44,10 @@ def _default_tooltip_title(raw) -> str:
 class Tooltip:
     """提示框组件（ECharts ``tooltip``）。
 
-    - ``show`` / ``trigger``（``"item"`` 默认 / ``"axis"`` / ``"none"``）；
-    - ``formatter``：callable(params) 或 ``{a}/{b}/{c}`` 模板；callable 返回
-      字符串，或 ``[标题, 内容]``（标题行无圆点，扩展约定）；
-    - ``valueFormatter``：callable(value) 或含 ``{value}`` 的模板，作用于
-      默认内容中的数值；
-    - ``axisPointer.type``：``"line"`` / ``"shadow"`` / ``"cross"`` / ``"none"``；
-    - 样式：``backgroundColor`` / ``borderColor`` / ``borderWidth`` /
-      ``textStyle``（color/fontSize/fontWeight；未设置的键回退顶层 ``textStyle``）。
+    ``trigger`` 取 ``"item"``（默认）/ ``"axis"`` / ``"none"``；``formatter`` 是
+    callable(params) 或 ``{a}/{b}/{c}`` 模板，可返回 ``[标题, 内容]``；
+    ``valueFormatter`` 作用于默认内容里的数值。``axisPointer.type`` 取
+    ``line`` / ``shadow`` / ``cross`` / ``none``，外观键回退顶层 ``textStyle``。
     """
 
     def __init__(self, chart: "ElaChartWidget", opt: dict = None):
@@ -101,8 +97,7 @@ class Tooltip:
         return kind if kind in ("line", "shadow", "cross", "none") else "line"
 
     def axisPointerLabelOption(self) -> dict:
-        """``axisPointer.label``（``show`` / ``backgroundColor`` / ``color`` /
-        ``fontSize`` / ``borderColor`` / ``borderWidth`` / ``formatter``）。"""
+        """``axisPointer.label``（show / 颜色 / 字号 / formatter）。"""
         ap = self.opt.get("axisPointer")
         label = ap.get("label") if isinstance(ap, dict) else None
         return label if isinstance(label, dict) else {}
@@ -149,9 +144,8 @@ class Tooltip:
     def buildLines(self, hit: dict, color, fallback_name: str = "") -> list:
         """命中结果 → 浮层行 ``[(color, name, value_str), ...]``。
 
-        标题行走 ``(None, "", 标题)``（无圆点），内容行走 ``(color, "", 文本)``
-        （带系列色圆点）。命中方可给 ``hit["rows"]``（``[(名称, 值), ...]``）
-        让默认排版渲染**多行**（雷达的逐维度行）；``formatter`` 输出仍然优先。
+        标题行走 ``(None, "", 标题)``（无圆点）；``hit["rows"]`` 提供多行内容
+        （雷达逐维度行），``formatter`` 输出仍然优先。
         """
         name = str(hit.get("name") or hit.get("series") or fallback_name)
         series = str(hit.get("series") or fallback_name)
@@ -244,10 +238,8 @@ class Tooltip:
     ) -> None:
         """显示浮层。
 
-        ``lines``: [(color, name, value_str), ...]；
-        ``markers``: axis 模式下每条系列命中点的 ``[(QPointF, QColor)]``；
-        ``axis_pointer``: 是否画指示线（item 触发不画，ECharts 语义）；
-        ``axis_label``: 轴上数值气泡文案（``axisPointer.label``）。
+        ``lines``: ``[(color, name, value_str), ...]``；``markers``: axis 模式下
+        每条系列命中点；``axis_pointer``: 是否画指示线（item 触发不画）。
         """
         self._active = True
         self._pos = QPointF(pos)

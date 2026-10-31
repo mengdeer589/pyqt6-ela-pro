@@ -1,21 +1,4 @@
-"""
-聊天工具栏组件（``pyqt6_ela_pro.chat``）。
-
-实现件全部基于 Ela 原生组件封装：
-
-- 纯图标按钮：:class:`ElaChatToolButton`（``ElaIconButton`` 子类，
-  原生方形 / hover / ``IsSelected`` 选中态）；
-- 带文字按钮：``ElaButton``；
-- ``+`` 菜单：``ElaButton`` 触发 + ``ElaMenu`` 弹出（见 ``ElaChatInput``）。
-
-:class:`ElaChatToolBar` 提供两段式（``leading`` / ``trailing``）容器与
-三种追加入口（:meth:`addButton` / :meth:`addWidget` / :meth:`addSeparator`），
-以及对应插入版本（``insertButton`` / ``insertWidget`` / ``insertSeparator``，
-指定参照项插到它前面）和动态状态（``setItemVisible`` / ``setItemEnabled``）；
-事件 ``toolTriggered(key)`` 与 ``toolToggled(key, checked)``。
-
-命名规范与库内一致（``camelCase``）。
-"""
+"""聊天工具栏组件：图标按钮 + leading / trailing 两段式工具栏容器。"""
 
 from __future__ import annotations
 
@@ -171,15 +154,10 @@ class ElaChatToolBar(ElaThemeWidget):
     ) -> QPushButton:
         """添加工具按钮，返回按钮句柄。
 
-        有 ``text`` 时返回 ``ElaButton``（图标 + 文案）；无 ``text`` 时返回
-        :class:`ElaChatToolButton`（``ElaIconButton``，正方形图标按钮）。
+        有 ``text`` 时返回 ``ElaButton``（图标 + 文案），否则返回
+        :class:`ElaChatToolButton`（正方形图标按钮）。
 
-        :param key: 按钮标识（默认自动生成），用于 ``toolTriggered`` 信号；
-            **显式传重复 key 抛 ``ValueError``**（此前静默覆盖登记，旧控件留在
-            布局里但再也无法用公开 API 找到 / 移除）
-        :param zone: ``"leading"``（左）或 ``"trailing"``（右）；非法值抛
-            ``ValueError``（不再静默落到左侧）
-        :param checkable: 是否可选中
+        ``key`` 缺省自动生成，显式重复 / 非法 ``zone`` 抛 ``ValueError``。
         """
         zone = self._normalize_zone(zone)
         key = key or self._next_key("tool")
@@ -225,8 +203,7 @@ class ElaChatToolBar(ElaThemeWidget):
     ) -> QWidget:
         """插入任意控件（如 ``ElaToggleButton``、自定义组合控件）。
 
-        :param zone: ``"leading"``（左）或 ``"trailing"``（右）；非法值抛
-            ``ValueError``
+        ``zone`` 非法值抛 ``ValueError``。
         """
         zone = self._normalize_zone(zone)
         key = key or self._next_key("widget")
@@ -238,14 +215,7 @@ class ElaChatToolBar(ElaThemeWidget):
         return widget
 
     def addSeparator(self, zone: str = "leading") -> QWidget:
-        """添加分隔线（主题切换自动换色），返回分隔线句柄。
-
-        需要**单独移除**时把返回值交给 :meth:`removeSeparator`（或通用的
-        :meth:`removeItem`）；只想整段清空用 :meth:`clear`。
-
-        :param zone: ``"leading"``（左）或 ``"trailing"``（右）；非法值抛
-            ``ValueError``
-        """
+        """添加分隔线（主题切换自动换色），返回句柄；单独移除交给 :meth:`removeSeparator`。"""
         zone = self._normalize_zone(zone)
         line = QWidget(self)
         line.setFixedSize(1, _SEPARATOR_HEIGHT)
@@ -256,11 +226,7 @@ class ElaChatToolBar(ElaThemeWidget):
         return line
 
     def addStretch(self, zone: str = "trailing") -> None:
-        """在指定分段末尾追加弹簧（非法 ``zone`` 抛 ``ValueError``）。
-
-        弹簧会登记句柄，:meth:`clear` 能一并移除 —— 否则每次
-        ``addStretch`` + ``clear`` 都会留下一个永久弹簧。
-        """
+        """在指定分段末尾追加弹簧（``clear`` 能一并移除）。"""
         layout = self._zone_layout(self._normalize_zone(zone))
         layout.addStretch(1)
         item = layout.itemAt(layout.count() - 1) if layout.count() else None
@@ -285,8 +251,7 @@ class ElaChatToolBar(ElaThemeWidget):
     ) -> QPushButton:
         """在已有项之前插入工具按钮（其余参数同 :meth:`addButton`）。
 
-        :param before: 参照项（key 或已添加控件）；新按钮落在其所在分区，
-            不存在时抛 ``ValueError``
+        ``before`` 是参照项（key 或控件），不存在时抛 ``ValueError``。
         """
         reference = self._require_item(before)
         button = self.addButton(
@@ -377,12 +342,7 @@ class ElaChatToolBar(ElaThemeWidget):
         return len(self._items)
 
     def removeItem(self, item: Union[str, QWidget]) -> bool:
-        """移除按钮 / 控件 / 分隔线（接受句柄或 key），返回是否移除成功。
-
-        注意：会销毁控件（句柄随即失效）；只想临时隐藏请用
-        :meth:`setItemVisible`。分隔线没有 key，用句柄移除（见
-        :meth:`removeSeparator`）。
-        """
+        """移除按钮 / 控件 / 分隔线（接受句柄或 key），返回是否成功；会销毁控件。"""
         if isinstance(item, str):
             if item not in self._items:
                 return False
@@ -395,12 +355,7 @@ class ElaChatToolBar(ElaThemeWidget):
         return self.removeSeparator(item)
 
     def removeSeparator(self, separator: QWidget) -> bool:
-        """单独移除一条分隔线（接受 :meth:`addSeparator` / :meth:`insertSeparator`
-        的返回值），返回是否移除成功。
-
-        分隔线**没有 key**（不进 :meth:`keys` / :meth:`count` 的项空间），
-        所以只能用句柄；与 :meth:`clear`（按分区整段清空）相对。
-        """
+        """单独移除一条分隔线（接受 :meth:`addSeparator` / :meth:`insertSeparator` 的返回值）。"""
         if separator not in self._separators:
             return False
         self._separators.remove(separator)
@@ -408,10 +363,7 @@ class ElaChatToolBar(ElaThemeWidget):
         return True
 
     def clear(self, zone: Optional[str] = None) -> None:
-        """移除已添加的全部按钮与控件（``zone`` 为 ``None`` 时两段都清）。
-
-        ``zone`` 非法时抛 ``ValueError``。
-        """
+        """移除已添加的全部按钮与控件（``zone`` 为 ``None`` 时两段都清；非法 zone 抛 ``ValueError``）。"""
         if zone is not None:
             zone = self._normalize_zone(zone)
         for key, widget in list(self._items.items()):

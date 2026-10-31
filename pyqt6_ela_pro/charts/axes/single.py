@@ -21,20 +21,17 @@ from .base import AxisModel, Coord
 class SingleAxisCoord(Coord):
     """横向单轴坐标系（一行数值轴，系列在其上排布）。
 
-    option 键：``singleAxis`` {left,right,top,bottom,type,min,max,name}
-    （left/right 默认 40；top/bottom 不给时取可用区垂直居中）。
-    ``mapPoint(value)`` 单参调用，返回轴线上像素点。
+    ``singleAxis`` 收 left/right/top/bottom/type/min/max/name；left/right 默认
+    40，top/bottom 不给时垂直居中。``mapPoint(value)`` 单参返回轴线上像素点。
     """
 
     kind = "singleAxis"
 
     def __init__(self, chart=None, option: dict = None):
         super().__init__(chart, option)
-        sopt = dict(
-            single_option(self.option.get("singleAxis"), "singleAxis") or {}
-        )
+        sopt = dict(single_option(self.option.get("singleAxis"), "singleAxis") or {})
         self.axis = AxisModel(sopt, "value", self.chart)
-        # 边距支持 px / 百分比（"10%"）；top/bottom 非法输入降级为 None（垂直居中）
+        # 边距支持 px / 百分比；top/bottom 非法输入降级为 None（垂直居中）
         self._m_left = _parse_margin(sopt.get("left"), 40)
         self._m_right = _parse_margin(sopt.get("right"), 40)
         self._m_top = _parse_margin(sopt.get("top"), None)

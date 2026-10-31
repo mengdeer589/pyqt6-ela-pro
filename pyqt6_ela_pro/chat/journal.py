@@ -1,46 +1,7 @@
-"""聊天回合的**崩溃恢复日志**（``pyqt6_ela_pro.chat``）。
+"""聊天回合的崩溃恢复日志：把一个回合记成追加写事件流，可重放回完整消息。
 
-为什么需要它
-------------
-``ElaChatBubble`` 的落定语义（见 :meth:`ElaChatBubble.parts`）保证
-``message.toDict()`` 在**任意时刻**都能直接落库，但代价是**流式在途分片
-只存在于气泡缓冲里**，不进 ``parts``。于是：
-
-- 回合**正常结束** -> 写一条 ``message.toDict()`` 就够了；
-- 回合**中途进程死掉** -> 那个回合收到的内容全丢（缓冲只在内存里）。
-
-opencode 对这个问题的解法是 journal 每个 ``part_text_accum_delta``（增量
-本身）而不是等落定，于是崩了也能重放出全部内容。本模块就是这个思路的
-最小实现。
-
-用法
-----
-**记录**（与 :class:`~pyqt6_ela_pro.chat.binder.ElaChatStreamBinder` 并行
-消费同一批 worker 信号）::
-
-    journal = ElaChatTurnJournal(messageId=chat.beginAssistantMessage())
-    journal.begin()                        # 开始记录（connectWorker 不会替你开）
-    journal.connectWorker(worker)          # 与 binder 各连各的，Qt 允许
-    ...
-    journal.end("done")
-    fh.write(journal.dumpsNewLines())       # 追加写；崩了最多丢最后一行
-
-**恢复**（重启后）::
-
-    journal = ElaChatTurnJournal.fromLines(fh)   # 自动跳过残行 / 未知事件
-    row = journal.message().toDict()              # 完整 ElaChatMessage
-    save_row(row)                                 # 补写成一条正常记录
-    view.addMessageFromDict(row)                  # 或直接重放进界面
-
-设计约束
---------
-- **不依赖 Qt 核心**：纯数据 + 标准库，可在任意线程构造与重放，便于单测；
-- **追加写**：:meth:`dumps` 产出**整份**事件流（多事件时是多行文本），
-  :meth:`dumpsNewLines` 产出**新增**的那些行 —— 落盘用后者，崩了最多丢最后一行；
-- **容忍残行**：进程可能在写一半时被杀，:meth:`loadsLine` 对截断 / 非法 JSON
-  返回 ``None`` 而不抛，:meth:`fromLines` 直接跳过；
-- **未知事件跳过**：旧版本读到新版本的事件类型不会崩；
-- 分段 id 在记录时分配并写进事件，重放出来的 ``part.id`` 稳定。
+流式在途分片只存在于气泡缓冲里，回合中途进程死掉会全丢；这里按增量落行，
+崩了最多丢最后一行。纯数据 + 标准库，不依赖 Qt，可在任意线程构造与重放。
 """
 
 from __future__ import annotations
@@ -89,15 +50,10 @@ class _Ev:
 
 
 class ElaChatTurnJournal:
-    """把一个回合记录成**追加写事件流**，可重放回完整消息（崩溃恢复用）。
+    """把一个回合记录成追加写事件流，可重放回完整消息（崩溃恢复用）。
 
-    与消息快照的分工：
-
-    - 消息快照 = 回合**结束**后的完整状态，适合覆盖式存储；
-    - 本日志 = 回合**进行中**的增量流，适合每来一片就落一行。
-
-    两者都产出 :class:`ElaChatMessage`，因此存储层可以把日志重放的结果直接
-    当成一条正常消息存起来 —— 读取端完全不需要知道日志的存在。
+    与消息快照的分工：快照是回合结束后的完整状态，本日志是回合进行中的增量流。
+    两者都产出 :class:`ElaChatMessage`，读取端无需知道日志存在。
     """
 
     def __init__(
@@ -123,8 +79,7 @@ class ElaChatTurnJournal:
         self._worker = None
         #: 四个基础信号槽的绑定方法缓存（连 / 断必须同一批对象）
         self._worker_slots = None
-        #: 已连接的 ``(signal, slot)`` 列表（连 / 断必须同一批绑定方法，
-        #: 见 ``_connections``）
+        #: 已连接的 ``(signal, slot)`` 列表（连 / 断必须同一批绑定方法）。
         self._worker_connections: Optional[list] = None
 
         # -- 重放状态（从事件构建 parts） --
@@ -185,8 +140,7 @@ class ElaChatTurnJournal:
     def begin(self, messageId: Optional[int] = None) -> "ElaChatTurnJournal":
         """开始记录一个回合（``messageId`` 省略则沿用构造时的值）。
 
-        复用同一实例记录**第二个**回合时会先复位累计状态（否则第二个回合的
-        ``Text`` 事件会拼进上一回合的分段、``settleOpen`` 也会被跳过）。
+        复用同一实例记录第二个回合时先复位累计状态，否则内容会拼进上一回合。
         """
         if self._events:
             self._reset_state()
@@ -233,9 +187,8 @@ class ElaChatTurnJournal:
     def beginStep(self) -> "ElaChatTurnJournal":
         """进入下一步骤。
 
-        与 ``bubble.beginStep`` 对齐：先收口当前正文段与思考段，再推进步骤。
-        使用 :meth:`connectWorker` 时步骤会跟随 ``llmStarted`` 自动推进，宿主
-        **不要**再手动调用本方法（会多切一步）。
+        先收口当前正文段与思考段，再推进步骤。使用 :meth:`connectWorker` 时
+        步骤跟随 ``llmStarted`` 自动推进，宿主不要再手动调用（会多切一步）。
         """
         if not self._open:
             return self
@@ -249,8 +202,7 @@ class ElaChatTurnJournal:
     def text(self, chunk: str) -> "ElaChatTurnJournal":
         """记录一段正文增量（自动开段）。
 
-        纯空白分片在还没有正文段时先攒着，等首个非空白分片一起开段 ——
-        与 :meth:`ElaChatBubble.appendText` 同语义（中间空白照常保留）。
+        纯空白分片在还没有正文段时先攒着，等首个非空白分片一起开段（中间空白照常保留）。
         """
         if not self._open or not chunk:
             return self
@@ -338,8 +290,7 @@ class ElaChatTurnJournal:
     def stats(self, stats: Optional[ElaChatStats]) -> "ElaChatTurnJournal":
         """记录当前步骤用量。
 
-        同一 step 重复上报时复用同一个 part id（重放侧按 id 覆盖），与实时
-        ``setStepStats`` 的「本步用最新值」语义一致；跨 step 各自保留。
+        同一 step 重复上报复用同一 part id（重放侧按 id 覆盖），跨 step 各自保留。
         """
         if not self._open or stats is None:
             return self
@@ -369,10 +320,7 @@ class ElaChatTurnJournal:
     def beginCompaction(self, reason: str = "auto") -> "ElaChatTurnJournal":
         """记录一次压缩开始（段 id 内部生成，调用方不用管）。
 
-        **日志只记「发生过压缩」这件事，不记压缩算法** —— 摘要怎么来、压哪段
-        都是宿主的事（依赖 provider 侧能力）。本日志的职责是让压缩记录能跟着
-        回合一起崩溃恢复。段 id 的管理方式与 :meth:`text` / :meth:`reasoning`
-        一致（内部记账，调用方不传）。
+        日志只记「发生过压缩」，摘要怎么来、压哪段都归宿主；段 id 与 :meth:`text` 同样内部记账。
         """
         if not self._open:
             return self
@@ -414,8 +362,8 @@ class ElaChatTurnJournal:
     ) -> "ElaChatTurnJournal":
         """结束记录（``status`` 见 :class:`ElaChatStatusType`）。
 
-        与 ``endAssistantMessage`` 对齐：先收口仍打开的正文 / 思考段；没有显式
-        :meth:`setDuration` 时按 ``begin → end`` 的墙钟补一次消息级耗时。
+        先收口仍打开的正文 / 思考段；没有显式 :meth:`setDuration` 时按
+        ``begin → end`` 的墙钟补一次消息级耗时。
         """
         if not self._open:
             return self
@@ -435,15 +383,8 @@ class ElaChatTurnJournal:
     def _push(self, kind: str, **fields) -> None:
         """记一条事件，**并同步应用到自己的重放状态**。
 
-        记录与重放走同一条路径（``_apply`` -> ``_HANDLERS``），所以正在记录的
-        journal 本身就是一个可用的 journal：``message()`` 随时能给出「已收到的
-        部分」，``replayInto()`` 也能直接用，不必先序列化再读回来。
-
-        早期版本这里只 append 不应用，于是 ``message()`` 永远是空的、
-        ``beginStep()`` 也推进不了 ``_step`` —— 事件都在、状态没跟上。
-
-        浮点在**记录端**就要洗干净：``dumps()`` 用 ``allow_nan=False``，一个
-        NaN 会让整份日志写不出来（而重放端的清洗已经来不及了）。
+        记录与重放走同一条路径，所以正在记录的 journal 本身就可直接读
+        ``message()``。浮点在记录端就洗干净：``dumps()`` 用 ``allow_nan=False``。
         """
         event = {"v": JOURNAL_VERSION, "e": kind}
         for name, value in fields.items():
@@ -458,22 +399,15 @@ class ElaChatTurnJournal:
         return [dict(item) for item in self._events]
 
     def dumps(self) -> str:
-        """把**整份**事件流序列化成「一行一条事件」的文本。
+        """把整份事件流序列化成「一行一条事件」的文本。
 
-        **返回的是全部事件**（多事件时是多行文本），不是最后一条：想「每来一片
-        追加落一行」要用 :meth:`dumpsNewLines`（或 ``dumps().splitlines()`` 自行
-        去重）。把 ``dumps()`` 的返回值原样 ``append`` 到文件里会在每次调用时
-        把整份历史重复写一遍，恢复时事件被重放多次。
+        返回**全部**事件；追加落盘请用 :meth:`dumpsNewLines`（原样 append
+        整份会在每次调用时重复写入历史，恢复时事件被重放多次）。
         """
         return "\n".join(_json.dumps(item, allow_nan=False) for item in self._events)
 
     def dumpsNewLines(self) -> str:  # noqa: N802 (与 Qt 命名一致)
-        """只序列化**尚未被 :meth:`dumpsNewLines` 取走**的新事件（一行一条）。
-
-        这才是「追加写」的入口：::
-
-            fh.write(journal.dumpsNewLines())   # 每来一片写一次
-        """
+        """只序列化**尚未被取走**的新事件（一行一条），追加写的入口。"""
         lines = [
             _json.dumps(item, allow_nan=False) for item in self._events[self._dumped :]
         ]
@@ -486,10 +420,9 @@ class ElaChatTurnJournal:
 
     @staticmethod
     def loadsLine(line: str) -> Optional[dict]:
-        """解析日志的一行；**截断 / 非法 / 非事件**返回 ``None``（不抛）。
+        """解析日志的一行；截断 / 非法 / 非事件返回 ``None``（不抛）。
 
-        进程可能在写一半时被杀，所以一行坏数据必须能安全地变成「什么都没有」，
-        而不是让整个恢复流程炸掉。
+        进程可能在写一半时被杀，一行坏数据必须能安全地变成「什么都没有」。
         """
         if not line or not isinstance(line, str):
             return None
@@ -497,8 +430,7 @@ class ElaChatTurnJournal:
             data = _json.loads(line)
         except (ValueError, TypeError):
             return None
-        # 只认「事件名是字符串」的行：``{"e": [1,2]}`` 也是合法 JSON，
-        # 放它过去会在 _apply 的 _HANDLERS.get 上抛 unhashable TypeError。
+        # 只认「事件名是字符串」的行：``{"e": [1,2]}`` 也是合法 JSON，会让 _apply 抛 unhashable。
         if not isinstance(data, dict) or not isinstance(data.get("e"), str):
             return None
         return data
@@ -514,12 +446,9 @@ class ElaChatTurnJournal:
     def fromLines(cls, lines, settleOpen: bool = True) -> "ElaChatTurnJournal":
         """由日志文本重放，跳过残行与未知事件。
 
-        每个元素可以是一行，也可以是**含多行的整段文本**（``fh.read()`` 的
-        常见形态）—— 内部按行拆开，所以 ``fromLines([fh.read()])`` 也能用。
-
-        ``settleOpen`` 默认 **True**：一份行日志必然来自一个**已经不存在**
-        的进程（要么正常结束写完了，要么崩了），所以还在 streaming 的分段
-        要在这里落定 —— 否则恢复出来的界面会留永久闪烁的光标 / 转圈。
+        每个元素可以是一行，也可以是含多行的整段文本（``fromLines([fh.read()])``）。
+        ``settleOpen`` 默认 True：日志必然来自已不存在的进程，在途分段要在这里
+        落定，否则恢复出来的界面会留永久转圈。
         """
         events = []
         if isinstance(lines, str):
@@ -547,8 +476,7 @@ class ElaChatTurnJournal:
     def replay(self, events) -> "ElaChatTurnJournal":
         """把事件序列应用到本对象（增量重放，可多次调用）。
 
-        不要对**正在记录**的 journal 调这个 —— 记录路径已经自动应用过了，
-        再喂一遍会重复叠加文本。
+        不要对正在记录的 journal 调这个 —— 记录路径已自动应用，再喂一遍会重复叠加。
         """
         for item in events or ():
             if not isinstance(item, dict):
@@ -559,8 +487,7 @@ class ElaChatTurnJournal:
     def message(self) -> ElaChatMessage:
         """重放出当前这一刻的完整消息快照。
 
-        回合中途调用得到的是「**已收到的部分**」—— 崩了重启后拿它恢复，
-        收到多少就显示多少，不会把在途内容丢掉。
+        回合中途调用得到的是已收到的部分；崩了重启后拿它恢复，不会丢在途内容。
         """
         self._flushBuffers()
         base = ElaChatMessage(
@@ -644,8 +571,7 @@ class ElaChatTurnJournal:
                 )
             )
         else:
-            # 走分片缓冲而不是 ``existing.text + chunk``：逐分片整串拼接是 O(n²)，
-            # token 级流式 + 长回答时会产生大量临时大字符串（气泡那边同样是缓冲）。
+            # 走分片缓冲而不是整串拼接：逐分片拼接是 O(n²)，长回答会产生大量临时大字符串。
             self._buffers.setdefault(partId, []).append(chunk)
 
     def _ev_text_end(self, event: dict) -> None:
@@ -737,9 +663,7 @@ class ElaChatTurnJournal:
             _str(event.get("result")),
             ElaChatToolStatusType.Done if ok else ElaChatToolStatusType.Error,
         )
-        # part 状态保持 Done：工具**跑完了**，只是失败了 —— 失败由
-        # ``tool_call.status`` 承载（卡片变红也是读它，见 ``_apply_theme``）。
-        # 这与实时路径 ``setToolCallResult(ok=False)`` 的结果一致。
+        # part 状态保持 Done：工具跑完了，只是失败 —— 失败由 ``tool_call.status`` 承载。
         self._replace(part, part.withToolCall(call).withStatus(ElaChatStatusType.Done))
 
     def _ev_stats(self, event: dict) -> None:
@@ -790,8 +714,7 @@ class ElaChatTurnJournal:
 
     def _ev_compaction_end(self, event: dict) -> None:
         partId = _str(event.get("id"))
-        # **先 flush 再取 part**：反过来的话拿到的是 flush 前的旧快照，
-        # ``withStatus`` 会把刚并进去的摘要文本整个覆盖掉（实测摘要重放为空）。
+        # 先 flush 再取 part：反过来的话 withStatus 会把刚并进去的摘要文本覆盖掉。
         self._flushBuffer(partId)
         part = self._find(partId)
         if part is None or part.kind != ElaChatPartKindType.Compaction:
@@ -822,9 +745,7 @@ class ElaChatTurnJournal:
     def _settle(self, status: str) -> None:
         """把仍处于 streaming 的分段落到终态（绝不留永久转圈）。
 
-        规则与气泡的 ``_abortStream`` / ``_settle_open_tools`` 对齐：出错回合
-        落 ``Error``（确实没拿到结果），其余（被停止 / 进程崩了）落
-        ``Aborted`` —— 区分二者是因为「不是失败完成」。
+        出错回合落 ``Error``，其余（被停止 / 进程崩了）落 ``Aborted``。
         """
         if status in ElaChatStatusType.All:
             self._status = status
@@ -843,7 +764,9 @@ class ElaChatTurnJournal:
                     or part.tool_call.status == ElaChatToolStatusType.Error
                 )
                 call = part.tool_call.withStatus(
-                    ElaChatToolStatusType.Error if failed else ElaChatToolStatusType.Aborted
+                    ElaChatToolStatusType.Error
+                    if failed
+                    else ElaChatToolStatusType.Aborted
                 )
                 settled.append(
                     part.withToolCall(call).withStatus(
@@ -878,10 +801,8 @@ class ElaChatTurnJournal:
     def connectWorker(self, worker) -> "ElaChatTurnJournal":
         """连上 :class:`~pyqt6_ela_pro.chat.worker.ElaChatAsyncWorker` 的信号。
 
-        与 :class:`~pyqt6_ela_pro.chat.binder.ElaChatStreamBinder` 连的是同一批
-        信号，**两者可以并存**（Qt 允许多个接收方），所以加崩溃恢复不用改
-        现有接线。后端提供 ``llmStarted`` 时也会自动跟随它切步（第 1 轮不切，
-        与 binder 一致）—— 此时宿主**不要**再手动调 :meth:`beginStep`。
+        与 binder 连同一批信号，两者可并存。后端提供 ``llmStarted`` 时自动跟随
+        它切步（第 1 轮不切），此时宿主不要再手动调 :meth:`beginStep`。
         幂等：重复绑定同一后端直接返回；换绑其他后端先解旧的。
         """
         if worker is self._worker:
@@ -909,10 +830,9 @@ class ElaChatTurnJournal:
         return pairs
 
     def _bound_slots(self):
-        """四个基础信号槽的**绑定方法实例**（连 / 断必须用同一批对象）。
+        """四个基础信号槽的绑定方法实例（连 / 断必须用同一批对象）。
 
-        ``disconnect`` 要拿到**同一个可调用对象**：lambda / ``functools.partial``
-        断不掉（只打 RuntimeWarning，连接实际还在）。所以缓存一次复用。
+        ``disconnect`` 要拿到同一个可调用对象：lambda / ``partial`` 断不掉。
         """
         if self._worker_slots is None:
             self._worker_slots = (
@@ -926,8 +846,7 @@ class ElaChatTurnJournal:
     def disconnectWorker(self, worker) -> "ElaChatTurnJournal":
         """断开与 worker 的连接（幂等，可重复调用）。
 
-        只断**当前已连**的那个后端：对没连过的 worker 调 disconnect 只会打
-        RuntimeWarning（``Failed to disconnect``）而不抛异常。
+        只断当前已连的那个后端；对没连过的 worker 调只会打 RuntimeWarning。
         """
         if worker is None or worker is not self._worker:
             return self
@@ -942,10 +861,7 @@ class ElaChatTurnJournal:
         return self
 
     def _on_llm_started(self) -> None:
-        """后端每次 LLM 调用开始：第 2 轮起切步（与 binder.beginRound 一致）。
-
-        上一轮没有任何分段时不切步（对齐 ``bubble.beginStep`` 的「空步骤不递增」）。
-        """
+        """后端每次 LLM 调用开始：第 2 轮起切步（上一轮没有分段时不切）。"""
         if not self._open:
             return
         self._round_start = self._clock()
@@ -963,8 +879,7 @@ class ElaChatTurnJournal:
         if reasoning:
             self.reasoning(reasoning)
         if answer:
-            # 只有非空白正文才结束思考段（与 binder.answer 的 text.strip() 同）；
-            # 纯空白交给 text() 攒成 pending，不会开出一个空正文段。
+            # 只有非空白正文才结束思考段；纯空白交给 text() 攒成 pending。
             if answer.strip() and self._rec_reasoning is not None:
                 self.endReasoning()
             self.text(answer)
@@ -972,8 +887,7 @@ class ElaChatTurnJournal:
     def _on_tool_started(self, toolCall) -> None:
         if not isinstance(toolCall, dict):
             return
-        # 缺 function 时按 "unknown" 兜底；但 function 是字符串这类畸形结构
-        # 不能再 .get 打崩，也不能造出一张假工具卡。
+        # 缺 function 时按 "unknown" 兜底；畸形结构直接丢弃，不造出假工具卡。
         function = toolCall.get("function") or {}
         if not isinstance(function, dict):
             return

@@ -1,7 +1,6 @@
 """图表导出（PNG / JPEG / SVG / data URL）。
 
-从 ``ElaChartWidget`` 拆出的纯导出逻辑：不拥有绘图状态，只读画布当前
-option / 几何，用 ``_paint_content`` 离屏重绘（子控件 —— 工具条按钮 —— 天然不入镜）。
+只读画布当前 option / 几何，用 ``_paint_content`` 离屏重绘（子控件不入镜）。
 """
 
 from __future__ import annotations
@@ -90,8 +89,7 @@ class ChartExporter:
             or suffix.endswith(".jpeg")
         )
         try:
-            # JPEG 没有 alpha：先压到主题底，再按扩展名写对应格式
-            # （原先一律写 PNG，`chart.jpg` 里其实是 PNG 字节）。
+            # JPEG 没有 alpha：先压到主题底，再按扩展名写对应格式。
             image = self._render_image(opaque=want_jpeg)
             fmt = "JPEG" if want_jpeg else "PNG"
             if not image.isNull() and image.save(str(target), fmt):
@@ -134,17 +132,13 @@ class ChartExporter:
         return color if color.isValid() else None
 
     def _background_layers(self, opts: dict) -> tuple:
-        """→ (导出底色, 图表背景)，与 ECharts 同序：导出参数在下、图表背景在上。
+        """→ (导出底色, 图表背景)，导出参数在下、图表背景在上。
 
-        两者都没给时导出底色回落主题底（与控件观感一致）；图表显式设了
-        ``"transparent"`` 时不铺主题底 —— PNG 就是真正的透明背景。
+        两者都没给时导出底色回落主题底；图表显式设 ``"transparent"`` 时不铺底。
         """
         export_bg = self._option_color((opts or {}).get("backgroundColor"))
-        # **只读内部 option，绝不调 ``getOption()``**：后者会深拷贝整份数据
-        # （40 万点 [x,y] 实测 1.0s，占整次导出 88%），而这里只需要一个键。
-        chart_bg = self._option_color(
-            self._chart._option_ref().get("backgroundColor")
-        )
+        # 只读内部 option，不调 ``getOption()``：后者会深拷贝整份数据（40 万点约 1.0s）。
+        chart_bg = self._option_color(self._chart._option_ref().get("backgroundColor"))
         if export_bg is None and chart_bg is None:
             export_bg = QColor(T("color.bg.base"))
         return export_bg, chart_bg
@@ -156,10 +150,7 @@ class ChartExporter:
                 painter.fillRect(QRect(0, 0, width, height), color)
 
     def _render_image(self, opts: dict = None, *, opaque: bool = False) -> QImage:
-        """图表内容 → 离屏 ``QImage``（不含子控件，工具条按钮不会入镜）。
-
-        ``opaque``（JPEG）时把透明像素压到主题底上 —— JPEG 没有 alpha 通道。
-        """
+        """图表内容 → 离屏 ``QImage``（不含子控件）；``opaque`` 时压到主题底。"""
         chart = self._chart
         dpr = max(1.0, float(chart.devicePixelRatioF() or 1.0))
         image = QImage(

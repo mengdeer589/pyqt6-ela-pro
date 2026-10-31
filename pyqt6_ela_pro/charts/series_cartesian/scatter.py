@@ -46,11 +46,7 @@ def _draw_emphasis_markers(
     scale: float,
     symbol_rotate: float,
 ) -> None:
-    """快路径下把命中项按 emphasis 样式叠画在最上层。
-
-    基础点始终用同一张 sprite（与未 hover 帧逐像素一致）；只有命中项换成
-    逐点矢量绘制（+25% 半径 / ``emphasis.itemStyle.color``）。
-    """
+    """快路径下把命中项按 emphasis 样式叠画在最上层（基础点保持同一张 sprite）。"""
     for dot in renderer._dots:
         index = dot["index"]
         if index not in emphasized:
@@ -75,11 +71,9 @@ def _draw_emphasis_markers(
 class ScatterSeriesRenderer(SeriesRenderer):
     """散点图。
 
-    option 键：
-    - ``mode``: ``"markers"``（默认）/ ``"lines"`` / ``"lines+markers"``；
-    - ``symbolSize``: 数值 → 固定直径 px；缺省且数据带第三维时按第三维
-      在本系列内线性映射到 6~24px；否则默认 8px。
-    数据项：数值 / [x, y] / [x, y, size] / {"value": [...]}。
+    ``mode``：``"markers"``（默认）/ ``"lines"`` / ``"lines+markers"``。
+    ``symbolSize``：数值 → 固定直径 px；缺省且数据带第三维时按第三维在本系列内
+    映射到 6~24px，否则 8px。数据项：数值 / [x, y] / [x, y, size] / {"value": [...]}。
     支持 grid / polar / singleAxis 坐标系。
     """
 
@@ -164,7 +158,7 @@ class ScatterSeriesRenderer(SeriesRenderer):
         candidates = self._candidate_indices(coord, plot_w)
         data = self.data()
         indices = range(len(data)) if candidates is None else candidates.tolist()
-        # 第三维（尺寸映射）只对候选点求值：原先全量列表推导在 1M 点上要 300ms+
+        # 第三维只对候选点求值（全量推导在 1M 点上要 300ms+）
         thirds = {i: self._third_dim(data[i]) for i in indices}
         known = [v for v in thirds.values() if v is not None]
         zmin = min(known) if known else 0.0
@@ -172,8 +166,7 @@ class ScatterSeriesRenderer(SeriesRenderer):
         span = zmax - zmin
         append = self._dots.append
 
-        # 向量化映射（与折线同一快路径）：per-point mapPoint 每点 ~5µs，
-        # 5 万点就是 0.25s。
+        # 向量化映射（与折线同一快路径）：逐点 mapPoint 约 5µs，5 万点就是 0.25s。
         mapped = None
         if not single and candidates is not None:
             np_ = _ds.np
@@ -247,19 +240,11 @@ class ScatterSeriesRenderer(SeriesRenderer):
     # -- 绘制 -------------------------------------------------------------
     #: 散点抽稀的下限（点数低于它不做抽稀：小数据要全画）
     _LOD_MIN_POINTS = 4000
-    #: 抽稀后「每像素列保留几个点」（视觉密度与真实分布都够看）
-    #: 2 点/像素列 = 每个像素列两点：散点直径 4px 时已经看不出稀疏，
-    #: 而窗口重建（缩放 / 平移）的成本与点数成正比 —— 之前 4 点/列在
-    #: 5 万点窗口里要建 1 万个 dict，缩放一步 110ms。
+    #: 抽稀后每像素列保留的点数（2 点已看不出稀疏；窗口重建成本与点数成正比）
     _LOD_POINTS_PER_PX = 2.0
 
     def _candidate_indices(self, coord, plot_w: float):
-        """散点绘制候选下标（numpy 可用时）：窗口裁剪 + 像素密度抽稀。
-
-        返回 ``ndarray`` 或 ``None``（``None`` = 走原来的全量循环）。散点此前
-        **完全没有窗口与抽稀**：50k 点要建 50k 个 dict 再逐个 drawEllipse
-        （实测 layout 133ms + paint 125ms），1M 点直接不可用。
-        """
+        """散点绘制候选下标：窗口裁剪 + 像素密度抽稀；返回 ``ndarray`` 或 ``None``（= 全量循环）。"""
         np_ = _ds.np
         data = self.data()
         length = len(data)
@@ -357,11 +342,8 @@ class ScatterSeriesRenderer(SeriesRenderer):
         if not draw_markers and not show_label and not selected:
             p.restore()
             return
-        # 统一外观 + 无标签 + 尺寸一致：**所有点合并成一条 QPainterPath 一次
-        # drawPath**（逐点 drawSymbol 在 5 万点上要 ~100ms）。
-        # hover 强调项（emphasized）**不再禁用这条快路径**：否则 hover 一帧会从
-        # 「位图贴图」切到「逐点矢量绘制」，其余点出现轻微外观跳变（用户可见）。
-        # 现在基础点始终走同一张 sprite，只把命中项按 emphasis 样式叠画在最上层。
+        # 统一外观 + 无标签 + 尺寸一致：所有点贴同一张 sprite（逐点矢量绘制在
+        # 5 万点上 ~100ms）。hover 命中项不禁用快路径 —— 否则其余点外观会跳变。
         if (
             uni is not None
             and not selected
@@ -509,9 +491,7 @@ class ScatterSeriesRenderer(SeriesRenderer):
     def hitTest(self, pos: QPointF):
         best = None
         best_d = 1e9
-        # 散点的入场动画只缩半径、不挪位置（见 ``paint`` 的 ``r = d["r"] * scale``），
-        # 所以命中位置始终正确；这里只把半径也按同一系数缩，让命中范围与
-        # 画出来的大小一致（否则动画中「点得到但看不见」）。
+        # 入场动画只缩半径、不挪位置：命中半径按同一系数缩，保持「看到的就能点到」。
         scale = max(0.0, self._anim_t)
         for d in self._dots:
             dist = math.hypot(d["pt"].x() - pos.x(), d["pt"].y() - pos.y())

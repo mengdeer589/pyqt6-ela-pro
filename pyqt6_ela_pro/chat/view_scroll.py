@@ -1,4 +1,4 @@
-"""贴底跟随 / 回到底部 / 交互 resize 延迟重排方法组（从 ``ElaChatView`` 拆出）。"""
+"""贴底跟随 / 回到底部 / 交互 resize 延迟重排方法组。"""
 
 from __future__ import annotations
 
@@ -82,10 +82,8 @@ class _ViewScrollMixin:
         )
 
     def resizeEvent(self, event) -> None:  # noqa: N802 (Qt 命名)
-        # resizeEvent 投递时布局链通常已经把内容排到新宽度（super() 前后读
-        # viewport()/_content 都是新宽），所以冻结优先用「当前内容宽」；只有布局
-        # 还没跟上时才退回 oldSize 推算。拿 oldSize 无条件冻结会把已经排好的
-        # 内容拉回旧宽，多出两趟重排 + 一段旧宽闪现。
+        # resizeEvent 投递时布局链通常已把内容排到新宽度，冻结优先用当前内容宽；
+        # 无条件用 oldSize 会把已排好的内容拉回旧宽，多两趟重排 + 一帧旧宽闪现。
         self._freeze_before_resize(event)
         super().resizeEvent(event)
         self._position_jump_button()
@@ -106,15 +104,8 @@ class _ViewScrollMixin:
     ) -> None:
         """设置交互 resize 是否延迟重排（默认开启）。
 
-        拖动窗口期间把消息内容宽度冻结在起始宽度，避免全部 Markdown
-        查看器逐帧文本 reflow；停手 ``delayMs`` 毫秒后统一按新宽度重排
-        （贴底时自动回到最新消息）。
-
-        :param on: 是否启用
-        :param minMessages: 触发延迟重排的最小消息数（缺省 50，小会话实时重排）
-        :param delayMs: 停手后统一重排的延迟（毫秒，缺省 120）
-        :param minParts: 触发延迟重排的最小分段数（缺省 200；工具卡 / 正文多
-            但消息少的历史会话同样需要延迟）
+        拖动窗口期间冻结消息内容宽度，停手 ``delayMs`` 后统一按新宽度重排。
+        ``minMessages`` / ``minParts`` 是触发阈值（缺省 50 条 / 200 段）。
         """
         self._resize_reflow_deferred = bool(on)
         if minMessages is not None:
@@ -143,10 +134,8 @@ class _ViewScrollMixin:
     def _freeze_before_resize(self, event) -> None:
         """在 ``QScrollArea`` 处理 resize 之前冻结内容宽（避免逐帧重排）。
 
-        resize 事件到达时布局链**通常已经**按新宽排过内容（Qt 在投递事件前
-        完成父布局激活）。此时若还按 ``oldSize`` 推算冻结值，会把内容从新宽
-        拉回旧宽（一次多余重排 + 一帧旧宽），解冻时再拉回来（第二次）。
-        所以优先钉住当前内容宽；只有布局没跟上时才用旧控件宽推算。
+        布局链通常已按新宽排过内容，所以优先钉住当前内容宽，布局没跟上时才用
+        ``oldSize`` 推算。
         """
         if not self._resize_reflow_deferred or self._resize_frozen_width > 0:
             return
@@ -201,9 +190,8 @@ class _ViewScrollMixin:
                 self._pending_anchor = (bar.value(), bar.maximum())
             self._refresh_shell_heights()
             self._content_layout.activate()
-            # 冻结期间内容宽度可能已与视口脱节（ElaScrollBar 占 10px，出现/消失会改变视口
-            # 宽度），而 setWidgetResizable 只在滚动区自身 resize 时才重算 —— 不显式拉回，
-            # 内容会溢出视口被右侧裁掉。
+            # 冻结期间内容宽可能与视口脱节（ElaScrollBar 占 10px），必须显式拉回，
+            # 否则内容溢出视口被右侧裁掉。
             self._sync_content_width()
             if self._virtual_list_mode:
                 for messageId, message in self._message_index.items():
@@ -243,9 +231,8 @@ class _ViewScrollMixin:
     def _on_range_changed(self, _minimum: int, maximum: int) -> None:
         """滚动范围变化（Markdown / 工具卡展开等异步重排）时保持贴底。
 
-        正在展开 / 收起工具卡时消费本次变化并延长暂停窗口（视口不动，避免跳动）；
-        其余情况（流式输出、异步渲染）贴底时只对齐一次，不轮询。
-        懒加载插入更早消息后，按记下的锚点补偿滚动位置（保持阅读位置稳定）。
+        展开 / 收起期间消费变化并延长暂停窗口；懒加载插入更早消息后按锚点
+        补偿滚动位置。
         """
         if self._follow_hold:
             self._hold_timer.start(_FOLLOW_HOLD_MS)
@@ -267,11 +254,7 @@ class _ViewScrollMixin:
         self._schedule_suspension_update()
 
     def holdFollow(self, hold: bool = True) -> None:
-        """暂停 / 恢复贴底跟随（展开收起工具卡等交互期间使用）。
-
-        ``hold=True`` 后 ``_FOLLOW_HOLD_MS`` 毫秒自动恢复，期间滚动范围变化
-        不会带动视口，避免消息区跳动。
-        """
+        """暂停 / 恢复贴底跟随（``hold=True`` 后 ``_FOLLOW_HOLD_MS`` 自动恢复）。"""
         self._follow_hold = bool(hold)
         if self._follow_hold:
             self._hold_timer.start(_FOLLOW_HOLD_MS)
@@ -310,17 +293,7 @@ class _ViewScrollMixin:
         return self._stick
 
     def setScrollBarPolicy(self, policy) -> None:
-        """设置垂直滚动条策略（默认 :attr:`Qt.ScrollBarPolicy.ScrollBarAsNeeded`）。
-
-        :param policy: ``Qt.ScrollBarPolicy`` 成员。``ScrollBarAsNeeded``
-            仅在内容溢出时显示（默认）；``ScrollBarAlwaysOn`` 常显；
-            ``ScrollBarAlwaysOff`` 彻底隐藏 —— 注意此时只能滚轮 / 键盘滚动，
-            没有可拖动的把手。
-
-        滚动条本身是 ``ElaScrollBar``（Ela 自绘：静止 2.4px 细柄，悬停展开
-        成 6px 带上下箭头），可拖动、点击绝对定位。手动拖动会把
-        :meth:`stickToBottom` 置 ``False``（复用既有的 ``valueChanged`` 逻辑）。
-        """
+        """设置垂直滚动条策略（默认 :attr:`Qt.ScrollBarPolicy.ScrollBarAsNeeded`）。"""
         self._scroll.setVerticalScrollBarPolicy(policy)
         # ElaScrollBar 静止占 10px：策略变化会让视口宽度变化，内容要跟着拉回
         self._sync_content_width()
@@ -331,9 +304,5 @@ class _ViewScrollMixin:
         return self._scroll.verticalScrollBarPolicy()
 
     def scrollBar(self) -> QScrollBar:
-        """获取垂直滚动条控件（``ElaScrollBar``）。
-
-        用于宿主做策略之外的调节，例如 ``setIsAnimation(True)`` 让内容增长
-        时范围平滑过渡、``setSpeedLimit(...)`` 改滚轮步进上限。
-        """
+        """获取垂直滚动条控件（``ElaScrollBar``，供宿主做策略之外的调节）。"""
         return self._scroll.verticalScrollBar()

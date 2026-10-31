@@ -35,18 +35,13 @@ def _ms_to_dt(ms) -> datetime:
 
 
 def single_font_family(value) -> str:
-    """用户给的字体族 → **单个**族名（本库硬约束，见 ``chartFont``）。
-
-    ECharts 的 ``fontFamily`` 允许逗号分隔的回退列表；本库在 Win7 上只能单族
-    （多族 = 逐字形族匹配的慢 shaping，且进程级毒化后续文本），所以取第一个，
-    其余留一条 ``warn_once``。
-    """
+    """用户给的字体族 → 单个族名（多族在 Win7 上是慢 shaping 且进程级毒化，取首个并告警）。"""
     if not isinstance(value, str):
         return ""
-    text = value.strip().strip("\'\"").strip()
+    text = value.strip().strip("'\"").strip()
     if not text:
         return ""
-    parts = [p.strip().strip("\'\"") for p in text.split(",")]
+    parts = [p.strip().strip("'\"") for p in text.split(",")]
     parts = [p for p in parts if p]
     if not parts:
         return ""
@@ -64,14 +59,9 @@ def chartFont(
     family: str = None,
     italic: bool = False,
 ) -> QFont:
-    """构造图表用字体（默认 ``FONT_FAMILIES`` / 中文系统单族雅黑）。
+    """构造图表用字体（默认 ``FONT_FAMILIES``；中文系统单族雅黑）。
 
-    ``family`` 是**单个族名**（逗号列表取第一个）；``italic`` 对应 ECharts
-    ``fontStyle: "italic" | "oblique"``。
-
-    中文系统默认收成单族 ``Microsoft YaHei``：多族列表在 Win7 上是慢 shaping
-    路径（图表文本逐重绘放大，见「下游项目反馈bug.md」§3），而列表其余族全是
-    mac / linux 字体、Windows 上本就轮不到。
+    ``family`` 只取单个族名；``italic`` 对应 ``fontStyle: "italic" | "oblique"``。
     """
     font = QFont()
     single = single_font_family(family)
@@ -81,8 +71,7 @@ def chartFont(
         cjk_family = system_cjk_font_family()
         font.setFamilies([cjk_family] if cjk_family else list(FONT_FAMILIES))
     font.setStyleHint(QFont.StyleHint.SansSerif)
-    # 数值容错：外部 JSON 里 ``fontSize`` 可能是 ``"12.5"`` / ``"12px"``，
-    # 直接 ``int(px)`` 会抛 ValueError（层级系列整条 paint 中断 → 静默消失）。
+    # 外部 JSON 的 fontSize 可能是 "12.5" / "12px"，裸 int() 会抛 ValueError。
     px_value = _to_float(px, T("font.xs"))
     if px_value is None or not math.isfinite(px_value) or px_value <= 0:
         px_value = float(T("font.xs"))
@@ -108,11 +97,8 @@ def formatValue(v) -> str:
             return ""
         if float(v).is_integer() and abs(v) < 1e15:
             return str(int(v))
-        # **两位小数对小于 0.005 的量级完全不够**，而 ``rstrip("0")`` 再把
-        # "0.00" 清成 "0" —— 于是同一根轴上所有刻度标签变成同一个字符串。
-        # 实测数据在 1e-3 量级（niceTicks(0, 0.001) 的 step = 0.0002）时，
-        # 6 个刻度的标签全是 "0"，负小数还会给出 "-0"。
-        # 小数位按量级自适应，封顶 8 位（再多是浮点尾数，如 0.6000000000000001）。
+        # 小数位按量级自适应、封顶 8 位（再多是浮点尾数）：固定两位会把 1e-3
+        # 量级的刻度标签全变成 "0"，负小数还会给出 "-0"。
         av = abs(float(v))
         if av == 0.0:
             return "0"
@@ -143,8 +129,7 @@ def niceTicks(vmin: float, vmax: float, segments: int = 5):
             vmax += pad
     segments = max(1, min(int(segments), _MAX_SEGMENTS))
     span = vmax - vmin
-    # 端点有限不代表差值有限：±1e308 的差会溢出成 inf，随后 log10(inf)=inf、
-    # math.floor(inf) 抛 OverflowError（曾使 data:[1e308,-1e308] 直接崩掉 setOption）。
+    # 端点有限不代表差值有限：±1e308 的差溢出成 inf，随后 math.floor(inf) 抛 OverflowError。
     if not math.isfinite(span) or span <= 0.0:
         vmin, vmax = 0.0, 1.0
         span = 1.0
@@ -155,9 +140,8 @@ def niceTicks(vmin: float, vmax: float, segments: int = 5):
         step0 = 1.0 / segments
     mag = 10 ** math.floor(math.log10(step0))
     if not math.isfinite(mag) or mag <= 0.0:
-        # 次正规数（如 span=2.5e-323）下 ``10 ** -324`` 下溢成 0，随后
-        # ``vmin / step`` 直接 ZeroDivisionError。极端量级退回等分刻度，
-        # 不做 nice 取整 —— 有刻度可读总比崩掉 setOption 好。
+        # 次正规数下 ``10 ** -324`` 下溢成 0，随后除法 ZeroDivisionError；
+        # 极端量级退回等分刻度（有刻度可读总比崩掉 setOption 好）。
         ticks = [vmin + i * span / segments for i in range(segments + 1)]
         return vmin, vmax, ticks
     step = mag
@@ -178,11 +162,8 @@ def niceTicks(vmin: float, vmax: float, segments: int = 5):
         nice_max = nice_min + step
     # 用整数计数避免浮点累积误差
     n = int(round((nice_max - nice_min) / step))
-    # **刻度数硬上限**。step 极小时（``maxInterval: 1e-9``、或 step 恰好比
-    # 浮点分辨率还细）n 会膨胀到百万 / 千万级，而下面这个循环逐个 append 到
-    # Python list、随后每根刻度都要画一条网格线 + 一个标签。实测跨度 1 的
-    # 数据配 ``maxInterval=1e-6`` → 约 200 万刻度、单帧 35 秒；1e-9 直接
-    # 挂死（一分钟无返回）。宁可少几根网格线，也不能毁掉整帧。
+    # 刻度数硬上限：step 极小时 n 会膨胀到百万级，逐个 append + 每根刻度画线
+    # 画标签时单帧可达 35 秒，宁可少几根网格线也不能毁掉整帧。
     if n > _MAX_TICKS:
         return _clamp_tick_count(nice_min, nice_max, step, _MAX_TICKS)
     ticks = []
@@ -193,12 +174,7 @@ def niceTicks(vmin: float, vmax: float, segments: int = 5):
 
 
 def _clamp_tick_count(nice_min, nice_max, step, limit):
-    """刻度过多时改用放大 step 的等分刻度，并保持端点不变。
-
-    返回的刻度数 ≤ ``limit + 1``。``step`` 放大到能整除跨度为止 —— 不整除
-    时最后一根刻度会越过 ``nice_max``，宁可让 ``nice_max`` 与最后刻度略有
-    出入，也不要让坐标范围与数据脱节。
-    """
+    """刻度过多时改用放大 step 的等分刻度（端点保持不变，刻度数 ≤ ``limit + 1``）。"""
     span = nice_max - nice_min
     if span <= 0.0 or step <= 0.0:
         return nice_min, nice_max, [nice_min]
@@ -244,7 +220,7 @@ def _log_ticks(vmin: float, vmax: float, base: float, segments: int = 5) -> list
     if e1 <= e0:
         e1 = e0 + 1
     ticks = [base**e for e in range(e0, e1 + 1)]
-    # 十年内（例如 1..100）只有 3 个幂次标签太稀，补 2/5 子刻度。
+    # 不足三个数量级时只有 2~3 个幂次标签太稀，补 2/5 子刻度。
     if e1 - e0 <= 2 and abs(base - 10.0) < 1e-9:
         ticks = [m * (10.0**e) for e in range(e0, e1 + 1) for m in (1, 2, 5)]
     ticks = [t for t in ticks if vmin * (1.0 - 1e-9) <= t <= vmax * (1.0 + 1e-9)]
@@ -260,12 +236,10 @@ def _log_ticks(vmin: float, vmax: float, base: float, segments: int = 5) -> list
 
 
 def _iter_data_values(data):
-    """从系列 data 中迭代全部**有限**数值（支持 number / [x, y] / {"value": v}）。
+    """从系列 data 中迭代全部**有限**数值（number / [x, y] / {"value": v}）。
 
-    滤 NaN / inf 的原因与清单见 AGENTS.md「charts」。此处除极值污染外还多一层：
-    调用方（``SingleAxisCoord.setSeries``）用 ``min()`` / ``max()`` 归约，而
-    ``min()`` 遇 NaN 的结果是**顺序相关**的 —— 实测同一份数据 ``[1, 2, nan, 5]``，
-    NaN 在首位得 0..1、在末位得 0..5。
+    滤 NaN / inf 的原因：调用方用 ``min()`` / ``max()`` 归约，而 ``min()`` 遇
+    NaN 的结果是顺序相关的（``[1, 2, nan, 5]`` 会得 0..1 或 0..5）。
     """
     if data is None:
         return
@@ -303,15 +277,9 @@ def _opt_bound(v):
 
 
 def _parse_margin(v, default):
-    """解析 grid / singleAxis 边距：数值 px 或百分比字符串（"10%"）。
+    """解析 grid / singleAxis 边距：数值 px 或百分比字符串（"10%"）→ ``(is_pct, value)``。
 
-    返回 ``(is_pct, value)``：百分比在 layout 时按 rect 宽 / 高换算；
-    非法输入降级为 default（default 可为 None 表示「未设置」）。
-
-    **非有限值（inf / nan）与其它非法输入同等处理。** 原先 ``float(v)`` 直接
-    放行，导致 ``{"grid": {"left": "inf"}}`` 得到 ``plot = QRectF(inf, 40, 10,
-    202)``、``mapPoint`` 返回 NaN 坐标 —— 不抛异常、不告警，整图坐标系变成
-    NaN（Qt 画不出东西，宿主任何算术都拿到 NaN）。
+    非法输入（含非有限值）降级为 default；``default=None`` 表示「未设置」。
     """
     fallback = float(default) if default is not None else None
     if isinstance(v, str):
@@ -389,11 +357,7 @@ def _line_pen(opt: dict, default_color, default_width=1.0) -> QPen:
 
 
 def _datum_y(item):
-    """取数据项的 y 值：number / [x, y] / {"value": ...}；**非有限值返回 None**。
-
-    所有数据取 y 的入口，所以 NaN / inf 在这里滤最彻底（后果见 AGENTS.md
-    「charts」的极值一条）。
-    """
+    """取数据项的 y 值（number / [x, y] / {"value": ...}）；**非有限值返回 None**。"""
     if item is None:
         return None
     v = item.get("value") if isinstance(item, dict) else item

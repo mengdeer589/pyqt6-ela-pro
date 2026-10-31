@@ -1,4 +1,4 @@
-"""气泡文本分段 / 流式缓冲 / 查看器挂起方法组（从 ``ElaChatBubble`` 拆出）。"""
+"""气泡文本分段 / 流式缓冲 / 查看器挂起方法组。"""
 
 from __future__ import annotations
 
@@ -39,12 +39,10 @@ class _BubbleTextMixin:
         self._text_buffers.setdefault(partId, []).append(chunk)
 
     def _write_chunk(self, partId: str, chunk: str) -> None:
-        """写入一个文本分片：流式时入缓冲，非流式时**直接落定**。
+        """写入一个文本分片：流式时入缓冲，非流式时直接落定。
 
-        「在途」只存在于流式回合内。往一条**已结束**的消息追加文本时若也走
-        缓冲，就再也没有 ``endText()`` 来结算它，``part.text`` 永远是空的 ——
-        界面上看得到（查看器自己持有文本），但对序列化 / 存储完全不可见。
-        所以按消息状态分流。
+        「在途」只存在于流式回合内：已结束的消息走缓冲就再没有 ``endText()``
+        来结算，``part.text`` 会永远为空。
         """
         if self._status == ElaChatStatusType.Streaming:
             self._buffer_chunk(partId, chunk)
@@ -63,12 +61,9 @@ class _BubbleTextMixin:
             self._replace_part(partId, part.withText(part.text + "".join(chunks)))
 
     def _materialize_all(self) -> None:
-        """物化全部分段的文本缓冲（**写**操作）。
+        """物化全部分段的文本缓冲（**写**操作，读路径不许调用）。
 
-        只在**写路径**调用 —— 需要把真实文本灌进新建 / 重建的控件，或在分段
-        结束时落定。**读路径一律不许调用**：``parts()`` / ``text()`` /
-        ``reasoning()`` 必须保持纯读取，否则 ``part.text`` 的值会取决于
-        「有没有被读过」，可序列化的落定语义就废了。
+        读路径调用会让 ``part.text`` 的值取决于「有没有被读过」。
         """
         for partId in list(self._text_buffers):
             self._materialize_part(partId)
@@ -80,11 +75,7 @@ class _BubbleTextMixin:
         self._pending_renders.pop(partId, None)
 
     def setRenderDeferred(self, on: bool) -> None:
-        """设置是否延迟 Markdown 渲染（批量加载历史时先建骨架）。
-
-        延迟期间正文 / 内联思考只记录待渲染分段，查看器保持空内容；
-        由 :meth:`flushRender` 统一渲染（视图批量队列调用）。
-        """
+        """设置是否延迟 Markdown 渲染（批量加载历史时先建骨架，由 ``flushRender`` 补渲）。"""
         self._render_deferred = bool(on)
 
     def renderDeferred(self) -> bool:
@@ -129,14 +120,10 @@ class _BubbleTextMixin:
         widget.setMarkdown(text or "")
 
     def _defer_viewer_append(self, partId: str, widget: QWidget) -> bool:
-        """追加路径的延迟闸门：延迟期间只登记待渲染。
+        """追加路径的延迟闸门；``True`` = 已登记待渲染，调用方不要再写查看器。
 
-        ``setParts``（存储恢复）是**重放**增量 API 走完的，正文与思考分片最终都
-        落在 :meth:`appendText` / ``appendReasoning`` 的 ``appendMarkdown`` 上 ——
-        那两处若不看 ``_render_deferred``，批量加载几百条 parts 消息就照样在主线程
-        同步渲染全部 Markdown，渐进渲染形同虚设。
-
-        :returns: ``True`` = 已登记待渲染，调用方不要再写查看器。
+        ``setParts`` 的重放最终落在 ``appendMarkdown`` 上，不看
+        ``_render_deferred`` 的话批量加载仍会同步渲染全部 Markdown。
         """
         if not self._render_deferred or not isinstance(widget, ElaMarkdownViewer):
             return False
@@ -148,8 +135,8 @@ class _BubbleTextMixin:
     def setViewersSuspended(self, on: bool) -> None:
         """挂起 / 恢复全部 Markdown 查看器（视口外消息省内存与 reflow）。
 
-        挂起时用等高透明占位控件替换查看器（布局高度不变，``parts`` 数据
-        不变）；恢复时按分段内容重新渲染。流式中的分段不会被挂起。
+        挂起时用等高透明占位控件替换查看器（``parts`` 数据不变），流式中的
+        分段不会被挂起。
         """
         on = bool(on)
         if on == self._viewers_suspended:
@@ -164,11 +151,7 @@ class _BubbleTextMixin:
         return self._viewers_suspended
 
     def hasExpandedSections(self) -> bool:
-        """是否有用户展开中的折叠块 / 思考块 / 工具面板。
-
-        壳回收会销毁这些控件（展开态不属 ``parts`` 数据），因此调用方应跳过
-        这类消息，避免用户滚回来时发现手动展开的内容又收起了。
-        """
+        """是否有用户展开中的折叠块 / 思考块 / 工具面板（壳回收应跳过这类消息）。"""
         for card in self._tool_cards.values():
             if card is not None and not is_deleted(card) and card.isOpened():
                 return True
@@ -278,9 +261,7 @@ class _BubbleTextMixin:
         self._pending_text_lead.clear()
         if text:
             self._mark_generation_started()
-        # 多段正文（多步骤）时 setText 是**整体替换**：先清掉已有正文段，
-        # 否则 ``updateMessage(mid, "C")`` 会得到 "A" + "C" 的拼接，而 view 的
-        # 文档承诺「整体替换消息文本」。
+        # 多段正文时 setText 是整体替换，先清旧正文段，否则会拼接成 "A" + "C"
         if (
             text
             and sum(1 for item in self._parts if item.kind == ElaChatPartKindType.Text)
@@ -304,11 +285,8 @@ class _BubbleTextMixin:
     def appendText(self, chunk: str) -> None:
         """追加文本（助手消息追加到当前正文段，用户消息追加到气泡）。
 
-        **纯空白分片不开正文段**：模型常先吐 ``"\\n\\n"`` 再吐正文，直接开段会
-        在时间线上留一个空 text part（污染 ``parts`` / 导出），还把「空回答」
-        误判成有正文。所以没有打开正文段时先把空白攒进 ``_pending_text_lead``，
-        等首个非空白分片一起开段 —— 中段的空白（``"hello" + " " + "world"``）
-        不走这条路，照常保留。
+        纯空白分片不开正文段：先攒进 ``_pending_text_lead``，等首个非空白分片
+        一起开段，避免时间线上留下空 text part；中段空白照常保留。
         """
         if not chunk:
             return
@@ -346,8 +324,7 @@ class _BubbleTextMixin:
         # 文末段落下边距不计入高度：正文与后续分段的视觉间距与其它分段一致
         viewer.setEmbeddedTrimBottom(True)
         viewer.setBorderRadius(0)
-        # 不透明底色（与消息区同色）：嵌入查看器默认透明，Win7 上会走慢速
-        # 重绘路径（见「下游项目反馈bug.md」§4）
+        # 不透明底色：嵌入查看器默认透明，Win7 上会走慢速重绘路径
         viewer.setViewportBackground(base_color(self._theme_mode))
         viewer.setStickToBottom(False)
         if self._status == ElaChatStatusType.Streaming:
@@ -356,7 +333,7 @@ class _BubbleTextMixin:
         return viewer
 
     def _restore_text_part(self, partId: str, text: str) -> None:
-        """历史恢复正文段：一次性 ``setMarkdown``，不走流式缓冲（bug #17）。"""
+        """历史恢复正文段：一次性 ``setMarkdown``，不走流式缓冲。"""
         if self._current_text_id is not None:
             self.endText()
         viewer = self._create_text_viewer()
@@ -374,8 +351,7 @@ class _BubbleTextMixin:
     def beginText(self, partId: Optional[str] = None) -> Optional[str]:
         """开始一个新的正文段，返回分段 id（非助手消息返回 ``None``）。
 
-        ``partId`` 可由调用方指定（从存储恢复时保留原分段 id，使
-        ``messageId`` / ``partId`` 在重启后保持稳定），缺省自动生成。
+        ``partId`` 可由调用方指定（存储恢复时保留原分段 id），缺省自动生成。
         """
         if self._role != ElaChatRoleType.Assistant:
             return None
@@ -411,9 +387,7 @@ class _BubbleTextMixin:
             if widget.isStreaming():
                 widget.endStream()
             widget.setPlaceholderText("")
-        # 段结束即落定：把缓冲并入 part.text，使 part.text 自足、可序列化，
-        # 且与读取时机无关（对齐 opencode「`.ended` 携带全量并覆盖」）。
-        # 此前只在 parts() 被读时才物化，导致流结束后仍可能残留未落定缓冲。
+        # 段结束即落定：把缓冲并入 part.text，使 part.text 自足且与读取时机无关
         self._materialize_part(partId)
         part = self._find_part(partId)
         if part is not None:
@@ -427,10 +401,7 @@ class _BubbleTextMixin:
             return self._step_index
         self.endText()
         self._finish_tool_group()
-        # 思考段也要收尾：此前只把 _current_reasoning_id 置 None 而不
-        # endReasoning()，宿主若不显式调用 endReasoning（binder 会调，
-        # 手写宿主未必），ReasoningBlock 会永远停在「思考中」转圈，
-        # 对应 part 的 status 也冻在 streaming。
+        # 思考段也要收尾，否则 ReasoningBlock 永远停在「思考中」、part 冻在 streaming
         self.endReasoning()
         if self._thinking_row is not None:
             self._thinking_row.end()

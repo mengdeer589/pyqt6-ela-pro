@@ -23,16 +23,10 @@ from ..core import SeriesRenderer
 
 
 class LinesSeriesRenderer(SeriesRenderer):
-    """线图（起终点坐标对，Grid 直角坐标系下绘制）。
+    """飞线（起终点坐标对，Grid 直角坐标系下绘制）。
 
-    option 键：
-    - ``coordinateSystem``: "cartesian2d"（默认，需配 xAxis/yAxis）；
-    - ``data``: [{"coords": [[x1, y1], [x2, y2]]}, ...]；
-    - ``lineStyle``: {"width": px, "color": "#..."（缺省取系列色）,
-      "curveness": 0.0（>0 时二次贝塞尔弯曲）}；
-    - ``effect``: {"show": True, "period": 4（秒 / 全程）,
-      "symbolSize": 6, "color": "#..."}（QTimer 驱动移动亮点，生命周期挂
-      ChartWidget，渲染器替换时自动停止，不泄漏）。
+    支持 ``coordinateSystem`` / ``data``（``coords`` 起终点）/ ``lineStyle`` /
+    ``effect``（QTimer 驱动的移动亮点）。
     """
 
     def __init__(self, chart, opt):
@@ -44,10 +38,7 @@ class LinesSeriesRenderer(SeriesRenderer):
         if bool(effect.get("show", False)) and QApplication.instance() is not None:
             timer = QTimer(chart)  # 生命周期挂 ChartWidget
             timer.timeout.connect(self._on_tick)
-            # 持续动效：Reduced/Disabled 下高亮不流动（相位冻结即静态态）。
-            # 间隔只在这里出现一次 —— ``start_idle_loop`` 无论启不启动都会写
-            # ``setInterval``，所以**不要**在前面再 ``setInterval(40)``：
-            # 那是第二处魔数，改令牌时必然漏掉其中之一。
+            # 间隔只在这里设置一次：``start_idle_loop`` 无论启不启动都会写 ``setInterval``。
             start_idle_loop(timer, EFFECT_TICK_MS)
             self._timer = timer
 
@@ -56,10 +47,7 @@ class LinesSeriesRenderer(SeriesRenderer):
         return dict(eff or {})
 
     def _on_tick(self):
-        """亮点推进。仅可见时 tick（渲染器替换自动停止；legend 隐藏暂停）。
-
-        整个回调包裹：Qt 定时器回调中抛出的异常会终止进程。
-        """
+        """亮点推进。整个回调包裹：Qt 定时器回调抛异常会终止进程。"""
         timer = self._timer
         if timer is None:
             return
@@ -81,10 +69,7 @@ class LinesSeriesRenderer(SeriesRenderer):
         try:
             effect = self._effect_opt()
             period = max(0.5, _to_float(effect.get("period"), 4.0))
-            # 步长按**实际 tick 间隔**算，别写死 0.04：那个魔数隐含「每 40ms
-            # 走 4%」，一旦 ``start_idle_loop`` 因动效策略改了间隔（或者将来
-            # 调 EFFECT_TICK_MS），亮点速度就与配置无关地错了 —— 而
-            # ``period`` 是用户可见的 option，错的是「用户设的周期不生效」。
+            # 步长按实际 tick 间隔算，``period`` 才是用户可见的周期。
             step = max(1, int(timer.interval())) / 1000.0 / period
             self._phase = (self._phase + step) % 1.0
             self.requestSeriesRepaint()
@@ -98,13 +83,7 @@ class LinesSeriesRenderer(SeriesRenderer):
             self._timer = None
 
     def _on_visible_changed(self):
-        """显隐变化钩子（core 图例显隐调用）：显示恢复时重启定时器。
-
-        **必须走 ``start_idle_loop`` 而不是裸 ``timer.start()``**：裸 start
-        绕过动效策略，于是「Reduced/Disabled 下持续动效停掉」被图例切换重新
-        打开 —— 无障碍用户看到移动亮点照常流动。``start_idle_loop`` 幂等
-        （内部先查 ``isActive()``）、守策略、且总会重写 interval。
-        """
+        """显隐变化钩子：显示恢复时重启定时器（必须走 ``start_idle_loop`` 以守动效策略）。"""
         if self.visible and self._timer is not None and not self._timer.isActive():
             start_idle_loop(self._timer, EFFECT_TICK_MS)
 
@@ -198,19 +177,13 @@ class LinesSeriesRenderer(SeriesRenderer):
     def hitTest(self, pos: QPointF):
         best = None
         best_d = 8.0
-        curveness = _to_float(
-            (self.opt.get("lineStyle") or {}).get("curveness"), 0.0
-        )
+        curveness = _to_float((self.opt.get("lineStyle") or {}).get("curveness"), 0.0)
         for i, seg in enumerate(self._segments):
             if abs(curveness) > 1e-6:
-                # 命中必须贴着实际绘制的贝塞尔曲线，不能拿弦当近似
-                # （曲线中点与弦中点实测可差 90px：可见曲线没提示、空白有提示）。
+                # 命中必须贴着实际绘制的贝塞尔曲线（曲线中点与弦中点可差 90px）。
                 path = self._curve_path(seg["p0"], seg["p1"], curveness)
                 pts = [path.pointAtPercent(k / 8.0) for k in range(9)]
-                d = min(
-                    dist_point_segment(pos, a, b)
-                    for a, b in zip(pts, pts[1:])
-                )
+                d = min(dist_point_segment(pos, a, b) for a, b in zip(pts, pts[1:]))
             else:
                 d = dist_point_segment(pos, seg["p0"], seg["p1"])
             if d <= best_d:

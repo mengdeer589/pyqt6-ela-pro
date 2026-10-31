@@ -24,18 +24,10 @@ from ..axes import chartFont
 class ChartTimeline(QObject):
     """图表时间轴：底部轴（节点圆点 + 标签）+ 播放 / 暂停按钮。
 
-    option::
-
-        "timeline": {"data": ["2024", "2025", "2026"], "currentIndex": 0,
-                     "autoPlay": False, "playInterval": 1500}
-        "baseOption": {基础 option}          # 顶层（可选）
-        "options": [帧0 option, 帧1 option, ...]   # 顶层
-
-    切换帧：``goto(i)`` → ``baseOption`` 深合并 ``options[i]`` 后
-    ``setOption(..., notMerge=True)``（保留过渡动画与时间轴结构）。
-    当前帧下标与播放状态挂在 chart 上（``_timeline_index`` /
-    ``_timeline_playing``），重建组件后状态不丢；重建时旧 QTimer 会被
-    停止并删除，不会累积。
+    option: ``"timeline": {"data": [...], "currentIndex": 0, "autoPlay": False,
+    "playInterval": 1500}``，帧 option 放顶层 ``options``，基础 option 放
+    ``baseOption``。``goto(i)`` 深合并后 ``setOption(notMerge=True)``。
+    当前帧下标与播放状态挂在 chart 上，重建组件后不丢。
     """
 
     optionKey = "timeline"
@@ -75,8 +67,7 @@ class ChartTimeline(QObject):
         self._timer.timeout.connect(self._advance)
         chart._timeline_timer = self._timer
         if self._playing:
-            # 持续动效：Reduced/Disabled 下 timeline 不自动推进（当前帧照常显示，
-            # 用户仍可 goto / 点播放按钮手动切帧）。
+            # 持续动效：Reduced/Disabled 下不自动推进，用户仍可手动切帧。
             start_idle_loop(self._timer, play_interval_ms)
         self._band = QRectF()
         self._play_rect = QRectF()
@@ -85,11 +76,9 @@ class ChartTimeline(QObject):
     def dispose(self) -> None:
         """停表并从 chart 上解挂（``core._rebuild`` 丢弃旧组件时调用）。
 
-        必须连 ``deleteLater()`` 一起做：定时器的 parent 是 chart，光 ``stop()``
-        会让它变成一个挂在 chart 上的停摆 QObject —— 每次 ``setOption`` 泄一个。
-        注意 ``goto()`` 是从本组件的 ``_advance``（定时器回调）里进来的，此时
-        ``_rebuild`` 会 dispose 到自己 —— ``deleteLater`` 是延迟投递，qt 派发完
-        当前事件才落地，所以不会在发射过程中析构。
+        必须连 ``deleteLater()`` 一起做，只 ``stop()`` 会在 chart 上留下停摆
+        QObject（每次 ``setOption`` 泄一个）；``deleteLater`` 延迟投递，
+        不会在定时器回调里析构自己。
         """
         if getattr(self.chart, "_timeline_timer", None) is self._timer:
             self.chart._timeline_timer = None
@@ -145,8 +134,7 @@ class ChartTimeline(QObject):
         return self._playing
 
     def labelStyle(self) -> dict:
-        """时间轴标签样式（``label`` 平铺键优先，``label.textStyle`` 次之，
-        未设置的键回退顶层 ``textStyle``）。"""
+        """时间轴标签样式（``label`` 平铺键优先，其次 ``label.textStyle``，均回退顶层）。"""
         raw = self.opt.get("label")
         local = dict(raw) if isinstance(raw, dict) else {}
         nested = local.pop("textStyle", None)

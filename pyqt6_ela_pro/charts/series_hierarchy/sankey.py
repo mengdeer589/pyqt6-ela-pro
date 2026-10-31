@@ -22,14 +22,8 @@ from ._shared import _label_font, _series_palette_color, _text_color
 class SankeySeriesRenderer(SeriesRenderer):
     """桑基图（节点矩形 + 贝塞尔流带）。
 
-    option 键：
-    - ``data`` / ``nodes``: [{"name"}]（节点，二者等价，data 优先）；
-    - ``links``: [{"source","target","value"}]（source/target 为名称或下标）；
-    - ``nodeWidth``: 节点矩形宽度 px（默认 14）；
-    - ``nodeGap``: 同列节点间距 px（默认 10）；
-    - ``layoutIterations``: 排序迭代轮数（默认 6，减少流带交叉）；
-    - ``label``: {"show": True, "fontSize": px}（节点名称）；
-    - 节点着色：调色板按下标循环；流带取源节点色半透明。
+    支持 ``data`` / ``nodes`` / ``links`` / ``nodeWidth`` / ``nodeGap`` /
+    ``layoutIterations`` / ``label`` / ``lineStyle``。
     """
 
     def __init__(self, chart, opt):

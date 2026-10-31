@@ -1,42 +1,8 @@
 """
-聊天消息气泡组件（``pyqt6_ela_pro.chat``）。
+聊天消息气泡组件：用户 / 助手 / 系统三种角色。
 
-:class:`ElaChatBubble` 的助手消息按「步骤 + 内容分段」组织，与
-:class:`~pyqt6_ela_pro.chat.message.ElaChatPart` 时间线一一对应：
-
-1. **头部层** :class:`~pyqt6_ela_pro.chat.blocks.MessageHeader`
-   （头像 + 名称 / 模型 + 时间 / 状态；用户消息右对齐镜像）；
-2. **内容层**：``_parts_container`` 内按加入顺序排列全部分段——
-   思考段（:class:`~pyqt6_ela_pro.chat.blocks.ReasoningBlock` 或内联查看器，
-   行首为 :class:`~pyqt6_ela_pro.chat.blocks.ThinkingRow`）、
-   正文段（可多个嵌入模式 ``ElaMarkdownViewer``）、
-   每步工具面板（:class:`~pyqt6_ela_pro.chat.blocks.ToolGroupPanel`，
-   内含 :class:`~pyqt6_ela_pro.chat.blocks.ToolCallCard` /
-   :class:`~pyqt6_ela_pro.chat.blocks.ContextToolGroupCard`）、
-   步骤用量徽标（:class:`~pyqt6_ela_pro.chat.blocks.StatsBadge`，
-    展示模式见 :meth:`ElaChatBubble.setStatsMode`）；
-3. **附件层** :class:`~pyqt6_ela_pro.chat.blocks.AttachmentStrip`（chips）；
-4. **底部层** :class:`~pyqt6_ela_pro.chat.blocks.MessageActions`
-   （复制 / 撤回 / 重新生成 + 自定义动作）与
-   :class:`~pyqt6_ela_pro.chat.blocks.MessageMeta`（整轮耗时）。
-
-用户消息为圆角气泡 + 可选中纯文本，系统消息为居中弱化文本。
-主题切换实时换肤（颜色经 ``eTheme`` 语义令牌混合派生）。
-
-**API 分两类（改代码前先分清）**
-
-- **宿主 API**（改动某条消息的对外形态 / 取子控件）：
-  ``text()`` / ``parts()`` / ``markdownViewer()`` / ``inlineReasoningViewer()`` /
-  ``statsBadge()`` / ``toolPanels()`` / ``toolPanel()`` / ``actions()`` /
-  ``footer()`` / ``meta()`` / ``header()`` / ``attachments()`` /
-  ``setAvatarShape()`` / ``setActionsHoverReveal()`` / ``error()`` /
-  ``setTopSpacing()`` 等；
-- **view ↔ bubble 内部协议**（其余 ``beginText`` / ``appendText`` /
-  ``addToolCall`` / ``setParts`` / ``setStatus`` / ``setStepStats`` /
-  ``setRenderDeferred`` / ``setViewersSuspended`` / ``stampNow`` …）：
-  **只在 view / 分组卡内部调用**。宿主要改某条消息，请走
-  ``ElaChatView.<method>(messageId, ...)`` —— 直接对气泡调内部协议会绕过
-  view 的 ``_sync_parts`` 派生结算与 ``_dirty_syncs`` 防抖，数据与界面分叉。
+助手消息按「步骤 + 内容分段」组织，与 ``ElaChatPart`` 时间线一一对应；宿主
+改消息一律经 ``ElaChatView``，气泡上的内部协议只给 view / 分组卡调用。
 """
 
 from __future__ import annotations
@@ -120,18 +86,12 @@ _ROW_SPACING = 10
 DISCLAIMER_TEXT = "内容由 AI 生成，仅供参考"
 #: 底部「AI 生成」提示字号
 _DISCLAIMER_PIXEL_SIZE = 12
-#: 单条消息超过该步骤数时，物化只展开末尾若干步（历史超长回合）
-#: 超长消息物化时保留的末尾步骤数（用户通常停在最新一步）
 #: 右键菜单行高（与 markdown viewer / 终端一致）
 _CONTEXT_MENU_ITEM_HEIGHT = 28
 
 
 class _SelectableLabel(QLabel):
-    """可选中纯文本标签：右键菜单走库内 ``ElaMenu``。
-
-    ``QLabel`` 在 ``TextSelectableByMouse`` 下自带 Qt 原生右键菜单（Copy /
-    Select All），与本库外观不一致，所以整体接管。
-    """
+    """可选中纯文本标签：右键菜单走库内 ``ElaMenu``（不用 Qt 原生菜单）。"""
 
     def contextMenuEvent(self, event: QContextMenuEvent) -> None:  # noqa: N802
         execElaMenu(self._build_context_menu(), event.globalPos())
@@ -246,9 +206,7 @@ class ElaChatBubble(
     _BubbleDetailMixin,
     ElaThemeWidget,
 ):
-    """单条聊天消息气泡（用户 / 助手 / 系统三种角色，分层富消息；助手消息正文是
-    Markdown 源）。
-    """
+    """单条聊天消息气泡（用户 / 助手 / 系统；助手正文为 Markdown 源）。"""
 
     #: 助手消息流式结束（``endStream``）时发射
     streamFinished = pyqtSignal()
@@ -260,21 +218,13 @@ class ElaChatBubble(
     regenerateRequested = pyqtSignal()
     #: 用户取消自动重试
     retryCancelled = pyqtSignal()
-    #: 用户在错误卡上点击「重试」（同参数重发；由 view 转发成带 messageId 的
-    #: ``retryRequested``）
+    #: 用户在错误卡上点击「重试」（同参数重发；view 转发成带 messageId 的 ``retryRequested``）
     retryRequested = pyqtSignal()
-    #: 插入了待答复的工具审批（参数：``requestId``）
-    #:
-    #: **库不在这里阻塞**：宿主收到后自行挂起后端（Qt 里挂起等用户点按钮会
-    #: 卡死事件循环），用户点完卡片后组件发 ``permissionReplied``。
+    #: 插入了待答复的工具审批（参数：``requestId``）；库不阻塞，宿主自行挂起后端
     permissionRequested = pyqtSignal(str)
     #: 审批已落定（参数：``requestId``、reply、answer、feedback）
     permissionReplied = pyqtSignal(str, str, str, str)
-    #: **交互卡已就绪，请放进输入区上方的 dock**（参数：卡片、partId）
-    #:
-    #: 气泡不知道 dock 的存在（dock 挂在 :class:`ElaChatWidget` 上），所以用
-    #: 信号把「这张卡该去哪儿」交出去。时间线上不摆交互卡 —— 审批是当前这一步
-    #: 的事，摆在历史流里既窄又旧（提问被压到折行、候选卡说明被页脚盖住）。
+    #: 交互卡已就绪，请放进输入区上方的 dock（参数：卡片、partId）
     permissionDockRequested = pyqtSignal(object, str)
     #: 该 part 的审批已落定（参数：partId）—— dock 据此把当前卡撤下、接下一张
     permissionSettled = pyqtSignal(str)
@@ -284,8 +234,7 @@ class ElaChatBubble(
     actionTriggered = pyqtSignal(str)
     #: 工具卡 / 分组卡展开收起（宿主可借此暂停贴底跟随）
     toolToggled = pyqtSignal()
-    #: 新建了可滚动的正文 / 内联思考查看器（参数：查看器控件；
-    #: ``ElaChatView`` 借此按需安装嵌套滚动过滤器）
+    #: 新建了可滚动的正文 / 内联思考查看器（view 据此安装嵌套滚动过滤器）
     viewerCreated = pyqtSignal(QWidget)
 
     def __init__(
@@ -320,7 +269,7 @@ class ElaChatBubble(
         self._parts: list = []
         self._part_widgets: dict = {}
         self._text_buffers: dict = {}
-        #: 尚未开段的纯空白分片（首个非空白分片到来时一起开段；见 appendText）
+        #: 尚未开段的纯空白分片（首个非空白分片到来时一起开段）
         self._pending_text_lead: list = []
         self._heading_scanners: dict = {}
         self._text_width_cache: Optional[tuple] = None
@@ -351,10 +300,9 @@ class ElaChatBubble(
         #: 所属消息 id（由 ``ElaChatView`` 建气泡时写入；工具渲染器上下文要用）
         self._message_id = 0
         self._stats_mode = "footer"
-        #: ``setParts`` 重放期间为 True：逐段 setStepStats 不重复摆徽标，
-        #: 由 setParts 收尾统一 apply 一次（bug #17）。
+        #: ``setParts`` 重放期间为 True：逐段 setStepStats 不重复摆徽标，收尾统一 apply 一次
         self._stats_batch = False
-        #: 历史分段批量构建深度：回放期间暂缓布局 / 面板显示（bug #17）
+        #: 历史分段批量构建深度：回放期间暂缓布局 / 面板显示
         self._bulk_build = 0
         #: 回放期间待统一 show / 刷新摘要的工具面板
         self._bulk_panels: set = set()
@@ -368,8 +316,8 @@ class ElaChatBubble(
         self._disclaimer: Optional[ElaText] = None
         self._stats_host: Optional[QWidget] = None
         self._stats_layout: Optional[QHBoxLayout] = None
-        #: 已停靠底部行的步骤徽标 ``(partId, 原布局下标)``。停靠是**独占**的：
-        #: 换停靠前要把旧徽标放回时间线，否则恢复/重放会把中间徽标全堆进 footer。
+        #: 已停靠底部行的步骤徽标 ``(partId, 原布局下标)``；停靠是独占的，
+        #: 换停靠前要把旧徽标放回时间线
         self._docked_stats: Optional[tuple] = None
         self._thinking_row: Optional[ThinkingRow] = None
         # -- 工具（每步一个外层面板） ------------------------------------
@@ -388,7 +336,7 @@ class ElaChatBubble(
         # -- 合成 / 压缩 / 审批分段 -----------------------------------------
         #: 审批分段 id -> 审批卡控件
         self._permission_cards: dict = {}
-        #: 仍在 dock 里等待用户操作的**交互卡**（partId -> 卡片）；落定后清空
+        #: 仍在 dock 里等待用户操作的交互卡（partId -> 卡片）；落定后清空
         self._interactive_cards: dict = {}
         self._header = MessageHeader(self._role, self)
         self._meta = MessageMeta(self)
@@ -431,10 +379,8 @@ class ElaChatBubble(
             self._header.hide()
             root.addWidget(self._build_system_body())
         else:
-            # **内容列 + 附件条 + 底部行同进 ``_column``**：``setContentMaxWidth``
-            # 限的是这一列。原先只限 ``_content``，附件条和底部行是它的兄弟节点
-            # 不受限，宽窗口下 footer 比正文列宽，往右伸出去 —— 视觉上「偏左」。
-            # 收进同一容器后右边缘自然对齐；不限宽时行为完全不变。
+            # 内容列 + 附件条 + 底部行同进 _column：setContentMaxWidth 限的是这一列，
+            # 只限 _content 时附件条与 footer 不受限，宽窗口下会往右伸出正文列
             self._column = QWidget(self)
             column_layout = QVBoxLayout(self._column)
             column_layout.setContentsMargins(0, 0, 0, 0)
@@ -511,11 +457,7 @@ class ElaChatBubble(
         return row
 
     def _ensure_waiting_shimmer(self) -> Optional[ElaShimmer]:
-        """惰性创建等待首 token 的骨架（只用于助手消息）。
-
-        骨架不是分段：它直接挂在 ``_content_layout`` 的分段容器之前，隐藏后
-        不占布局；收到首个内容后由 ``_sync_waiting_placeholder`` 收掉。
-        """
+        """惰性创建等待首 token 的骨架（仅助手消息；不属于任何分段）。"""
         shimmer = self._waiting_shimmer
         if shimmer is not None:
             if is_deleted(shimmer):
@@ -581,15 +523,11 @@ class ElaChatBubble(
         self._actions.undoRequested.connect(self.undoRequested)
         self._actions.regenerateRequested.connect(self.regenerateRequested)
         self._actions.actionTriggered.connect(self.actionTriggered)
-        # **不挂 QGraphicsOpacityEffect**：即使 opacity=0、控件隐藏，效果器仍会让
-        # 每个滚动帧走一次离屏渲染（实测占聊天滚动 ~20%）。显隐交给
-        # setVisible + RetainSizeWhenHidden；这个对象只保留透明度读数供
-        # setActionsHoverReveal 的既有契约使用。
+        # 不挂 QGraphicsOpacityEffect：即使 opacity=0 且控件隐藏，效果器仍会让
+        # 每个滚动帧走一次离屏渲染；显隐交给 setVisible + RetainSizeWhenHidden
         self._actions_effect = QGraphicsOpacityEffect(self._actions)
         self._actions_effect.setOpacity(0.0 if self._actions_hover_reveal else 1.0)
-        # 隐藏时仍占位（否则悬停出现时消息区整体跳动）。**必须用
-        # RetainSizeWhenHidden**：仅靠 ``QGraphicsOpacityEffect(opacity=0)``
-        # 保留占位时，动作栏每个滚动帧仍要整块离屏渲染一次（Win7 上很贵）。
+        # 隐藏时仍占位（否则悬停出现时消息区整体跳动）；必须用 RetainSizeWhenHidden
         policy = self._actions.sizePolicy()
         policy.setRetainSizeWhenHidden(True)
         self._actions.setSizePolicy(policy)
@@ -655,16 +593,14 @@ class ElaChatBubble(
     def footer(self) -> Optional[QWidget]:
         """获取底部行容器（操作按钮 + AI 提示 + 用量徽标 + 耗时）。
 
-        流式回合期间整行隐藏（见 :meth:`_sync_footer`），回合结束后出现；宿主
-        也可用它整体接管底部行（自定义控件加进去即可）。
+        流式回合期间整行隐藏，回合结束后出现；宿主也可往里加自定义控件。
         """
         return self._footer
 
     def setDisclaimer(self, text: str) -> None:
         """设置底部「内容由 AI 生成」提示文案（仅助手消息；空串等同隐藏）。
 
-        与其它外观 setter 一样**立即作用于本条消息**；气泡级改单条，
-        批量改走 ``ElaChatView.setDisclaimer()``。
+        立即作用于本条消息；批量改走 ``ElaChatView.setDisclaimer()``。
         """
         self._disclaimer_text = str(text or "")
         self._disclaimer_visible = bool(self._disclaimer_text)
@@ -691,11 +627,7 @@ class ElaChatBubble(
         return self._header
 
     def setMessageId(self, messageId: int) -> None:
-        """设置所属消息 id（由 ``ElaChatView`` 建气泡时写入）。
-
-        传给工具渲染器上下文（:attr:`ToolRenderContext.messageId`），
-        渲染器可据此回调宿主做「跳到这条消息」之类的事。
-        """
+        """设置所属消息 id（由 ``ElaChatView`` 建气泡时写入；工具渲染器上下文要用）。"""
         self._message_id = int(messageId or 0)
 
     def messageId(self) -> int:
@@ -739,11 +671,12 @@ class ElaChatBubble(
         """获取头部时间文本。"""
         return self._timestamp
 
-    def setIdentity(self, agent: str = "", model: str = "", modelVariant: str = "") -> None:
+    def setIdentity(
+        self, agent: str = "", model: str = "", modelVariant: str = ""
+    ) -> None:
         """设置历史消息的 agent / 模型 / 变体（空则不显示）。
 
-        用户消息显示在头部副行（名字下面），助手消息显示在底部 meta 行 ——
-        与 opencode 的「提问者身份在气泡上方、回答身份在回答末尾」一致。
+        用户消息显示在头部副行，助手消息显示在底部 meta 行。
         """
         self._agent = str(agent or "")
         self._model = str(model or "")
@@ -772,8 +705,7 @@ class ElaChatBubble(
         self._mentions = tuple(mentions or ())
         if self._role == ElaChatRoleType.User:
             self._render_user_text()
-            # RichText 的标签文本是 HTML（含 span 标签），气泡宽度必须按
-            # **原文**重算，否则会量到 HTML 源码长度、把短消息撑得很宽。
+            # RichText 标签是 HTML（含 span），气泡宽度必须按原文重算，否则会撑宽
             self._update_max_width()
 
     def mentions(self) -> tuple:
@@ -919,8 +851,8 @@ class ElaChatBubble(
     def markdownViewer(self) -> Optional[ElaMarkdownViewer]:
         """获取当前正文段的 Markdown 查看器（非助手 / 无正文段返回 ``None``）。
 
-        **纯读取**：非流式消息没有正文段时不会凭空建一段（那会污染 ``parts``
-        与序列化结果）。流式回合内仍按需建段 —— 查看器是流式光标与占位的落点。
+        纯读取：非流式消息没有正文段时不会凭空建一段（那会污染 ``parts``）；
+        流式回合内仍按需建段，查看器是流式光标与占位的落点。
         """
         if self._role != ElaChatRoleType.Assistant:
             return None
@@ -986,8 +918,7 @@ class ElaChatBubble(
     def setContentMaxWidth(self, width: int) -> None:
         """设置消息内容最大宽度（像素，``0`` 表示不限；仅助手消息）。
 
-        Typora 式阅读宽度（默认 860px）。限的是**整列**（正文分段 + 附件条 +
-        底部操作栏 / 用量行），所以宽窗口下这几层的右边缘是对齐的。
+        限的是整列（正文 + 附件条 + 底部行），所以宽窗口下右边缘对齐。
         """
         if self._role != ElaChatRoleType.Assistant:
             return
@@ -1001,8 +932,7 @@ class ElaChatBubble(
     def _apply_content_max_width(self) -> None:
         """把阅读宽度应用到内容列（用户 / 系统消息不受影响）。
 
-        限 ``_column`` 而不是 ``_content``：见 :meth:`_build_layout` 的注释 ——
-        附件条与底部行必须跟着一起限，否则宽窗口下 footer 会伸出正文列。
+        限 ``_column`` 而不是 ``_content``：附件条与底部行必须一起限。
         """
         if self._column is None or self._role != ElaChatRoleType.Assistant:
             return
@@ -1200,8 +1130,7 @@ class ElaChatBubble(
     def _reset_part_state(self) -> None:
         """清空全部分段、控件与步骤面板（:meth:`setParts` 的第一步）。
 
-        工具面板必须一起清：``ToolGroupPanel`` 是真实控件，只清 ``_parts``
-        会让旧卡片留在界面上，而新卡片又叠在同一面板里。
+        工具面板必须一起清：只清 ``_parts`` 会让旧卡片留在界面上。
         """
         self._current_text_id = None
         self._current_reasoning_id = None
@@ -1216,16 +1145,15 @@ class ElaChatBubble(
             self._discard_part_state(partId)
             self._suspended_viewers.pop(partId, None)
         for widget in self._part_widgets.values():
-            # 待答复的审批 part 没有控件（``_append_part(part, None)``）会存成
-            # ``None``；已挂起 / 已销毁的占位控件也可能在这里。都要跳过 ——
-            # 否则 ``None.setParent`` 会在 setParts 里抛 AttributeError。
+            # 待答复的审批 part 存的是 None；已挂起 / 已销毁的占位也要跳过，
+            # 否则 None.setParent 会在 setParts 里抛 AttributeError
             if widget is None or is_deleted(widget):
                 continue
             widget.hide()
             widget.setParent(None)
             widget.deleteLater()
-        # 占位控件已被销毁，挂起标志必须一起复位；否则 ``viewersSuspended()``
-        # 恒为 True，之后同名调用直接早退，这条消息再也挂不起 / 恢复不了。
+        # 占位控件已销毁，挂起标志必须一起复位；否则 viewersSuspended() 恒为 True，
+        # 之后这条消息再也挂不起 / 恢复不了
         self._suspended_viewers.clear()
         self._viewers_suspended = False
         self._parts = []
@@ -1236,9 +1164,8 @@ class ElaChatBubble(
         self._group_card = None
         self._docked_stats = None
         self._thinking_row = None
-        # 审批：记录卡清 `_part_widgets` 就够了（上面的循环会销毁它们），
-        # 但**交互卡不在布局里**（在 dock 上），必须单独收掉，否则 dock 会一直
-        # 显示一张已经没人再答的卡。
+        # 记录卡清 _part_widgets 就够了（上面的循环会销毁它们），但交互卡不在
+        # 布局里（在 dock 上），必须单独收掉，否则 dock 会一直显示一张死卡
         for card in self._interactive_cards.values():
             if not is_deleted(card):
                 card.hide()
@@ -1331,8 +1258,8 @@ class ElaChatBubble(
             self._error = ErrorCard(self._content or self)
             if self._content_layout is not None:
                 self._content_layout.addWidget(self._error)
-            # 错误卡的两个动作直接复用气泡既有的「重新生成」通道（同一个
-            # 语义不值得开第二条路），「重试」是新通道。
+            # 错误卡的「重新生成」复用气泡既有通道（同一语义不开第二条路），
+            # 「重试」是新通道
             self._error.retryRequested.connect(self.retryRequested.emit)
             self._error.regenerateRequested.connect(self.regenerateRequested.emit)
         return self._error
@@ -1340,11 +1267,9 @@ class ElaChatBubble(
     def setError(self, message: str, errorType: str = "") -> None:
         """设置错误文本与类型（空文本隐藏卡片）。
 
-        错误通常发生在流式过程中：先收尾未完成的分段（正文查看器 /
-        思考光标 / 工具分组），避免留下永久闪烁的光标与未结束的流。
+        错误通常发生在流式中：先收尾未完成的分段，避免留下永久闪烁的光标。
 
         :param errorType: 错误类型，决定错误卡上点亮哪些动作
-            （见 :data:`~pyqt6_ela_pro.chat.blocks.RETRYABLE_ERROR_TYPES`）
         """
         if message:
             self._abortStream(ElaChatStatusType.Error)

@@ -1,43 +1,12 @@
 """异步聊天后端 worker 基类（``pyqt6_ela_pro.chat``）。
 
-:class:`ElaChatAsyncWorker` 把「QThread + asyncio 事件循环 + 命令队列 + 取消 / 收尾」
-这套宿主基础设施收进库内；信号契约与
-:class:`~pyqt6_ela_pro.chat.mock.ElaChatMockBackend` 完全同构，可直接接到
-:class:`~pyqt6_ela_pro.chat.binder.ElaChatStreamBinder`。
+``ElaChatAsyncWorker`` 封装 QThread + asyncio 事件循环 + 命令队列 + 取消 / 收尾，
+信号契约与 ``ElaChatMockBackend`` 同构，可直接接 ``ElaChatStreamBinder``。
 
-子类只需实现与后端相关的钩子（**在钩子内直接发信号**，如 ``self.llmStarted.emit()`` /
-``self.toolStarted.emit(tool_call)`` / ``self.statsReady.emit(usage, ttft_ms, tps)``）：
-
-- ``_setup()``（async）：初始化后端，完成时发 ``ready``、失败时发 ``failed``；
-- ``_stream_turn(prompt, attachments)``：返回本回合的异步分片迭代器，产出对象由
-  ``chunkReceived`` 发出；``attachments`` 是本条消息的附件列表（可空）；
-- ``_rollback_turn(prompt, attachments)``（async，可选）：``regenerate()`` 前
-  回滚历史（``attachments`` 与 ``_stream_turn`` 同源，用于拼出与历史一致的口径）；
-- ``_after_turn()``（async，可选）：回合正常结束时收尾（如空正文诊断）；
-- ``_reset_backend()``（async，可选）：``reset()`` 命令。
-
-线程安全命令：``ask`` / ``regenerate``（返回**回合 token**，未就绪返回
-``None``）/ ``reset`` / ``cancel`` / ``shutdown``。
-
-**回合 token 是必需的，不是可选装饰**：``cancel()`` 只置标记、由轮询异步收尾，
-旧回合的 ``turnFinished`` 可能晚几十毫秒到达，而那时宿主往往已经发了新提问。
-``turnFinished`` 原样带回发起时的 token，宿主凭它认领收尾（``binder.finish``），
-认不出的迟到信号直接丢弃 —— 否则新回合会被旧回合的收尾按「完成」掐掉，
-分片全被丢弃，用户看到「消息发出去了、正文一个字没有」。
-
-用法::
-
-    class MyWorker(ElaChatAsyncWorker):
-        async def _setup(self):
-            self._client = await create_client()
-            self.ready.emit()
-
-        def _stream_turn(self, prompt, attachments):
-            return self._client.stream(prompt, attachments)
-
-    worker = MyWorker(parent)
-    worker.start()                 # QThread.start()
-    worker.ask("你好", attachments=[{"name": "a.png", "path": "C:/a.png"}])
+子类实现 ``_setup`` / ``_stream_turn`` / ``_rollback_turn`` / ``_after_turn`` /
+``_reset_backend`` 钩子，并在钩子内直接发信号。``ask`` / ``regenerate`` 返回回合
+token，``turnFinished`` 原样带回 —— ``cancel()`` 是异步的，认不出的迟到信号必须
+丢弃，否则会把新回合按完成掐掉。
 """
 
 from __future__ import annotations
@@ -71,11 +40,7 @@ def _worker_exited(worker) -> bool:
 
 
 def _remember_lingering(worker) -> None:
-    """保活一个「terminate 后仍未退出」的 worker；顺手剪掉已退出的条目。
-
-    保活的目的只是「避免运行中的 ``QThread`` 被 GC 析构」，线程一旦退出就
-    没有保活价值 —— 只增不减的列表在长生命周期宿主里会无界累积。
-    """
+    """保活「terminate 后仍未退出」的 worker，顺手剪掉已退出条目。"""
     _LINGERING_WORKERS[:] = [
         item for item in _LINGERING_WORKERS if not _worker_exited(item)
     ]
@@ -133,18 +98,13 @@ class ElaChatAsyncWorker(QThread):
         self.ready.emit()
 
     def _stream_turn(self, prompt: str, attachments: list) -> AsyncIterator:
-        """返回本回合的异步分片迭代器（子类实现）。
-
-        ``attachments`` 是本条消息的附件列表（``ElaChatAttachment`` 或等价
-        dict；无附件时为空列表）。
-        """
+        """返回本回合的异步分片迭代器（子类实现；``attachments`` 可空）。"""
         raise NotImplementedError(f"{type(self).__name__} 未实现 _stream_turn")
 
     async def _rollback_turn(self, prompt: str, attachments: list) -> None:
         """``regenerate()`` 前回滚上一轮历史（子类可选实现）。
 
-        ``attachments`` 与 :meth:`_stream_turn` 同源 —— 子类若把附件拼进提问
-        （例如追加附件清单），回滚比较时也要用同一口径拼。
+        ``attachments`` 与 :meth:`_stream_turn` 同源，回滚比较要用同一口径拼。
         """
 
     async def _after_turn(self) -> None:
@@ -182,13 +142,11 @@ class ElaChatAsyncWorker(QThread):
         loop = self._loop
         if loop is None:
             return
-        # **先把 ``_loop`` 置 None 再 close()**：反过来的话，「已 close 但仍非 None」
-        # 这个中间态落在本函数的两条语句之间，而它是可达的（见 :meth:`_submit`）——
-        # 别的线程此刻提交命令就会撞上 ``RuntimeError: Event loop is closed``。
+        # 先把 ``_loop`` 置 None 再 close()：中间态里别的线程提交命令会撞上
+        # ``RuntimeError: Event loop is closed``。
         self._loop = None
         try:
-            # 先取消残留任务：否则流式响应仍在跑，shutdown_asyncgens 会报
-            # 「already running」
+            # 先取消残留任务，否则 shutdown_asyncgens 会报「already running」
             pending = asyncio.all_tasks(loop)
             for task in pending:
                 task.cancel()
@@ -213,9 +171,8 @@ class ElaChatAsyncWorker(QThread):
             command = await self._queue.get()
             if command is None:
                 break
-            # 新命令开始：清掉上一轮遗留的取消标记。**不能放在 ``_run_turn``
-            # 里清** —— regenerate 的 ``_rollback_turn`` 可能耗时（HTTP / DB），
-            # 期间用户按下的停止会被那一步清掉，整个回合照跑、停止键失效。
+            # 新命令开始：清掉上一轮遗留的取消标记。不能放进 _run_turn ——
+            # regenerate 的 _rollback_turn 可能耗时，期间按下的停止会被清掉。
             self._cancel.clear()
             kind, payload, turn = command
             if kind == "ask":
@@ -225,8 +182,7 @@ class ElaChatAsyncWorker(QThread):
                 try:
                     await self._rollback_turn(text, attachments)
                 except Exception as exc:
-                    # 回滚失败只上报：本回合仍继续跑（历史一致性由后端子类
-                    # 负责；这里贸然中止会让宿主收到「无回答的完成」）。
+                    # 回滚失败只上报：本回合仍继续跑（历史一致性由后端子类负责）
                     self.errorOccurred.emit("worker", f"{type(exc).__name__}: {exc}")
                 await self._run_turn(text, attachments, turn)
             elif kind == "reset":
@@ -237,17 +193,14 @@ class ElaChatAsyncWorker(QThread):
 
     async def _run_turn(self, prompt: str, attachments: list, turn: int) -> None:
         if self._cancel.is_set():
-            # 回滚 / 排队期间用户按下了停止：这一轮直接作废，不再发起后端请求，
-            # 但仍要发 ``turnFinished`` 把宿主的回合生命周期收掉。
+            # 回滚 / 排队期间按下了停止：作废本轮，但仍发 turnFinished 收掉回合
             self._cancel.clear()
             self.turnFinished.emit(turn)
             return
         try:
             stream = self._stream_turn(prompt, attachments)
         except Exception as exc:
-            # 同步抛异常（创建生成器 / 客户端时就失败）必须在本回合内收尾：
-            # 否则异常冲出 _serve 循环，worker 线程直接退出，后续 ask 永久失败
-            # 且不发 turnFinished。
+            # 同步抛异常必须在本回合内收尾，否则 worker 线程直接退出、后续 ask 永久失败
             self.errorOccurred.emit("worker", f"{type(exc).__name__}: {exc}")
             self.turnFinished.emit(turn)
             return
@@ -256,8 +209,7 @@ class ElaChatAsyncWorker(QThread):
             async for chunk in stream:
                 self.chunkReceived.emit(chunk)
 
-        # 流式迭代独占一个 task：取消时注入 CancelledError 让生成器在自己的任务里
-        # 收尾（直接 aclose 会与 SDK 内部的响应流任务冲突：already running）。
+        # 流式迭代独占一个 task：取消时注入 CancelledError 让生成器在自己任务里收尾
         self._turn_active = True
         self._active_turn = turn
         task = asyncio.ensure_future(pump())
@@ -307,11 +259,8 @@ class ElaChatAsyncWorker(QThread):
     def ask(self, text: str, attachments=None) -> Optional[int]:
         """提交提问；worker 未就绪返回 ``None``。
 
-        ``attachments`` 随提问一起交给 :meth:`_stream_turn`（附件对象 / dict
-        列表，原样透传，不做序列化 —— 后端要什么格式由子类决定）。
-
-        :returns: 回合 token（:attr:`turnFinished` 会原样带回，供宿主认领收尾）。
-            **不要再当 bool 用** —— 真值即代表已受理。
+        ``attachments`` 原样交给 :meth:`_stream_turn`。返回回合 token
+        （:attr:`turnFinished` 原样带回），真值即代表已受理，不要当 bool 用。
         """
         turn = self._next_turn_token()
         submitted = self._submit(("ask", (text, list(attachments or ())), turn))
@@ -320,8 +269,7 @@ class ElaChatAsyncWorker(QThread):
     def regenerate(self, text: str, attachments=None) -> Optional[int]:
         """重新生成：先回滚历史再重跑；未就绪返回 ``None``。
 
-        **必须带上原消息的附件** —— ``regenerateFrom`` 返回的提问快照里就有，
-        不带等于模型看不见用户上传的文件。
+        必须带上原消息的附件，否则模型看不见用户上传的文件。
         """
         turn = self._next_turn_token()
         submitted = self._submit(("regenerate", (text, list(attachments or ())), turn))
@@ -336,15 +284,10 @@ class ElaChatAsyncWorker(QThread):
         self._cancel.set()
 
     def _submit(self, command) -> bool:
-        """投递命令。worker 未就绪 / 已关闭返回 ``False``（**不抛**）。
+        """投递命令。worker 未就绪 / 已关闭返回 ``False``（不抛）。
 
-        契约是「未就绪时返回 ``False``」，所以这里对「事件循环已关闭」也必须走
-        返回路径而不是让 ``RuntimeError`` 冒出去 —— ``ask()`` 是宿主从 GUI 线程直接
-        调的，异常穿过 C++ 边界就是 0xC0000409 静默终止。
-
-        :meth:`_cleanup_loop` 已经把「先置 ``None`` 后 ``close()``」的顺序固定下来，
-        这里再兜一层底：万一 loop 在检查与投递之间被别的线程关掉（``terminate()``
-        路径），也只是返回 ``False``。
+        ``ask()`` 从 GUI 线程直接调用，异常穿过 C++ 边界就是 0xC0000409，
+        所以「事件循环已关闭」也必须走返回路径。
         """
         loop = self._loop
         if loop is None or self._queue is None or self._closing:
@@ -368,18 +311,10 @@ class ElaChatAsyncWorker(QThread):
         return self._closing
 
     def shutdown(self) -> None:
-        """请求停止 worker 并**立即返回**（不阻塞调用线程）。
+        """请求停止 worker 并立即返回（不阻塞调用线程）。
 
-        只做三件事：置关闭标记、请求中止当前回合、投递 ``None`` 哨兵让 ``_serve``
-        循环退出。线程随后在**自己那条**消息里收尾，不占着 GUI 线程。
-
-        **不要在这里阻塞。** 旧实现在这里 ``wait(4000)`` + ``terminate()`` 后再
-        ``wait(1000)``，而后端初始化卡住时实测关窗冻结 4016 ms（``_setup`` 没跑完时
-        ``_queue`` 还是 ``None``，哨兵投不出去，只能等满超时）。超时升级改由
-        :meth:`_arm_watchdog` 的**非阻塞**轮询完成：到点就 ``terminate()``，再不退出
-        就保活防「运行中被销毁」。
-
-        确实需要「确保线程已退出」（例如紧接着销毁宿主窗口）时用
+        只置关闭标记、请求中止当前回合、投递 ``None`` 哨兵；线程随后在
+        :meth:`_arm_watchdog` 的非阻塞轮询下自行收尾。确实要等线程退出时用
         :meth:`waitForShutdown`。
         """
         self._closing = True
@@ -388,11 +323,7 @@ class ElaChatAsyncWorker(QThread):
         self._arm_watchdog()
 
     def _request_sentinel(self) -> None:
-        """投递 ``None`` 哨兵让 ``_serve`` 循环退出（投不出去也不抛）。
-
-        ``shutdown()`` 走的是关窗路径，**任何**异常都会穿过 C++ 边界，所以这里
-        连「队列对象状态异常」也要吞 —— 线程退不退出交给看门狗。
-        """
+        """投递 ``None`` 哨兵让 ``_serve`` 循环退出（投不出去也不抛）。"""
         loop = self._loop
         queue = self._queue
         if loop is None or queue is None:
@@ -409,8 +340,7 @@ class ElaChatAsyncWorker(QThread):
     def waitForShutdown(self, timeoutMs: Optional[int] = None) -> bool:  # noqa: N802
         """阻塞等到线程退出（必要时 ``terminate()``）；返回是否已退出。
 
-        :param timeoutMs: 总预算，默认 ``shutdownWaitMs``。**只有真的要确保线程停掉
-            时才用**（例如紧接着销毁宿主窗口）；一般用 :meth:`shutdown` 就够。
+        ``timeoutMs`` 默认 ``shutdownWaitMs``；只有紧接着要销毁宿主窗口时才用。
         """
         budget = self.shutdownWaitMs if timeoutMs is None else int(timeoutMs)
         if not self.isRunning():
@@ -429,11 +359,7 @@ class ElaChatAsyncWorker(QThread):
         return False
 
     def _arm_watchdog(self) -> None:
-        """武装非阻塞看门狗：到点升级成 ``terminate()``，再不退出就保活。
-
-        挂在 self 上的 ``QTimer``，靠 GUI 线程的事件循环推进 —— 与 worker 线程
-        无关，所以后端卡死时它照样能把线程收掉。
-        """
+        """武装非阻塞看门狗：到点升级成 ``terminate()``，再不退出就保活。"""
         if self._watchdog is None:
             self._watchdog = QTimer(self)
             self._watchdog.setInterval(_SHUTDOWN_POLL_MS)

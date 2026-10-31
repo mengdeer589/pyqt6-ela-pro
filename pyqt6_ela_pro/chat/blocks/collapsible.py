@@ -37,10 +37,7 @@ from ._helpers import REASONING_FLUSH_INTERVAL_MS
 
 
 class _CollapsibleBlock(_ThemeAwareMixin, ElaScrollPageArea):
-    """可折叠区块（``ElaScrollPageArea`` 圆角卡面 + ``ElaIconButton`` 箭头）。
-
-    ``setSurfaceVisible(False)`` 可关闭卡面绘制（思考块等内联场景）。
-    """
+    """可折叠区块：``ElaScrollPageArea`` 卡面 + 箭头标题行（``surface=False`` 关闭卡面）。"""
 
     #: 展开状态变化（参数：是否展开）
     toggled = pyqtSignal(bool)
@@ -86,8 +83,7 @@ class _CollapsibleBlock(_ThemeAwareMixin, ElaScrollPageArea):
         self._title_label.setWordWrap(False)
         # 折叠块标题含外部数据（工具名 / 审批 action）—— 一律纯文本渲染
         self._title_label.setTextFormat(Qt.TextFormat.PlainText)
-        #: 运行指示按需创建：历史消息里 99% 的折叠块从没运行过，构造期就建
-        #: ``ElaProgressRing``（含两套 QPropertyAnimation）是纯浪费。
+        #: 运行指示按需创建：历史里多数折叠块从未运行，构造期就建 ElaProgressRing 是纯浪费。
         self._busy: Optional[ElaProgressRing] = None
         self._busy_on = False
         self._header_layout.addWidget(self._chevron)
@@ -125,12 +121,7 @@ class _CollapsibleBlock(_ThemeAwareMixin, ElaScrollPageArea):
         self._header.setChecked(bool(opened))
 
     def setOpenedSilently(self, opened: bool) -> None:
-        """设置展开态但**不触发** toggled / 祖先布局链（恢复历史用）。
-
-        恢复时每块都 ``setOpened(True)`` → ``setOpened(False)`` 会触发
-        ``_relayoutAncestors``（最多 32 层）与 ``toggled`` 信号；几千个块累计
-        上万次布局激活，纯属浪费。最终态由 ``setParts`` 收尾统一激活一次。
-        """
+        """设置展开态但不触发 toggled / 祖先布局链（恢复历史用，最终由 ``setParts`` 统一激活一次）。"""
         self._header.blockSignals(True)
         try:
             self._header.setChecked(bool(opened))
@@ -160,11 +151,10 @@ class _CollapsibleBlock(_ThemeAwareMixin, ElaScrollPageArea):
         return self._expandable
 
     def setBusy(self, on: bool) -> None:
-        """显示 / 隐藏运行中指示（``ElaProgressRing``）。
+        """显示 / 隐藏运行中指示（控件按需创建）。
 
-        关闭时必须 ``setIsBusying(False)``：``ElaProgressRing`` 的动画由
-        ``IsBusying`` 驱动，仅隐藏控件会留下两个 QPropertyAnimation 永久
-        空转（每个已完成的工具卡都会泄漏）。控件本身按需创建。
+        关闭时必须 ``setIsBusying(False)``：``ElaProgressRing`` 的动画由 ``IsBusying``
+        驱动，仅隐藏控件会留下两个 QPropertyAnimation 永久空转。
         """
         on = bool(on)
         self._busy_on = on
@@ -236,10 +226,8 @@ class _CollapsibleBlock(_ThemeAwareMixin, ElaScrollPageArea):
     def _relayoutAncestors(self) -> None:
         """同步刷新祖先布局链。
 
-        Qt 的布局失效（``updateGeometry``）会逐级投递 ``LayoutRequest``，
-        每层在独立的事件循环轮次里重排：展开 / 收起工具卡时表现为内容分
-        2-3 帧逐级收缩，肉眼可见「抖动」。这里从自身向上依次激活布局，
-        让整条链（卡片 → 工具面板 → 气泡 → 消息容器）在同一帧内完成重排。
+        ``updateGeometry`` 逐级投递 ``LayoutRequest`` 会分 2-3 帧逐级收缩（展开 / 收起时
+        肉眼可见抖动）；这里从自身向上依次激活，让整条链在同一帧完成重排。
         """
         widget = self
         for _ in range(32):  # 防御：避免异常父链导致死循环
@@ -308,9 +296,8 @@ class ReasoningBlock(_CollapsibleBlock):
         """结束思考，标题显示耗时并自动收起。"""
         self._flush_chunks()
         self.setBusy(False)
-        # 宿主可能传非数值（恢复历史时从 JSON 读到 "1.2s" 之类），
-        # 直接做算术会抛 TypeError/ValueError；而本方法常在信号槽里被调用，
-        # 异常穿出 Qt 回调就是 0xC0000409 静默 abort。
+        # 宿主可能传非数值（恢复历史时 JSON 里的 "1.2s"），算术会抛异常；
+        # 本方法常在信号槽里被调用，异常穿出 Qt 回调 = 0xC0000409。
         try:
             millis = float(durationMs) if durationMs else 0.0
         except (TypeError, ValueError, OverflowError):
@@ -347,9 +334,7 @@ class ReasoningBlock(_CollapsibleBlock):
         self._flush_timer.stop()
         self._chunks.clear()
         self._text = text or ""
-        # 折叠态不把全文塞进 word-wrap 标签：QLabel 的首次 sizeHint /
-        # heightForWidth 要整段折行（51KB 实测 12~45ms/次），958 个历史思考块
-        # 全量物化就是秒级纯浪费（bug #17）。展开时再灌。
+        # 折叠态不把全文塞进折行标签：整段折行很贵（51KB 约 12~45ms），展开时再灌。
         if self.isOpened():
             self._sync_label_text()
 
@@ -377,8 +362,7 @@ class ReasoningBlock(_CollapsibleBlock):
             self._label.setText(text)
 
     def _on_toggled(self, checked: bool) -> None:
-        # 先把全文灌进标签再交给基类：基类会触发祖先布局激活，空标签先量一遍
-        # 会把同一 (类别, 宽度) 算两次（ColorText 缓存按文本分键）。
+        # 先灌全文再交给基类：基类会触发布局激活，空标签先量一遍会把同一 (文本, 宽度) 算两次。
         if checked and getattr(self, "_label", None) is not None:
             self._flush_chunks()
             self._sync_label_text()
@@ -393,9 +377,7 @@ class ReasoningBlock(_CollapsibleBlock):
     def _displayText(self) -> str:
         """喂给标签的文本：裁掉尾部空白（``self._text`` 保持原样）。
 
-        模型常以若干换行收尾一段思考，而这是 PlainText 标签 —— 不像内联形态走
-        Markdown 导入器（导入器本来就丢尾部空行），每个换行都真的画一行。
-        只裁显示不裁数据：``text()`` / ``part.text`` / journal / 导出全部保真。
+        PlainText 标签每个换行都真画一行；只裁显示不裁数据，``text()`` / 导出全部保真。
         """
         return self._text.rstrip()
 
