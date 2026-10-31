@@ -306,8 +306,7 @@ class _ViewMessagesMixin:
                 # 必须一起落定（与 journal 的 ``settleOpen`` 同口径）—— 否则
                 # 底部行永久隐藏、挂起调度永远跳过它，且没有任何路径再收尾。
                 status = ElaChatStatusType.Stopped
-            # 历史恢复的默认状态就是 Done：重复 setStatus 会再跑一遍
-            # ``_apply_stats_mode``（建徽标 / 汇总 / 停靠），是物化热路径上的纯浪费。
+            # 状态未变时跳过：setStatus 会重复跑 _apply_stats_mode。
             if bubble.status() != status:
                 bubble.setStatus(status)
                 self._update_snapshot(

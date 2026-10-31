@@ -15,7 +15,7 @@ import re
 from pathlib import Path
 from typing import Optional
 
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import QSize, Qt
 from PyQt6.QtGui import QPixmap
 from PyQt6.QtWidgets import QLabel, QSizePolicy, QVBoxLayout, QWidget
 
@@ -60,16 +60,43 @@ class _ShellBody(ElaTerminalView):
         self.setToolbarVisible(False)
         self.setLineNumbersVisible(False)
         self.setMaximumHeight(CONSOLE_MAX_HEIGHT)
-        self.setMinimumHeight(80)
-        self.setSizePolicy(
-            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred
-        )
+        self.setMinimumHeight(48)
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         self.setAutoScroll(True)
+        self.linesAppended.connect(self._onLinesAppended)
+        self.cleared.connect(self._sync_height)
+
+    def _content_height(self) -> int:
+        edit = getattr(self, "_edit", None)
+        metrics = edit.fontMetrics() if edit is not None else self.fontMetrics()
+        lines = max(1, self.visibleLineCount())
+        margin = int(edit.document().documentMargin() * 2) if edit is not None else 8
+        return lines * metrics.lineSpacing() + margin + 12
+
+    def _sync_height(self) -> None:
+        # 父布局紧张时也不压缩短输出。
+        self.setMinimumHeight(min(self._content_height(), CONSOLE_MAX_HEIGHT))
+        self.updateGeometry()
+
+    def _onLinesAppended(self, _count: int) -> None:
+        self._sync_height()
+
+    def _flush_render(self) -> None:
+        # linesAppended 在 flush 前发出，等文档更新后再量行数。
+        super()._flush_render()
+        self._sync_height()
+
+    def sizeHint(self) -> QSize:  # noqa: N802 (Qt 命名)
+        """按行数贴合高度，超过最大高度才滚动。"""
+        hint = super().sizeHint()
+        height = min(self._content_height(), self.maximumHeight())
+        return QSize(hint.width(), max(height, self.minimumHeight()))
 
     def setOutput(self, text: str) -> None:
         self.clear()
         if text:
             self.append(text)
+        self._sync_height()
 
     def updateToolResult(self, result: str, status: str) -> None:
         self.setOutput(result)

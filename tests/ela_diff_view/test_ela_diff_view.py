@@ -124,6 +124,25 @@ class TestDiffView:
         assert isinstance(view.verticalScrollBar(), ElaScrollBar)
         assert isinstance(view.horizontalScrollBar(), ElaScrollBar)
 
+    def test_height_fits_short_diff_and_caps_long_diff(self, qapp, make):
+        """短 diff 贴合内容，只有超过最大高度才出现滚动条。"""
+        view = make(ElaDiffView)
+        view.setMaximumHeight(320)
+        view.setFiles(parseUnifiedDiff(SAMPLE))
+        view.resize(600, view.sizeHint().height())
+        view.show()
+        qapp.processEvents()
+        assert view.sizeHint().height() < 320
+        assert view.verticalScrollBar().maximum() == 0
+
+        long_text = "\n".join(f"line {i}" for i in range(80))
+        view.setFiles([diffLines("", long_text, "long.py")])
+        qapp.processEvents()
+        assert view.sizeHint().height() == 320
+        view.resize(600, 320)
+        qapp.processEvents()
+        assert view.verticalScrollBar().maximum() > 0
+
     def test_set_files_and_fold(self, qapp, make):
         view = make(ElaDiffView)
         files = parseUnifiedDiff(SAMPLE)
@@ -195,8 +214,9 @@ class TestBuiltinRenderers:
         assert cleanAnsi("\x1b[31mred\x1b[0m") == "red"
         assert cleanAnsi("10%\r20%\r30%") == "30%"
 
-    def test_shell_body_uses_terminal_view(self, qapp):
+    def test_shell_body_uses_terminal_view(self, qapp, make):
         from pyqt6_ela_pro.chat import ToolRenderContext
+        from pyqt6_ela_pro.chat.renderers_builtin import CONSOLE_MAX_HEIGHT
         from pyqt6_ela_pro.terminal_view import ElaTerminalView
 
         installBuiltinToolRenderers()
@@ -218,6 +238,15 @@ class TestBuiltinRenderers:
             assert isinstance(body, ElaTerminalView)
             assert not body.toolbarVisible()
             assert not body.lineNumbersVisible()
+            make.track(body)
+
+            body.append("line1\nline2\nline3\nline4\n")
+            qapp.processEvents()
+            body.resize(600, body.sizeHint().height())
+            body.show()
+            qapp.processEvents()
+            assert body.sizeHint().height() < CONSOLE_MAX_HEIGHT
+            assert body._edit.verticalScrollBar().maximum() == 0
         finally:
             uninstallBuiltinToolRenderers()
 

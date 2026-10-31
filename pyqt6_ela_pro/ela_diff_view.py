@@ -347,6 +347,25 @@ class ElaDiffView(_ThemeAwareMixin, QPlainTextEdit):
         self.setTabStopDistance(QFontMetrics(self.font()).horizontalAdvance(" ") * 4)
         self._apply_theme()
 
+    # -- 尺寸 --------------------------------------------------------------
+
+    def _content_height(self) -> int:
+        """按行数估算内容高度。"""
+        lines = max(1, self.blockCount())
+        margin = int(self.document().documentMargin() * 2)
+        return lines * self.fontMetrics().lineSpacing() + margin + 8
+
+    def sizeHint(self) -> QSize:  # noqa: N802 (Qt 命名)
+        """内容高度；超过 maximumHeight 才滚动。"""
+        hint = super().sizeHint()
+        height = min(self._content_height(), self.maximumHeight())
+        return QSize(hint.width(), max(height, self.minimumHeight()))
+
+    def minimumSizeHint(self) -> QSize:  # noqa: N802 (Qt 命名)
+        hint = super().minimumSizeHint()
+        height = min(self._content_height(), self.maximumHeight())
+        return QSize(hint.width(), max(height, self.minimumHeight()))
+
     # -- 数据 --------------------------------------------------------------
 
     def setFiles(self, files) -> None:
@@ -582,6 +601,8 @@ class ElaDiffView(_ThemeAwareMixin, QPlainTextEdit):
         self._update_gutter_width()
         self._highlighter.rehighlight()
         self.viewport().update()
+        # 行数变化后重算高度。
+        self.updateGeometry()
 
     def _build_spans(self, rows: list, file_spans: list) -> dict:
         """把每行 token span 映射到块号（文件头 / 占位行没有 span）。"""

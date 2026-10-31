@@ -43,6 +43,7 @@ class ChatContent(ElaThemeWidget):
         self._apply_theme()
 
     def event(self, event) -> bool:  # noqa: N802 (Qt 命名)
+        # 不清缓存会让 QScrollArea 按旧最小高度压缩子控件（卡片内部出滚动条）。
         if event.type() == QEvent.Type.LayoutRequest:
             self._min_height_cache = None
         return super().event(event)

@@ -250,7 +250,8 @@ class ElaChatFileChanges(_ThemeAwareMixin, QWidget):
         body.setFileHeadersVisible(False)
         body.setFiles([row["file"]])
         body.setMaximumHeight(self._diff_max_height)
-        body.setMinimumHeight(60)
+        # 高度由 sizeHint 决定；Fixed 防止父布局拉回默认 192px。
+        body.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         body.fileClicked.connect(self.fileClicked)
         row["body"] = body
         index = self._layout.indexOf(row["header"])
