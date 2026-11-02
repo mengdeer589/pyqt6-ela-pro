@@ -73,13 +73,13 @@ class CandlestickSeriesRenderer(SeriesRenderer):
     def _up_color(self):
         style = self.itemStyle()
         c = style.get("color") or style.get("borderColor")
-        return parse_color(c) if isinstance(c, str) and c else QColor(T("color.danger"))
+        return parse_color(c) if isinstance(c, str) and c else QColor(T("color.danger", self.chart))
 
     def _down_color(self):
         style = self.itemStyle()
         c = style.get("color0") or style.get("borderColor0")
         return (
-            parse_color(c) if isinstance(c, str) and c else QColor(T("color.success"))
+            parse_color(c) if isinstance(c, str) and c else QColor(T("color.success", self.chart))
         )
 
     # -- 绘制 -------------------------------------------------------------
@@ -145,6 +145,9 @@ class CandlestickSeriesRenderer(SeriesRenderer):
                 return {
                     "name": _axis_label(coord.x_axis, it["x"]),
                     "value": [it["open"], it["close"], it["low"], it["high"]],
+                    "color": self._up_color()
+                    if it["close"] >= it["open"]
+                    else self._down_color(),
                     "series": self.name,
                     "dataIndex": it["index"],
                 }
@@ -164,6 +167,9 @@ class CandlestickSeriesRenderer(SeriesRenderer):
                 return {
                     "name": _axis_label(coord.x_axis, it["x"]),
                     "value": it["close"],
+                    "color": self._up_color()
+                    if it["close"] >= it["open"]
+                    else self._down_color(),
                     "series": self.name,
                     "pos": pos,
                 }

@@ -35,6 +35,7 @@ __all__ = [
     "ElaNodeSpec",
     "ElaNodeRegistry",
     "register_node_type",
+    "pin",
     "PIN_COLORS",
     "register_pin_type",
     "pin_color",
@@ -131,14 +132,41 @@ def pin_color(data_type: str) -> str:
 # ---------------------------------------------------------------------------
 
 
+def pin(
+    pin_id: str,
+    name: str = None,
+    data_type: str = "any",
+    multi: bool = False,
+) -> dict:
+    """声明一个引脚（``register_node_type`` 的 ``inputs`` / ``outputs`` 条目）。
+
+    比手写 ``{"id": ..., "name": ..., ...}`` 简短得多；``inputs=pin(...)``
+    且只有一个引脚时可以直接传单个（``ElaNodeSpec`` 会归一成列表）。
+    """
+    return {
+        "id": str(pin_id),
+        "name": str(name) if name is not None else str(pin_id),
+        "data_type": str(data_type or "any"),
+        "multi": bool(multi),
+    }
+
+
+def _as_pin_list(pins) -> list:
+    """把「单个 pin 定义 / pin 定义列表 / None」归一成列表。"""
+    if pins is None:
+        return []
+    if isinstance(pins, dict):
+        return [pins]
+    return list(pins)
+
+
 @dataclass
 class ElaNodeSpec:
     """节点类型描述（注册表条目）。
 
-    ``inputs`` / ``outputs`` 是引脚字典列表，每项 ``{"id", "name", "data_type",
-    "multi"}``（后三个可缺省，``id`` 必须非空）；``accent`` 是标题栏强调色
-    （令牌键或 hex，``None`` 用默认灰）；``body_builder`` 为 ``None`` 时按
-    properties 键值对展示节点体。
+    ``inputs`` / ``outputs`` 是引脚字典列表（用 ``pin(...)`` 声明）；
+    ``accent`` 是标题栏强调色（令牌键或 hex，``None`` 用默认灰）；
+    ``body_builder`` 为 ``None`` 时按 properties 键值对展示节点体。
     """
 
     type_name: str
@@ -150,6 +178,11 @@ class ElaNodeSpec:
     body_builder: Optional[Callable] = None
     description: str = ""
     owner: Optional[str] = None
+
+    def __post_init__(self) -> None:
+        # 单个 pin（dict）与 pin 列表统一成列表，直接构造 ElaNodeSpec 也不踩坑
+        self.inputs = _as_pin_list(self.inputs)
+        self.outputs = _as_pin_list(self.outputs)
 
 
 # ---------------------------------------------------------------------------
@@ -327,13 +360,25 @@ def register_node_type(
     description: str = "",
     owner: str = None,
 ) -> ElaNodeSpec:
-    """便捷函数：一行注册节点类型（等价 ``ElaNodeRegistry.instance().register``）。"""
+    """便捷函数：一行注册节点类型（等价 ``ElaNodeRegistry.instance().register``）。
+
+    ``inputs`` / ``outputs`` 既接受列表，也接受**单个** ``pin(...)``：
+
+    .. code-block:: python
+
+        register_node_type(
+            "encoder", "编码器", "模型",
+            inputs=pin("batch", "批次", "tensor"),
+            outputs=pin("hidden", "Hidden", "tensor"),
+            accent="warning",
+        )
+    """
     spec = ElaNodeSpec(
         type_name=type_name,
         title=title,
         category=category,
-        inputs=list(inputs),
-        outputs=list(outputs),
+        inputs=_as_pin_list(inputs),
+        outputs=_as_pin_list(outputs),
         accent=accent,
         body_builder=body_builder,
         description=description,

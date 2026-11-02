@@ -13,11 +13,12 @@ from PyQt6.QtGui import (
     QPen,
 )
 
-from .._tokens import T
+from .._tokens import T, theme_ramp
 from .._utils import clamp as _clamp
 from .._utils import merged_text_style, parse_color, text_italic, text_weight
 from .._utils import to_float as _to_float
-from ..axes import chartFont, formatValue
+from ..axes import CalendarCoord, chartFont, formatValue
+from ..colormaps import colormapColors
 
 
 class VisualMapComponent:
@@ -78,12 +79,42 @@ class VisualMapComponent:
 
     # -- 公共 API ----------------------------------------------------------
     def colors(self) -> list:
-        """生效色带（inRange.colors 覆盖；缺省 primary.subtle→primary）。"""
+        """生效色带（inRange.colors 覆盖；image 的 cmap；缺省用主题色带）。"""
         in_range = self.opt.get("inRange") or {}
         cols = in_range.get("colors") if isinstance(in_range, dict) else None
         if isinstance(cols, list) and len(cols) >= 2:
             return [str(c) for c in cols]
-        return [T("color.primary.subtle"), T("color.primary")]
+        image_colors = self._image_colormap()
+        if image_colors:
+            return image_colors
+        return theme_ramp(self.chart)
+
+    def _image_colormap(self):
+        """绑定到本组件的 image 系列显式 ``cmap``（让色条与图像自动同色）。"""
+        getter = getattr(self.chart, "_option_ref", None)
+        if not callable(getter):
+            return None
+        try:
+            series = getter().get("series") or []
+        except Exception:
+            return None
+        if not isinstance(series, (list, tuple)):
+            return None
+        for index, series_opt in enumerate(series):
+            if not isinstance(series_opt, dict):
+                continue
+            if str(series_opt.get("type") or "") != "image":
+                continue
+            if not self.bindsTo(index, str(series_opt.get("id") or "")):
+                continue
+            cmap = series_opt.get("cmap")
+            if isinstance(cmap, str) and cmap.strip():
+                colors = colormapColors(cmap)
+                if colors:
+                    return colors
+            elif isinstance(cmap, (list, tuple)) and len(cmap) >= 2:
+                return [str(c) for c in cmap]
+        return None
 
     @property
     def piecewise(self) -> bool:
@@ -122,13 +153,14 @@ class VisualMapComponent:
                 return False
         return True
 
-    @staticmethod
-    def _piece_color(piece: dict) -> str:
+    def _piece_color(self, piece: dict):
         style = piece.get("itemStyle")
         raw = piece.get("color") or (
             style.get("color") if isinstance(style, dict) else None
         )
-        return str(raw) if isinstance(raw, str) and raw else T("color.primary")
+        return (
+            str(raw) if isinstance(raw, str) and raw else T("color.primary", self.chart)
+        )
 
     @staticmethod
     def _piece_label(piece: dict) -> str:
@@ -243,7 +275,7 @@ class VisualMapComponent:
         """把手 + 「超出当前范围」的遮罩。"""
         bar = self._bar
         lo_pt, hi_pt = self._handle_points()
-        mask = QColor(T("color.bg.base"))
+        mask = QColor(T("color.bg.base", self.chart))
         mask.setAlpha(150)
         if self.orient == "vertical":
             p.fillRect(
@@ -281,7 +313,7 @@ class VisualMapComponent:
                 mask,
             )
         for point, value in ((lo_pt, self.min), (hi_pt, self.max)):
-            p.setPen(QPen(QColor(T("color.bg.elevated")), 2))
+            p.setPen(QPen(QColor(T("color.bg.elevated", self.chart)), 2))
             p.setBrush(self.mapColor(value))
             p.drawEllipse(point, 5.5, 5.5)
 
@@ -301,7 +333,7 @@ class VisualMapComponent:
         """值 → 颜色（按 min..max 归一后在色带上分段线性插值）。"""
         fv = _to_float(v, None)
         if fv is None:
-            return QColor(T("color.bg.muted"))
+            return QColor(T("color.bg.muted", self.chart))
         if self.piecewise:
             for piece in self.pieces():
                 if self._piece_contains(piece, fv):
@@ -311,7 +343,7 @@ class VisualMapComponent:
             return parse_color(
                 fallback
                 if isinstance(fallback, str) and fallback
-                else T("color.bg.muted")
+                else T("color.bg.muted", self.chart)
             )
         frac = _clamp((fv - self.min) / (self.max - self.min), 0.0, 1.0)
         cols = [parse_color(c) for c in self.colors()]
@@ -361,7 +393,9 @@ class VisualMapComponent:
         p.save()
         p.setFont(font)
         fm = QFontMetricsF(font)
-        color = parse_color(self.textStyle().get("color") or T("color.text.secondary"))
+        color = parse_color(
+            self.textStyle().get("color") or T("color.text.secondary", self.chart)
+        )
         for box, label, piece_color in self._piece_rects:
             p.setPen(Qt.PenStyle.NoPen)
             p.setBrush(parse_color(piece_color))
@@ -386,21 +420,67 @@ class VisualMapComponent:
                 )
         p.restore()
 
+    def _calendar_coord(self):
+        return next(
+            (
+                c
+                for c in getattr(self.chart, "coords", ())
+                if isinstance(c, CalendarCoord)
+            ),
+            None,
+        )
+
+    def _calendar_grid(self):
+        coord = self._calendar_coord()
+        if coord is None:
+            return None
+        grid = coord.gridRect()
+        return grid if not grid.isNull() else None
+
     def layout(self, rect: QRectF) -> None:
         if self.piecewise:
             self._bar = QRectF()
-            self._layout_pieces(rect)
+            content = self.chart._content_rect()
+            target = QRectF(
+                rect.left(),
+                content.top(),
+                rect.width(),
+                max(1.0, rect.bottom() - content.top()),
+            )
+            grid = self._calendar_grid()
+            if grid is not None:
+                if self.orient == "horizontal":
+                    target.setBottom(
+                        max(
+                            content.top() + 30.0,
+                            min(rect.bottom(), grid.bottom() + 30.0),
+                        )
+                    )
+                else:
+                    total = 18.0 * len(self.pieces()) + 8.0
+                    target.setBottom(min(rect.bottom(), grid.top() + total))
+            self._layout_pieces(target)
             return
         if self.orient == "vertical":
             w, h = 12.0, min(120.0, max(40.0, rect.height() * 0.4))
             # 右侧预留 38px：色带 12 + 右侧数值标签 34（避免标签越界被裁剪）
             x = rect.right() - w - 38
             y = rect.bottom() - h - 12
+            grid = self._calendar_grid()
+            if grid is not None:
+                y = max(rect.top(), min(y, grid.top()))
         else:
             w, h = min(140.0, max(60.0, rect.width() * 0.35)), 12.0
             x = rect.center().x() - w / 2
             # 底部预留 30px：标签在色带上方，整条落在专属条带内
             y = rect.bottom() - h - 4
+            grid = self._calendar_grid()
+            if grid is not None:
+                # 全年日历被宽度限制时，网格下方会留出大量空白；色带贴着
+                # 网格底部放，别钉在画布最底边（否则中间空一大截）。
+                content = self.chart._content_rect()
+                if grid.bottom() + h + 10 <= content.bottom():
+                    y = max(content.top(), grid.bottom() + 10)
         self._bar = QRectF(x, y, w, h)
 
     def paint(self, p: QPainter, anim_t: float = 1.0) -> None:
@@ -420,7 +500,7 @@ class VisualMapComponent:
             grad.setColorAt(i / (n - 1) if n > 1 else 0.0, parse_color(c))
         path = QPainterPath()
         path.addRoundedRect(self._bar, 3, 3)
-        p.setPen(QPen(QColor(T("color.border")), 1))
+        p.setPen(QPen(QColor(T("color.border", self.chart)), 1))
         p.setBrush(grad)
         p.drawPath(path)
         # 两端数值 / 自定义文案标签
@@ -428,7 +508,9 @@ class VisualMapComponent:
         font = self._font()
         p.setFont(font)
         fm = QFontMetricsF(font)
-        p.setPen(parse_color(style.get("color") or T("color.text.secondary")))
+        p.setPen(
+            parse_color(style.get("color") or T("color.text.secondary", self.chart))
+        )
         hi, lo = self.textPair()
         if self.calculable:
             self._paint_handles(p)

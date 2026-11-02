@@ -240,15 +240,7 @@ class ElaNodeWidget(QFrame):
         # ``ElaPinHandle`` 就既无悬停提示也拖不出连线
         node.changed.connect(self.sync_pins)
         # 自定义体 / 缺省 properties 展示（按 owner 解析注册表，画布传入）
-        spec = ElaNodeRegistry.instance().spec(node.type_name, owner=self._owner)
-        if spec is not None and spec.body_builder is not None:
-            self._body = QWidget(self)
-            _transparent(self._body)
-            lay = QVBoxLayout(self._body)
-            lay.setContentsMargins(0, 0, 0, 0)
-            lay.setSpacing(int(T("space.1")))
-            spec.body_builder(node, self._body)
-
+        self._build_body()
         # running 旋转圈（标题栏状态图标区）
         self._spinner = SpinnerArc(size=int(SPINNER_SIZE), line_width=2, parent=self)
         _transparent(self._spinner)
@@ -261,6 +253,8 @@ class ElaNodeWidget(QFrame):
 
         node.changed.connect(self._on_node_changed)
         node.status_changed.connect(self._on_status_changed)
+        node.progress_changed.connect(self._on_progress_changed)
+        node.properties_changed.connect(self._on_properties_changed)
         # 绑定方法连接：控件销毁时 Qt 自动断连（接收方销毁即断）
         theme_changed_slot(self, self._on_theme_changed)
 
@@ -284,6 +278,27 @@ class ElaNodeWidget(QFrame):
     def _body_visible(self) -> bool:
         """当前缩放下节点体是否可见（低于 ``BODY_MIN_ZOOM`` 隐藏）。"""
         return self._body is not None and self._scale >= BODY_MIN_ZOOM
+
+    def _build_body(self) -> None:
+        """按注册表 ``body_builder`` 构建节点体（无自定义体时 ``None``）。"""
+        spec = ElaNodeRegistry.instance().spec(self.node.type_name, owner=self._owner)
+        if spec is None or spec.body_builder is None:
+            self._body = None
+            return
+        self._body = QWidget(self)
+        _transparent(self._body)
+        layout = QVBoxLayout(self._body)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(int(T("space.1")))
+        spec.body_builder(self.node, self._body)
+
+    def _rebuild_body(self) -> None:
+        """``set_properties`` 后重建节点体控件（交互控件直接改 properties 不触发）。"""
+        if self._body is not None:
+            self._body.hide()
+            self._body.deleteLater()
+            self._body = None
+        self._build_body()
 
     def _relayout(self) -> None:
         """按内容重算逻辑尺寸并写回 ``node.size``，再重排子控件。"""
@@ -396,9 +411,9 @@ class ElaNodeWidget(QFrame):
         """
         if direction is not None:
             return self._handles.get((direction, pin_id))
-        return self._handles.get((ElaPinDirectionType.Input, pin_id)) or self._handles.get(
-            (ElaPinDirectionType.Output, pin_id)
-        )
+        return self._handles.get(
+            (ElaPinDirectionType.Input, pin_id)
+        ) or self._handles.get((ElaPinDirectionType.Output, pin_id))
 
     def sync_pins(self) -> list:
         """按 ``node.inputs + node.outputs`` 校准引脚热区，返回新建的热区列表。
@@ -571,6 +586,22 @@ class ElaNodeWidget(QFrame):
         bw, bh = tw + 14.0, 18.0
         return QRectF(self.node.size.width() - bw - 6.0, (TITLE_H - bh) / 2, bw, bh)
 
+    def _title_reserve(self) -> float:
+        """标题右侧要为状态徽标 / 状态图标让出的宽度（逻辑像素）。"""
+        if self.node.status == "done" and self.elapsed_text():
+            return self.badge_rect().width() + 8.0
+        return 24.0
+
+    def _title_draw_text(self, available: float = None) -> str:
+        """标题栏实际绘制的文本：按可用宽度省略，长标题不压到右侧徽标上。"""
+        if available is None:
+            available = self.node.size.width() - PAD_X - self._title_reserve()
+        return QFontMetrics(self._title_font()).elidedText(
+            self.node.title,
+            Qt.TextElideMode.ElideRight,
+            max(10, int(available)),
+        )
+
     def accent_color(self) -> QColor:
         """标题栏强调色（令牌键 / hex 实时解析，缺省灰）。"""
         return _resolve_color(self.node.accent, "text.tertiary")
@@ -597,6 +628,16 @@ class ElaNodeWidget(QFrame):
             self.setToolTip("")
         self._invalidate_cache()
         self.update()
+
+    def _on_progress_changed(self, _value) -> None:
+        """进度变化只重绘（不重排）：进度条不参与节点尺寸计算。"""
+        self._invalidate_cache()
+        self.update()
+
+    def _on_properties_changed(self) -> None:
+        """属性被整体替换：重建节点体控件，再走一次布局刷新。"""
+        self._rebuild_body()
+        self._on_node_changed()
 
     def _on_node_changed(self) -> None:
         self._relayout()
@@ -660,14 +701,15 @@ class ElaNodeWidget(QFrame):
         p.setPen(QPen(QColor(str(T("color.border"))), 1.0))
         p.drawLine(QPointF(1.0, TITLE_H), QPointF(w - 1.0, TITLE_H))
 
-        # 标题文本
+        # 标题文本（按右侧状态徽标 / 图标预留宽度，过长省略）
         p.setFont(self._title_font())
         p.setPen(_text_on(accent))
-        title_rect = QRectF(PAD_X, 0.0, w - 2 * PAD_X - 24.0, TITLE_H)
+        reserve = self._title_reserve()
+        title_rect = QRectF(PAD_X, 0.0, max(10.0, w - PAD_X - reserve), TITLE_H)
         p.drawText(
             title_rect,
             Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft,
-            self.node.title,
+            self._title_draw_text(title_rect.width()),
         )
 
         # 状态图标区（标题右侧）
@@ -725,6 +767,19 @@ class ElaNodeWidget(QFrame):
                     f"{k}: {v}",
                 )
                 y += BODY_LINE_H
+
+        # 进度条（节点底部内边距里，不参与布局）
+        progress = self.node.progress
+        if progress is not None:
+            bar = QRectF(6.0, h - 6.0, max(1.0, w - 12.0), 3.0)
+            p.setPen(Qt.PenStyle.NoPen)
+            p.setBrush(QColor(str(T("color.bg.muted"))))
+            p.drawRoundedRect(bar, 1.5, 1.5)
+            if progress > 0.0:
+                fill = QRectF(bar)
+                fill.setWidth(max(3.0, bar.width() * progress))
+                p.setBrush(accent)
+                p.drawRoundedRect(fill, 1.5, 1.5)
 
         # 描边（选中 > 状态 > 普通）
         border_color = QColor(str(T("color.border")))

@@ -1,15 +1,17 @@
 """
 [pyqt6_ela_pro] ElaChartWidget 图表工作台
 
-顶部工具栏用 ``ElaPivot`` 切换五个工作区，每个工作区独立滚动、**首次切换时
-才构建**（首屏只建概览，27 张画廊图不会拖慢启动）：
+顶部工具栏用 ``ElaPivot`` 切换七个工作区，每个工作区独立滚动、**首次切换时
+才构建**（首屏只建概览，29 张画廊图不会拖慢启动）：
 
 - **概览**：四张旗舰图（折线 / 柱状 / 环形饼 / 日历热力）+ 能力速览。
-- **系列画廊**：21 种系列按能力分六节，3 列紧凑网格，每节可随机数据 / 开关交互。
+- **系列画廊**：22 种系列按能力分七节，3 列紧凑网格，每节可随机数据 / 开关交互。
 - **交互**：tooltip / legend / dataZoom / visualMap（连续 + 分段）/ mark* / toolbox /
   timeline / brush / 跨图联动。
 - **大数据**：30 万点 + 采样 / LOD / 缩放重采样。
 - **高级**：多轴 / log、多网格、多标题 / 多图例、字体与标签外观、折线细节。
+- **主题**：7 套配色方案（Ela / ECharts / MATLAB / Plotly / ggplot2 / seaborn /
+  Tableau）实时切换 + 自定义主题注册。
 
 每节标题的「</> 代码」按钮展示该节 demo 方法的源码（API 调用写在方法体内）；
 右上角「随机数据 / 交互 / 动效」按**当前工作区**生效。图表都是活的：滚轮缩放、
@@ -18,17 +20,20 @@
 
 import math
 import random
+import time
 from datetime import date, timedelta
 
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtGui import QFont
 from PyQt6.QtWidgets import QGridLayout, QHBoxLayout, QStackedWidget, QVBoxLayout
 from PyQt6ElaWidgetTools import (
     ElaCheckBox,
+    ElaComboBox,
     ElaLineEdit,
     ElaPivot,
     ElaPushButton,
     ElaScrollArea,
+    ElaSlider,
     ElaText,
 )
 
@@ -37,13 +42,34 @@ from pyqt6_ela_pro import (
     ElaChip,
     ElaThemeWidget,
 )
-from pyqt6_ela_pro.charts import connectCharts
+from pyqt6_ela_pro.charts import (
+    chartThemes,
+    colormapColors,
+    colormapNames,
+    connectCharts,
+    defaultChartTheme,
+    registerChartTheme,
+)
 from .base_page import ExamplePage
+
+try:
+    import numpy as np
+
+    _HAS_NUMPY = True
+except ImportError:  # pragma: no cover - 可选依赖
+    np = None
+    _HAS_NUMPY = False
 
 _WEEKS = ["周一", "周二", "周三", "周四", "周五", "周六", "周日"]
 
 #: GitHub 绿 5 档色带（visualMap.inRange.colors 示例）
 _GITHUB_GREENS = ["#ebedf0", "#9be9a8", "#40c463", "#30a14e", "#216e39"]
+
+#: 小波工作区：矩阵尺寸 / 滚动步长 / 默认刷新间隔
+_WAVELET_SIZES = ((256, 2048), (512, 4096), (1024, 8192))
+_WAVELET_DEFAULT_SIZE = (512, 4096)
+_WAVELET_SCROLL_STEP = 8
+_WAVELET_DEFAULT_INTERVAL_MS = 80
 
 
 def _daily_labels(count: int, start=(2025, 1, 1)) -> list:
@@ -183,7 +209,7 @@ def _token_activity_series(rows: list, mode: str) -> list:
 
 
 class ChartsPage(ExamplePage):
-    """ElaChartWidget 图表工作台：概览 / 系列画廊 / 交互 / 大数据 / 高级。"""
+    """ElaChartWidget 图表工作台：概览 / 系列画廊 / 交互 / 大数据 / 高级 / 主题 / 小波。"""
 
     PAGE_TITLE = "ElaChartWidget 图表工作台"
 
@@ -191,12 +217,12 @@ class ChartsPage(ExamplePage):
     WORKSPACES = (
         (
             "概览",
-            "旗舰图表 + 能力速览：21 种系列、多轴 / 多网格、交互、大数据与导出。",
+            "旗舰图表 + 能力速览：22 种系列、多轴 / 多网格、交互、大数据与导出。",
             "_buildWorkspaceOverview",
         ),
         (
             "系列画廊",
-            "全部 21 种系列按能力分组（3 列紧凑网格）；每节可随机数据 / 开关交互。",
+            "全部 22 种系列按能力分组（3 列紧凑网格）；每节可随机数据 / 开关交互。",
             "_buildWorkspaceGallery",
         ),
         (
@@ -215,6 +241,18 @@ class ChartsPage(ExamplePage):
             "多轴 / log、多网格、多标题 / 多图例、字体与标签外观、折线细节。",
             "_buildWorkspaceAdvanced",
         ),
+        (
+            "主题",
+            "7 套配色方案实时切换；色板 / 背景 / 文字 / 轴 / 网格 / tooltip / 色带一起换，"
+            "option 显式颜色仍优先；可注册自定义主题。",
+            "_buildWorkspaceThemes",
+        ),
+        (
+            "小波",
+            "小波 scalogram 实时刷新：2D 幅值矩阵滚动更新，image 系列重建 QImage；"
+            "缩放 / 平移不重建，色带固定、主题只换外框。",
+            "_buildWorkspaceWavelet",
+        ),
     )
 
     def __init__(self, parent=None):
@@ -222,6 +260,22 @@ class ChartsPage(ExamplePage):
         self._active_workspace = 0
         self._anim_enabled = True
         self._pivot_syncing = False
+        #: 顶部「全局主题」当前选择（新建工作区也继承）
+        self._global_chart_theme = defaultChartTheme()
+        #: 小波工作区（惰性构建；定时器只在当前工作区运行）
+        self._wavelet_chart = None
+        self._wavelet_timer = None
+        self._wavelet_running = False
+        self._wavelet_rows, self._wavelet_cols = _WAVELET_DEFAULT_SIZE
+        self._wavelet_step = 0
+        self._wavelet_scale = None
+        self._wavelet_matrix = None
+        self._wavelet_rng = None
+        self._wavelet_workspace_index = next(
+            index
+            for index, (name, _desc, _builder) in enumerate(self.WORKSPACES)
+            if name == "小波"
+        )
         super().__init__(parent)
 
     # ── 工作台外壳 ──────────────────────────────────────────────────────
@@ -278,7 +332,24 @@ class ChartsPage(ExamplePage):
             self._pivot.appendPivot(name)
         self._pivot.setCurrentIndex(0)
         self._pivot.pivotClicked.connect(self._onWorkspaceChanged)
-        header_layout.addWidget(self._pivot)
+        pivot_row = QHBoxLayout()
+        pivot_row.setSpacing(8)
+        pivot_row.addWidget(self._pivot, 1)
+        theme_label = ElaText("全局主题", header)
+        theme_label.setTextPixelSize(13)
+        pivot_row.addWidget(theme_label)
+        self._global_theme_combo = ElaComboBox(header)
+        for name in chartThemes():
+            self._global_theme_combo.addItem(name)
+        self._global_theme_combo.setFixedWidth(150)
+        index = self._global_theme_combo.findText(self._global_chart_theme)
+        if index < 0:
+            index = 0
+        self._global_theme_combo.setCurrentIndex(index)
+        self._global_chart_theme = self._global_theme_combo.currentText()
+        self._global_theme_combo.currentIndexChanged.connect(self._onGlobalThemeChanged)
+        pivot_row.addWidget(self._global_theme_combo)
+        header_layout.addLayout(pivot_row)
 
         self._desc_label = ElaText("", header)
         self._desc_label.setTextPixelSize(13)
@@ -330,8 +401,10 @@ class ChartsPage(ExamplePage):
             workspace["built"] = True
             getattr(self, workspace["builder"])(workspace["layout"])
             workspace["layout"].addStretch()
+            # 新建工作区继承顶部「全局主题」（主题画廊的固定对比图不参与）
+            self._apply_global_theme_to_page(self._stack.widget(index))
             # 惰性新建的工作区要继承全局「动效」开关（否则在概览里关掉后
-            # 切到尚未构建的画廊，27 张图仍照常播入场动画）。
+            # 切到尚未构建的画廊，29 张图仍照常播入场动画）。
             if not self._anim_enabled:
                 for chart in self._active_charts():
                     chart.setOption({"animation": False})
@@ -343,6 +416,7 @@ class ChartsPage(ExamplePage):
             finally:
                 self._pivot_syncing = False
         self._apply_workspace_text(index)
+        self._set_wavelet_workspace_active(index == self._wavelet_workspace_index)
 
     def _active_charts(self):
         """当前工作区里的全部图表（全局控制按钮按工作区生效）。"""
@@ -361,6 +435,45 @@ class ChartsPage(ExamplePage):
             self._interact_btn.setText(
                 "交互: 开" if charts[0].interactiveEnabled() else "交互: 关"
             )
+
+    # ── 全局配色主题 ────────────────────────────────────────────────────
+
+    def _onGlobalThemeChanged(self, index: int):
+        if index < 0:
+            return
+        self._apply_global_theme(self._global_theme_combo.currentText())
+
+    def _apply_global_theme(self, name: str):
+        """切换整个工作台的主题（主题画廊的固定对比图保持原样）。"""
+        self._global_chart_theme = name
+        stack = getattr(self, "_stack", None)
+        if stack is not None:
+            for index in range(stack.count()):
+                self._apply_global_theme_to_page(stack.widget(index))
+        self._sync_theme_workspace(name)
+
+    def _apply_global_theme_to_page(self, page):
+        if page is None:
+            return
+        for chart in page.findChildren(ElaChartWidget):
+            if getattr(chart, "_theme_pinned", False):
+                continue
+            chart.setChartTheme(self._global_chart_theme)
+
+    def _sync_theme_workspace(self, name: str):
+        """全局主题变化后同步「主题」工作区的本区下拉与状态文案。"""
+        combo = getattr(self, "_theme_combo", None)
+        if combo is not None:
+            index = combo.findText(name)
+            if index >= 0:
+                combo.blockSignals(True)
+                try:
+                    combo.setCurrentIndex(index)
+                finally:
+                    combo.blockSignals(False)
+        label = getattr(self, "_theme_state_label", None)
+        if label is not None:
+            label.setText(f"当前：{name}")
 
     def _onRandomWorkspace(self):
         for chart in self._active_charts():
@@ -403,6 +516,8 @@ class ChartsPage(ExamplePage):
         self._demoGalleryHierarchy(layout)
         layout.addSpacing(24)
         self._demoGalleryCoordinates(layout)
+        layout.addSpacing(24)
+        self._demoGalleryMatrix(layout)
 
     def _buildWorkspaceInteraction(self, layout):
         self._createSectionHeader("=== 交互 ===").hide()
@@ -411,6 +526,8 @@ class ChartsPage(ExamplePage):
         self._demoPlotlyInteractions(layout)
         layout.addSpacing(24)
         self._demoInteractions(layout)
+        layout.addSpacing(24)
+        self._demoAnnotations(layout)
 
     def _buildWorkspaceBigData(self, layout):
         self._createSectionHeader("=== 大数据 ===").hide()
@@ -428,6 +545,16 @@ class ChartsPage(ExamplePage):
         layout.addSpacing(24)
         self._demoLineDetails(layout)
 
+    def _buildWorkspaceThemes(self, layout):
+        self._createSectionHeader("=== 主题 ===").hide()
+        self._demoThemeSwitch(layout)
+        layout.addSpacing(24)
+        self._demoThemeGallery(layout)
+
+    def _buildWorkspaceWavelet(self, layout):
+        self._createSectionHeader("=== 小波 ===").hide()
+        self._demoWaveletScalogram(layout)
+
     def _addDemoContent(self, main_layout):
         """静态渲染清单（工作台按工作区惰性构建；此方法供节标题守卫展开）。"""
         self._buildWorkspaceOverview(main_layout)
@@ -435,6 +562,8 @@ class ChartsPage(ExamplePage):
         self._buildWorkspaceInteraction(main_layout)
         self._buildWorkspaceBigData(main_layout)
         self._buildWorkspaceAdvanced(main_layout)
+        self._buildWorkspaceThemes(main_layout)
+        self._buildWorkspaceWavelet(main_layout)
 
     # ── 工作区 0：概览 ──────────────────────────────────────────────────
 
@@ -622,7 +751,7 @@ class ChartsPage(ExamplePage):
         chips = QHBoxLayout()
         chips.setSpacing(8)
         for text in (
-            "21 种系列",
+            "22 种系列",
             "多轴 · 多网格",
             "多标题 · 多图例",
             "单族字体 · 字重 / 斜体",
@@ -1007,7 +1136,9 @@ class ChartsPage(ExamplePage):
             "顶层 textStyle 是兜底，组件级 legend.textStyle / axisLabel / series.label "
             "优先；fontWeight 收数字与 bold 等关键字，fontStyle 支持 italic / oblique；"
             "series.label.rotate 绕文字中心旋转、align 按数据点调水平锚点；"
-            "setFontFamily 只接受单个族名（中文系统请用单个中文字体）。",
+            "轴标签用 setAxisLabelStyle 统一设字号 / 加粗 / 颜色 / 对齐 / 间距；"
+            "x 轴默认水平居中于刻度，y 轴默认垂直居中、水平贴轴（align='center' 可让 "
+            "y 轴标签列居中）；setFontFamily 只接受单个族名（中文系统请用单个中文字体）。",
             parent_layout,
         )
         chart = ElaChartWidget(self)
@@ -1029,7 +1160,6 @@ class ChartsPage(ExamplePage):
                 "xAxis": {
                     "type": "category",
                     "data": [f"第 {i + 1} 周" for i in range(8)],
-                    "axisLabel": {"fontSize": 11},
                 },
                 "yAxis": {"type": "value", "name": "销量"},
                 "series": [
@@ -1047,8 +1177,468 @@ class ChartsPage(ExamplePage):
                 ],
             }
         )
+        chart.setAxisLabelStyle("x", fontSize=11, bold=True)
+        chart.setAxisLabelStyle("y", align="center", margin=8)
         chart.setFontFamily("Microsoft YaHei")
         parent_layout.addWidget(chart)
+
+    # ── 工作区 5：主题 ──────────────────────────────────────────────────
+
+    def _demoThemeSwitch(self, parent_layout):
+        parent_layout.addLayout(
+            self._createHeaderRow("01. 内置主题实时切换", self._demoThemeSwitch)
+        )
+        self._addInfoText(
+            "主题 = 分类色板 + 背景 / 文字 / 轴 / 网格 / 图例 / 提示框 / 色带；"
+            "顶部「全局主题」切换整个工作台，本区下拉只改下面两张图（实例级 API）。"
+            "option 里显式写的颜色仍然优先（「固定色」系列写死了粉色，切主题不变）。"
+            "自定义主题用 registerChartTheme 注册后即可按名称切换。",
+            parent_layout,
+        )
+        registerChartTheme(
+            "example-coral",
+            palette=["#e76f51", "#2a9d8f", "#e9c46a", "#264653", "#f4a261"],
+            light={
+                "color.bg.base": "#fff8f2",
+                "color.text.primary": "#3a2a22",
+                "color.text.secondary": "#6b5145",
+                "color.border": "#f0d9cc",
+                "color.border.strong": "#8c6a58",
+                "color.primary": "#e76f51",
+                "color.ramp": ["#fff1e6", "#e76f51", "#9b2226"],
+            },
+            dark={
+                "color.bg.base": "#221a18",
+                "color.text.primary": "#f4e6df",
+                "color.text.secondary": "#c9b3a7",
+                "color.border": "#3d302c",
+                "color.border.strong": "#a38a7e",
+                "color.primary": "#f4a261",
+                "color.ramp": ["#3d302c", "#f4a261", "#e76f51"],
+            },
+        )
+        if self._global_theme_combo.findText("example-coral") < 0:
+            self._global_theme_combo.addItem("example-coral")
+        row = QHBoxLayout()
+        row.setSpacing(10)
+        local_label = ElaText("本区主题", self)
+        local_label.setTextPixelSize(13)
+        row.addWidget(local_label)
+        combo = ElaComboBox(self)
+        for name in chartThemes():
+            combo.addItem(name)
+        combo.setFixedWidth(180)
+        row.addWidget(combo)
+        state = ElaText("", self)
+        state.setTextPixelSize(13)
+        row.addWidget(state)
+        row.addStretch()
+        parent_layout.addLayout(row)
+        self._theme_combo = combo
+        self._theme_state_label = state
+
+        chart_row = QHBoxLayout()
+        chart_row.setSpacing(12)
+        bar = ElaChartWidget(self)
+        bar.setMinimumHeight(280)
+        bar.setOption(
+            {
+                "legend": {"top": 4},
+                "tooltip": {"trigger": "axis"},
+                "xAxis": {"type": "category", "data": ["Q1", "Q2", "Q3", "Q4"]},
+                "yAxis": {"type": "value"},
+                "series": [
+                    {
+                        "type": "bar",
+                        "name": "营收",
+                        "data": [120, 180, 150, 210],
+                        "itemStyle": {"borderRadius": [4, 4, 0, 0]},
+                    },
+                    {
+                        "type": "bar",
+                        "name": "成本",
+                        "data": [80, 110, 95, 140],
+                        "itemStyle": {"borderRadius": [4, 4, 0, 0]},
+                    },
+                    {
+                        "type": "line",
+                        "name": "利润率",
+                        "data": [42, 38, 46, 52],
+                        "smooth": True,
+                    },
+                    {
+                        "type": "bar",
+                        "name": "固定色",
+                        "data": [60, 70, 65, 75],
+                        "itemStyle": {
+                            "color": "#ff2d95",
+                            "borderRadius": [4, 4, 0, 0],
+                        },
+                    },
+                ],
+            }
+        )
+        pie = ElaChartWidget(self)
+        pie.setMinimumHeight(280)
+        pie.setOption(
+            {
+                "legend": {"bottom": 0},
+                "tooltip": {"trigger": "item"},
+                "series": [
+                    {
+                        "type": "pie",
+                        "name": "来源",
+                        "radius": ["42%", "68%"],
+                        "data": [
+                            {"name": "直接访问", "value": 420},
+                            {"name": "搜索引擎", "value": 310},
+                            {"name": "社交媒体", "value": 180},
+                            {"name": "外部链接", "value": 90},
+                        ],
+                    }
+                ],
+            }
+        )
+        chart_row.addWidget(bar, 2)
+        chart_row.addWidget(pie, 1)
+        parent_layout.addLayout(chart_row)
+        self._theme_demo_charts = [bar, pie]
+
+        def _apply_theme(index):
+            name = combo.currentText()
+            for chart in self._theme_demo_charts:
+                chart.setChartTheme(name)
+            state.setText(f"当前：{self._theme_demo_charts[0].chartTheme()}")
+
+        start = combo.findText(getattr(self, "_global_chart_theme", "ela"))
+        if start < 0:
+            start = 0
+        combo.setCurrentIndex(start)
+        combo.currentIndexChanged.connect(_apply_theme)
+        _apply_theme(start)
+
+    def _demoThemeGallery(self, parent_layout):
+        parent_layout.addLayout(
+            self._createHeaderRow("02. 同一份数据的六种外观", self._demoThemeGallery)
+        )
+        self._addInfoText(
+            "六套内置主题渲染同一份柱状数据：色板、背景、轴与网格、图例文字一起变；"
+            "明暗档位跟随应用主题（右上角「切换主题」可看深色变体）。"
+            "这六张图固定展示，不跟随顶部「全局主题」。",
+            parent_layout,
+        )
+        names = ["echarts", "matlab", "plotly", "ggplot2", "seaborn", "tableau"]
+        tiles = []
+        for name in names:
+            chart = ElaChartWidget(self)
+            chart.setMinimumHeight(190)
+            chart.setChartTheme(name)
+            chart._theme_pinned = True  # 主题画廊固定展示，不参与全局切换
+            chart.setOption(
+                {
+                    "animation": False,
+                    "legend": {"top": 2},
+                    "xAxis": {
+                        "type": "category",
+                        "data": ["华东", "华南", "华北", "西南"],
+                    },
+                    "yAxis": {"type": "value"},
+                    "series": [
+                        {
+                            "type": "bar",
+                            "name": "本期",
+                            "data": [320, 240, 180, 150],
+                            "itemStyle": {"borderRadius": [3, 3, 0, 0]},
+                        },
+                        {
+                            "type": "bar",
+                            "name": "上期",
+                            "data": [280, 260, 160, 130],
+                            "itemStyle": {"borderRadius": [3, 3, 0, 0]},
+                        },
+                        {
+                            "type": "bar",
+                            "name": "目标",
+                            "data": [300, 300, 200, 180],
+                            "itemStyle": {"borderRadius": [3, 3, 0, 0]},
+                        },
+                    ],
+                }
+            )
+            tiles.append((name, chart))
+        self._theme_gallery_charts = self._addGallery(parent_layout, tiles, columns=3)
+
+    # ── 工作区 6：小波 ──────────────────────────────────────────────────
+
+    def _demoWaveletScalogram(self, parent_layout):
+        parent_layout.addLayout(
+            self._createHeaderRow(
+                "01. 实时 scalogram（image 系列）", self._demoWaveletScalogram
+            )
+        )
+        self._addInfoText(
+            "合成 Morlet 风格幅值矩阵：每帧左移并补新列，updateSeries 重建 QImage；"
+            "缩放 / 平移 / 悬停不会重建图像。色带固定为所选 cmap（科学图不建议随 UI "
+            "主题换色），顶部「全局主题」只换背景 / 轴 / 文字 / 色条外框。",
+            parent_layout,
+        )
+        if not _HAS_NUMPY:
+            self._addInfoText(
+                "需要 numpy 才能运行本示例（请先安装 numpy）。", parent_layout
+            )
+            return
+
+        self._wavelet_rng = np.random.default_rng(7)
+        self._init_wavelet_data()
+        self._wavelet_chart = chart = ElaChartWidget(self)
+        chart.setMinimumHeight(520)
+        colors = colormapColors("viridis") or []
+        chart.setOption(
+            {
+                "animation": False,
+                "tooltip": {"trigger": "item"},
+                "xAxis": {"type": "value", "name": "时间（样本）"},
+                "yAxis": {"type": "value", "name": "尺度"},
+                "visualMap": {
+                    "min": 0,
+                    "max": 1,
+                    "calculable": True,
+                    "orient": "vertical",
+                    "text": ["高", "低"],
+                    "inRange": {"colors": colors},
+                },
+                "series": [
+                    {
+                        "type": "image",
+                        "name": "scalogram",
+                        "data": self._wavelet_matrix,
+                        "extent": [0, self._wavelet_cols, 1, self._wavelet_rows],
+                        "origin": "lower",
+                        "cmap": "viridis",
+                        "interpolation": "nearest",
+                        "aspect": "auto",
+                    }
+                ],
+            }
+        )
+
+        controls = QHBoxLayout()
+        controls.setSpacing(8)
+        self._wavelet_toggle_btn = ElaPushButton("开始实时", self)
+        self._wavelet_toggle_btn.setFixedWidth(100)
+        self._wavelet_toggle_btn.clicked.connect(self._toggle_wavelet)
+        controls.addWidget(self._wavelet_toggle_btn)
+        reset_btn = ElaPushButton("重置", self)
+        reset_btn.setFixedWidth(70)
+        reset_btn.clicked.connect(self._reset_wavelet)
+        controls.addWidget(reset_btn)
+
+        size_label = ElaText("矩阵", self)
+        size_label.setTextPixelSize(13)
+        controls.addWidget(size_label)
+        self._wavelet_size_combo = ElaComboBox(self)
+        for rows, cols in _WAVELET_SIZES:
+            self._wavelet_size_combo.addItem(
+                f"{rows} × {cols}（{rows * cols / 1e6:.1f}M）"
+            )
+        self._wavelet_size_combo.setFixedWidth(170)
+        self._wavelet_size_combo.setCurrentIndex(
+            _WAVELET_SIZES.index(_WAVELET_DEFAULT_SIZE)
+        )
+        self._wavelet_size_combo.currentIndexChanged.connect(
+            self._on_wavelet_size_changed
+        )
+        controls.addWidget(self._wavelet_size_combo)
+
+        cmap_label = ElaText("色带", self)
+        cmap_label.setTextPixelSize(13)
+        controls.addWidget(cmap_label)
+        self._wavelet_cmap_combo = ElaComboBox(self)
+        for name in colormapNames():
+            self._wavelet_cmap_combo.addItem(name)
+        self._wavelet_cmap_combo.setCurrentIndex(
+            self._wavelet_cmap_combo.findText("viridis")
+        )
+        self._wavelet_cmap_combo.setFixedWidth(110)
+        self._wavelet_cmap_combo.currentIndexChanged.connect(
+            self._on_wavelet_cmap_changed
+        )
+        controls.addWidget(self._wavelet_cmap_combo)
+        controls.addStretch()
+        parent_layout.addLayout(controls)
+
+        timing = QHBoxLayout()
+        timing.setSpacing(8)
+        self._wavelet_interval_label = ElaText(
+            f"刷新间隔: {_WAVELET_DEFAULT_INTERVAL_MS} ms", self
+        )
+        self._wavelet_interval_label.setTextPixelSize(13)
+        timing.addWidget(self._wavelet_interval_label)
+        self._wavelet_interval_slider = ElaSlider(Qt.Orientation.Horizontal, self)
+        self._wavelet_interval_slider.setRange(16, 200)
+        self._wavelet_interval_slider.setValue(_WAVELET_DEFAULT_INTERVAL_MS)
+        self._wavelet_interval_slider.setFixedWidth(180)
+        self._wavelet_interval_slider.valueChanged.connect(
+            self._on_wavelet_interval_changed
+        )
+        timing.addWidget(self._wavelet_interval_slider)
+        self._wavelet_stat_label = ElaText("", self)
+        self._wavelet_stat_label.setTextPixelSize(13)
+        self._wavelet_stat_label.setTextFormat(Qt.TextFormat.PlainText)
+        timing.addWidget(self._wavelet_stat_label)
+        timing.addStretch()
+        parent_layout.addLayout(timing)
+        parent_layout.addWidget(chart)
+
+        self._wavelet_timer = QTimer(self)
+        self._wavelet_timer.setInterval(_WAVELET_DEFAULT_INTERVAL_MS)
+        self._wavelet_timer.timeout.connect(self._tick_wavelet)
+        self._update_wavelet_stat(0.0)
+
+    def _init_wavelet_data(self):
+        self._wavelet_scale = np.arange(1, self._wavelet_rows + 1, dtype=float)[:, None]
+        self._wavelet_matrix = self._make_wavelet_columns(
+            np.arange(self._wavelet_cols, dtype=float)
+        )
+        self._wavelet_step = self._wavelet_cols
+
+    def _make_wavelet_columns(self, t):
+        """生成 ``rows × len(t)`` 的合成 scalogram 列（0~1）。"""
+        rows = self._wavelet_rows
+        scale = self._wavelet_scale
+        t = np.asarray(t, dtype=float).reshape(1, -1)
+        phase = t * 0.012
+        center = 1.0 + (rows - 1) * (0.5 + 0.5 * np.sin(phase))
+        width = np.maximum(2.0, rows * (0.05 + 0.02 * np.sin(t * 0.017 + 0.6)))
+        ridge = np.exp(-0.5 * ((scale - center) / width) ** 2)
+        center2 = 1.0 + (rows - 1) * (0.5 + 0.5 * np.sin(phase * 2.3 + 2.1))
+        width2 = max(1.5, rows * 0.025)
+        ridge2 = 0.55 * np.exp(-0.5 * ((scale - center2) / width2) ** 2)
+        cycle = t % (self._wavelet_cols * 1.5)
+        burst = np.exp(
+            -0.5
+            * ((cycle - self._wavelet_cols * 0.35) / (self._wavelet_cols * 0.06)) ** 2
+        )
+        burst += 0.7 * np.exp(
+            -0.5
+            * ((cycle - self._wavelet_cols * 1.05) / (self._wavelet_cols * 0.09)) ** 2
+        )
+        texture = 0.08 * np.sin(scale * 0.07 + t * 0.03)
+        base = 0.12 * np.exp(-0.5 * ((scale - rows * 0.12) / (rows * 0.08)) ** 2)
+        noise = self._wavelet_rng.normal(0.0, 0.02, (rows, t.shape[1]))
+        values = ridge * (0.55 + 0.55 * burst) + ridge2 + base + texture + noise
+        return np.clip(values, 0.0, 1.0)
+
+    def _tick_wavelet(self):
+        if self._wavelet_matrix is None or self._wavelet_chart is None:
+            return
+        started = time.perf_counter()
+        step = min(_WAVELET_SCROLL_STEP, self._wavelet_cols)
+        matrix = self._wavelet_matrix
+        matrix[:, :-step] = matrix[:, step:].copy()
+        matrix[:, -step:] = self._make_wavelet_columns(
+            np.arange(self._wavelet_step, self._wavelet_step + step, dtype=float)
+        )
+        self._wavelet_step += step
+        self._wavelet_chart.updateSeries({"data": matrix}, seriesIndex=0)
+        if self._wavelet_chart.isVisible():
+            self._wavelet_chart.repaint()
+        self._update_wavelet_stat((time.perf_counter() - started) * 1000.0)
+
+    def _update_wavelet_stat(self, elapsed_ms: float):
+        if getattr(self, "_wavelet_stat_label", None) is None:
+            return
+        interval = (
+            self._wavelet_timer.interval()
+            if getattr(self, "_wavelet_timer", None) is not None
+            else _WAVELET_DEFAULT_INTERVAL_MS
+        )
+        fps = 1000.0 / max(elapsed_ms, float(interval), 1.0)
+        self._wavelet_stat_label.setText(
+            f"重建 {elapsed_ms:.1f} ms · 上限 {fps:.0f} fps · "
+            f"{self._wavelet_rows} × {self._wavelet_cols}"
+        )
+
+    def _toggle_wavelet(self):
+        timer = getattr(self, "_wavelet_timer", None)
+        if timer is None:
+            return
+        if self._wavelet_running:
+            self._wavelet_running = False
+            timer.stop()
+            self._wavelet_toggle_btn.setText("开始实时")
+        else:
+            self._wavelet_running = True
+            if self._active_workspace == self._wavelet_workspace_index:
+                timer.start()
+            self._wavelet_toggle_btn.setText("暂停实时")
+
+    def _reset_wavelet(self):
+        if not _HAS_NUMPY or self._wavelet_chart is None:
+            return
+        self._init_wavelet_data()
+        self._wavelet_chart.updateSeries({"data": self._wavelet_matrix}, seriesIndex=0)
+        if self._wavelet_chart.isVisible():
+            self._wavelet_chart.repaint()
+        self._update_wavelet_stat(0.0)
+
+    def _on_wavelet_size_changed(self, index: int):
+        if not _HAS_NUMPY or not 0 <= index < len(_WAVELET_SIZES):
+            return
+        self._wavelet_rows, self._wavelet_cols = _WAVELET_SIZES[index]
+        self._init_wavelet_data()
+        self._wavelet_chart.updateSeries(
+            {
+                "data": self._wavelet_matrix,
+                "extent": [0, self._wavelet_cols, 1, self._wavelet_rows],
+            },
+            seriesIndex=0,
+        )
+        if self._wavelet_chart.isVisible():
+            self._wavelet_chart.repaint()
+        self._update_wavelet_stat(0.0)
+
+    def _on_wavelet_cmap_changed(self, index: int):
+        if self._wavelet_chart is None:
+            return
+        name = self._wavelet_cmap_combo.currentText()
+        colors = colormapColors(name)
+        if not colors:
+            return
+        self._wavelet_chart.setOption(
+            {
+                "visualMap": {"inRange": {"colors": colors}},
+                "series": [{"cmap": name}],
+            }
+        )
+        if self._wavelet_chart.isVisible():
+            self._wavelet_chart.repaint()
+
+    def _on_wavelet_interval_changed(self, value: int):
+        self._wavelet_interval_label.setText(f"刷新间隔: {value} ms")
+        if getattr(self, "_wavelet_timer", None) is not None:
+            self._wavelet_timer.setInterval(value)
+        self._update_wavelet_stat(0.0)
+
+    def _set_wavelet_workspace_active(self, active: bool):
+        timer = getattr(self, "_wavelet_timer", None)
+        if timer is None:
+            return
+        if active:
+            if self._wavelet_running and not timer.isActive():
+                timer.start()
+        elif timer.isActive():
+            timer.stop()
+
+    def hideEvent(self, event) -> None:
+        self._set_wavelet_workspace_active(False)
+        super().hideEvent(event)
+
+    def showEvent(self, event) -> None:
+        super().showEvent(event)
+        self._set_wavelet_workspace_active(
+            self._active_workspace == self._wavelet_workspace_index
+        )
 
     def _demoLineModes(self, parent_layout):
         parent_layout.addLayout(
@@ -1101,7 +1691,7 @@ class ChartsPage(ExamplePage):
     def _demoMultiAxisAndLog(self, parent_layout):
         parent_layout.addLayout(
             self._createHeaderRow(
-                "01. 多轴 / log 轴 / 标注标签双击编辑",
+                "01. 多轴 / log 轴 / 标注标签双击编辑 / 可拖动标注",
                 self._demoMultiAxisAndLog,
             )
         )
@@ -1109,7 +1699,9 @@ class ChartsPage(ExamplePage):
             "xAxis / yAxis 可传数组：索引 0 默认在左/下，索引 >=1 默认在右/上，"
             "series 用 xAxisIndex / yAxisIndex 选轴；type: 'log' 支持对数轴；"
             "series.label.show 显示数据点标签，双击数据点标签（以及 markPoint / "
-            "markLine 标签）即可编辑，Enter 提交、Esc 取消，提交后发 annotationEdited 信号",
+            "markLine 标签）即可编辑，Enter 提交、Esc 取消，提交后发 annotationEdited 信号；"
+            "annotations 是 Plotly 风格可拖动标注：拖动文本框只改偏移，箭头终点固定在数据点，"
+            "双击文本框也能改文案",
             parent_layout,
         )
         chart = ElaChartWidget(self)
@@ -1180,6 +1772,18 @@ class ChartsPage(ExamplePage):
                         ],
                         "markLine": {"data": [{"type": "average", "name": "均值"}]},
                     },
+                ],
+                "annotations": [
+                    {
+                        "id": "peak",
+                        "x": "1月",
+                        "y": 120,
+                        "text": "拖动我 / 双击改文案",
+                        "ax": 55,
+                        "ay": -42,
+                        "arrowcolor": "#e46a6a",
+                        "bordercolor": "#e46a6a",
+                    }
                 ],
             }
         )
@@ -1285,10 +1889,15 @@ class ChartsPage(ExamplePage):
     def _onRandomChart(self, chart):
         """按各系列类型随机化 data 并播放过渡插值动画（setOption 合并语义）。"""
         # 大数据图有自己的生成 / 降采样控制；`getOption()` 会把百万点物化
-        # 一遍（5M 点约十几秒），这里直接跳过。
+        # 一遍（5M 点约十几秒），这里直接跳过。小波 scalogram 同理（8M 格）。
         if chart is getattr(self, "_bigChart", None):
             return
+        if chart is getattr(self, "_wavelet_chart", None):
+            return
         opt = chart.getOption()
+        # 带标注的图不随机：标注锚定的是数据坐标，换数据后箭头会指向旧值。
+        if opt.get("annotations"):
+            return
         series = opt.get("series") or []
         for s in series:
             if isinstance(s, dict):
@@ -1313,6 +1922,18 @@ class ChartsPage(ExamplePage):
         t = str(s.get("type") or "line")
         data = s.get("data")
         if not isinstance(data, list) or not data:
+            return
+        if t == "image":
+            if data and isinstance(data[0], list):
+                if data[0] and isinstance(data[0][0], list):
+                    s["data"] = [
+                        [[random.randint(0, 255) for _ in cell] for cell in row]
+                        for row in data
+                    ]
+                else:
+                    s["data"] = [
+                        [random.uniform(-1.0, 1.0) for _ in row] for row in data
+                    ]
             return
         if t in ("pie", "funnel"):
             s["data"] = [
@@ -2462,6 +3083,74 @@ class ChartsPage(ExamplePage):
         self._calendar_green = bool(checked)
         self._applyCalendarOption()
 
+    # ── 07 画廊 · 矩阵图像（imshow） ──────────────────────────────────────
+
+    def _demoGalleryMatrix(self, parent_layout):
+        parent_layout.addLayout(
+            self._createHeaderRow(
+                "07. 系列画廊 · 矩阵图像（imshow：标量色带 / RGB 原图 / 平移缩放）",
+                self._demoGalleryMatrix,
+            )
+        )
+        self._addInfoText(
+            "series.type='image'：2D 标量矩阵按 cmap 上色（内置 viridis / plasma 等，"
+            "也可传颜色列表，或用 visualMap 提供色带与色条）；3D M×N×3/4 直接显示 RGB(A)。"
+            "extent 定义数据范围、origin='upper' 表示第 0 行在顶部；滚轮缩放 / 拖拽平移 / "
+            "dataZoom 自动裁切图像；tooltip 返回（行, 列, 值）。",
+            parent_layout,
+        )
+        tiles = []
+
+        scalar = self._galleryChart()
+        scalar.setOption(
+            {
+                "animation": False,
+                "tooltip": {"trigger": "item"},
+                "xAxis": {"type": "value"},
+                "yAxis": {"type": "value"},
+                "visualMap": {"min": -1, "max": 1},
+                "series": [
+                    {
+                        "type": "image",
+                        "name": "标量矩阵",
+                        "cmap": "viridis",
+                        "data": [
+                            [
+                                math.sin(r / 3.0) * math.cos(c / 4.0)
+                                for c in range(32)
+                            ]
+                            for r in range(24)
+                        ],
+                    }
+                ],
+            }
+        )
+        tiles.append(("矩阵图像 · imshow 标量 + 色条", scalar))
+
+        rgb = self._galleryChart()
+        rgb.setOption(
+            {
+                "animation": False,
+                "tooltip": {"trigger": "item"},
+                "xAxis": {"type": "value"},
+                "yAxis": {"type": "value"},
+                "series": [
+                    {
+                        "type": "image",
+                        "name": "RGB",
+                        "data": [
+                            [[r * 30, c * 20, 128] for c in range(12)]
+                            for r in range(8)
+                        ],
+                    }
+                ],
+            }
+        )
+        tiles.append(("矩阵图像 · RGB 原图", rgb))
+
+        charts = self._addGallery(parent_layout, tiles, columns=2)
+        self._attachGalleryControls(parent_layout, charts)
+
     # ── 07 大数据动态采样 ───────────────────────────────────────────────
 
     def _demoBigData(self, parent_layout):
@@ -3110,3 +3799,87 @@ class ChartsPage(ExamplePage):
         controls.addStretch()
         parent_layout.addLayout(controls)
         parent_layout.addWidget(status)
+
+    def _demoAnnotations(self, parent_layout):
+        parent_layout.addLayout(
+            self._createHeaderRow(
+                "04. 可拖动标注（annotations）：文本框拖动、箭头始终指向数据点",
+                self._demoAnnotations,
+            )
+        )
+        self._addInfoText(
+            "annotations 是 Plotly 风格的标注：x / y 是箭头指向的数据坐标（category 轴可写类目名），"
+            "ax / ay 是箭头尾部相对数据点的像素偏移，文本框再按 xanchor / yanchor 摆在尾部周围。"
+            "拖动文本框只改 ax / ay，箭头终点始终停在数据点上；双击文本框可改文案"
+            "（Enter / 失焦提交，Esc 取消）；annotationDragged 在拖动结束时发出，"
+            "载荷含最终偏移，可直接持久化。",
+            parent_layout,
+        )
+        chart = ElaChartWidget(self)
+        chart.setMinimumHeight(360)
+        chart.setOption(
+            {
+                "tooltip": {"trigger": "axis"},
+                "xAxis": {
+                    "type": "category",
+                    "data": ["1月", "2月", "3月", "4月", "5月", "6月"],
+                },
+                "yAxis": {"type": "value"},
+                "series": [
+                    {
+                        "type": "line",
+                        "name": "访问量",
+                        "data": [120, 200, 150, 80, 70, 110],
+                        "smooth": True,
+                        "areaStyle": {"opacity": 0.18},
+                    }
+                ],
+                "annotations": [
+                    {
+                        "id": "peak",
+                        "x": "2月",
+                        "y": 200,
+                        "text": "峰值 200",
+                        "ax": 62,
+                        "ay": 36,
+                        "arrowcolor": "#e46a6a",
+                        "bordercolor": "#e46a6a",
+                    },
+                    {
+                        "id": "trough",
+                        "x": "5月",
+                        "y": 70,
+                        "text": "低谷 70",
+                        "ax": -20,
+                        "ay": 44,
+                        "align": "left",
+                    },
+                ],
+            }
+        )
+        status = ElaText("拖动文本框试试：箭头终点固定在数据点上。", self)
+        status.setTextPixelSize(13)
+        chart.annotationDragged.connect(
+            lambda info: status.setText(
+                f"annotationDragged：{info['id']} → "
+                f"ax={info['ax']:.1f}, ay={info['ay']:.1f}"
+            )
+        )
+        reset_btn = ElaPushButton("重置标注位置", self)
+        reset_btn.setFixedWidth(120)
+        reset_btn.clicked.connect(
+            lambda: chart.setOption(
+                {
+                    "annotations": [
+                        {"id": "peak", "ax": 62, "ay": 36},
+                        {"id": "trough", "ax": -20, "ay": 44},
+                    ]
+                }
+            )
+        )
+        row = QHBoxLayout()
+        row.setSpacing(8)
+        row.addWidget(reset_btn)
+        row.addWidget(status, 1)
+        parent_layout.addWidget(chart)
+        parent_layout.addLayout(row)

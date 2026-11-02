@@ -94,6 +94,7 @@ class CanvasInteraction:
                 if event.button() == Qt.MouseButton.RightButton:
                     c._rpress = (view_pos, obj)
                     c._rpan = False
+                    c._rpress_edge = None
                     c._pan_start = QPointF(view_pos)
                     c._offset_start = QPointF(c._offset)
                     return True
@@ -142,6 +143,9 @@ class CanvasInteraction:
     # -- 节点拖动 ----------------------------------------------------------
     def node_press(self, widget: ElaNodeWidget, view_pos: QPointF, modifiers) -> None:
         c = self._canvas
+        # 焦点交给绘制视口（键盘事件由它转发给画布）：点节点后方向键 /
+        # Ctrl+A 等快捷键立即可用
+        c._viewport.setFocus(Qt.FocusReason.MouseFocusReason)
         nid = widget.node.id
         if modifiers & Qt.KeyboardModifier.ControlModifier:
             c.toggle_node_selected(nid)
@@ -162,17 +166,30 @@ class CanvasInteraction:
         delta = (QPointF(view_pos) - start_view) / c._zoom
         if not c._drag_moved and delta.manhattanLength() * c._zoom < 2.0:
             return
+        if c.grid_snap():
+            step = c._grid_scene_step()
+            delta = QPointF(
+                round(delta.x() / step) * step, round(delta.y() / step) * step
+            )
         c._drag_moved = True
         defer = bool(getattr(c._viewport, "supports_node_proxy", False))
         affected = []
-        old_rects = []
+        old_edge_rects = []
+        old_node_rects = []
+        new_node_rects = []
         if not defer:
             for nid in starts:
+                node = c.graph.node(nid)
+                if node is None:
+                    continue
+                # 选中发光画在画布层、超出节点控件矩形：旧位置的光晕带必须
+                # 纳入脏区，只靠 Qt 的控件移动失效会留下拖影
+                old_node_rects.append(c._node_repaint_view_rect(node))
                 for edge in c.graph.edges_of(nid):
                     widget = c._edge_widgets.get(edge.id)
                     if widget is not None and widget not in affected:
                         affected.append(widget)
-                        old_rects.append(widget.bounding_rect())
+                        old_edge_rects.append(widget.bounding_rect())
         for nid, start_pos in starts.items():
             node = c.graph.node(nid)
             if node is None:
@@ -183,13 +200,16 @@ class CanvasInteraction:
                 widget.begin_gesture_proxy()
             if widget is not None and not (defer and widget.uses_proxy()):
                 widget.apply_view(c.scene_to_view(node.pos), c._zoom)
+                if not defer:
+                    new_node_rects.append(c._node_repaint_view_rect(node))
         if defer:
             c._gesture_deferred = True
             c.update()
         else:
             c._update_scene_rects(
-                old_rects + [widget.bounding_rect() for widget in affected]
+                old_edge_rects + [ew.bounding_rect() for ew in affected]
             )
+            c._update_view_rects(old_node_rects + new_node_rects)
 
     def end_drag(self) -> None:
         c = self._canvas
@@ -298,10 +318,13 @@ class CanvasInteraction:
         if target is not None:
             dirty.append(self.wire_ring_rect(target))
             tgt_nid, tgt_pin = target
-            if src_pin.direction is ElaPinDirectionType.Output:
-                c.graph.add_edge(src_nid, src_pin.id, tgt_nid, tgt_pin.id)
-            else:
-                c.graph.add_edge(tgt_nid, tgt_pin.id, src_nid, src_pin.id)
+            try:
+                if src_pin.direction is ElaPinDirectionType.Output:
+                    c.graph.add_edge(src_nid, src_pin.id, tgt_nid, tgt_pin.id)
+                else:
+                    c.graph.add_edge(tgt_nid, tgt_pin.id, src_nid, src_pin.id)
+            except ValueError:
+                pass  # 同一条连线已存在：拖放到同一目标上时静默忽略
         else:
             scene_pt = c.view_to_scene(view_pos)
             c._pending_wire = (src_nid, src_pin, scene_pt)
@@ -327,7 +350,7 @@ class CanvasInteraction:
         if pending is None:
             return
         src_nid, src_pin, scene_pt = pending
-        node = c.add_node_at(type_name, scene_pt)
+        node = c.create_node(type_name, scene_pt)
         want_dir = (
             ElaPinDirectionType.Input
             if src_pin.direction is ElaPinDirectionType.Output
@@ -342,9 +365,13 @@ class CanvasInteraction:
             if not ok:
                 continue
             if src_pin.direction is ElaPinDirectionType.Output:
-                c.graph.add_edge(src_nid, src_pin.id, node.id, pin.id)
+                edge = (src_nid, src_pin.id, node.id, pin.id)
             else:
-                c.graph.add_edge(node.id, pin.id, src_nid, src_pin.id)
+                edge = (node.id, pin.id, src_nid, src_pin.id)
+            try:
+                c.graph.add_edge(*edge)
+            except ValueError:
+                pass
             break
 
     # -- 空白区鼠标 --------------------------------------------------------
@@ -373,8 +400,10 @@ class CanvasInteraction:
             c.update()
             return
         if event.button() == Qt.MouseButton.RightButton:
+            hit = c._edge_at(c.view_to_scene(pos))
             c._rpress = (pos, None)
             c._rpan = False
+            c._rpress_edge = hit
             c._pan_start = QPointF(pos)
             c._offset_start = QPointF(c._offset)
             return
@@ -431,16 +460,21 @@ class CanvasInteraction:
                 return
         if event.button() == Qt.MouseButton.RightButton and c._rpress is not None:
             was_pan = c._rpan
+            edge_id = c._rpress_edge
             c._rpress = None
             c._rpan = False
+            c._rpress_edge = None
             if was_pan:
                 c._panning = False
                 c.unsetCursor()
                 c._settle_view_gesture()
+            elif edge_id is not None:
+                c._select_edge(edge_id, False)
+                c._open_edge_menu(edge_id, event.globalPosition().toPoint())
             else:
                 scene_pt = c.view_to_scene(pos)
                 menu = ElaNodeCreationMenu(c, owner=c._owner)
-                menu.type_chosen.connect(lambda t, sp=scene_pt: c.add_node_at(t, sp))
+                menu.type_chosen.connect(lambda t, sp=scene_pt: c.create_node(t, sp))
                 menu.popup_at(event.globalPosition().toPoint())
             return
         QWidget.mouseReleaseEvent(c, event)
@@ -499,6 +533,7 @@ class CanvasInteraction:
         c._band_additive = False
         c._rpress = None
         c._rpan = False
+        c._rpress_edge = None
         if c._wire is not None:
             c._wire.deleteLater()
         c._wire = None
@@ -511,13 +546,49 @@ class CanvasInteraction:
 
     def key_press(self, event) -> None:
         c = self._canvas
-        if event.key() == Qt.Key.Key_Space and not event.isAutoRepeat():
+        key = event.key()
+        mods = event.modifiers()
+        if key == Qt.Key.Key_Space and not event.isAutoRepeat():
             c._space_down = True
             return
-        if event.key() in (Qt.Key.Key_Delete, Qt.Key.Key_Backspace):
+        if key in (Qt.Key.Key_Delete, Qt.Key.Key_Backspace):
             c.delete_selection()
             return
+        if key == Qt.Key.Key_Escape:
+            self.cancel()
+            c.clear_selection()
+            return
+        if mods & Qt.KeyboardModifier.ControlModifier:
+            if key == Qt.Key.Key_A:
+                c.select_all()
+                return
+            if key == Qt.Key.Key_D:
+                c.duplicate_selection()
+                return
+        if key in (
+            Qt.Key.Key_Left,
+            Qt.Key.Key_Right,
+            Qt.Key.Key_Up,
+            Qt.Key.Key_Down,
+        ):
+            self.nudge(key, bool(mods & Qt.KeyboardModifier.ShiftModifier))
+            return
         QWidget.keyPressEvent(c, event)
+
+    def nudge(self, key, big: bool) -> None:
+        """方向键微调选中节点（Shift = 10px，其余 1px，场景单位）。"""
+        step = 10.0 if big else 1.0
+        dx = dy = 0.0
+        if key == Qt.Key.Key_Left:
+            dx = -step
+        elif key == Qt.Key.Key_Right:
+            dx = step
+        elif key == Qt.Key.Key_Up:
+            dy = -step
+        elif key == Qt.Key.Key_Down:
+            dy = step
+        if dx or dy:
+            self._canvas.nudge_selection(dx, dy)
 
     def key_release(self, event) -> None:
         c = self._canvas

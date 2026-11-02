@@ -146,7 +146,7 @@ class ThemeRiverSeriesRenderer(SeriesRenderer):
         font = chartFont(T("font.xs"), None, self.chart.fontFamily())
         p.setFont(font)
         fm = QFontMetricsF(font)
-        p.setPen(QColor(T("color.text.secondary")))
+        p.setPen(QColor(T("color.text.secondary", self.chart)))
         tick_n = min(5, n)
         for k in range(tick_n):
             i = round(k * (n - 1) / max(1, tick_n - 1))
@@ -204,9 +204,16 @@ class ThemeRiverSeriesRenderer(SeriesRenderer):
             y0 = s["top"][best_i].y()
             y1 = s["bot"][best_i].y()
             if min(y0, y1) - 2 <= pos.y() <= max(y0, y1) + 2 and y1 > y0:
+                palette = self.chart.palette()
+                color = (
+                    parse_color(palette[s["color_idx"] % len(palette)])
+                    if palette
+                    else self.color()
+                )
                 return {
                     "name": s["name"],
                     "value": self._matrix.get((s["name"], self._times[best_i]), 0.0),
+                    "color": color,
                     "series": self.name,
                     "x": self._times[best_i],
                 }

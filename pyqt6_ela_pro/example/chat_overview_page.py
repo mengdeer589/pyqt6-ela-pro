@@ -25,7 +25,8 @@ from pyqt6_ela_pro.chat import (
 from PyQt6ElaWidgetTools import ElaCheckBox, ElaIconType, ElaMenu
 
 from .base_page import ExamplePage
-from .chat_demo_kit import _ScriptPlayer, note, readonly_chat, replay_section, set_note
+from ._step_player import _ScriptPlayer
+from .chat_demo_kit import note, readonly_chat, replay_section, set_note
 
 
 #: 下拉的初始选中项（用来给菜单项打勾）

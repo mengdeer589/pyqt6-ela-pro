@@ -20,6 +20,7 @@ from PyQt6.QtGui import (
 from PyQt6ElaWidgetTools import eTheme
 
 from ..._motion import start_idle_loop
+from .._theme import chart_theme_key
 from ..option import (
     _series_data_len,
     _series_geom_len,
@@ -83,7 +84,7 @@ class _ChartPaintMixin:
 
     def _paint_loading(self, p: QPainter) -> None:
         opts = self._loading_opts
-        mask = parse_color(opts.get("maskColor") or QColor(T("color.bg.base")))
+        mask = parse_color(opts.get("maskColor") or QColor(T("color.bg.base", self)))
         if not opts.get("maskColor"):
             mask.setAlpha(204)
         p.fillRect(self.rect(), mask)
@@ -101,7 +102,7 @@ class _ChartPaintMixin:
         if opts.get("showSpinner", True) and self._loading_type != "none":
             radius = max(6.0, float(opts.get("spinnerRadius", 14)))
             line_w = max(1.0, float(opts.get("lineWidth", 3)))
-            color = parse_color(opts.get("color") or T("color.primary"))
+            color = parse_color(opts.get("color") or T("color.primary", self))
             pen = QPen(color, line_w)
             pen.setCapStyle(Qt.PenCapStyle.RoundCap)
             p.setPen(pen)
@@ -114,7 +115,9 @@ class _ChartPaintMixin:
                 270 * 16,
             )
         if text:
-            p.setPen(parse_color(opts.get("textColor") or T("color.text.secondary")))
+            p.setPen(
+                parse_color(opts.get("textColor") or T("color.text.secondary", self))
+            )
             p.drawText(
                 QRectF(
                     self.width() / 2 - max(120.0, text_w) / 2 - 10,
@@ -399,7 +402,7 @@ class _ChartPaintMixin:
             warn_once(
                 "background-color", f"backgroundColor 非法，已回退主题底色: {bg!r}"
             )
-        return QColor(T("color.bg.base"))
+        return QColor(T("color.bg.base", self))
 
     def _series_layer_key(self):
         """系列层位图缓存键（``None`` 表示本帧不缓存）。
@@ -431,6 +434,7 @@ class _ChartPaintMixin:
             self.height(),
             round(self.getDevicePixelRatio(), 4),
             eTheme.getThemeMode(),
+            chart_theme_key(self),
             self._series_layer_key_zoom(),
             tuple((id(r), r.visible) for r in self._series),
             hover,
@@ -489,6 +493,15 @@ class _ChartPaintMixin:
         图例悬停高亮：命中系列正常绘制，其余降到 35% 不透明度。
         """
         highlight = self._legend_hover
+        # 饼 / 漏斗的图例条目是**数据项名**，不是系列名；这种悬停由系列
+        # 自己高亮对应扇区 / 层，不能把整条系列压到 35%。
+        item_highlight = False
+        if highlight is not None and not any(r.name == highlight for r in self._series):
+            item_highlight = any(
+                highlight == name
+                for r in self._series
+                for name, _color in r.legendItems()
+            )
         focus_series = None
         focus_scope = "coordinateSystem"
         if self._hover is not None:
@@ -502,7 +515,7 @@ class _ChartPaintMixin:
             try:
                 # 记下本次进度：命中分发可能发生在下一帧 paint 之前
                 r._anim_t = r.animProgress(t)
-                if highlight is not None:
+                if highlight is not None and not item_highlight:
                     p.setOpacity(1.0 if r.name == highlight else 0.35)
                 elif (
                     focus_series is not None

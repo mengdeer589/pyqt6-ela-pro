@@ -448,6 +448,7 @@ class BarSeriesRenderer(SeriesRenderer):
                 return {
                     "name": bar["label"],
                     "value": bar["y"],
+                    "color": self.itemColor(bar["index"]),
                     "series": self.name,
                     "dataIndex": bar["index"],
                 }
@@ -465,6 +466,7 @@ class BarSeriesRenderer(SeriesRenderer):
                 return {
                     "name": bar["label"],
                     "value": bar["y"],
+                    "color": self.itemColor(bar["index"]),
                     "series": self.name,
                     "dataIndex": bar["index"],
                     "pos": pos,

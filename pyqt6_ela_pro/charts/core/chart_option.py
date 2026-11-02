@@ -31,13 +31,17 @@ from .._tokens import (
 from .._utils import component_opt as _component_opt
 from .._utils import component_options as _component_options
 from .._utils import grid_options as _grid_options
+from .._utils import parse_color
 from .._utils import single_option
+from .._utils import text_weight
 from .._utils import warn_key, warn_once
 from ..axes import (
+    AxisModel,
     CalendarCoord,
     GridCoord,
     PolarCoord,
     SingleAxisCoord,
+    _axis_options,
     single_font_family,
 )
 from .legend import Legend
@@ -71,9 +75,10 @@ class _ChartOptionMixin:
     ) -> "ElaChartWidget":
         """设置 option（ECharts ``setOption(option, notMerge, lazyUpdate)``）。
 
-        默认合并：dict 深合并；``series`` / ``dataZoom`` / ``graphic`` 数组按
-        ``id`` → ``name`` → 下标逐项合并，其余 list 整体替换。``notMerge=True``
-        全量替换并重置交互状态；``lazyUpdate=True`` 把重建 / 重绘推迟到下一事件循环。
+        默认合并：dict 深合并；``series`` / ``dataZoom`` / ``graphic`` /
+        ``visualMap`` / ``annotations`` 数组按 ``id`` → ``name`` → 下标逐项合并，
+        其余 list 整体替换。``notMerge=True`` 全量替换并重置交互状态；
+        ``lazyUpdate=True`` 把重建 / 重绘推迟到下一事件循环。
 
         ``series[].data`` 的大数值数组按引用摄入（``ElaNumericBuffer``），调用方
         在本次调用后不得原地修改，改数据请重新 ``setOption``。
@@ -137,26 +142,192 @@ class _ChartOptionMixin:
         :param axisIndex: 轴下标（单轴传 0）
         :returns: 是否找到目标轴并完成合并
         """
-        key = _AXIS_OPTION_KEYS.get(str(axis or "").strip().lower())
+        name = str(axis or "").strip().lower()
+        key = _AXIS_OPTION_KEYS.get(name)
+        payload = self._axis_patch_payload(key, patch, axisIndex)
+        if payload is None:
+            return False
+        self.setOption({key: payload})
+        return True
+
+    def _axis_patch_payload(self, key, patch, axis_index):
+        """校验轴目标并生成 ``setOption`` 片段；目标不存在返回 ``None``（不写入）。"""
         if key is None or not isinstance(patch, dict):
+            return None
+        try:
+            index = int(axis_index)
+        except (TypeError, ValueError, OverflowError):
+            return None
+        current = self._option.get(key)
+        if isinstance(current, list):
+            if not 0 <= index < len(current):
+                return None
+            return [{} for _ in range(index)] + [patch]
+        if isinstance(current, dict):
+            return patch if index == 0 else None
+        return None
+
+    def setAxisLabelStyle(
+        self,
+        axis: str,
+        *,
+        fontSize: float = None,
+        fontWeight=None,
+        bold: bool = None,
+        color: str = None,
+        fontFamily: str = None,
+        fontStyle: str = None,
+        align: str = None,
+        verticalAlign: str = None,
+        rotate: float = None,
+        margin: float = None,
+        axisIndex: int = 0,
+    ) -> bool:
+        """设置一条（或 x/y 两条）坐标轴刻度标签的样式，只改传入的键。
+
+        默认对齐：x 轴文字水平居中于刻度；y 轴文字垂直居中于刻度线、水平
+        方向贴轴（左侧轴右对齐 / 右侧轴左对齐）。``align="center"`` 可让
+        y 轴标签同列居中，``"auto"`` 恢复默认。
+
+        :param axis: ``"x"`` / ``"y"`` / ``"single"`` / ``"both"``（x + y）
+        :param bold: ``True`` 加粗 / ``False`` 常规，优先于 ``fontWeight``
+        :param align: ``left`` / ``center`` / ``right`` / ``auto``
+        :param verticalAlign: ``top`` / ``middle`` / ``bottom`` / ``auto``
+        :param margin: 标签与轴线的间距（px）
+        :returns: 是否写入（轴不存在 / 参数非法 / 没有任何键时 False）
+        """
+        name = str(axis or "").strip().lower()
+        if name in ("both", "all"):
+            targets = ("x", "y")
+        elif name in _AXIS_OPTION_KEYS:
+            targets = (name,)
+        else:
+            return False
+        patch = {}
+        if fontSize is not None:
+            try:
+                size = float(fontSize)
+            except (TypeError, ValueError, OverflowError):
+                return False
+            if not math.isfinite(size) or size <= 0.0:
+                return False
+            patch["fontSize"] = int(size) if size.is_integer() else size
+        if bold is not None:
+            if not isinstance(bold, bool):
+                return False
+            patch["fontWeight"] = 700 if bold else 400
+        elif fontWeight is not None:
+            weight = text_weight(fontWeight)
+            if weight is None:
+                return False
+            patch["fontWeight"] = weight
+        if color is not None:
+            if not isinstance(color, str) or not parse_color(color).isValid():
+                return False
+            patch["color"] = color.strip()
+        if fontFamily is not None:
+            if not isinstance(fontFamily, str):
+                return False
+            patch["fontFamily"] = single_font_family(fontFamily)
+        if fontStyle is not None:
+            style_name = str(fontStyle).strip().lower()
+            if style_name not in ("normal", "italic", "oblique"):
+                return False
+            patch["fontStyle"] = style_name
+        if align is not None:
+            value = str(align).strip().lower()
+            if value == "auto":
+                patch["align"] = None
+            elif value in ("left", "center", "right"):
+                patch["align"] = value
+            else:
+                return False
+        if verticalAlign is not None:
+            value = str(verticalAlign).strip().lower()
+            if value == "auto":
+                patch["verticalAlign"] = None
+            elif value in ("top", "middle", "bottom"):
+                patch["verticalAlign"] = value
+            else:
+                return False
+        if rotate is not None:
+            try:
+                angle = float(rotate)
+            except (TypeError, ValueError, OverflowError):
+                return False
+            if not math.isfinite(angle):
+                return False
+            patch["rotate"] = int(angle) if angle.is_integer() else angle
+        if margin is not None:
+            try:
+                gap = float(margin)
+            except (TypeError, ValueError, OverflowError):
+                return False
+            if not math.isfinite(gap) or gap < 0.0:
+                return False
+            patch["margin"] = int(gap) if gap.is_integer() else gap
+        if not patch:
             return False
         try:
             index = int(axisIndex)
         except (TypeError, ValueError, OverflowError):
             return False
-        current = self._option.get(key)
-        if isinstance(current, list):
-            if not 0 <= index < len(current):
+        payload = {}
+        for target in targets:
+            axis_payload = self._axis_patch_payload(
+                _AXIS_OPTION_KEYS[target], {"axisLabel": patch}, index
+            )
+            if axis_payload is None:
                 return False
-            payload = [{} for _ in range(index)] + [patch]
-        elif isinstance(current, dict):
-            if index != 0:
-                return False
-            payload = patch
-        else:
-            return False
-        self.setOption({key: payload})
+            payload[_AXIS_OPTION_KEYS[target]] = axis_payload
+        self.setOption(payload)
         return True
+
+    def axisLabelStyle(self, axis: str = "x", axisIndex: int = 0) -> dict:
+        """一条轴标签的实际样式（含默认对齐 / 间距；无此轴返回 ``{}``）。
+
+        返回键：``fontSize`` / ``fontWeight`` / ``fontFamily`` / ``fontStyle`` /
+        ``color`` / ``align`` / ``verticalAlign`` / ``margin`` / ``rotate``。
+        """
+        name = str(axis or "").strip().lower()
+        key = _AXIS_OPTION_KEYS.get(name)
+        if key is None:
+            return {}
+        try:
+            index = int(axisIndex)
+        except (TypeError, ValueError, OverflowError):
+            return {}
+        options = _axis_options(self._option.get(key))
+        if not 0 <= index < len(options):
+            return {}
+        opt = options[index]
+        model = AxisModel(opt, "category" if opt.get("data") else "value", self)
+        horizontal = name == "y"
+        position = model.position or (
+            ("left" if index == 0 else "right")
+            if horizontal
+            else ("bottom" if index == 0 else "top")
+        )
+        if horizontal:
+            align_default = "left" if position == "right" else "right"
+            valign_default = "middle"
+            margin_default = 6.0
+        else:
+            align_default = "center"
+            valign_default = "bottom" if position == "top" else "top"
+            margin_default = 6.0 if name == "single" else 5.0
+        font = model.labelFont()
+        return {
+            "fontSize": font.pixelSize(),
+            "fontWeight": font.weight(),
+            "fontFamily": font.family(),
+            "fontStyle": "italic" if font.italic() else "normal",
+            "color": model.labelColor().name(),
+            "align": model.labelAlign(align_default),
+            "verticalAlign": model.labelVerticalAlign(valign_default),
+            "margin": model.labelMargin(margin_default),
+            "rotate": model.labelRotate(),
+        }
 
     def updateSeries(
         self,

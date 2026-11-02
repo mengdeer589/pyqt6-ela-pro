@@ -388,7 +388,7 @@ class BrushComponent(QObject):
 
     def _paint_lasso(self, p: QPainter) -> None:
         """套索轨迹：半透明填充 + 描边（矩形刷选的同一套强调色语义）。"""
-        accent = QColor(T("color.primary"))
+        accent = QColor(T("color.primary", self.chart))
         fill = parse_color(accent)
         fill.setAlpha(30)
         stroke = parse_color(accent)
@@ -416,7 +416,7 @@ class BrushComponent(QObject):
         p.save()
         # outOfBrush：框外降透明遮罩
         if self.opt.get("outOfBrush") and not plot.isNull():
-            mask = QColor(T("color.bg.base"))
+            mask = QColor(T("color.bg.base", self.chart))
             op = _to_float((self.opt.get("outOfBrush") or {}).get("opacity"), 0.45)
             mask.setAlpha(int(255 * _clamp(op if op is not None else 0.45, 0.0, 1.0)))
             p.setPen(Qt.PenStyle.NoPen)
@@ -453,10 +453,10 @@ class BrushComponent(QObject):
                     max(0.0, plot.bottom() - rect.bottom()),
                 )
             )
-        fill = QColor(T("color.primary"))
+        fill = QColor(T("color.primary", self.chart))
         fill.setAlpha(36)
         p.setBrush(fill)
-        pen = QPen(QColor(T("color.primary")), 1.2)
+        pen = QPen(QColor(T("color.primary", self.chart)), 1.2)
         pen.setStyle(Qt.PenStyle.DashLine)
         p.setPen(pen)
         p.drawRect(rect)

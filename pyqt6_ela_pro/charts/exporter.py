@@ -140,7 +140,7 @@ class ChartExporter:
         # 只读内部 option，不调 ``getOption()``：后者会深拷贝整份数据（40 万点约 1.0s）。
         chart_bg = self._option_color(self._chart._option_ref().get("backgroundColor"))
         if export_bg is None and chart_bg is None:
-            export_bg = QColor(T("color.bg.base"))
+            export_bg = QColor(T("color.bg.base", self._chart))
         return export_bg, chart_bg
 
     def _paint_backgrounds(self, painter: QPainter, width: int, height: int, opts):
@@ -173,12 +173,11 @@ class ChartExporter:
             image = self._flatten(image)
         return image
 
-    @staticmethod
-    def _flatten(image: QImage) -> QImage:
+    def _flatten(self, image: QImage) -> QImage:
         """把带透明度的图压到主题底（JPEG 用）。"""
         canvas = QImage(image.size(), QImage.Format.Format_RGB32)
         canvas.setDevicePixelRatio(image.devicePixelRatio())
-        canvas.fill(QColor(T("color.bg.base")))
+        canvas.fill(QColor(T("color.bg.base", self._chart)))
         painter = QPainter(canvas)
         try:
             painter.drawImage(0, 0, image)

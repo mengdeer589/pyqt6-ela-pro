@@ -6,18 +6,17 @@ from __future__ import annotations
 from PyQt6.QtCore import QPointF, QRectF, Qt
 from PyQt6.QtGui import QColor, QPainter, QPen, QPolygonF
 
-from ._tokens import T
-from ._utils import ON_FILL_WHITE, parse_roam as _parse_roam
+from .._colors import text_on_color
+from ._tokens import T, theme_ramp
+from ._utils import parse_roam as _parse_roam
 from ._utils import merged_text_style, text_italic, text_weight
-from ._utils import to_float as _to_float, warn_once, with_alpha
+from ._utils import ramp_color, to_float as _to_float, warn_once, with_alpha
 from ._utils import parse_color
 from .axes import chartFont
 from .core import (
     SeriesRenderer,
     registerSeries,
 )
-
-from .components import lerp_color
 
 
 DEMO_MAP = {
@@ -43,6 +42,7 @@ class MapSeriesRenderer(SeriesRenderer):
     def __init__(self, chart, opt):
         super().__init__(chart, opt)
         self._polys = []  # [(region_name, QPolygonF, data_index)]
+        self._region_colors = {}
         self._rect = QRectF()
         self._roam = _parse_roam(self.opt.get("roam", False))
         try:
@@ -112,6 +112,7 @@ class MapSeriesRenderer(SeriesRenderer):
     def layout(self, rect: QRectF) -> None:
         self._rect = QRectF(rect)
         self._polys = []
+        self._region_colors = {}
         regions = self._regions()
         if not regions:
             return
@@ -203,7 +204,7 @@ class MapSeriesRenderer(SeriesRenderer):
     ) -> QColor:
         v = values.get(name)
         if v is None:
-            return QColor(T("color.bg.muted"))
+            return QColor(T("color.bg.muted", self.chart))
         if vm is not None:
             try:
                 return parse_color(vm.mapColor(v))
@@ -211,7 +212,7 @@ class MapSeriesRenderer(SeriesRenderer):
                 pass
         span = vmax - vmin
         frac = 0.5 if span == 0 else (v - vmin) / span
-        return lerp_color(T("color.primary.subtle"), T("color.primary"), frac)
+        return ramp_color(theme_ramp(self.chart), frac, self.chart)
 
     def labelStyle(self) -> dict:
         """区域名样式（``label``；未设置的键回退顶层 ``textStyle``）。"""
@@ -242,7 +243,7 @@ class MapSeriesRenderer(SeriesRenderer):
             text_italic(label_style.get("fontStyle")),
         )
         p.setFont(font)
-        border = QPen(QColor(T("color.border.strong")), 1)
+        border = QPen(QColor(T("color.border.strong", self.chart)), 1)
         hover = self.chart.hoverInfo()
         hovered = (
             hover[1].get("dataIndex")
@@ -255,6 +256,7 @@ class MapSeriesRenderer(SeriesRenderer):
                 override = self.itemColor(data_index, default=fill)
                 if override != fill:
                     fill = override
+            self._region_colors[name] = fill
             if hovered is not None and data_index is not None:
                 if data_index == hovered:
                     fill = parse_color(fill).lighter(112)
@@ -270,10 +272,8 @@ class MapSeriesRenderer(SeriesRenderer):
             label_color = label_style.get("color")
             if isinstance(label_color, str) and label_color:
                 p.setPen(parse_color(label_color))
-            elif fill.lightness() < 130:
-                p.setPen(QColor(ON_FILL_WHITE))
             else:
-                p.setPen(QColor(T("color.text.primary")))
+                p.setPen(text_on_color(parse_color(fill)))
             label = name
             p.drawText(
                 QRectF(c.x() - 40, c.y() - 8, 80, 16),
@@ -284,11 +284,20 @@ class MapSeriesRenderer(SeriesRenderer):
 
     def hitTest(self, pos: QPointF):
         values = self._value_map()
+        vals = [v for v in values.values() if v is not None]
+        vmin = min(vals) if vals else 0.0
+        vmax = max(vals) if vals else 1.0
         for name, poly, data_index in reversed(self._polys):
             if poly.containsPoint(pos, Qt.FillRule.OddEvenFill):
+                color = self._region_colors.get(name)
+                if color is None:
+                    color = self._fill_color(name, values, vmin, vmax, self._visual_map())
+                    if data_index is not None:
+                        color = self.itemColor(data_index, default=color)
                 return {
                     "name": name,
                     "value": values.get(name),
+                    "color": color,
                     "series": self.name,
                     "dataIndex": data_index,
                 }

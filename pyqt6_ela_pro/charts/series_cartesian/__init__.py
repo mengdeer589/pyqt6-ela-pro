@@ -20,7 +20,6 @@ from ._shared import (
     _lerp,
     _monotone_path,
     _numeric_xy,
-    _ramp_color,
     _seq_len,
     _smooth_path,
     _win_span,
@@ -36,6 +35,9 @@ from .scatter import (
 )
 from .heatmap import (
     HeatmapSeriesRenderer,
+)
+from .image import (
+    ImageSeriesRenderer,
 )
 from .pictorial import (
     PictorialBarSeriesRenderer,
@@ -66,6 +68,7 @@ registerSeries("effectScatter", EffectScatterSeriesRenderer)
 registerSeries("candlestick", CandlestickSeriesRenderer)
 registerSeries("boxplot", BoxplotSeriesRenderer)
 registerSeries("heatmap", HeatmapSeriesRenderer)
+registerSeries("image", ImageSeriesRenderer)
 registerSeries("parallel", ParallelSeriesRenderer)
 registerSeries("themeRiver", ThemeRiverSeriesRenderer)
 
@@ -75,6 +78,7 @@ __all__ = [
     "CandlestickSeriesRenderer",
     "EffectScatterSeriesRenderer",
     "HeatmapSeriesRenderer",
+    "ImageSeriesRenderer",
     "LineSeriesRenderer",
     "ParallelSeriesRenderer",
     "PictorialBarSeriesRenderer",
@@ -97,7 +101,6 @@ __all__ = [
     "_lerp",
     "_monotone_path",
     "_numeric_xy",
-    "_ramp_color",
     "_seq_len",
     "_smooth_path",
     "_win_span",

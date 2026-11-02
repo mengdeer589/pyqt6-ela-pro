@@ -123,6 +123,7 @@ class BoxplotSeriesRenderer(SeriesRenderer):
                 return {
                     "name": formatValue(it["x"]),
                     "value": it["vals"],
+                    "color": self.itemColor(it["index"]),
                     "series": self.name,
                     "dataIndex": it["index"],
                 }
@@ -142,6 +143,7 @@ class BoxplotSeriesRenderer(SeriesRenderer):
                 return {
                     "name": _axis_label(coord.x_axis, it["x"]),
                     "value": it["vals"][2],
+                    "color": self.itemColor(it["index"]),
                     "series": self.name,
                     "pos": pos,
                 }

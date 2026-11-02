@@ -13,6 +13,7 @@ from .graphic import (
     GraphicComponent,
     lerp_color,
 )
+from .annotation import AnnotationComponent
 
 from ..core import registerComponent
 
@@ -20,9 +21,11 @@ registerComponent("markPoint", MarkPointComponent)
 registerComponent("markLine", MarkLineComponent)
 registerComponent("markArea", MarkAreaComponent)
 registerComponent("graphic", GraphicComponent)
+registerComponent("annotations", AnnotationComponent)
 
 __all__ = [
     "DEMO_MAP",
+    "AnnotationComponent",
     "GraphicComponent",
     "MapSeriesRenderer",
     "MarkAreaComponent",

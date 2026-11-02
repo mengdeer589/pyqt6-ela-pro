@@ -31,6 +31,55 @@ def _move(chart, pos):
     chart.mouseMoveEvent(event)
 
 
+class TestAxisTooltipCategoryY:
+    def test_horizontal_bar_axis_tooltip_follows_row(self, qapp, make):
+        chart = _chart(
+            make,
+            tooltip={"trigger": "axis"},
+            xAxis={"type": "value"},
+            yAxis={"type": "category", "data": ["A", "B", "C"]},
+            series=[{"type": "bar", "name": "值", "data": [10, 20, 30]}],
+        )
+        renderer = chart.seriesRenderers[0]
+        for index, (category, value) in enumerate(
+            (("A", "10"), ("B", "20"), ("C", "30"))
+        ):
+            _move(chart, renderer._bars[index]["rect"].center())
+            rows = [
+                (name, text) for _color, name, text in chart.tooltip._lines if name
+            ]
+            assert rows == [("值", value)]
+            assert chart.tooltip._lines[0][2] == category
+            assert chart.tooltip._axis_label == category
+            assert chart.tooltip._pointer_axis == "y"
+
+
+class TestAxisTooltipOutsidePlot:
+    def test_hides_when_cursor_leaves_plot_area(self, qapp, make):
+        chart = _chart(
+            make,
+            title={"text": "标题", "left": "left"},
+            tooltip={"trigger": "axis"},
+            xAxis={"type": "category", "data": ["A", "B", "C"]},
+            yAxis={"type": "value"},
+            series=[{"type": "line", "name": "值", "data": [10, 20, 30]}],
+        )
+        coord = chart.primaryCoord()
+        _move(chart, coord.plot.center())
+        assert chart.tooltip.active
+        assert chart._axis_hover
+        # 标题 / 上边距：在绘图区外，tooltip 必须收起
+        _move(chart, QPointF(10, 5))
+        assert not chart.tooltip.active
+        assert chart._axis_hover == []
+        # 下边距同样不显示
+        _move(chart, coord.plot.center())
+        assert chart.tooltip.active
+        _move(chart, QPointF(10, chart.height() - 5))
+        assert not chart.tooltip.active
+        assert chart._axis_hover == []
+
+
 class TestAxisTooltipValueAxis:
     def test_collects_every_series_at_nearest_x(self, qapp, make):
         chart = _chart(

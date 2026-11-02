@@ -23,9 +23,31 @@ from ._shared import (
     _line_pen,
     _margin_px,
     _parse_margin,
+    _series_image_extent,
     _to_float,
 )
 from .base import AxisModel, Coord
+
+
+#: ``axisLabel.align`` / ``verticalAlign`` → Qt 对齐标志
+_LABEL_HFLAGS = {
+    "left": Qt.AlignmentFlag.AlignLeft,
+    "center": Qt.AlignmentFlag.AlignHCenter,
+    "right": Qt.AlignmentFlag.AlignRight,
+}
+_LABEL_VFLAGS = {
+    "top": Qt.AlignmentFlag.AlignTop,
+    "middle": Qt.AlignmentFlag.AlignVCenter,
+    "bottom": Qt.AlignmentFlag.AlignBottom,
+}
+
+
+def _merge_image_extent(current, new):
+    """image 系列范围并集（``extent`` 允许反向，这里统一成 min/max）。"""
+    lo, hi = min(new[0], new[1]), max(new[0], new[1])
+    if current is None:
+        return lo, hi
+    return min(current[0], lo), max(current[1], hi)
 
 
 class GridCoord(Coord):
@@ -226,6 +248,10 @@ class GridCoord(Coord):
     def setSeries(self, series_opts: list) -> None:
         xs = [[] for _ in self.x_axes]
         ys = [[] for _ in self.y_axes]
+        image_x = [None] * len(self.x_axes)
+        image_y = [None] * len(self.y_axes)
+        other_x = [False] * len(self.x_axes)
+        other_y = [False] * len(self.y_axes)
         for s in series_opts or []:
             if not isinstance(s, dict):
                 continue
@@ -240,6 +266,19 @@ class GridCoord(Coord):
                 continue
             positive_x = xaxis.type == "log"
             positive_y = yaxis.type == "log"
+            if str(s.get("type") or "") == "image":
+                # 二维矩阵不是 [x, y] 点对：直接按 extent / shape 提供范围，
+                # 绝不能落到下面的逐点扫描（会把列当 x、第二列当 y）。
+                extent = _series_image_extent(s)
+                if extent is not None:
+                    x0, x1, y0, y1 = extent
+                    if need_x:
+                        xs[xi].extend((x0, x1))
+                        image_x[xi] = _merge_image_extent(image_x[xi], (x0, x1))
+                    if need_y:
+                        ys[yi].extend((y0, y1))
+                        image_y[yi] = _merge_image_extent(image_y[yi], (y0, y1))
+                continue
             data = s.get("data")
             # ``data: 5`` / ``True`` 这类**标量**不是合法序列（ECharts 也不接受），
             # 降级成空数据；判据不能用 ``isBufferLike``（它故意不认 list / tuple）。
@@ -247,6 +286,13 @@ class GridCoord(Coord):
                 data = []
             elif not _cdata.isBufferLike(data) and not isinstance(data, (list, tuple)):
                 data = []
+            try:
+                has_data = len(data) > 0
+            except TypeError:
+                has_data = False
+            if has_data:
+                other_x[xi] = other_x[xi] or need_x
+                other_y[yi] = other_y[yi] or need_y
             ext = self._extent(data, positive_x, positive_y)
             if ext is not None:
                 x0, x1, y0, y1 = ext
@@ -284,6 +330,17 @@ class GridCoord(Coord):
             if axis.type in ("value", "log"):
                 # 新数据到了：上一轮的「真实全量」作废，等系列 layout 重算。
                 axis._data_extent = None
+                exact = image_y[i]
+                if (
+                    axis.type == "value"
+                    and exact is not None
+                    and not other_y[i]
+                    and axis.min is None
+                    and axis.max is None
+                ):
+                    # 纯 image 轴：保持 imshow 语义，图像铺满绘图区（不向 nice 外扩）。
+                    axis.setFixedExtent(exact[0], exact[1])
+                    continue
                 vals = ys[i]
                 axis.setExtent(min(vals), max(vals)) if vals else axis.setExtent(
                     0.0, 1.0
@@ -291,6 +348,16 @@ class GridCoord(Coord):
         for i, axis in enumerate(self.x_axes):
             if axis.type in ("value", "log"):
                 axis._data_extent = None
+                exact = image_x[i]
+                if (
+                    axis.type == "value"
+                    and exact is not None
+                    and not other_x[i]
+                    and axis.min is None
+                    and axis.max is None
+                ):
+                    axis.setFixedExtent(exact[0], exact[1])
+                    continue
                 vals = xs[i]
                 axis.setExtent(min(vals), max(vals)) if vals else axis.setExtent(
                     0.0, 1.0
@@ -317,6 +384,51 @@ class GridCoord(Coord):
             plot_w,
             plot_h,
         )
+        self._apply_equal_aspect(plot_w, plot_h)
+
+    def _apply_equal_aspect(self, plot_w: float, plot_h: float) -> None:
+        """``image.aspect="equal"``：把绘图区收成 1:1 数据像素并居中（letterbox）。"""
+        target = None
+        for series in self.option.get("series") or []:
+            if not isinstance(series, dict) or str(series.get("type")) != "image":
+                continue
+            if str(series.get("aspect") or "").strip().lower() != "equal":
+                continue
+            if series.get("coordinateSystem") not in (None, "cartesian2d", "grid"):
+                continue
+            xi, yi = self._series_axes(series)
+            if (
+                self.x_axes[xi].grid_index != self.grid_index
+                or self.y_axes[yi].grid_index != self.grid_index
+            ):
+                continue
+            target = (self.x_axes[xi], self.y_axes[yi])
+            break
+        if target is None:
+            return
+        x_axis, y_axis = target
+        if x_axis.type not in ("value", "log") or y_axis.type not in (
+            "value",
+            "log",
+        ):
+            return
+        x_span = abs(x_axis.vmax - x_axis.vmin)
+        y_span = abs(y_axis.vmax - y_axis.vmin)
+        if not (math.isfinite(x_span) and math.isfinite(y_span)):
+            return
+        if x_span <= 0.0 or y_span <= 0.0 or plot_w <= 0.0 or plot_h <= 0.0:
+            return
+        desired = y_span / x_span
+        available = plot_h / plot_w
+        if desired >= available:
+            new_h, new_w = plot_h, plot_h / desired
+        else:
+            new_w, new_h = plot_w, plot_w * desired
+        new_w = max(10.0, min(plot_w, new_w))
+        new_h = max(10.0, min(plot_h, new_h))
+        left = self.plot.left() + (plot_w - new_w) / 2.0
+        top = self.plot.top() + (plot_h - new_h) / 2.0
+        self.plot = QRectF(left, top, new_w, new_h)
 
     def _axis_label_extent(self, axis: AxisModel, horizontal: bool) -> float:
         """轴标签在垂直轴方向（y 轴宽度 / x 轴高度）需要的像素。"""
@@ -409,7 +521,9 @@ class GridCoord(Coord):
         xa = self.x_axes[_axis_index(x_axis_index, len(self.x_axes))]
         ya = self.y_axes[_axis_index(y_axis_index, len(self.y_axes))]
         px = xa.map(x, self.plot.left(), self.plot.right())
-        py = ya.map(_to_float(y), self.plot.bottom(), self.plot.top())
+        # category 轴接受类目名 / 下标；不能先转 float（类目名会被吞成 None → 0）。
+        py_value = y if ya.type == "category" else _to_float(y)
+        py = ya.map(py_value, self.plot.bottom(), self.plot.top())
         return QPointF(px, py)
 
     def mapArrays(
@@ -635,7 +749,7 @@ class GridCoord(Coord):
             area = opt.get("areaStyle")
             colors = (area or {}).get("color") if isinstance(area, dict) else None
             if not isinstance(colors, list) or not colors:
-                colors = [T("color.bg.muted")]
+                colors = [T("color.bg.muted", self.chart)]
             positions = self._axis_positions(
                 axis, horizontal, self._interval_step(axis, horizontal, "splitArea")
             )
@@ -661,7 +775,7 @@ class GridCoord(Coord):
             default_show = axis.type in ("value", "log") and primary
             if not bool(opt.get("show", default_show)):
                 continue
-            p.setPen(_line_pen(opt, T("color.border")))
+            p.setPen(_line_pen(opt, T("color.border", self.chart)))
             for px, py, _label, _idx in self._axis_positions(
                 axis, horizontal, self._interval_step(axis, horizontal, "splitLine")
             ):
@@ -679,7 +793,7 @@ class GridCoord(Coord):
             opt = axis.axisLineOption()
             if not bool(opt.get("show", True)):
                 continue
-            p.setPen(_line_pen(opt, T("color.border.strong")))
+            p.setPen(_line_pen(opt, T("color.border.strong", self.chart)))
             if horizontal:
                 x = self._axis_line_pos(axis, True)
                 p.drawLine(QPointF(x, self.plot.bottom()), QPointF(x, self.plot.top()))
@@ -697,7 +811,7 @@ class GridCoord(Coord):
                 length = max(1.0, float(opt.get("length", 5)))
             except (TypeError, ValueError, OverflowError):
                 length = 5.0
-            p.setPen(_line_pen(opt, T("color.border.strong")))
+            p.setPen(_line_pen(opt, T("color.border.strong", self.chart)))
             line = self._axis_line_pos(axis, horizontal)
             # 向外方向的符号：left=-1 / right=+1 / bottom=+1 / top=-1
             if horizontal:
@@ -718,55 +832,76 @@ class GridCoord(Coord):
                     )
 
     def _paint_axis_labels(self, p: QPainter) -> None:
-        # y 轴标签：left 右对齐到轴线左侧，right 左对齐到轴线右侧
+        # y 轴标签：贴轴一列，默认垂直居中于刻度线；align 默认贴轴（左侧右对齐 /
+        # 右侧左对齐），改为 center 时同列标签共用一条中线。
         for axis in self.y_axes:
             if axis.grid_index != self.grid_index:
+                continue
+            positions = [
+                (py, label)
+                for _px, py, label, idx in self._axis_positions(
+                    axis, True, self._interval_step(axis, True, "axisLabel")
+                )
+                if axis.labelShownAt(idx, label)
+            ]
+            if not positions:
                 continue
             font = axis.labelFont()
             p.setFont(font)
             fm = QFontMetricsF(font)
             color = axis.labelColor()
             line = self._axis_line_pos(axis, True)
+            margin = axis.labelMargin(6.0)
+            align_name = axis.labelAlign(
+                "left" if axis.position == "right" else "right"
+            )
+            valign_name = axis.labelVerticalAlign("middle")
+            align = _LABEL_HFLAGS[align_name] | _LABEL_VFLAGS[valign_name]
+            # 列宽取最宽的一条：右 / 左对齐时逐条贴住轴侧边缘（与原行为逐像素
+            # 一致），居中时才有稳定的共同中线。
+            text_w = max(fm.horizontalAdvance(label) for _py, label in positions)
             if axis.position == "right":
-                left = line + 6
-                right = max(left + 8, self.rect.right())
-                align = Qt.AlignmentFlag.AlignLeft
+                left = line + margin
+                right = max(left + text_w, self.rect.right())
             else:
-                left = self.rect.left()
-                right = max(left + 8, line - 6)
-                align = Qt.AlignmentFlag.AlignRight
-            for px, py, label, idx in self._axis_positions(
-                axis, True, self._interval_step(axis, True, "axisLabel")
-            ):
-                if not axis.labelShownAt(idx, label):
-                    continue
-                p.setPen(color)
-                p.drawText(
-                    QRectF(
-                        left, py - fm.height() / 2, max(8.0, right - left), fm.height()
-                    ),
-                    align | Qt.AlignmentFlag.AlignVCenter,
-                    label,
+                right = line - margin
+                left = min(right - text_w, self.rect.left())
+            width = max(8.0, right - left)
+            height = fm.height()
+            p.setPen(color)
+            for py, label in positions:
+                top = (
+                    py
+                    if valign_name == "top"
+                    else py - height
+                    if valign_name == "bottom"
+                    else py - height / 2
                 )
-        # x 轴标签：bottom 在轴线下，top 在轴线上；可按 axisLabel.rotate 旋转
+                p.drawText(QRectF(left, top, width, height), align, label)
+        # x 轴标签：沿刻度居中（默认），可按 axisLabel.align / verticalAlign 调锚点，
+        # 并支持 axisLabel.rotate 旋转。
         for axis in self.x_axes:
             if axis.grid_index != self.grid_index:
                 continue
-            font = axis.labelFont()
-            p.setFont(font)
-            fm = QFontMetricsF(font)
-            color = axis.labelColor()
-            try:
-                rotate = float(axis.axisLabelOption().get("rotate", 0) or 0)
-            except (TypeError, ValueError, OverflowError):
-                rotate = 0.0
-            line = self._axis_line_pos(axis, False)
-            top_side = axis.position == "top"
             positions = list(
                 self._axis_positions(
                     axis, False, self._interval_step(axis, False, "axisLabel")
                 )
             )
+            if not positions:
+                continue
+            font = axis.labelFont()
+            p.setFont(font)
+            fm = QFontMetricsF(font)
+            color = axis.labelColor()
+            rotate = axis.labelRotate()
+            line = self._axis_line_pos(axis, False)
+            top_side = axis.position == "top"
+            margin = axis.labelMargin(5.0)
+            align_name = axis.labelAlign("center")
+            valign_name = axis.labelVerticalAlign("bottom" if top_side else "top")
+            hflag = _LABEL_HFLAGS[align_name]
+            anchor_y = line - margin if top_side else line + margin
             # 标签框宽度按实际文本宽算，上限取相邻刻度间距，
             # 否则长日期标签会被硬裁且没有省略号。
             spacing = 80.0
@@ -775,13 +910,12 @@ class GridCoord(Coord):
                 gaps = [b - a for a, b in zip(xs, xs[1:]) if b > a]
                 if gaps:
                     spacing = min(gaps)
-            for px, py, label, idx in positions:
+            for px, _py, label, idx in positions:
                 if not axis.labelShownAt(idx, label):
                     continue
-                p.setPen(color)
+                text_w = fm.horizontalAdvance(label)
+                box_w = max(20.0, min(max(40.0, text_w + 4.0), spacing))
                 if abs(rotate) < 1e-6:
-                    text_w = fm.horizontalAdvance(label)
-                    box_w = max(20.0, min(max(40.0, text_w + 4.0), spacing))
                     text = (
                         label
                         if text_w <= box_w - 2.0
@@ -789,36 +923,49 @@ class GridCoord(Coord):
                             label, Qt.TextElideMode.ElideRight, int(box_w - 2.0)
                         )
                     )
-                    rect = (
-                        QRectF(
-                            px - box_w / 2, line - 5 - fm.height(), box_w, fm.height()
-                        )
-                        if top_side
-                        else QRectF(px - box_w / 2, line + 5, box_w, fm.height())
+                    left = (
+                        px
+                        if align_name == "left"
+                        else px - box_w
+                        if align_name == "right"
+                        else px - box_w / 2
                     )
+                    top = (
+                        anchor_y
+                        if valign_name == "top"
+                        else anchor_y - fm.height()
+                        if valign_name == "bottom"
+                        else anchor_y - fm.height() / 2
+                    )
+                    p.setPen(color)
                     p.drawText(
-                        rect,
-                        Qt.AlignmentFlag.AlignHCenter
-                        | (
-                            Qt.AlignmentFlag.AlignBottom
-                            if top_side
-                            else Qt.AlignmentFlag.AlignTop
-                        ),
+                        QRectF(left, top, box_w, fm.height()),
+                        hflag | _LABEL_VFLAGS[valign_name],
                         text,
                     )
                 else:
+                    box_w = max(120.0, text_w + 4.0)
                     center_y = (
-                        line - 5 - fm.height() / 2
-                        if top_side
-                        else line + 5 + fm.height() / 2
+                        anchor_y + fm.height() / 2
+                        if valign_name == "top"
+                        else anchor_y - fm.height() / 2
+                        if valign_name == "bottom"
+                        else anchor_y
                     )
-                    box_w = max(120.0, fm.horizontalAdvance(label) + 4.0)
+                    left = (
+                        0.0
+                        if align_name == "left"
+                        else -box_w
+                        if align_name == "right"
+                        else -box_w / 2
+                    )
                     p.save()
                     p.translate(px, center_y)
                     p.rotate(rotate)
+                    p.setPen(color)
                     p.drawText(
-                        QRectF(-box_w / 2, -fm.height() / 2, box_w, fm.height()),
-                        Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignVCenter,
+                        QRectF(left, -fm.height() / 2, box_w, fm.height()),
+                        hflag | Qt.AlignmentFlag.AlignVCenter,
                         label,
                     )
                     p.restore()
@@ -828,7 +975,7 @@ class GridCoord(Coord):
             if axis.grid_index != self.grid_index or not axis.name:
                 continue
             style = axis.nameTextStyle()
-            p.setPen(parse_color(style.get("color") or T("color.text.tertiary")))
+            p.setPen(parse_color(style.get("color") or T("color.text.tertiary", self.chart)))
             font = axis.nameFont()
             p.setFont(font)
             fm = QFontMetricsF(font)
@@ -854,7 +1001,7 @@ class GridCoord(Coord):
             if axis.grid_index != self.grid_index or not axis.name:
                 continue
             style = axis.nameTextStyle()
-            p.setPen(parse_color(style.get("color") or T("color.text.tertiary")))
+            p.setPen(parse_color(style.get("color") or T("color.text.tertiary", self.chart)))
             font = axis.nameFont()
             p.setFont(font)
             fm = QFontMetricsF(font)
@@ -891,7 +1038,7 @@ class GridCoord(Coord):
         if self.grid_show and self.grid_border_width > 0:
             p.setPen(
                 QPen(
-                    parse_color(self.grid_border_color or T("color.border")),
+                    parse_color(self.grid_border_color or T("color.border", self.chart)),
                     self.grid_border_width,
                 )
             )
@@ -912,22 +1059,43 @@ class GridCoord(Coord):
         kind: str = "cross",
         x_axis_index: int = 0,
         line_style: dict = None,
+        axis: str = "x",
     ) -> None:
         if kind == "none":
             return
         p.save()
         style = line_style if isinstance(line_style, dict) else {}
-        pen = _line_pen({"lineStyle": style}, T("color.border.strong"))
+        pen = _line_pen({"lineStyle": style}, T("color.border.strong", self.chart))
         if not isinstance(style.get("type"), str):
             pen.setStyle(Qt.PenStyle.DashLine)
         p.setPen(pen)
         x = min(max(pos.x(), self.plot.left()), self.plot.right())
         y = min(max(pos.y(), self.plot.top()), self.plot.bottom())
+        if axis == "y":
+            # 横向柱：指示线 / 阴影带沿 y 类目行展开。
+            if kind == "shadow":
+                band = self.y_axis.bandWidth(self.plot.top(), self.plot.bottom())
+                height = band if band > 1.0 else 8.0
+                shadow = QColor(T("color.bg.muted", self.chart))
+                shadow.setAlpha(90)
+                p.fillRect(
+                    QRectF(
+                        self.plot.left(), y - height / 2, self.plot.width(), height
+                    ),
+                    shadow,
+                )
+            elif kind == "line":
+                p.drawLine(QPointF(self.plot.left(), y), QPointF(self.plot.right(), y))
+            else:  # cross
+                p.drawLine(QPointF(x, self.plot.top()), QPointF(x, self.plot.bottom()))
+                p.drawLine(QPointF(self.plot.left(), y), QPointF(self.plot.right(), y))
+            p.restore()
+            return
         if kind == "shadow":
             xa = self.x_axes[_axis_index(x_axis_index, len(self.x_axes))]
             band = xa.bandWidth(self.plot.left(), self.plot.right())
             width = band if band > 1.0 else 8.0
-            shadow = QColor(T("color.bg.muted"))
+            shadow = QColor(T("color.bg.muted", self.chart))
             shadow.setAlpha(90)
             p.fillRect(
                 QRectF(x - width / 2, self.plot.top(), width, self.plot.height()),
@@ -1011,6 +1179,7 @@ class _GridAxisView(GridCoord):
         kind: str = "cross",
         x_axis_index=None,
         line_style: dict = None,
+        axis: str = "x",
     ) -> None:
         return self._owner.paintTooltipMarker(
             p,
@@ -1018,4 +1187,5 @@ class _GridAxisView(GridCoord):
             kind,
             self.x_axis_index if x_axis_index is None else x_axis_index,
             line_style,
+            axis=axis,
         )

@@ -11,13 +11,12 @@ from PyQt6.QtGui import (
     QPen,
 )
 
-from .._tokens import T
-from .._utils import parse_color, to_float as _to_float
+from .._tokens import T, theme_ramp
+from .._utils import parse_color, ramp_color, to_float as _to_float
 from ..axes import CalendarCoord, GridCoord, formatValue
 from ..core import SeriesRenderer
 from ._shared import (
     _axis_label,
-    _ramp_color,
     label_rotate,
     paint_label_in,
 )
@@ -93,7 +92,7 @@ class HeatmapSeriesRenderer(SeriesRenderer):
                 if isinstance(in_range.get("colors"), list) and in_range["colors"]:
                     colors = in_range["colors"]
         if colors is None:
-            colors = [T("color.primary.subtle"), T("color.primary")]
+            colors = theme_ramp(self.chart)
         vals = [v for _, _, v, _, _ in items]
         if vmin is None:
             vmin = min(vals) if vals else 0.0
@@ -110,10 +109,10 @@ class HeatmapSeriesRenderer(SeriesRenderer):
         elif raw_empty:
             color = parse_color(raw_empty)
             self._empty_color = (
-                color if color.isValid() else QColor(T("color.bg.muted"))
+                color if color.isValid() else QColor(T("color.bg.muted", self.chart))
             )
         else:
-            self._empty_color = QColor(T("color.bg.muted"))
+            self._empty_color = QColor(T("color.bg.muted", self.chart))
         series_style = self.itemStyle()
         try:
             self._cell_gap = max(0.0, float(series_style.get("borderWidth", 1.0)))
@@ -157,7 +156,7 @@ class HeatmapSeriesRenderer(SeriesRenderer):
             color = (
                 parse_color(raw)
                 if isinstance(raw, str) and raw
-                else _ramp_color(colors, t)
+                else ramp_color(colors, t, self.chart)
             )
             border_color, border_w = self.itemBorder(data_index)
             if border_color is None and border_w <= 0:
@@ -208,7 +207,7 @@ class HeatmapSeriesRenderer(SeriesRenderer):
             if not isinstance(coord, GridCoord):
                 continue
             t = 0.5 if span == 0 else (val - vmin) / span
-            color = _ramp_color(colors, t)
+            color = ramp_color(colors, t, self.chart)
             px = coord.x_axis.map(x, coord.plot.left(), coord.plot.right())
             py = coord.y_axis.map(y, coord.plot.bottom(), coord.plot.top())
             bw = coord.x_axis.bandWidth(coord.plot.left(), coord.plot.right()) or 10.0
@@ -314,6 +313,7 @@ class HeatmapSeriesRenderer(SeriesRenderer):
                 return {
                     "name": cell["label"],
                     "value": cell["value"],
+                    "color": cell.get("color"),
                     "series": self.name,
                     "dataIndex": cell.get("index"),
                     "title": cell.get("title"),

@@ -41,7 +41,7 @@ from ._tokens import theme_changed_slot
 from .model import ElaPinDirectionType, types_compatible
 from .registry import ElaNodeRegistry
 
-__all__ = ["ElaNodeCreationMenu", "ElaNodeContextMenu"]
+__all__ = ["ElaNodeCreationMenu", "ElaNodeContextMenu", "ElaEdgeContextMenu"]
 
 #: 语义槽位（**必须是枚举成员**：PyQt6 的 getThemeColor 只接受枚举，
 #: 传位次数字直接 `TypeError: argument 2 has unexpected type 'int'`）
@@ -93,7 +93,7 @@ class ElaNodeCreationMenu(QDialog):
     用法::
 
         menu = ElaNodeCreationMenu(canvas)
-        menu.type_chosen.connect(lambda t: canvas.add_node_at(t, scene_pos))
+        menu.type_chosen.connect(lambda t: canvas.create_node(t, scene_pos))
         menu.popup_at(QCursor.pos())
 
     拖线到空白松开的场景可传 ``compatible`` 过滤：
@@ -311,16 +311,18 @@ class ElaNodeContextMenu(ElaMenu):
     delete_requested = pyqtSignal(str)
     properties_requested = pyqtSignal(str)
 
-    def __init__(self, node_id: str, parent=None):
+    def __init__(self, node, parent=None):
         super().__init__(parent)
         # 与 ElaNodeCreationMenu 一致：画布每次右键都 new 一个，parent 是 canvas，
         # 不设 WA_DeleteOnClose 的话局部引用一掉就被 GC 忽略（QObject 有父），
         # 每右键一次就在 canvas 上永久挂一个 QMenu。
         self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose, True)
-        self.node_id = node_id
+        self.node_id = str(getattr(node, "id", node))
         self._add(ElaIconType.IconName.PenToSquare, "重命名", self.rename_requested)
         self._add(ElaIconType.IconName.Copy, "复制", self.duplicate_requested)
-        self._add(ElaIconType.IconName.LinkSlash, "断开所有连线", self.disconnect_requested)
+        self._add(
+            ElaIconType.IconName.LinkSlash, "断开所有连线", self.disconnect_requested
+        )
         self.addSeparator()
         self._add(ElaIconType.IconName.Gear, "属性…", self.properties_requested)
         self.addSeparator()
@@ -334,3 +336,26 @@ class ElaNodeContextMenu(ElaMenu):
     def add_custom_action(self, text: str, callback) -> None:
         """追加自定义动作；``callback`` 接收节点 id 作为唯一参数。"""
         self.addAction(text, lambda: callback(self.node_id))
+
+
+class ElaEdgeContextMenu(ElaMenu):
+    """连线右键菜单（内置「删除连线」；可追加自定义动作）。
+
+    信号:
+        delete_requested(str): 请求删除该连线（参数为边 id），画布已接默认实现。
+    """
+
+    delete_requested = pyqtSignal(str)
+
+    def __init__(self, edge, parent=None):
+        super().__init__(parent)
+        # 与节点菜单一致：每次右键新建，WA_DeleteOnClose 随 exec 结束回收
+        self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose, True)
+        self.edge_id = str(getattr(edge, "id", edge))
+        self.addElaIconAction(
+            ElaIconType.IconName.TrashCan, "删除连线"
+        ).triggered.connect(lambda: self.delete_requested.emit(self.edge_id))
+
+    def add_custom_action(self, text: str, callback) -> None:
+        """追加自定义动作；``callback`` 接收边 id 作为唯一参数。"""
+        self.addAction(text, lambda: callback(self.edge_id))

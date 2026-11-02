@@ -12,6 +12,7 @@ import sys
 from PyQt6.QtGui import QColor
 
 from .._colors import parse_color
+from ._tokens import T
 
 __all__ = [
     "to_float",
@@ -22,6 +23,7 @@ __all__ = [
     "ON_FILL_WHITE",
     "merged_text_style",
     "parse_color",
+    "ramp_color",
     "text_weight",
     "text_italic",
 ]
@@ -257,6 +259,26 @@ def parse_roam(value) -> tuple:
     if text in ("false", "no", "off", "0", ""):
         return (False, False)
     return ("scale" in text, "move" in text)
+
+
+def ramp_color(colors, t, chart=None) -> QColor:
+    """多色带插值：``colors`` 为颜色列表，``t∈[0,1]`` → ``QColor``。"""
+    cols = [parse_color(c) for c in (colors or []) if c]
+    if not cols:
+        return QColor(T("color.primary", chart))
+    if len(cols) == 1:
+        return cols[0]
+    t = max(0.0, min(1.0, float(t)))
+    pos = t * (len(cols) - 1)
+    index = min(int(pos), len(cols) - 2)
+    frac = pos - index
+    a, b = cols[index], cols[index + 1]
+    return QColor(
+        int(a.red() * (1 - frac) + b.red() * frac),
+        int(a.green() * (1 - frac) + b.green() * frac),
+        int(a.blue() * (1 - frac) + b.blue() * frac),
+        int(a.alpha() * (1 - frac) + b.alpha() * frac),
+    )
 
 
 # ---------------------------------------------------------------------------

@@ -90,7 +90,7 @@ class GraphicComponent:
             cx = base.x() + _to_float(shape.get("cx"), 0.0)
             cy = base.y() + _to_float(shape.get("cy"), 0.0)
             r = _to_float(shape.get("r"), 20.0)
-            self._apply_brush(p, style, default_fill=T("color.primary"))
+            self._apply_brush(p, style, default_fill=T("color.primary", self.chart))
             p.drawEllipse(QPointF(cx, cy), r, r)
         elif typ == "rect":
             x = base.x() + _to_float(shape.get("x"), 0.0)
@@ -98,7 +98,9 @@ class GraphicComponent:
             w = _to_float(shape.get("width"), 40.0)
             h = _to_float(shape.get("height"), 24.0)
             radius = _to_float(shape.get("r"), 0.0)
-            self._apply_brush(p, style, default_fill=T("color.primary.subtle"))
+            self._apply_brush(
+                p, style, default_fill=T("color.primary.subtle", self.chart)
+            )
             if radius > 0:
                 p.drawRoundedRect(QRectF(x, y, w, h), radius, radius)
             else:
@@ -127,7 +129,7 @@ class GraphicComponent:
                     "graphic-text-fill", f"graphic text 的 fill 非法，已跳过: {fill!r}"
                 )
                 return
-            p.setPen(color or QColor(T("color.text.primary")))
+            p.setPen(color or QColor(T("color.text.primary", self.chart)))
             p.setBrush(Qt.BrushStyle.NoBrush)
             fm = QFontMetricsF(p.font())
             x = base.x() + _to_float(shape.get("x"), 0.0)
@@ -142,7 +144,9 @@ class GraphicComponent:
             y1 = base.y() + _to_float(shape.get("y1"), 0.0)
             x2 = base.x() + _to_float(shape.get("x2"), 40.0)
             y2 = base.y() + _to_float(shape.get("y2"), 0.0)
-            stroke = parse_color(style.get("stroke") or T("color.border.strong"))
+            stroke = parse_color(
+                style.get("stroke") or T("color.border.strong", self.chart)
+            )
             width = _to_float(style.get("lineWidth"), 2.0)
             p.setPen(QPen(stroke, width))
             p.setBrush(Qt.BrushStyle.NoBrush)

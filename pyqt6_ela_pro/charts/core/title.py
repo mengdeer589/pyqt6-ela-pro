@@ -131,7 +131,7 @@ class Title:
         gap = self.itemGap()
         y = rect.top() + 2
         p.setFont(title_font)
-        p.setPen(parse_color(style.get("color") or T("color.text.primary")))
+        p.setPen(parse_color(style.get("color") or T("color.text.primary", self.chart)))
         p.drawText(
             QRectF(x, y, text_w + 4, fm_t.height()),
             Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
@@ -140,7 +140,7 @@ class Title:
         if self.subtext:
             y += fm_t.height() + gap
             p.setFont(sub_font)
-            p.setPen(parse_color(sub_style.get("color") or T("color.text.secondary")))
+            p.setPen(parse_color(sub_style.get("color") or T("color.text.secondary", self.chart)))
             p.drawText(
                 QRectF(x, y, sub_w + 4, fm_s.height()),
                 Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,

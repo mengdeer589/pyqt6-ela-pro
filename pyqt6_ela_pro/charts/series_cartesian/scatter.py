@@ -438,7 +438,7 @@ class ScatterSeriesRenderer(SeriesRenderer):
                     continue
                 style = self.selectItemStyle(index)
                 fill = self.selectColor(index) or self.itemColor(index)
-                border = style.get("borderColor") or T("color.bg.elevated")
+                border = style.get("borderColor") or T("color.bg.elevated", self.chart)
                 width = _to_float(style.get("borderWidth"), 1.6)
                 p.setPen(QPen(parse_color(border), width))
                 p.setBrush(fill)
@@ -505,6 +505,7 @@ class ScatterSeriesRenderer(SeriesRenderer):
         return {
             "name": self.name,
             "value": best["value"],
+            "color": self.itemColor(best["index"]),
             "series": self.name,
             "dataIndex": best["index"],
             "x": best["x"],
@@ -518,6 +519,7 @@ class ScatterSeriesRenderer(SeriesRenderer):
                 return {
                     "name": self.name,
                     "value": d["value"],
+                    "color": self.itemColor(d["index"]),
                     "series": self.name,
                     "dataIndex": d["index"],
                     "pos": d["pt"],
@@ -532,6 +534,7 @@ class ScatterSeriesRenderer(SeriesRenderer):
         return {
             "name": self.name,
             "value": d["value"],
+            "color": self.itemColor(d["index"]),
             "series": self.name,
             "dataIndex": d["index"],
             "pos": d["pt"],

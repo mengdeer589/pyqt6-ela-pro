@@ -7,19 +7,29 @@
 
 快速上手::
 
-    from PyQt6.QtCore import QPointF
     from pyqt6_ela_pro.blueprint import (
-        ElaBlueprintGraph, ElaBlueprintCanvas, register_node_type)
+        ElaBlueprintCanvas, ElaBlueprintGraph, pin, register_node_type)
 
     register_node_type(
-        "resize", "Resize", "处理",
-        inputs=[{"id": "img", "name": "图像", "data_type": "image"}],
-        outputs=[{"id": "img", "name": "图像", "data_type": "image"}],
-        description="调整图像尺寸",
+        "encoder", "编码器", "模型",
+        inputs=pin("batch", "批次", "tensor"),
+        outputs=pin("hidden", "Hidden", "tensor"),
+        accent="warning",
     )
-    graph = ElaBlueprintGraph()
-    canvas = ElaBlueprintCanvas(graph)
-    canvas.add_node_at("start", QPointF(40, 120))
+    register_node_type(
+        "head", "输出头", "模型",
+        inputs=pin("hidden", "Hidden", "tensor"),
+        outputs=pin("logits", "Logits", "tensor"),
+    )
+
+    canvas = ElaBlueprintCanvas(ElaBlueprintGraph())
+    encoder = canvas.create_node("encoder", (40, 80))
+    head = canvas.create_node("head", (240, 80))
+    encoder.connect(head, "hidden", "hidden")   # 非法连接抛 ValueError（原因可读）
+
+    ex = canvas.execution()
+    ex.start(encoder)                            # 节点对象 / id 都接受
+    ex.finish(encoder, 42)
     canvas.show()
 
 移植自 InstructionX_UIKit.blueprint（原库为 PyQt6，类名 Ela* 前缀；
@@ -27,9 +37,8 @@
 """
 
 from .canvas import ElaBlueprintCanvas
-from .edge_widget import ElaEdgeWidget, ElaTempWire, bezier_path
 from .execution import ElaExecutionController
-from .menu import ElaNodeContextMenu, ElaNodeCreationMenu
+from .menu import ElaEdgeContextMenu, ElaNodeContextMenu, ElaNodeCreationMenu
 from .model import (
     ElaBlueprintGraph,
     ElaBlueprintNode,
@@ -38,11 +47,11 @@ from .model import (
     ElaPinDirectionType,
     types_compatible,
 )
-from .node_widget import ElaNodeWidget, ElaPinHandle, format_elapsed
 from .registry import (
     PIN_COLORS,
     ElaNodeRegistry,
     ElaNodeSpec,
+    pin,
     pin_color,
     register_node_type,
     register_pin_type,
@@ -61,20 +70,16 @@ __all__ = [
     "ElaNodeSpec",
     "ElaNodeRegistry",
     "register_node_type",
-    "PIN_COLORS",
     "register_pin_type",
+    "pin",
+    "PIN_COLORS",
     "pin_color",
-    # widgets
-    "ElaNodeWidget",
-    "ElaPinHandle",
-    "format_elapsed",
-    "ElaEdgeWidget",
-    "ElaTempWire",
-    "bezier_path",
+    # canvas
     "ElaBlueprintCanvas",
     # menus
     "ElaNodeCreationMenu",
     "ElaNodeContextMenu",
+    "ElaEdgeContextMenu",
     # execution
     "ElaExecutionController",
     # viewport

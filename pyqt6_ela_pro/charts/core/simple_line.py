@@ -115,7 +115,7 @@ class SimpleLineSeriesRenderer(SeriesRenderer):
         if len(seg) >= 2:
             p.drawPolyline(QPolygonF(seg))
         # 数据点
-        p.setBrush(QColor(T("color.bg.elevated")))
+        p.setBrush(QColor(T("color.bg.elevated", self.chart)))
         for pt in valid:
             p.drawEllipse(pt, 3.0, 3.0)
         p.restore()
@@ -136,6 +136,7 @@ class SimpleLineSeriesRenderer(SeriesRenderer):
         return {
             "name": self.name,
             "value": y,
+            "color": self.itemColor(best),
             "series": self.name,
             "dataIndex": best,
             "x": x,
@@ -149,4 +150,10 @@ class SimpleLineSeriesRenderer(SeriesRenderer):
         if y is None:
             return None
         pos = self._points[idx] if idx < len(self._points) else None
-        return {"name": self.name, "value": y, "series": self.name, "pos": pos}
+        return {
+            "name": self.name,
+            "value": y,
+            "color": self.itemColor(idx),
+            "series": self.name,
+            "pos": pos,
+        }

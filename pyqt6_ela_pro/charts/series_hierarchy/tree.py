@@ -108,7 +108,7 @@ class TreeSeriesRenderer(SeriesRenderer):
         p.save()
         orient = str(self.opt.get("orient") or "LR").upper()
         edge = str(self.opt.get("edgeShape") or "polyline")
-        c_line = _text_color("color.border.strong")
+        c_line = _text_color("color.border.strong", self.chart)
         pen = QPen(c_line, 1.2)
         p.setPen(pen)
         p.setBrush(Qt.BrushStyle.NoBrush)
@@ -136,13 +136,13 @@ class TreeSeriesRenderer(SeriesRenderer):
         # 节点 + 标签
         label_opt = dict(self.opt.get("label") or {})
         label_show = bool(label_opt.get("show", True))
-        c_label = self.labelColor(_text_color("color.text.primary"))
+        c_label = self.labelColor(_text_color("color.text.primary", self.chart))
         font = _label_font(self, label_opt)
         p.setFont(font)
         fm = QFontMetricsF(font)
         size = _to_float(self.opt.get("symbolSize"), 8.0)
         for node, pt in self._nodes:
-            p.setPen(QPen(QColor(T("color.bg.elevated")), 1.5))
+            p.setPen(QPen(QColor(T("color.bg.elevated", self.chart)), 1.5))
             p.setBrush(node.color or self.color())
             p.drawEllipse(pt, size / 2, size / 2)
             if not label_show or not node.name:
@@ -194,6 +194,7 @@ class TreeSeriesRenderer(SeriesRenderer):
         return {
             "name": best.name,
             "value": best.value,
+            "color": best.color or self.color(),
             "series": self.name,
             "depth": int(best.x),
         }

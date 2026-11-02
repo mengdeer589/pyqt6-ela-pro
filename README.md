@@ -60,11 +60,19 @@ tests/                     回归测试（按组件 / 家族目录组织；`-m "
   性能基线可复跑：`tools/perf/bench_chat.py`（构造 / 流式 / 历史 / 滚动 / 主题）与
   `tools/perf/bench_markdown_paint.py`（原生浏览器 vs 查看器的滚动绘制分项，Win7 排查字体慢路径）。
   详见 [docs/chat.md](docs/chat.md) 与 [docs/performance.md](docs/performance.md)。
-- **图表引擎**：`ElaChartWidget` 对齐 ECharts 的 `setOption`（21 种系列、tooltip / dataZoom /
+- **图表引擎**：`ElaChartWidget` 对齐 ECharts 的 `setOption`（22 种系列、tooltip / dataZoom /
   日历热力 / 下钻），**多轴**（双 Y / 顶部 X / 双 X）、**多网格**（`gridIndex`）、**多标题 / 多图例**、**log 轴**、**时间轴**
   （`xAxis.type: "time"`：日期字符串 / 毫秒时间戳、自动时间刻度）、**数据点标签 /
-  `markPoint` / `markLine` 标签双击编辑**；**文字外观**（字号 / 字重 / 单族字体 /
-  斜体，组件级优先、顶层 `textStyle` 兜底）；折线 / 散点支持 Plotly 三模式
+  `markPoint` / `markLine` 标签双击编辑**、**Plotly 风格可拖动标注**（`annotations`：
+  拖动文本框只改箭头尾部像素偏移 `ax` / `ay`，箭头终点始终锚定数据点；双击可改文案，
+  `annotationDragged` 可持久化）；**配色主题**（`ela` / `echarts` /
+  `matlab` / `plotly` / `ggplot2` / `seaborn` / `tableau`，实例级
+  `setChartTheme` + 自定义 `registerChartTheme`，option 显式颜色优先）；
+  **文字外观**（字号 / 字重 / 单族字体 /
+  斜体，组件级优先、顶层 `textStyle` 兜底；轴标签另有
+  `setAxisLabelStyle` 便捷接口，含加粗 / 颜色 / 居中 / 间距）；**矩阵图像**
+  （`series.type: "image"`：2D 标量 + colormap / RGB(A)、`extent` / `origin` /
+  dataZoom 裁切；实时小波 scalogram 见 `example/charts_page.py` 的「小波」工作区）；折线 / 散点支持 Plotly 三模式
   `mode: "lines" / "lines+markers" / "markers"`（line 默认只有线）；百万点级数据有系列层位图缓存与降采样 —— 折线 / 散点 100 万点稳态帧
   ~9ms、悬停 <1ms、进入新窗口 ~12ms；显式时间戳数据的**记录中断自动断开**（`addGaps`，
   `connectNulls` 可关）；`tools/perf/bench_charts.py`（含 `zoom新窗口` / `缩回全景` 两列）
@@ -253,7 +261,7 @@ sys.exit(app.exec())
 | **ElaRowColorDelegate** | 表格行底色 delegate（跨行分组着色用） |
 | **ElaParquetTable** | Parquet 文件分页查看 |
 | **ElaInfoBarWidget** | Parquet 查看器的错误 / 统计信息条 |
-| **ElaChartWidget** | 类 ECharts 引擎：21 系列 + 交互组件（含日历热力） |
+| **ElaChartWidget** | 类 ECharts 引擎：22 系列 + 交互组件（含日历热力 / 可拖动标注）+ 7 套配色主题（Ela / ECharts / MATLAB / Plotly / ggplot2 / seaborn / Tableau） |
 | **ElaNumericBuffer** | charts 的大数组**按引用**包装（百万点不深拷贝）；**传入后不得原地修改** |
 | **ElaDashboardGauge** | 仪表盘（全自绘，指针动画，颜色分段） |
 | **ElaPlotWidget** | pyqtgraph 绘图控件（主题自适应，可选依赖） |
@@ -328,8 +336,37 @@ sys.exit(app.exec())
 
 | 组件 | 说明 |
 |---|---|
-| **ElaBlueprintCanvas** | 蓝图节点图编辑器画布（节点 / 连线 / 框选 / 平移缩放 / 执行高亮；节点体控件可交互、拖动走标题栏与体空白处；重命名 / 属性经 `node_rename_requested` / `node_properties_requested` 信号交给宿主；`from_dict` 整体容错） |
-| **ElaNodeRegistry / ElaNodeSpec / ElaPin / ElaPinDirectionType** | 蓝图节点类型注册表与其描述数据（引脚字典、强调色令牌键、自定义节点体构建器）；`register_node_type(...)` 是便捷入口 |
+| **ElaBlueprintCanvas** | 蓝图节点图编辑器画布（节点 / 连线 / 框选 / 平移缩放 / 执行高亮 / 节点进度条；网格吸附 `set_grid_snap`、方向键微调、Ctrl+A / Ctrl+D、右键连线删除；连线支持中点标签 `connect(..., label=...)` / `set_edge_label`（多行、避让节点、序列化）；节点体控件可交互、拖动走标题栏与体空白处；重命名 / 属性经 `node_rename_requested` / `node_properties_requested` 信号交给宿主；`from_dict` 整体容错） |
+| **ElaNodeRegistry / ElaNodeSpec / ElaPin / ElaPinDirectionType** | 蓝图节点类型注册表与数据模型：`pin(...)` 声明引脚、`register_node_type(...)` 一行注册、`create_node(...)` 建节点（可在构建节点体前传 `properties`，`title=` 覆盖标题）、`node.connect(...)` 连线、`validate_edge(...)` 返回可读原因 |
+
+用法（注册 → 建图 → 连线 → 运行）:
+
+```python
+from pyqt6_ela_pro.blueprint import (
+    ElaBlueprintCanvas, ElaBlueprintGraph, pin, register_node_type)
+
+register_node_type(
+    "encoder", "编码器", "模型",
+    inputs=pin("batch", "批次", "tensor"),
+    outputs=pin("hidden", "Hidden", "tensor"),
+    accent="warning",
+)
+register_node_type(
+    "head", "输出头", "模型",
+    inputs=pin("hidden", "Hidden", "tensor"),
+    outputs=pin("logits", "Logits", "tensor"),
+)
+
+canvas = ElaBlueprintCanvas(ElaBlueprintGraph())
+encoder = canvas.create_node("encoder", (40, 80))
+head = canvas.create_node("head", (240, 80))
+edge = encoder.connect(head, "hidden", "hidden", label="hidden [B, 512]")
+canvas.set_edge_label(edge, "hidden [B, 512]\nbf16")   # 支持多行
+
+ex = canvas.execution()
+ex.start(encoder)                            # 节点对象 / id 都接受
+ex.finish(encoder, 42)
+```
 
 ## 示例
 

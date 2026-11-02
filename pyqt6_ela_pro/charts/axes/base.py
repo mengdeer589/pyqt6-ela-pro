@@ -31,6 +31,11 @@ if TYPE_CHECKING:
     from ..core.widget import ElaChartWidget
 
 
+#: ``axisLabel.align`` / ``axisLabel.verticalAlign`` 的合法取值（ECharts 同名键）
+_LABEL_ALIGNS = ("left", "center", "right")
+_LABEL_VALIGNS = ("top", "middle", "bottom")
+
+
 class Coord:
     """坐标系协议基类。
 
@@ -148,6 +153,8 @@ class AxisModel:
         #: 数据真实全量范围（渲染器 ``_fix_value_axis`` 写入）；dataZoom 拿它当
         #: 「全量」——``vmin/vmax`` 缩放后只是窗口子集。
         self._data_extent = None
+        #: image 系列钉死的精确范围（dataZoom 回到全量时保持不向 nice 外扩）
+        self._fixed_extent = None
         #: ``_data_extent`` 的代次（dataZoom 用它判断「全量范围变了没有」）
         self._extent_epoch = 0
         #: 当前是否处于 dataZoom 窗口态（``setWindow`` 维护）
@@ -368,6 +375,7 @@ class AxisModel:
 
         ``minInterval`` / ``maxInterval`` 约束刻度步长。
         """
+        self._fixed_extent = None
         if self.is_time:
             self._set_time_extent(data_min, data_max, segments)
             return
@@ -411,6 +419,29 @@ class AxisModel:
             self.vmin, self.vmax, self._ticks = niceTicks(
                 self.vmin, self.vmax, segments
             )
+
+    def setFixedExtent(self, lo: float, hi: float, segments: int = 5) -> None:
+        """把 value 轴固定到精确范围（image 系列专用：不向 nice 刻度外扩）。
+
+        只保留范围内的刻度；``dataZoom`` 的全量范围记为这个精确区间。
+        """
+        if self.type != "value":
+            return
+        lo, hi = _opt_bound(lo), _opt_bound(hi)
+        if lo is None or hi is None or hi <= lo:
+            return
+        try:
+            segments = max(1, int(self.opt.get("splitNumber", segments)))
+        except (TypeError, ValueError, OverflowError):
+            pass
+        _, _, ticks = niceTicks(lo, hi, segments)
+        self.vmin, self.vmax = lo, hi
+        ticks = [t for t in ticks if lo <= t <= hi]
+        self._ticks = ticks if len(ticks) >= 2 else [lo, hi]
+        self._data_extent = (lo, hi)
+        self._fixed_extent = (lo, hi)
+        self._extent_epoch += 1
+        self._windowed = False
 
     def _apply_interval_constraints(self) -> None:
         """``minInterval`` / ``maxInterval`` 约束 value 轴刻度步长。"""
@@ -586,6 +617,22 @@ class AxisModel:
         # 全量窗口 = 非窗口态：渲染器可按数据真实范围重设轴（横向柱 / 堆叠 /
         # K 线的范围要等系列 layout 才算得出来）。
         self._windowed = start > 1e-9 or end < 100.0 - 1e-9
+        if (
+            self.type == "value"
+            and self._fixed_extent is not None
+            and not self._windowed
+        ):
+            # image 轴钉死的精确范围：dataZoom 回到全量时不要被 niceTicks 外扩。
+            fixed_lo, fixed_hi = self._fixed_extent
+            self.vmin, self.vmax = fixed_lo, fixed_hi
+            try:
+                segments = max(1, int(self.opt.get("splitNumber", 5)))
+            except (TypeError, ValueError, OverflowError):
+                segments = 5
+            _, _, ticks = niceTicks(fixed_lo, fixed_hi, segments)
+            ticks = [t for t in ticks if fixed_lo <= t <= fixed_hi]
+            self._ticks = ticks if len(ticks) >= 2 else [fixed_lo, fixed_hi]
+            return
         if self.is_time:
             span = hi - lo
             a = lo + span * start / 100.0
@@ -837,4 +884,38 @@ class AxisModel:
             color = parse_color(raw)
             if color.isValid():
                 return color
-        return QColor(T("color.text.secondary"))
+        return QColor(T("color.text.secondary", self.chart))
+
+    def labelAlign(self, default: str = "center") -> str:
+        """``axisLabel.align``：``left`` / ``center`` / ``right``，非法 / 未设置回退 ``default``。"""
+        return self._label_choice("align", _LABEL_ALIGNS, default)
+
+    def labelVerticalAlign(self, default: str = "middle") -> str:
+        """``axisLabel.verticalAlign``：``top`` / ``middle`` / ``bottom``。"""
+        return self._label_choice("verticalAlign", _LABEL_VALIGNS, default)
+
+    def labelMargin(self, default: float) -> float:
+        """``axisLabel.margin``：标签与轴线间距（px，非法 / 负数回退 ``default``）。"""
+        raw = self.axisLabelOption().get("margin")
+        try:
+            value = float(raw)
+        except (TypeError, ValueError, OverflowError):
+            return float(default)
+        return value if math.isfinite(value) and value >= 0.0 else float(default)
+
+    def labelRotate(self) -> float:
+        """``axisLabel.rotate``（度；非法值按 0 处理）。"""
+        raw = self.axisLabelOption().get("rotate")
+        try:
+            value = float(raw)
+        except (TypeError, ValueError, OverflowError):
+            return 0.0
+        return value if math.isfinite(value) else 0.0
+
+    def _label_choice(self, key: str, allowed: tuple, default: str) -> str:
+        raw = self.axisLabelOption().get(key)
+        if isinstance(raw, str):
+            text = raw.strip().lower()
+            if text in allowed:
+                return text
+        return default

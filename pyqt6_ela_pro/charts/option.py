@@ -28,8 +28,9 @@ def _deep_merge(dst: dict, src: dict) -> dict:
 
 
 #: setOption 合并时按组件数组「逐项合并」的顶层键；``visualMap`` 天生是
-#: 数组语义（多个色带各绑一个系列），整体替换会丢掉其余色带。
-_MERGE_ARRAY_KEYS = frozenset({"series", "dataZoom", "graphic", "visualMap"})
+#: 数组语义（多个色带各绑一个系列），整体替换会丢掉其余色带；``annotations``
+#: 逐项合并才能保住拖动后的 ``ax`` / ``ay``（按 id → name → 下标匹配）。
+_MERGE_ARRAY_KEYS = frozenset({"series", "dataZoom", "graphic", "visualMap", "annotations"})
 #: 坐标轴数组：只按下标逐项合并（轴的 ``name`` 是轴名不是身份，
 #: 按 name 匹配会把「给第 2 条轴改名」合并到同名的第 1 条上）。
 _AXIS_ARRAY_KEYS = frozenset({"xAxis", "yAxis", "singleAxis"})
@@ -62,7 +63,7 @@ def _match_option_index(new_item, old_list: list, index: int) -> int:
 
 
 def _merge_option_array(old_list: list, new_list: list) -> list:
-    """ECharts 风格组件数组合并（``series`` / ``dataZoom`` / ``graphic``）。
+    """ECharts 风格组件数组合并（``series`` / ``dataZoom`` / ``graphic`` / ``annotations``）。
 
     新项按 ``id`` → ``name`` → 序号匹配旧项并深合并，未匹配的追加；旧项保留
     （合并模式下传空数组不删项，需 ``notMerge=True`` 或 ``clear()``）。

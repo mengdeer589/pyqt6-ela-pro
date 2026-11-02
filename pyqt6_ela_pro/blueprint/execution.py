@@ -27,6 +27,8 @@ import time
 
 from PyQt6.QtCore import QObject, pyqtSignal
 
+from .model import _node_id
+
 __all__ = ["ElaExecutionController"]
 
 
@@ -53,12 +55,13 @@ class ElaExecutionController(QObject):
         self._path_edges = []
 
     # -- 节点状态 ----------------------------------------------------------
-    def start(self, node_id: str) -> None:
+    def start(self, node) -> None:
         """标记节点 running（脉冲描边 + 标题栏旋转圈），记录起始时刻。
 
-        幂等：已在 running 的节点重复调用直接返回——不覆盖起始时刻、
-        不重复发射 ``node_started``。
+        ``node`` 接受 ``ElaBlueprintNode`` 或 id。幂等：已在 running 的节点
+        重复调用直接返回——不覆盖起始时刻、不重复发射 ``node_started``。
         """
+        node_id = _node_id(node)
         node = self._canvas.graph.node(node_id)
         if node is None:
             return
@@ -69,8 +72,8 @@ class ElaExecutionController(QObject):
         node.set_status("running")
         self.node_started.emit(node_id)
 
-    def finish(self, node_id: str, elapsed_ms=None) -> None:
-        """标记节点 done：success 描边 + 耗时徽标。
+    def finish(self, node, elapsed_ms=None) -> None:
+        """标记节点 done：success 描边 + 耗时徽标（``node`` 接受对象或 id）。
 
         :param elapsed_ms: 耗时毫秒；缺省自动计时（自 ``start`` 起算，
             未 ``start`` 过则为 0）。
@@ -80,6 +83,7 @@ class ElaExecutionController(QObject):
         「一轮执行结束」，不发 ``finished``（原先空集合也发，宿主每收一次
         就误判一轮结束）。
         """
+        node_id = _node_id(node)
         node = self._canvas.graph.node(node_id)
         if node is None:
             return
@@ -94,8 +98,9 @@ class ElaExecutionController(QObject):
         if was_active:
             self._maybe_finished()
 
-    def fail(self, node_id: str, message: str = "") -> None:
-        """标记节点 error：danger 描边 + 错误图标，tooltip 显示 ``message``。"""
+    def fail(self, node, message: str = "") -> None:
+        """标记节点 error：danger 描边 + 错误图标（``node`` 接受对象或 id）。"""
+        node_id = _node_id(node)
         node = self._canvas.graph.node(node_id)
         if node is None:
             return
@@ -108,21 +113,21 @@ class ElaExecutionController(QObject):
             self._maybe_finished()
 
     # -- 路径高亮 ----------------------------------------------------------
-    def set_path(self, node_ids) -> None:
+    def set_path(self, nodes) -> None:
         """高亮执行路径上的边（流动虚线动画）。
 
-        :param node_ids: 按执行顺序排列的节点 id 序列。**序列中从前到后
-            存在的每一条边**都会被标记为 flowing：只要一条边的两个端点
-            都在序列里、且方向与序列顺序一致（``from`` 在前）。相邻节点
-            之间的边是最常见的一档；分支 DAG（一个节点扇出到多个下游）
-            给出的序列也能把两条分支边都点亮 —— 只认「相邻两节点」的
+        :param nodes: 按执行顺序排列的节点（``ElaBlueprintNode`` 或 id 混合）。
+            **序列中从前到后存在的每一条边**都会被标记为 flowing：只要一条
+            边的两个端点都在序列里、且方向与序列顺序一致（``from`` 在前）。
+            相邻节点之间的边是最常见的一档；分支 DAG（一个节点扇出到多个
+            下游）给出的序列也能把两条分支边都点亮 —— 只认「相邻两节点」的
             旧实现会把它们漏掉。
         """
         self._clear_path()
         graph = self._canvas.graph
         order = {}
-        for index, nid in enumerate(node_ids):
-            order.setdefault(nid, index)
+        for index, value in enumerate(nodes):
+            order.setdefault(_node_id(value), index)
         for edge in graph.edges():
             a, b = order.get(edge.from_node), order.get(edge.to_node)
             if a is None or b is None or a >= b:
@@ -152,6 +157,7 @@ class ElaExecutionController(QObject):
         for node in self._canvas.graph.nodes():
             node.error_message = ""
             node.set_elapsed_ms(None)
+            node.set_progress(None)
             node.set_status("idle")
 
     # -- 内部 --------------------------------------------------------------

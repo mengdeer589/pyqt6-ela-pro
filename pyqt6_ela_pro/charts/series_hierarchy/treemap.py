@@ -11,8 +11,9 @@ from PyQt6.QtGui import (
     QPen,
 )
 
+from ..._colors import text_on_color
 from .._tokens import T
-from .._utils import ON_FILL_WHITE, clamp as _clamp
+from .._utils import clamp as _clamp
 from .._utils import to_float as _to_float
 from .._utils import with_alpha
 from .._utils import parse_color
@@ -156,7 +157,7 @@ class TreemapSeriesRenderer(SeriesRenderer):
         font = _label_font(self, label_opt)
         p.setFont(font)
         fm = QFontMetricsF(font)
-        border = QColor(T("color.bg.base"))
+        border = QColor(T("color.bg.base", self.chart))
         hover = self.chart.hoverInfo()
         hovered = (
             hover[1].get("dataIndex")
@@ -187,7 +188,7 @@ class TreemapSeriesRenderer(SeriesRenderer):
                 # 父级标签画在 header 区（顶部）
                 if r.height() < 20:
                     continue
-                p.setPen(c_label or QColor(ON_FILL_WHITE))
+                p.setPen(c_label or text_on_color(color))
                 p.drawText(
                     QRectF(r.left() + 4, r.top() + 1, r.width() - 8, 15),
                     Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
@@ -199,7 +200,7 @@ class TreemapSeriesRenderer(SeriesRenderer):
                 or r.height() < fm.height() + 2
             ):
                 continue  # 矩形过小省略标签
-            p.setPen(c_label or with_alpha(QColor(ON_FILL_WHITE), 230))
+            p.setPen(c_label or with_alpha(text_on_color(color), 230))
             p.drawText(
                 QRectF(r.left() + 3, r.top() + 1, r.width() - 6, fm.height()),
                 Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
@@ -208,7 +209,7 @@ class TreemapSeriesRenderer(SeriesRenderer):
         # 顶部面包屑（默认显示，drill 后为当前焦点路径）
         if getattr(self, "_crumb_show", False) and self._crumb:
             p.setFont(font)
-            p.setPen(_text_color("color.text.secondary"))
+            p.setPen(_text_color("color.text.secondary", self.chart))
             p.drawText(
                 QRectF(
                     6,
@@ -232,6 +233,7 @@ class TreemapSeriesRenderer(SeriesRenderer):
         return {
             "name": best.name,
             "value": best.value,
+            "color": self.itemColor(best.style_index, default=best.color),
             "series": self.name,
             "depth": best.depth,
             "dataIndex": getattr(best, "style_index", None),

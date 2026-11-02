@@ -174,9 +174,9 @@ class RadarSeriesRenderer(SeriesRenderer):
         p.save()
         n = len(self._indicators)
         split = max(1, int(_to_float(self.opt.get("splitNumber"), 5)))
-        c_grid = _text_color("color.border")
-        c_axis = _text_color("color.border.strong")
-        c_text = _text_color("color.text.secondary")
+        c_grid = _text_color("color.border", self.chart)
+        c_axis = _text_color("color.border.strong", self.chart)
+        c_text = _text_color("color.text.secondary", self.chart)
         # axisName / splitLine / axisLine（ECharts 键）
         radar_opt = getattr(self, "_radar_opt", None) or {}
         axis_name_opt = dict(

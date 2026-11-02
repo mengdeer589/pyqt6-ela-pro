@@ -195,9 +195,11 @@ def _component_table_text() -> str:
 #: 刻意不要求出现在 README 里（否则表格会被 30+ 个内部类撑爆）。
 INTENTIONAL_UNDOCUMENTED = {
     # blueprint 内部实现（公开入口是 ElaBlueprintCanvas，已记录）
-    "ElaBlueprintGraph", "ElaBlueprintNode", "ElaEdge", "ElaEdgeWidget",
+    "ElaBlueprintGraph", "ElaBlueprintNode", "ElaEdge",
     "ElaExecutionController", "ElaNodeContextMenu", "ElaNodeCreationMenu",
-    "ElaNodeWidget", "ElaPin", "ElaPinDirectionType", "ElaPinHandle", "ElaTempWire",
+    "ElaEdgeContextMenu",
+    "ElaNodeWidget", "ElaPin", "ElaPinDirectionType", "ElaPinHandle",
+    "ElaEdgeWidget", "ElaTempWire",
     # 基类 / 混入 / 代理（不是宿主直接实例化的东西）
     "ElaAnimatedMixin", "ElaThemeWidget",
 }

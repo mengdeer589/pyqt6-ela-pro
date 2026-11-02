@@ -8,10 +8,13 @@
 - 缩放：滚轮以光标为中心，0.25x–2.5x；
 - 背景：主题感知点阵网格，间距随缩放自适应疏密；
 - 选择：Ctrl+点选多选、空白左键橡皮筋框选（半透明）；
-- Delete 删除选中节点（连带边）与选中边；
+- 编辑：网格吸附（``set_grid_snap``）、方向键微调选中节点、Ctrl+A 全选 /
+  Ctrl+D 复制、Delete 删除选中节点（连带边）与选中边、右键连线删除；
 - 连线：引脚按下拖出贝塞尔临时线 → 磁吸高亮兼容引脚 → 松开经
   ``graph.add_edge`` 校验建边；拖到空白松开 → 创建菜单，创建后自动连接；
 - 边：hover 加粗、点击选中、running 路径 flowing 虚线动画；
+- 运行指示：``execution()`` 标记 running / done / error，
+  ``ElaBlueprintNode.set_progress`` 在节点底部画进度条；
 - 序列化：``to_dict`` / ``from_dict``（含节点位置与画布 zoom/offset）。
 
 手势行为（事件路由 / 拖节点 / 平移 / 框选 / 连线）在
@@ -55,12 +58,14 @@ from .edge_widget import (
 )
 from .execution import ElaExecutionController
 from .interaction import ZOOM_MAX, ZOOM_MIN, CanvasInteraction
-from .menu import ElaNodeContextMenu
+from .menu import ElaEdgeContextMenu, ElaNodeContextMenu
 from .model import (
     ElaBlueprintGraph,
     ElaBlueprintNode,
     ElaEdge,
     _finite,
+    _node_id,
+    _pin_id,
 )
 from .node_widget import ElaNodeWidget
 from .registry import ElaNodeRegistry
@@ -74,6 +79,40 @@ logger = logging.getLogger(__name__)
 EDGE_FLOW_TICK_MS = 50
 #: 背景网格点半径（视图像素）
 GRID_DOT_R = 1.3
+
+
+def _glow_steps(blur: float) -> tuple[int, float]:
+    """选中发光的层数与笔宽（绘制与重绘外扩共用同一套参数）。"""
+    steps = max(3, int(blur / 2))
+    return steps, max(1.0, blur / steps + 0.5)
+
+
+def _selection_glow_pad() -> float:
+    """选中发光在节点矩形外的最大外扩（视图像素）。
+
+    与 ``_draw_selection_glow`` 同源：最大 grow + 半个笔宽 + 阴影偏移 +
+    抗锯齿余量。**画布层自绘的装饰超出子控件矩形**，节点移动 / 尺寸变化
+    的局部重绘必须按这个值外扩，否则旧位置会留下光晕残影。
+    """
+    spec = shadow_md()
+    blur = float(spec["blur"])
+    steps, pen_w = _glow_steps(blur)
+    ox, oy = spec["offset"]
+    grow = blur * 0.75 * (1.0 - 0.5 / steps)
+    return grow + pen_w / 2.0 + max(abs(ox), abs(oy)) + 2.0
+
+
+def _as_point(pos) -> QPointF:
+    """把 ``QPointF`` / ``QPoint`` / ``(x, y)`` 归一成 ``QPointF``。"""
+    if isinstance(pos, QPointF):
+        return QPointF(pos)
+    if isinstance(pos, QPoint):
+        return QPointF(pos)
+    try:
+        x, y = pos
+    except (TypeError, ValueError):
+        raise TypeError("pos 需要 QPointF / QPoint / (x, y)") from None
+    return QPointF(_finite(x), _finite(y))
 
 
 class ElaBlueprintCanvas(QWidget):
@@ -91,7 +130,7 @@ class ElaBlueprintCanvas(QWidget):
         node_properties_requested(str): 右键菜单「属性…」（同上）。
         edge_created(object): 新边建立（``ElaEdge``，含菜单自动连接产生的）。
         edge_removed(str): 边被移除（边 id）。
-        selection_changed(list): 选中节点 id 列表变化。
+        selection_changed(list): 选中节点对象列表变化。
 
     交互注记（节点体是可交互的）：``body_builder`` 注入的节点体容器不会被
     置为鼠标透明 —— 体里的控件（输入框 / 按钮…）正常接收自己的鼠标事件；
@@ -116,6 +155,9 @@ class ElaBlueprintCanvas(QWidget):
         self._owner = owner
         self._zoom = 1.0
         self._offset = QPointF(0.0, 0.0)
+        # 拖动吸附：基础间距 24（场景单位），屏幕间距随缩放按 2 的幂自适应
+        self._grid_snap = False
+        self._grid_step = 24.0
         self._node_widgets = {}
         self._edge_widgets = {}
         self._selected_nodes = []
@@ -132,6 +174,7 @@ class ElaBlueprintCanvas(QWidget):
         self._space_down = False
         self._rpress = None
         self._rpan = False
+        self._rpress_edge = None
         self._drag = None  # (start_view, {node_id: start_scene_pos})
         self._drag_moved = False
         self._band = None  # (start_view, current_view)
@@ -174,6 +217,7 @@ class ElaBlueprintCanvas(QWidget):
         graph.node_removed.connect(self._on_node_removed)
         graph.edge_added.connect(self._on_edge_added)
         graph.edge_removed.connect(self._on_edge_removed)
+        graph.edge_changed.connect(self._on_edge_changed)
         # 绑定方法连接：receiver（本画布）销毁时 Qt 自动断连
         theme_changed_slot(self, self._retheme)
 
@@ -185,24 +229,50 @@ class ElaBlueprintCanvas(QWidget):
     # ------------------------------------------------------------------
     # 公共 API
     # ------------------------------------------------------------------
-    def add_node_at(self, type_name: str, scene_pos: QPointF) -> ElaBlueprintNode:
-        """经注册表创建节点并放置到场景坐标，返回 ``ElaBlueprintNode``。
+    def create_node(
+        self,
+        type_name: str,
+        pos,
+        properties: dict = None,
+        title: str = None,
+    ) -> ElaBlueprintNode:
+        """按注册类型创建节点并放入画布，返回 ``ElaBlueprintNode``。
 
-        按画布 ``owner`` 解析类型（「本 owner + 全局」范围）。
+        :param type_name: 注册表里的类型名（按画布 ``owner`` 解析）
+        :param pos: ``QPointF`` / ``QPoint`` / ``(x, y)``
+        :param properties: 初始属性；**在节点体构建之前写入**，节点体里的
+            控件（SpinBox / ComboBox）会读到正确的初始值
+        :param title: 可选标题覆盖（在节点体构建前写入，避免二次重排）
+
+        非法类型抛 ``KeyError``，节点 id 冲突抛 ``ValueError``。
         """
         node = ElaNodeRegistry.instance().create(type_name, owner=self._owner)
-        node.pos = QPointF(scene_pos)
+        node.pos = _as_point(pos)
+        if title is not None:
+            node.title = str(title)
+        if properties:
+            node.set_properties(properties)
         self.graph.add_node(node)
         return node
 
-    def add_node(
-        self, node: ElaBlueprintNode, scene_pos: QPointF = None
-    ) -> ElaBlueprintNode:
-        """直接把既有 ``ElaBlueprintNode`` 放入图（可选指定场景坐标）。"""
-        if scene_pos is not None:
-            node.pos = QPointF(scene_pos)
+    def add_node(self, node: ElaBlueprintNode, pos=None) -> ElaBlueprintNode:
+        """把既有 ``ElaBlueprintNode`` 放入图（可选指定场景坐标）。"""
+        if pos is not None:
+            node.pos = _as_point(pos)
         self.graph.add_node(node)
         return node
+
+    def clear(self) -> None:
+        """清空画布（节点 / 连线 / 选择），等价 ``clear_selection`` + ``graph.clear``。"""
+        self.clear_selection()
+        self.graph.clear()
+
+    def set_edge_label(self, edge, text: str) -> bool:
+        """设置连线中点标签（``edge`` 接受 ``ElaEdge`` 或 id，``text`` 支持多行）。
+
+        返回是否实际变化；画布会自动失效标签缓存并局部重绘。
+        """
+        return self.graph.set_edge_label(edge, text)
 
     def set_zoom(self, z: float) -> None:
         """设置缩放（夹在 0.25–2.5），视图中心保持不变。"""
@@ -222,10 +292,102 @@ class ElaBlueprintCanvas(QWidget):
         """当前缩放系数。"""
         return self._zoom
 
-    def center_on(self, node_id: str) -> None:
-        """把视图中心对准某节点（缩放不变）。"""
+    # -- 网格吸附 ---------------------------------------------------------
+    def set_grid_snap(self, on: bool) -> None:
+        """拖节点时是否吸附到点阵网格（默认关）。
+
+        吸附作用在**拖动位移**上（而不是逐个节点取整）：多选拖动保持节点间
+        的相对布局，不会因为各自取整而互相挤开。
+        """
+        self._grid_snap = bool(on)
+
+    def grid_snap(self) -> bool:
+        """拖节点是否吸附到网格。"""
+        return self._grid_snap
+
+    def set_grid_step(self, step: float) -> None:
+        """吸附网格的基础间距（场景单位，默认 24）。
+
+        实际生效间距随缩放按 2 的幂自适应（与 ``_draw_grid`` 同源），
+        保证吸附后节点落在看得见的网格点上。
+        """
+        self._grid_step = max(4.0, _finite(step, 24.0))
+
+    def grid_step(self) -> float:
+        """当前缩放下实际生效的吸附间距（场景单位）。"""
+        return self._grid_scene_step()
+
+    # -- 选择 / 复制 / 微调 ------------------------------------------------
+    def select_all(self) -> None:
+        """选中全部节点（Ctrl+A）。"""
+        self.select_nodes(self.graph.nodes())
+
+    def duplicate_selection(self) -> list:
+        """复制选中节点（Ctrl+D），副本错开 24px 并成为新的选择。
+
+        返回副本 id 列表；连同节点属性（含按钮体读的 ``properties``）一起
+        复制，但**不**复制节点之间的连线。
+        """
+        copies = []
+        for nid in list(self._selected_nodes):
+            node = self.graph.node(nid)
+            if node is None:
+                continue
+            copy = self._clone_node(node)
+            self.graph.add_node(copy)
+            copies.append(copy.id)
+        if copies:
+            self.select_nodes(copies)
+        return copies
+
+    def nudge_selection(self, dx: float, dy: float) -> bool:
+        """按场景单位平移选中节点（方向键微调），返回是否真的移动。
+
+        与拖动走同一套脏区：旧 / 新节点矩形（含选中发光带）+ 相连边的新旧
+        包围盒，否则微调一样会留下光晕残影。
+        """
+        dx, dy = _finite(dx), _finite(dy)
+        if (dx == 0.0 and dy == 0.0) or not self._selected_nodes:
+            return False
+        moved = [
+            node
+            for node in (self.graph.node(nid) for nid in self._selected_nodes)
+            if node is not None
+        ]
+        if not moved:
+            return False
+        old_node_rects = [self._node_repaint_view_rect(node) for node in moved]
+        old_edge_rects = []
+        edge_ids = []
+        for node in moved:
+            for edge in self.graph.edges_of(node.id):
+                if edge.id in edge_ids:
+                    continue
+                edge_ids.append(edge.id)
+                widget = self._edge_widgets.get(edge.id)
+                if widget is not None:
+                    old_edge_rects.append(widget.bounding_rect())
+        for node in moved:
+            node.pos = node.pos + QPointF(dx, dy)
+            widget = self._node_widgets.get(node.id)
+            if widget is not None:
+                widget.apply_view(self.scene_to_view(node.pos), self._zoom)
+        new_node_rects = [self._node_repaint_view_rect(node) for node in moved]
+        new_edge_rects = [
+            widget.bounding_rect()
+            for widget in (self._edge_widgets.get(eid) for eid in edge_ids)
+            if widget is not None
+        ]
+        self._update_scene_rects(old_edge_rects + new_edge_rects)
+        self._update_view_rects(old_node_rects + new_node_rects)
+        for node in moved:
+            self.node_moved.emit(node.id, QPointF(node.pos))
+        return True
+
+    def center_on(self, node) -> None:
+        """把视图中心对准某节点（``ElaBlueprintNode`` 或 id，缩放不变）。"""
         self._settle_view_gesture()
-        node = self.graph.node(node_id)
+        node = self.graph.node(_node_id(node))
         if node is None:
             return
         center = node.pos + QPointF(node.size.width() / 2, node.size.height() / 2)
@@ -261,30 +423,52 @@ class ElaBlueprintCanvas(QWidget):
         return self._execution
 
     # -- 部件访问 ---------------------------------------------------------
-    def node_widget(self, node_id: str):
-        """按节点 id 取 ``ElaNodeWidget``，不存在返回 ``None``。"""
-        return self._node_widgets.get(node_id)
+    def node_widget(self, node):
+        """按 ``ElaBlueprintNode`` / id 取节点控件，不存在返回 ``None``。"""
+        return self._node_widgets.get(_node_id(node))
 
-    def edge_widget(self, edge_id: str):
-        """按边 id 取 ``ElaEdgeWidget``，不存在返回 ``None``。"""
-        return self._edge_widgets.get(edge_id)
+    def edge_widget(self, edge):
+        """按 ``ElaEdge`` / id 取边部件，不存在返回 ``None``。"""
+        eid = edge.id if isinstance(edge, ElaEdge) else str(edge)
+        return self._edge_widgets.get(eid)
 
-    def pin_scene_pos(self, node_id: str, pin_id: str, direction=None) -> QPointF:
-        """引脚圆心的场景坐标（找不到时回退节点左上角）。"""
-        widget = self._node_widgets.get(node_id)
-        node = self.graph.node(node_id)
-        if widget is not None and node is not None:
-            pin = node.pin(pin_id, direction)
+    def pin_scene_pos(self, node, pin_id: str, direction=None) -> QPointF:
+        """引脚圆心的场景坐标（找不到时回退节点左上角）。
+
+        ``node`` 接受 ``ElaBlueprintNode`` 或 id；``pin_id`` 接受
+        ``ElaPin`` 或字符串 id。
+        """
+        nid = _node_id(node)
+        node_obj = self.graph.node(nid)
+        widget = self._node_widgets.get(nid)
+        if widget is not None and node_obj is not None:
+            pin = node_obj.pin(_pin_id(pin_id), direction)
             if pin is not None:
-                return node.pos + widget.pin_logical_center(pin)
-        return QPointF(node.pos) if node is not None else QPointF()
+                return node_obj.pos + widget.pin_logical_center(pin)
+        return QPointF(node_obj.pos) if node_obj is not None else QPointF()
 
     def selected_nodes(self) -> list:
-        """当前选中节点 id 列表。"""
+        """当前选中的节点对象列表（顺序与选择顺序一致）。"""
+        return [
+            node
+            for node in (self.graph.node(nid) for nid in self._selected_nodes)
+            if node is not None
+        ]
+
+    def selected_node_ids(self) -> list:
+        """当前选中的节点 id 列表。"""
         return list(self._selected_nodes)
 
     def selected_edges(self) -> list:
-        """当前选中边 id 列表。"""
+        """当前选中的边对象列表（顺序与选择顺序一致）。"""
+        return [
+            edge
+            for edge in (self.graph.edge(eid) for eid in self._selected_edges)
+            if edge is not None
+        ]
+
+    def selected_edge_ids(self) -> list:
+        """当前选中的边 id 列表。"""
         return list(self._selected_edges)
 
     # -- 坐标换算 ---------------------------------------------------------
@@ -309,6 +493,9 @@ class ElaBlueprintCanvas(QWidget):
 
     def from_dict(self, data: dict) -> None:
         """从 ``to_dict`` 结果恢复：重建节点 / 边并还原 zoom 与 offset。
+
+        **节点对象会被重建**：调用方持有的旧 ``ElaBlueprintNode`` 引用失效
+        （节点 id 会保留，请按 id 从 ``graph.nodes()`` 重新取）。
 
         **整体容错**（与 chat 的序列化契约一致）：这是宿主「加载文件」
         这类 Qt 槽里最常见的入口，脏数据 / 旧版格式抛出去 = 槽内异常 =
@@ -354,17 +541,16 @@ class ElaBlueprintCanvas(QWidget):
                 continue
             # 走 add_edge 校验（保留原 id 以便往返），不过就丢弃：
             # 一条坏边不该让整张图载入失败
-            added = self.graph.add_edge(
-                raw.from_node,
-                raw.from_pin,
-                raw.to_node,
-                raw.to_pin,
-                edge_id=raw.id,
-            )
-            if added is None:
-                logger.warning(
-                    "跳过非法连线 %r（引脚缺失 / 类型不兼容 / id 冲突）", raw.id
+            try:
+                self.graph.add_edge(
+                    raw.from_node,
+                    raw.from_pin,
+                    raw.to_node,
+                    raw.to_pin,
+                    edge_id=raw.id,
                 )
+            except ValueError as exc:
+                logger.warning("跳过非法连线 %r（%s）", raw.id, exc)
         self._execution.reset()
         view = data.get("view", {}) if isinstance(data, dict) else {}
         if not isinstance(view, dict):
@@ -425,6 +611,16 @@ class ElaBlueprintCanvas(QWidget):
         self.edge_created.emit(edge)
         self.update()
 
+    def _on_edge_changed(self, edge) -> None:
+        """连线数据变化（标签）：失效缓存并重绘新旧包围盒。"""
+        widget = self._edge_widgets.get(edge.id)
+        if widget is None:
+            return
+        old = widget.bounding_rect()
+        widget.invalidate_label()
+        new = widget.bounding_rect()
+        self._update_scene_rects([old, new])
+
     def _on_edge_removed(self, edge_id: str) -> None:
         widget = self._edge_widgets.pop(edge_id, None)
         if widget is not None:
@@ -435,8 +631,17 @@ class ElaBlueprintCanvas(QWidget):
         self.update()
 
     def _node_layout_changed(self, node_widget: ElaNodeWidget) -> None:
-        """节点尺寸变化（属性 / 引脚变化）后重新落位。"""
+        """节点尺寸变化（属性 / 引脚变化）后重新落位并清掉旧区域。
+
+        此时控件几何还是旧尺寸，取它作为旧矩形；画布层的选中发光范围也随
+        尺寸变化，旧光晕带不一起重绘就会残留在原处。
+        """
+        pad = _selection_glow_pad()
+        old_rect = QRectF(node_widget.geometry()).adjusted(-pad, -pad, pad, pad)
         node_widget.apply_view(self.scene_to_view(node_widget.node.pos), self._zoom)
+        self._update_view_rects(
+            [old_rect, self._node_repaint_view_rect(node_widget.node)]
+        )
 
     def _retheme(self) -> None:
         self._settle_view_gesture()
@@ -499,12 +704,15 @@ class ElaBlueprintCanvas(QWidget):
         self.selection_changed.emit([])
         self.update()
 
-    def select_nodes(self, node_ids, additive: bool = False) -> None:
-        """选中节点（``additive`` 为 Ctrl 语义：并入现有选择）。"""
+    def select_nodes(self, nodes, additive: bool = False) -> None:
+        """选中节点（``nodes`` 接受单个 / 列表，元素为节点对象或 id）。"""
+        if isinstance(nodes, (ElaBlueprintNode, str)):
+            nodes = [nodes]
         if not additive:
             self.clear_selection()
         changed = False
-        for nid in node_ids:
+        for value in nodes:
+            nid = _node_id(value)
             if nid in self._selected_nodes:
                 continue
             w = self._node_widgets.get(nid)
@@ -517,16 +725,17 @@ class ElaBlueprintCanvas(QWidget):
             self.selection_changed.emit(list(self._selected_nodes))
         self.update()
 
-    def toggle_node_selected(self, node_id: str) -> None:
-        """Ctrl 点选：切换单个节点的选中态。"""
-        if node_id in self._selected_nodes:
-            self._selected_nodes.remove(node_id)
-            w = self._node_widgets.get(node_id)
+    def toggle_node_selected(self, node) -> None:
+        """Ctrl 点选：切换节点（对象或 id）的选中态。"""
+        nid = _node_id(node)
+        if nid in self._selected_nodes:
+            self._selected_nodes.remove(nid)
+            w = self._node_widgets.get(nid)
             if w is not None:
                 w.set_selected(False)
         else:
-            self._selected_nodes.append(node_id)
-            w = self._node_widgets.get(node_id)
+            self._selected_nodes.append(nid)
+            w = self._node_widgets.get(nid)
             if w is not None:
                 w.set_selected(True)
         self.selection_changed.emit(list(self._selected_nodes))
@@ -648,17 +857,31 @@ class ElaBlueprintCanvas(QWidget):
         # 兜住「非主屏上 ElaMenu 偶发只显示第一项」，返回后再回收
         execElaMenu(menu, global_pos)
 
+    def _open_edge_menu(self, edge_id: str, global_pos: QPoint) -> None:
+        """连线右键菜单：删除（右键连线时由交互层调用）。"""
+        if self.graph.edge(edge_id) is None:
+            return
+        menu = ElaEdgeContextMenu(edge_id, self)
+        menu.delete_requested.connect(self.graph.remove_edge)
+        execElaMenu(menu, global_pos)
+
     def _duplicate_node(self, node_id: str) -> None:
-        """默认复制实现：同类型新节点 + 拷贝属性，位置错开 24px。"""
+        """右键菜单「复制」：复制单节点并选中副本。"""
         node = self.graph.node(node_id)
         if node is None:
             return
+        copy = self._clone_node(node)
+        self.graph.add_node(copy)
+        self.select_nodes([copy.id])
+
+    @staticmethod
+    def _clone_node(node: ElaBlueprintNode) -> ElaBlueprintNode:
+        """复制节点数据（新 id、位置错开 24px），不自动入图。"""
         data = node.to_dict()
         data.pop("id", None)
         copy = ElaBlueprintNode.from_dict(data)
         copy.pos = node.pos + QPointF(24.0, 24.0)
-        self.graph.add_node(copy)
-        self.select_nodes([copy.id])
+        return copy
 
     # ------------------------------------------------------------------
     # 流动动画
@@ -724,10 +947,16 @@ class ElaBlueprintCanvas(QWidget):
         p.save()
         p.translate(self._offset)
         p.scale(self._zoom, self._zoom)
-        for ew in self._edge_widgets.values():
-            if not ew.bounding_rect().intersects(dirty_scene):
-                continue
-            ew.draw(p)
+        visible_edges = [
+            ew
+            for ew in self._edge_widgets.values()
+            if ew.bounding_rect().intersects(dirty_scene)
+        ]
+        # 两趟：先全部线，再全部标签 —— 后面的边线不会盖住前面的标签
+        for ew in visible_edges:
+            ew.draw(p, label=False)
+        for ew in visible_edges:
+            ew.draw_label(p)
         if self._wire is not None:
             self._wire.draw(p)
             if self._wire_target is not None:
@@ -749,18 +978,42 @@ class ElaBlueprintCanvas(QWidget):
             p.drawRect(rect)
 
     def _update_scene_rects(self, scene_rects) -> None:
-        """按场景坐标矩形列表请求局部重绘（换算视图坐标并合并求并集）。"""
-        rect = None
-        for r in scene_rects:
-            if r is None or r.isNull():
-                continue
-            vr = QRectF(
+        """按场景坐标矩形列表请求局部重绘（换算视图坐标后逐个提交）。"""
+        self._update_view_rects(
+            QRectF(
                 self.scene_to_view(r.topLeft()), self.scene_to_view(r.bottomRight())
             ).normalized()
-            vr = vr.adjusted(-2.0, -2.0, 2.0, 2.0)
-            rect = vr if rect is None else rect.united(vr)
-        if rect is not None:
+            for r in scene_rects
+            if r is not None and not r.isNull()
+        )
+
+    def _update_view_rects(self, view_rects) -> None:
+        """按视图坐标矩形逐个请求重绘（每块自带 2px 描边余量）。
+
+        逐矩形提交而不是合并成一个大矩形：多选拖动 / 多条流动边分散在画布
+        两端时，合并会退化成整幅重绘。
+        """
+        for r in view_rects:
+            if r is None or r.isNull():
+                continue
+            rect = r.adjusted(-2.0, -2.0, 2.0, 2.0)
             self.update(rect.toAlignedRect().intersected(self.rect()))
+
+    def _node_view_rect(self, node) -> QRectF:
+        """节点在视图坐标下的矩形（与控件几何同口径）。"""
+        return QRectF(
+            self.scene_to_view(node.pos),
+            QSizeF(node.size.width() * self._zoom, node.size.height() * self._zoom),
+        )
+
+    def _node_repaint_view_rect(self, node) -> QRectF:
+        """节点重绘区域：节点矩形 + 选中发光外扩（视图坐标）。
+
+        光晕由画布层自绘、超出节点控件矩形：节点移动时只依赖 Qt 对子控件
+        移动的自动失效（控件自身旧 / 新矩形）会留下旧位置的光晕残影。
+        """
+        pad = _selection_glow_pad()
+        return self._node_view_rect(node).adjusted(-pad, -pad, pad, pad)
 
     def _draw_selection_glow(self, p: QPainter) -> None:
         """选中节点的外发光（画布层自绘，替代 QGraphicsEffect）。
@@ -773,7 +1026,7 @@ class ElaBlueprintCanvas(QWidget):
         r, g, b, a = spec["color"]
         blur = float(spec["blur"])
         ox, oy = spec["offset"]
-        steps = max(3, int(blur / 2))
+        steps, pen_w = _glow_steps(blur)
         base_radius = float(T("radius.lg")) * self._zoom
         p.setBrush(Qt.BrushStyle.NoBrush)
         for nid in self._selected_nodes:
@@ -792,7 +1045,7 @@ class ElaBlueprintCanvas(QWidget):
                 alpha = int(a * (1.0 - t) * 0.9)
                 if alpha <= 0:
                     continue
-                pen = QPen(QColor(r, g, b, alpha), max(1.0, blur / steps + 0.5))
+                pen = QPen(QColor(r, g, b, alpha), pen_w)
                 p.setPen(pen)
                 rr = rect.adjusted(-grow, -grow, grow, grow)
                 rad = base_radius + grow
@@ -827,13 +1080,18 @@ class ElaBlueprintCanvas(QWidget):
         self._grid_tile_cache = pm
         return pm
 
-    def _draw_grid(self, p: QPainter) -> None:
-        """点阵网格：间距随缩放自适应（屏幕间距保持在 18–72px 之间）。"""
-        step = 24.0
+    def _grid_scene_step(self) -> float:
+        """当前缩放下点阵网格的场景间距（屏幕间距保持 18–72px）。"""
+        step = self._grid_step
         while step * self._zoom < 18.0:
             step *= 2.0
         while step * self._zoom > 72.0:
             step /= 2.0
+        return step
+
+    def _draw_grid(self, p: QPainter) -> None:
+        """点阵网格：间距随缩放自适应（屏幕间距保持在 18–72px 之间）。"""
+        step = self._grid_scene_step()
         tile = self._grid_tile(step * self._zoom)
         side = tile.width() / tile.devicePixelRatioF()
         p.setPen(Qt.PenStyle.NoPen)

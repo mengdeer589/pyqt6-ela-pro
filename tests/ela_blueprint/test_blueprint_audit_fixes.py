@@ -33,9 +33,9 @@ from pyqt6_ela_pro.blueprint import (
     ElaBlueprintNode,
     ElaNodeCreationMenu,
     ElaPin,
-    ElaTempWire,
     register_node_type,
 )
+from pyqt6_ela_pro.blueprint.edge_widget import ElaTempWire
 from pyqt6_ela_pro.blueprint import node_widget as _nw
 
 # ---------------------------------------------------------------------------
@@ -246,10 +246,9 @@ class TestEdgeIdCollision:
     def test_add_edge_rejects_duplicate_id(self):
         g, a, b = self._two_pins()
         e1 = g.add_edge(a.id, "o1", b.id, "i1", edge_id="dup")
-        e2 = g.add_edge(a.id, "o2", b.id, "i2", edge_id="dup")
-        assert e1 is not None and e2 is None, (
-            "同 id 覆盖会静默丢边（无 edge_removed 信号）"
-        )
+        with pytest.raises(ValueError, match="冲突"):
+            g.add_edge(a.id, "o2", b.id, "i2", edge_id="dup")
+        assert e1 is not None
         assert [e.id for e in g.edges()] == ["dup"]
 
     def test_canvas_from_dict_duplicate_edge_id_keeps_first(self, canvas, caplog):
@@ -414,7 +413,7 @@ class TestBodyInteraction:
         c.resize(900, 600)
         c.show()
         qapp.processEvents()
-        node = c.add_node_at("with_body", QPointF(60, 60))
+        node = c.create_node("with_body", QPointF(60, 60))
         qapp.processEvents()
         return c, node, c.node_widget(node.id), clicked
 
@@ -467,7 +466,7 @@ class TestBodyInteraction:
 # ======================================================= P1：空格强制平移
 class TestSpacePanOverChildren:
     def test_space_left_on_node_pans_not_drags(self, canvas):
-        n = canvas.add_node_at("a", QPointF(100, 100))
+        n = canvas.create_node("a", QPointF(100, 100))
         widget = canvas.node_widget(n.id)
         canvas.keyPressEvent(_key(QEvent.Type.KeyPress, Qt.Key.Key_Space))
         center = widget.rect().center()
@@ -487,7 +486,7 @@ class TestSpacePanOverChildren:
         assert canvas._panning is False
 
     def test_space_left_on_pin_pans_not_wire(self, canvas):
-        n = canvas.add_node_at("a", QPointF(100, 100))
+        n = canvas.create_node("a", QPointF(100, 100))
         handle = canvas.node_widget(n.id).pin_widget("o", None)
         canvas.keyPressEvent(_key(QEvent.Type.KeyPress, Qt.Key.Key_Space))
         _send(handle, _mouse(QEvent.Type.MouseButtonPress, handle.rect().center()))
@@ -500,7 +499,7 @@ class TestSpacePanOverChildren:
 # ======================================================= P1：拖线失焦清理
 class TestWireCancelCleanup:
     def test_focus_out_reclaims_temp_wire(self, canvas):
-        n = canvas.add_node_at("a", QPointF(100, 100))
+        n = canvas.create_node("a", QPointF(100, 100))
         handle = canvas.node_widget(n.id).pin_widget("o", None)
         _send(handle, _mouse(QEvent.Type.MouseButtonPress, handle.rect().center()))
         assert canvas._wire is not None
@@ -512,7 +511,7 @@ class TestWireCancelCleanup:
         assert canvas.findChildren(ElaTempWire) == []
 
     def test_hide_reclaims_too(self, canvas):
-        n = canvas.add_node_at("a", QPointF(100, 100))
+        n = canvas.create_node("a", QPointF(100, 100))
         handle = canvas.node_widget(n.id).pin_widget("o", None)
         _send(handle, _mouse(QEvent.Type.MouseButtonPress, handle.rect().center()))
         canvas.hide()
@@ -524,7 +523,7 @@ class TestWireCancelCleanup:
 # ======================================================= P2：执行控制器语义
 class TestExecutionSemantics:
     def test_finish_without_start_no_finished(self, canvas):
-        n = canvas.add_node_at("a", QPointF(100, 100))
+        n = canvas.create_node("a", QPointF(100, 100))
         ex = canvas.execution()
         fired = []
         ex.finished.connect(lambda: fired.append(1))
@@ -532,7 +531,7 @@ class TestExecutionSemantics:
         assert fired == [], "从未 start 的 finish 不是「一轮执行结束」"
 
     def test_fail_without_start_no_finished(self, canvas):
-        n = canvas.add_node_at("a", QPointF(100, 100))
+        n = canvas.create_node("a", QPointF(100, 100))
         ex = canvas.execution()
         fired = []
         ex.finished.connect(lambda: fired.append(1))
@@ -540,14 +539,14 @@ class TestExecutionSemantics:
         assert fired == []
 
     def test_explicit_elapsed_clears_timer_start(self, canvas):
-        n = canvas.add_node_at("a", QPointF(100, 100))
+        n = canvas.create_node("a", QPointF(100, 100))
         ex = canvas.execution()
         ex.start(n.id)
         ex.finish(n.id, 5.0)
         assert n.id not in ex._t0
 
     def test_finish_twice_emits_finished_once(self, canvas):
-        n = canvas.add_node_at("a", QPointF(100, 100))
+        n = canvas.create_node("a", QPointF(100, 100))
         ex = canvas.execution()
         fired = []
         ex.finished.connect(lambda: fired.append(1))
@@ -557,8 +556,8 @@ class TestExecutionSemantics:
         assert len(fired) == 1
 
     def test_linear_round_still_emits_when_all_done(self, canvas):
-        n1 = canvas.add_node_at("a", QPointF(100, 100))
-        n2 = canvas.add_node_at("a", QPointF(400, 100))
+        n1 = canvas.create_node("a", QPointF(100, 100))
+        n2 = canvas.create_node("a", QPointF(400, 100))
         ex = canvas.execution()
         fired = []
         ex.finished.connect(lambda: fired.append(1))
@@ -572,10 +571,10 @@ class TestExecutionSemantics:
 
 class TestSetPathDag:
     def test_branch_edges_are_highlighted(self, canvas):
-        a = canvas.add_node_at("a", QPointF(0, 0))
-        b = canvas.add_node_at("a", QPointF(200, 0))
-        c = canvas.add_node_at("a", QPointF(200, 200))
-        d = canvas.add_node_at("a", QPointF(400, 100))
+        a = canvas.create_node("a", QPointF(0, 0))
+        b = canvas.create_node("a", QPointF(200, 0))
+        c = canvas.create_node("a", QPointF(200, 200))
+        d = canvas.create_node("a", QPointF(400, 100))
         e1 = canvas.graph.add_edge(a.id, "o", b.id, "i")
         e2 = canvas.graph.add_edge(a.id, "o", c.id, "i")
         e3 = canvas.graph.add_edge(b.id, "o", d.id, "i")
@@ -584,8 +583,8 @@ class TestSetPathDag:
         assert set(canvas.execution().path_edge_ids()) == {e1.id, e2.id, e3.id, e4.id}
 
     def test_backward_edge_not_highlighted(self, canvas):
-        a = canvas.add_node_at("a", QPointF(0, 0))
-        b = canvas.add_node_at("a", QPointF(300, 0))
+        a = canvas.create_node("a", QPointF(0, 0))
+        b = canvas.create_node("a", QPointF(300, 0))
         forward = canvas.graph.add_edge(a.id, "o", b.id, "i")
         backward = canvas.graph.add_edge(b.id, "o", a.id, "i")
         canvas.execution().set_path([a.id, b.id])
@@ -607,7 +606,7 @@ class TestApplyViewNoChurn:
             body_builder=lambda node, container: QPushButton("x", container),
         )
         c = make(ElaBlueprintCanvas)  # 故意不 show（父链不可见）
-        node = c.add_node_at("with_body2", QPointF(0, 0))
+        node = c.create_node("with_body2", QPointF(0, 0))
         widget = c.node_widget(node.id)
         rev = widget._layout_rev
         for _ in range(5):
@@ -617,8 +616,8 @@ class TestApplyViewNoChurn:
 
 class TestEdgeHoverClearsOnLeave:
     def test_leave_event_clears_hover(self, qapp, canvas):
-        n1 = canvas.add_node_at("a", QPointF(100, 100))
-        n2 = canvas.add_node_at("a", QPointF(400, 100))
+        n1 = canvas.create_node("a", QPointF(100, 100))
+        n2 = canvas.create_node("a", QPointF(400, 100))
         edge = canvas.graph.add_edge(n1.id, "o", n2.id, "i")
         ew = canvas.edge_widget(edge.id)
         mid = ew.path().pointAtPercent(0.5)
@@ -702,7 +701,7 @@ class TestContextMenuSignalsReemitted:
         monkeypatch.setattr(
             canvas_mod, "execElaMenu", lambda menu, pos: captured.update(menu=menu)
         )
-        node = canvas.add_node_at("a", QPointF(10, 10))
+        node = canvas.create_node("a", QPointF(10, 10))
         canvas._open_node_menu(canvas.node_widget(node.id), QPoint(0, 0))
         menu = captured["menu"]
         renamed, props = [], []

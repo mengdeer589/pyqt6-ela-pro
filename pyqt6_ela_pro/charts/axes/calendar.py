@@ -48,6 +48,7 @@ class CalendarCoord(Coord):
         self.show_year_label = bool(self._year_label.get("show", True))
         self._cell = 14.0
         self._origin = QPointF()  # 网格左上角（orient 转置后）
+        self._grid = QRectF()
         self._weeks = 1
 
     # -- 选项 -------------------------------------------------------------
@@ -213,8 +214,14 @@ class CalendarCoord(Coord):
         else:
             self._cell = max(3.0, _to_float(self.cell_size_opt, 14.0))
         grid_w = self._cell * cols
+        grid_h = self._cell * rows
         ox = rect.left() + label_left + max(0.0, (avail_w - grid_w) / 2)
         self._origin = QPointF(ox, rect.top() + label_top)
+        self._grid = QRectF(ox, self._origin.y(), grid_w, grid_h)
+
+    def gridRect(self) -> QRectF:
+        """实际日期网格矩形（visualMap 等组件用来贴近内容，而不是贴画布底）。"""
+        return QRectF(self._grid)
 
     def cellRect(self, day) -> QRectF:
         """日期 → 单元格矩形（无法解析 / 范围外返回空矩形）。"""
@@ -320,7 +327,7 @@ class CalendarCoord(Coord):
         day_style = self._label_style("day")
         day_font = self._label_font(day_style)
         p.setFont(day_font)
-        p.setPen(parse_color(day_style.get("color") or T("color.text.tertiary")))
+        p.setPen(parse_color(day_style.get("color") or T("color.text.tertiary", self.chart)))
         # 星期标签（行号按 firstDay 换算）
         if self.show_week_labels:
             for local_row, label in self._weekday_label_rows().items():
@@ -350,7 +357,7 @@ class CalendarCoord(Coord):
         month_fm = QFontMetricsF(month_font)
         if self.show_month_labels:
             p.setFont(month_font)
-            p.setPen(parse_color(month_style.get("color") or T("color.text.tertiary")))
+            p.setPen(parse_color(month_style.get("color") or T("color.text.tertiary", self.chart)))
             first = self._first_column_start()
             last_idx = -1
             for d in self._month_dates():
@@ -384,7 +391,7 @@ class CalendarCoord(Coord):
         year_fm = QFontMetricsF(year_font)
         if self.show_year_label and str(self.start.year) == str(self.end.year):
             p.setFont(year_font)
-            p.setPen(parse_color(year_style.get("color") or T("color.text.tertiary")))
+            p.setPen(parse_color(year_style.get("color") or T("color.text.tertiary", self.chart)))
             p.drawText(
                 QRectF(self.rect.left(), self.rect.top(), 60, year_fm.height()),
                 Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
@@ -392,7 +399,7 @@ class CalendarCoord(Coord):
             )
         # splitLine：单元格网格线
         if bool(self._split_line.get("show", False)):
-            p.setPen(_line_pen(self._split_line, T("color.border")))
+            p.setPen(_line_pen(self._split_line, T("color.border", self.chart)))
             grid_w = self._cell * (7 if self._vertical else self._weeks)
             grid_h = self._cell * (self._weeks if self._vertical else 7)
             cols = 7 if self._vertical else self._weeks
@@ -419,7 +426,7 @@ class CalendarCoord(Coord):
         if d is not None:
             r = self.cellRect(d)
             style = line_style if isinstance(line_style, dict) else {}
-            pen = _line_pen({"lineStyle": style}, T("color.primary"), 1.4)
+            pen = _line_pen({"lineStyle": style}, T("color.primary", self.chart), 1.4)
             p.setPen(pen)
             p.setBrush(Qt.BrushStyle.NoBrush)
             p.drawRect(r.adjusted(0.5, 0.5, -0.5, -0.5))

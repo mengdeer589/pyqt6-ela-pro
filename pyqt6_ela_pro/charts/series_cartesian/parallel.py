@@ -227,7 +227,7 @@ class ParallelSeriesRenderer(SeriesRenderer):
             else:
                 p.drawPolyline(QPolygonF(pts))
         # 轴 + 标签（``parallelAxis[].nameTextStyle`` / ``axisLabel``）
-        c_axis = QColor(T("color.border.strong"))
+        c_axis = QColor(T("color.border.strong", self.chart))
         for ax in self._axes:
             raw_label = ax.get("labelStyle")
             raw_label = raw_label if isinstance(raw_label, dict) else {}
@@ -253,7 +253,7 @@ class ParallelSeriesRenderer(SeriesRenderer):
                 QPointF(ax["x"], self._area.bottom()),
             )
             p.setFont(name_font)
-            p.setPen(parse_color(name_style.get("color") or T("color.text.secondary")))
+            p.setPen(parse_color(name_style.get("color") or T("color.text.secondary", self.chart)))
             p.drawText(
                 QRectF(
                     ax["x"] - 50,
@@ -267,7 +267,7 @@ class ParallelSeriesRenderer(SeriesRenderer):
             if not self._axis_label_shown(ax):
                 continue
             p.setFont(label_font)
-            p.setPen(parse_color(label_style.get("color") or T("color.text.secondary")))
+            p.setPen(parse_color(label_style.get("color") or T("color.text.secondary", self.chart)))
             p.drawText(
                 QRectF(ax["x"] - 50, self._area.top() + 2, 100, label_fm.height()),
                 Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignTop,
@@ -298,9 +298,13 @@ class ParallelSeriesRenderer(SeriesRenderer):
                     best = row
         if best is None:
             return None
+        line_style = self.opt.get("lineStyle") or {}
+        raw = line_style.get("color") if isinstance(line_style, dict) else None
+        color = parse_color(raw) if isinstance(raw, str) and raw else self.color()
         return {
             "name": f"{self.name} #{best['index']}",
             "value": best["values"],
+            "color": color,
             "series": self.name,
             "dataIndex": best["index"],
         }

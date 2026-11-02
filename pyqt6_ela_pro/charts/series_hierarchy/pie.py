@@ -14,10 +14,11 @@ from PyQt6.QtGui import (
     QPen,
 )
 
+from ..._colors import text_on_color
 from .._tokens import T
-from .._utils import ON_FILL_WHITE, clamp as _clamp
+from .._utils import clamp as _clamp
 from .._utils import to_float as _to_float
-from .._utils import parse_color
+from .._utils import parse_color, text_italic, text_weight
 from ..axes import chartFont, formatValue
 from ..core import SeriesRenderer, formatLabelTemplate
 from ._shared import (
@@ -231,13 +232,14 @@ class PieSeriesRenderer(SeriesRenderer):
             return
         p.save()
         sectors = self._animated_sectors(anim_t)
-        border = QColor(T("color.bg.base"))
+        border = QColor(T("color.bg.base", self.chart))
         hover = self.chart.hoverInfo()
         hovered = (
             hover[1].get("dataIndex")
             if hover is not None and hover[0] is self
             else None
         )
+        legend_hover = self.chart._legend_hover
         for sec in sectors:
             path = self._sector_path(sec, anim_t)
             if path.isEmpty():
@@ -252,6 +254,9 @@ class PieSeriesRenderer(SeriesRenderer):
                 elif self.blursOtherItems():
                     blur = self.blurOpacity()
                     alpha *= blur if blur is not None else 0.35
+            elif legend_hover is not None and sec["name"] == legend_hover:
+                emphasis = self.emphasisColor(sec["index"])
+                color = emphasis if emphasis is not None else color.lighter(112)
             if alpha < 1.0:
                 color.setAlphaF(color.alphaF() * alpha)
             if border_color is not None and border_w > 0:
@@ -300,7 +305,13 @@ class PieSeriesRenderer(SeriesRenderer):
         fm = QFontMetricsF(font)
         total = sum(s["value"] for s in self._sectors) or 1.0
         c_text = self.labelColor()
-        c_line = _text_color("color.border.strong")
+        explicit_label = self.labelTextStyle().get("color")
+        explicit_label = (
+            parse_color(explicit_label)
+            if isinstance(explicit_label, str) and explicit_label
+            else None
+        )
+        c_line = _text_color("color.border.strong", self.chart)
         if pos == "center":
             self._paint_center_total(p, font)
             return
@@ -315,7 +326,7 @@ class PieSeriesRenderer(SeriesRenderer):
                 r = (sec["r0"] + sec["r1"]) / 2
                 pt = self._pt(mid, r)
                 text = self._label_text(sec, pct, pct)
-                p.setPen(QColor(ON_FILL_WHITE))
+                p.setPen(explicit_label or text_on_color(parse_color(sec["color"])))
                 p.drawText(
                     QRectF(pt.x() - 40, pt.y() - fm.height() / 2, 80, fm.height()),
                     Qt.AlignmentFlag.AlignCenter,
@@ -359,22 +370,34 @@ class PieSeriesRenderer(SeriesRenderer):
             self._paint_center_total(p, font)
 
     def _paint_center_total(self, p, font):
-        """环形中心孔显示总计数值。"""
+        """环形中心孔显示总计数值（字号随内半径自适应，可被 totalLabel 覆盖）。"""
         total_opt = dict(self.opt.get("totalLabel") or {})
         title = str(total_opt.get("text") or "")
-        p.setFont(
-            chartFont(
-                T("font.title.md"),
-                T("font.weight.semibold"),
-                self.chart.fontFamily(),
-            )
+        label_style = self.labelTextStyle()
+        label_px = _to_float(label_style.get("fontSize"), T("font.xs"))
+        value_px = _to_float(total_opt.get("fontSize"), None)
+        if value_px is None:
+            # 中心孔越大字号越大；上下限避免小图挤爆 / 大图过小。
+            value_px = _clamp(max(label_px + 2.0, self._r_in * 0.32), 12.0, 22.0)
+        value_font = chartFont(
+            value_px,
+            text_weight(total_opt.get("fontWeight") or T("font.weight.semibold")),
+            total_opt.get("fontFamily") or self.chart.fontFamily(),
+            text_italic(total_opt.get("fontStyle")),
         )
-        fm = QFontMetricsF(p.font())
+        p.setFont(value_font)
+        fm = QFontMetricsF(value_font)
         value_text = formatValue(self._total)
         cy = self._center.y()
         if title:
             cy -= fm.height() / 2
-        p.setPen(_text_color("color.text.primary"))
+        raw_color = total_opt.get("color")
+        value_color = parse_color(raw_color) if raw_color is not None else None
+        p.setPen(
+            value_color
+            if value_color is not None and value_color.isValid()
+            else _text_color("color.text.primary", self.chart)
+        )
         p.drawText(
             QRectF(
                 self._center.x() - self._r_in,
@@ -386,9 +409,29 @@ class PieSeriesRenderer(SeriesRenderer):
             value_text,
         )
         if title:
+            sub_px = _to_float(total_opt.get("subtextFontSize"), None)
+            if sub_px is not None:
+                font = chartFont(
+                    sub_px,
+                    text_weight(
+                        total_opt.get("subtextFontWeight")
+                        or label_style.get("fontWeight")
+                    ),
+                    total_opt.get("subtextFontFamily") or self.chart.fontFamily(),
+                    text_italic(
+                        total_opt.get("subtextFontStyle")
+                        or label_style.get("fontStyle")
+                    ),
+                )
             p.setFont(font)
             fm2 = QFontMetricsF(font)
-            p.setPen(_text_color("color.text.secondary"))
+            raw_sub = total_opt.get("subtextColor")
+            sub_color = parse_color(raw_sub) if raw_sub is not None else None
+            p.setPen(
+                sub_color
+                if sub_color is not None and sub_color.isValid()
+                else _text_color("color.text.secondary", self.chart)
+            )
             p.drawText(
                 QRectF(
                     self._center.x() - self._r_in,

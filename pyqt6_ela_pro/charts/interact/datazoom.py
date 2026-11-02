@@ -424,7 +424,7 @@ class DataZoomComponent(QObject):
             return
         p.save()
         p.setPen(Qt.PenStyle.NoPen)
-        p.setBrush(QColor(T("color.bg.muted")))
+        p.setBrush(QColor(T("color.bg.muted", self.chart)))
         p.drawRoundedRect(self._track, 4, 4)
         sel = QRectF(
             self._x_of(self.start),
@@ -432,15 +432,15 @@ class DataZoomComponent(QObject):
             max(2.0, self._x_of(self.end) - self._x_of(self.start)),
             self._track.height(),
         )
-        fill = QColor(T("color.primary"))
+        fill = QColor(T("color.primary", self.chart))
         fill.setAlpha(70)
         p.setBrush(fill)
         p.drawRoundedRect(sel, 4, 4)
         for r in (self._h_start, self._h_end):
-            p.setPen(QPen(QColor(T("color.border.strong")), 1))
-            p.setBrush(QColor(T("color.bg.elevated")))
+            p.setPen(QPen(QColor(T("color.border.strong", self.chart)), 1))
+            p.setBrush(QColor(T("color.bg.elevated", self.chart)))
             p.drawRoundedRect(r, 3, 3)
-            p.setPen(QPen(QColor(T("color.text.tertiary")), 1))
+            p.setPen(QPen(QColor(T("color.text.tertiary", self.chart)), 1))
             cx = r.center().x()
             p.drawLine(QPointF(cx - 2, r.top() + 4), QPointF(cx - 2, r.bottom() - 4))
             p.drawLine(QPointF(cx + 2, r.top() + 4), QPointF(cx + 2, r.bottom() - 4))
@@ -456,7 +456,7 @@ class DataZoomComponent(QObject):
             )
             p.setFont(font)
             fm = QFontMetricsF(font)
-            p.setPen(parse_color(style.get("color") or T("color.text.tertiary")))
+            p.setPen(parse_color(style.get("color") or T("color.text.tertiary", self.chart)))
             ly = self._track.bottom() + 1
             p.drawText(
                 QRectF(self._track.left(), ly, 40, fm.height()),

@@ -90,12 +90,26 @@ class SingleAxisCoord(Coord):
 
     def paintAxes(self, p: QPainter) -> None:
         p.save()
-        c_axis = QColor(T("color.border.strong"))
-        c_grid = QColor(T("color.border"))
-        c_text = QColor(T("color.text.secondary"))
+        c_axis = QColor(T("color.border.strong", self.chart))
+        c_grid = QColor(T("color.border", self.chart))
+        c_text = QColor(T("color.text.secondary", self.chart))
         font = self.axis.labelFont()
         p.setFont(font)
         fm = QFontMetricsF(font)
+        margin = self.axis.labelMargin(6.0)
+        align_name = self.axis.labelAlign("center")
+        valign_name = self.axis.labelVerticalAlign("top")
+        hflag = {
+            "left": Qt.AlignmentFlag.AlignLeft,
+            "center": Qt.AlignmentFlag.AlignHCenter,
+            "right": Qt.AlignmentFlag.AlignRight,
+        }[align_name]
+        vflag = {
+            "top": Qt.AlignmentFlag.AlignTop,
+            "middle": Qt.AlignmentFlag.AlignVCenter,
+            "bottom": Qt.AlignmentFlag.AlignBottom,
+        }[valign_name]
+        anchor_y = self.line_y + margin
         p.setPen(QPen(c_axis, 1))
         p.drawLine(
             QPointF(self.plot.left(), self.line_y),
@@ -106,13 +120,28 @@ class SingleAxisCoord(Coord):
             p.setPen(QPen(c_grid, 1))
             p.drawLine(QPointF(px, self.line_y - 4), QPointF(px, self.line_y + 4))
             p.setPen(c_text)
+            box_w = 80.0
+            left = (
+                px
+                if align_name == "left"
+                else px - box_w
+                if align_name == "right"
+                else px - box_w / 2
+            )
+            top = (
+                anchor_y
+                if valign_name == "top"
+                else anchor_y - fm.height()
+                if valign_name == "bottom"
+                else anchor_y - fm.height() / 2
+            )
             p.drawText(
-                QRectF(px - 40, self.line_y + 6, 80, fm.height()),
-                Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignTop,
+                QRectF(left, top, box_w, fm.height()),
+                hflag | vflag,
                 formatValue(tv),
             )
         if self.axis.name:
-            p.setPen(QColor(T("color.text.tertiary")))
+            p.setPen(QColor(T("color.text.tertiary", self.chart)))
             p.drawText(
                 QRectF(
                     self.plot.right() + 6,
@@ -132,7 +161,7 @@ class SingleAxisCoord(Coord):
             return
         p.save()
         style = line_style if isinstance(line_style, dict) else {}
-        pen = _line_pen({"lineStyle": style}, T("color.border.strong"))
+        pen = _line_pen({"lineStyle": style}, T("color.border.strong", self.chart))
         if not isinstance(style.get("type"), str):
             pen.setStyle(Qt.PenStyle.DashLine)
         p.setPen(pen)

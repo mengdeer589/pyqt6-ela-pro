@@ -14,8 +14,9 @@ from PyQt6.QtGui import (
     QPen,
 )
 
+from ..._colors import text_on_color
 from .._tokens import T
-from .._utils import ON_FILL_WHITE, clamp as _clamp
+from .._utils import clamp as _clamp
 from .._utils import to_float as _to_float
 from .._utils import parse_color
 from ..core import SeriesRenderer
@@ -129,7 +130,7 @@ class SunburstSeriesRenderer(SeriesRenderer):
         if not self._nodes:
             return
         p.save()
-        border = QColor(T("color.bg.base"))
+        border = QColor(T("color.bg.base", self.chart))
         hover = self.chart.hoverInfo()
         hovered = (
             hover[1].get("dataIndex")
@@ -209,7 +210,12 @@ class SunburstSeriesRenderer(SeriesRenderer):
         if not bool(label_opt.get("show", True)):
             return
         min_angle = _to_float(label_opt.get("minAngle"), 8.0)
-        c_label = self.labelColor(QColor(ON_FILL_WHITE))
+        explicit_label = self.labelTextStyle().get("color")
+        explicit_label = (
+            parse_color(explicit_label)
+            if isinstance(explicit_label, str) and explicit_label
+            else None
+        )
         font = _label_font(self, label_opt)
         p.setFont(font)
         fm = QFontMetricsF(font)
@@ -229,7 +235,7 @@ class SunburstSeriesRenderer(SeriesRenderer):
             p.save()
             p.translate(pt)
             p.rotate(deg + (180.0 if flip else 0.0))
-            p.setPen(c_label)
+            p.setPen(explicit_label or text_on_color(parse_color(node.color)))
             band_w = math.radians(span) * rm
             text = node.name
             tw = fm.horizontalAdvance(text)
@@ -273,6 +279,7 @@ class SunburstSeriesRenderer(SeriesRenderer):
         return {
             "name": best.name,
             "value": best.value,
+            "color": self.itemColor(best.style_index, default=best.color),
             "series": self.name,
             "depth": best.level,
             "dataIndex": getattr(best, "style_index", None),

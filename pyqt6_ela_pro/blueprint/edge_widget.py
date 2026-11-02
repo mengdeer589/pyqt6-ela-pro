@@ -19,13 +19,19 @@ from __future__ import annotations
 import math
 
 from PyQt6.QtCore import QObject, QPointF, QRectF, Qt
-from PyQt6.QtGui import QColor, QPainter, QPainterPath, QPen
+from PyQt6.QtGui import QColor, QFont, QFontMetrics, QPainter, QPainterPath, QPen
 
 from ._tokens import T
 from .model import ElaPinDirectionType
 from .registry import pin_color
 
 __all__ = ["bezier_path", "ElaEdgeWidget", "ElaTempWire"]
+
+#: 连线标签的最大宽度（场景单位；超出按省略号截断）
+LABEL_MAX_W = 220.0
+LABEL_PAD_X = 6.0
+LABEL_PAD_Y = 3.0
+LABEL_RADIUS = 4.0
 
 
 def bezier_path(p1: QPointF, p2: QPointF) -> QPainterPath:
@@ -120,6 +126,9 @@ class ElaEdgeWidget(QObject):
         self._p2 = None
         self._bounds = None
         self._samples = None
+        self._label_layout = None
+        # 标签锚点（曲线中点）；标签被挪开时用细引线连回连线
+        self._label_anchor = None
         # 基础颜色（边的引脚类型创建后不变，惰性取一次）
         self._base_color = None
 
@@ -158,6 +167,8 @@ class ElaEdgeWidget(QObject):
         self._path = bezier_path(self._p1, self._p2)
         self._bounds = None
         self._samples = None
+        self._label_layout = None
+        self._label_anchor = None
 
     def path(self) -> QPainterPath:
         """当前贝塞尔曲线路径（场景坐标，缓存）。"""
@@ -165,17 +176,105 @@ class ElaEdgeWidget(QObject):
         return self._path
 
     def bounding_rect(self) -> QRectF:
-        """路径外接矩形（含描边余量，场景坐标，缓存）。"""
+        """路径外接矩形 + 标签卡片（含描边余量，场景坐标，缓存）。"""
         self._ensure_path()
         if self._bounds is None:
-            self._bounds = self._path.boundingRect().adjusted(-8, -8, 8, 8)
+            bounds = self._path.boundingRect().adjusted(-8, -8, 8, 8)
+            label = self._ensure_label()[0]
+            if not label.isNull():
+                bounds = bounds.united(label.adjusted(-4, -4, 4, 4))
+            self._bounds = bounds
         return self._bounds
 
+    def _ensure_label(self):
+        """惰性计算标签布局：``(rect, lines, font, line_height)``。"""
+        if self._label_layout is not None:
+            return self._label_layout
+        text = str(self.edge.label or "")
+        if not text.strip():
+            self._label_layout = (QRectF(), [], None, 0.0)
+            self._label_anchor = None
+            return self._label_layout
+        font = QFont(self.canvas.font())
+        font.setPixelSize(int(T("font.sm")))
+        metrics = QFontMetrics(font)
+        line_h = float(metrics.height())
+        lines = [
+            metrics.elidedText(raw, Qt.TextElideMode.ElideRight, int(LABEL_MAX_W))
+            for raw in text.splitlines() or [text]
+        ]
+        width = max(metrics.horizontalAdvance(line) for line in lines) + 2 * LABEL_PAD_X
+        height = line_h * len(lines) + 2 * LABEL_PAD_Y
+        center = self.path().pointAtPercent(0.5)
+        rect = QRectF(
+            center.x() - width / 2.0,
+            center.y() - height / 2.0,
+            width,
+            height,
+        )
+        self._label_anchor = center
+        chosen, anchor = self._place_label(rect, center, height)
+        self._label_anchor = anchor
+        self._label_layout = (chosen, lines, font, line_h)
+        return self._label_layout
+
+    def _place_label(self, rect: QRectF, center: QPointF, height: float):
+        """为标签找位置：沿曲线换锚点 + 法线上下偏移，避开节点矩形。
+
+        返回 ``(label_rect, anchor)``；``anchor`` 是标签对应的曲线点（引线终点）。
+        """
+        node_rects = [
+            QRectF(node.pos, node.size).adjusted(-2.0, -2.0, 2.0, 2.0)
+            for node in self.canvas.graph.nodes()
+        ]
+        canvas_rect = QRectF(self.canvas.rect()).adjusted(2.0, 2.0, -2.0, -2.0)
+
+        def clear(candidate: QRectF) -> bool:
+            if any(candidate.intersects(node) for node in node_rects):
+                return False
+            tl = self.canvas.scene_to_view(candidate.topLeft())
+            br = self.canvas.scene_to_view(candidate.bottomRight())
+            return canvas_rect.contains(QRectF(tl, br).normalized())
+
+        for percent in (0.5, 0.35, 0.65, 0.2, 0.8):
+            spot = self.path().pointAtPercent(percent)
+            base = rect.translated(spot - center)
+            if clear(base):
+                return base, spot
+            p1 = self.path().pointAtPercent(percent - 0.01)
+            p2 = self.path().pointAtPercent(percent + 0.01)
+            dx, dy = p2.x() - p1.x(), p2.y() - p1.y()
+            length = (dx * dx + dy * dy) ** 0.5
+            normal = (
+                QPointF(dy / length, -dx / length)
+                if length > 1e-6
+                else QPointF(0.0, -1.0)
+            )
+            for sign in (1.0, -1.0):
+                for extra in (8.0, 20.0, 36.0, 56.0, 80.0):
+                    candidate = base.translated(normal * (height / 2.0 + extra) * sign)
+                    if clear(candidate):
+                        return candidate, spot
+        return rect, center
+
+    def label_rect(self) -> QRectF:
+        """标签卡片矩形（场景坐标；无标签时为空矩形）。"""
+        return QRectF(self._ensure_label()[0])
+
+    def invalidate_label(self) -> None:
+        """失效标签布局与包围盒（``edge_changed`` 后由画布调用）。"""
+        self._label_layout = None
+        self._label_anchor = None
+        self._bounds = None
+
     def contains(self, scene_pt: QPointF, tol: float = 7.0) -> bool:
-        """命中检测：场景点距曲线采样点的最小距离小于 ``tol`` 即命中。"""
+        """命中检测：标签卡片或曲线采样点距场景点小于 ``tol`` 即命中。"""
         coarse = self.bounding_rect().adjusted(-tol, -tol, tol, tol)
         if not coarse.contains(scene_pt):
             return False
+        label = self._ensure_label()[0]
+        if not label.isNull() and label.adjusted(-2, -2, 2, 2).contains(scene_pt):
+            return True
         self._ensure_path()
         if self._samples is None:
             self._samples = _path_points(self._path)
@@ -223,8 +322,8 @@ class ElaEdgeWidget(QObject):
         self._dash_offset -= step
 
     # -- 绘制 ------------------------------------------------------------
-    def draw(self, p: QPainter) -> None:
-        """在已做场景变换的画笔上绘制本条边（抗锯齿、主题实时取色）。"""
+    def draw(self, p: QPainter, label: bool = True) -> None:
+        """在已做场景变换的画笔上绘制本条边（``label=False`` 时只画线）。"""
         path = self.path()
         if self.flowing:
             pen = _cached_pen(
@@ -238,18 +337,46 @@ class ElaEdgeWidget(QObject):
             p.setPen(pen)
             p.setBrush(Qt.BrushStyle.NoBrush)
             p.drawPath(path)
+        else:
+            width = 2.0
+            color = self._color()
+            if self.selected:
+                color = _cached_color(str(T("color.primary")))
+                width = 2.8
+            elif self.hovered:
+                width = 3.2
+            pen = _cached_pen(color, width)
+            p.setPen(pen)
+            p.setBrush(Qt.BrushStyle.NoBrush)
+            p.drawPath(path)
+        if label:
+            self.draw_label(p)
+
+    def draw_label(self, p: QPainter) -> None:
+        """在曲线中点绘制标签卡片（多行居中；标签覆盖线段，保证可读）。"""
+        rect, lines, font, line_h = self._ensure_label()
+        if not lines or rect.isNull():
             return
-        width = 2.0
-        color = self._color()
-        if self.selected:
-            color = _cached_color(str(T("color.primary")))
-            width = 2.8
-        elif self.hovered:
-            width = 3.2
-        pen = _cached_pen(color, width)
-        p.setPen(pen)
-        p.setBrush(Qt.BrushStyle.NoBrush)
-        p.drawPath(path)
+        anchor = self._label_anchor
+        if anchor is not None and not rect.contains(anchor):
+            x = min(max(anchor.x(), rect.left()), rect.right())
+            y = min(max(anchor.y(), rect.top()), rect.bottom())
+            p.setPen(QPen(_cached_color(str(T("color.border"))), 1.0))
+            p.drawLine(anchor, QPointF(x, y))
+        p.setPen(QPen(_cached_color(str(T("color.border"))), 1.0))
+        p.setBrush(_cached_color(str(T("color.bg.elevated"))))
+        p.drawRoundedRect(rect, LABEL_RADIUS, LABEL_RADIUS)
+        p.setPen(_cached_color(str(T("color.text.primary"))))
+        p.setFont(font)
+        inner_w = rect.width() - 2 * LABEL_PAD_X
+        for index, line in enumerate(lines):
+            line_rect = QRectF(
+                rect.x() + LABEL_PAD_X,
+                rect.y() + LABEL_PAD_Y + index * line_h,
+                inner_w,
+                line_h,
+            )
+            p.drawText(line_rect, Qt.AlignmentFlag.AlignCenter, line)
 
 
 class ElaTempWire(QObject):

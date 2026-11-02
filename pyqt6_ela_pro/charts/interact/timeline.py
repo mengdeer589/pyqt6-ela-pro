@@ -195,24 +195,24 @@ class ChartTimeline(QObject):
         p.setFont(font)
         fm = QFontMetricsF(font)
         line_style = self._style(
-            "lineStyle", {"color": T("color.border.strong"), "width": 1.0}
+            "lineStyle", {"color": T("color.border.strong", self.chart), "width": 1.0}
         )
         checkpoint = self._style(
             "checkpointStyle",
-            {"color": T("color.primary"), "borderColor": None, "symbolSize": None},
+            {"color": T("color.primary", self.chart), "borderColor": None, "symbolSize": None},
         )
         control = self._style(
             "controlStyle",
             {
-                "color": T("color.bg.elevated"),
-                "borderColor": T("color.border.strong"),
+                "color": T("color.bg.elevated", self.chart),
+                "borderColor": T("color.border.strong", self.chart),
                 "borderWidth": 1.2,
             },
         )
-        primary = parse_color(checkpoint.get("color") or T("color.primary"))
-        c_line = parse_color(line_style.get("color") or T("color.border.strong"))
+        primary = parse_color(checkpoint.get("color") or T("color.primary", self.chart))
+        c_line = parse_color(line_style.get("color") or T("color.border.strong", self.chart))
         line_w = max(0.5, _to_float(line_style.get("width"), 1.0))
-        c_text = parse_color(style.get("color") or T("color.text.secondary"))
+        c_text = parse_color(style.get("color") or T("color.text.secondary", self.chart))
         # 轴线
         p.setPen(QPen(c_line, line_w))
         p.drawLine(self._node_pts[0], self._node_pts[-1])
@@ -232,7 +232,7 @@ class ChartTimeline(QObject):
             p.setBrush(
                 primary
                 if cur
-                else parse_color(control.get("color") or T("color.bg.elevated"))
+                else parse_color(control.get("color") or T("color.bg.elevated", self.chart))
             )
             r = cp_size / 2 if cur and cp_size else (5.0 if cur else 4.0)
             p.drawEllipse(pt, r, r)
@@ -245,14 +245,14 @@ class ChartTimeline(QObject):
                 )
         # 播放 / 暂停按钮
         ctrl_border = parse_color(
-            control.get("borderColor") or T("color.border.strong")
+            control.get("borderColor") or T("color.border.strong", self.chart)
         )
         p.setPen(QPen(ctrl_border, _to_float(control.get("borderWidth"), 1.2)))
-        p.setBrush(parse_color(control.get("color") or T("color.bg.elevated")))
+        p.setBrush(parse_color(control.get("color") or T("color.bg.elevated", self.chart)))
         p.drawEllipse(self._play_rect)
         c = self._play_rect.center()
         p.setPen(Qt.PenStyle.NoPen)
-        p.setBrush(QColor(T("color.text.secondary")))
+        p.setBrush(QColor(T("color.text.secondary", self.chart)))
         if self._playing:
             # 暂停：双竖条
             p.drawRect(QRectF(c.x() - 5, c.y() - 5, 3.4, 10))

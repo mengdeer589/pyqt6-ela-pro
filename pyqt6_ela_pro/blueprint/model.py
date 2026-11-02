@@ -16,6 +16,7 @@ from __future__ import annotations
 import logging
 import math
 import uuid
+import weakref
 from dataclasses import dataclass
 from enum import Enum
 
@@ -144,13 +145,18 @@ class ElaPin:
 
 @dataclass
 class ElaEdge:
-    """一条连线：``from_*`` 为输出端，``to_*`` 为输入端。"""
+    """一条连线：``from_*`` 为输出端，``to_*`` 为输入端。
+
+    ``label`` 是连线标签（支持 ``\n`` 多行），绘制在贝塞尔曲线中点；
+    用 ``graph.set_edge_label(edge, text)`` 修改（会发 ``edge_changed``）。
+    """
 
     id: str
     from_node: str
     from_pin: str
     to_node: str
     to_pin: str
+    label: str = ""
 
     def to_dict(self) -> dict:
         return {
@@ -159,6 +165,7 @@ class ElaEdge:
             "from_pin": self.from_pin,
             "to_node": self.to_node,
             "to_pin": self.to_pin,
+            "label": self.label,
         }
 
     @classmethod
@@ -179,7 +186,15 @@ class ElaEdge:
             to_pin = str(data["to_pin"])
         except KeyError as exc:
             raise ValueError(f"连线定义缺少字段 {exc.args[0]!r}: {data!r}") from None
-        return cls(edge_id, from_node, from_pin, to_node, to_pin)
+        label = data.get("label", "")
+        return cls(
+            edge_id,
+            from_node,
+            from_pin,
+            to_node,
+            to_pin,
+            "" if label is None else str(label),
+        )
 
 
 def _finite(value, default: float = 0.0) -> float:
@@ -222,7 +237,8 @@ class ElaBlueprintNode(QObject):
     :param node_id: 可选固定 id，缺省自动生成
 
     常用属性：``pos`` / ``size``、``inputs`` / ``outputs``、``properties``、
-    ``status``（idle/running/done/error）、``elapsed_ms``、``accent``。
+    ``status``（idle/running/done/error）、``elapsed_ms``、``progress``、
+    ``accent``。
 
     注意：``title`` / ``properties`` 为裸属性，**直接赋值不发射
     ``changed``**；请使用 ``set_title()`` / ``set_properties()``。
@@ -230,8 +246,12 @@ class ElaBlueprintNode(QObject):
 
     #: 节点任意数据变化（标题 / 引脚 / 属性 / 位置）
     changed = pyqtSignal()
+    #: 属性字典被整体替换（供节点体重建控件；交互控件直接改 properties 时不发）
+    properties_changed = pyqtSignal()
     #: 运行状态变化，参数为新状态字符串
     status_changed = pyqtSignal(str)
+    #: 进度变化，参数为 ``float``（0–1）或 ``None``（见 ``set_progress``）
+    progress_changed = pyqtSignal(object)
 
     def __init__(self, type_name: str, title: str, node_id: str = None, parent=None):
         super().__init__(parent)
@@ -246,7 +266,10 @@ class ElaBlueprintNode(QObject):
         self.accent = None
         self._status = "idle"
         self._elapsed_ms = None
+        self._progress = None
         self.error_message = ""
+        # 所属图（add_node 时写入弱引用；用于 node.connect(...)，不延长图的生命）
+        self._graph_ref = None
 
     # -- 状态 ------------------------------------------------------------
     @property
@@ -274,6 +297,27 @@ class ElaBlueprintNode(QObject):
         self._elapsed_ms = None if value is None else float(value)
         self.changed.emit()
 
+    @property
+    def progress(self):
+        """节点进度（0.0–1.0），未开始 / 不适用时为 ``None``。"""
+        return self._progress
+
+    def set_progress(self, value) -> None:
+        """设置节点进度（``None`` 或 0–1，越界夹紧、非有限归 0）。
+
+        只发 ``progress_changed``（节点体内进度条重绘），**不走** ``changed``
+        —— 后者会触发 ``_relayout``（重算宽度 / 重排子控件），训练演示里进度
+        每几十毫秒推进一次，每帧全量布局完全不值。
+        """
+        if value is None:
+            progress = None
+        else:
+            progress = max(0.0, min(1.0, _finite(value, 0.0)))
+        if progress == self._progress:
+            return
+        self._progress = progress
+        self.progress_changed.emit(progress)
+
     # -- 标题 / 属性 ------------------------------------------------------
     def set_title(self, title: str) -> None:
         """设置节点标题并发射 ``changed``（画布据此重排标题栏宽度等）。"""
@@ -281,8 +325,9 @@ class ElaBlueprintNode(QObject):
         self.changed.emit()
 
     def set_properties(self, properties: dict) -> None:
-        """整体替换属性字典并发射 ``changed``（节点体重建展示）。"""
+        """整体替换属性字典（``properties_changed`` 供节点体重建控件）。"""
         self.properties = dict(properties)
+        self.properties_changed.emit()
         self.changed.emit()
 
     # -- 引脚 ------------------------------------------------------------
@@ -326,6 +371,29 @@ class ElaBlueprintNode(QObject):
             if pin.id == pin_id:
                 return pin
         return None
+
+    def input(self, pin_id: str):
+        """按 id 返回输入引脚（找不到为 ``None``）。"""
+        return next((p for p in self.inputs if p.id == pin_id), None)
+
+    def output(self, pin_id: str):
+        """按 id 返回输出引脚（找不到为 ``None``）。"""
+        return next((p for p in self.outputs if p.id == pin_id), None)
+
+    def connect(self, target, from_pin: str, to_pin: str, label: str = "") -> "ElaEdge":
+        """把本节点的输出引脚连到 ``target`` 的输入引脚，返回 ``ElaEdge``。
+
+        ``target`` 接受 ``ElaBlueprintNode`` 或 id；``label`` 是连线中点显示
+        的标签（支持 ``\n`` 多行）。节点必须已经加入图
+        （``graph.add_node`` / ``canvas.create_node``）；非法连接抛
+        ``ValueError``（原因见 ``ElaBlueprintGraph.validate_edge``）。
+        """
+        graph = self._graph_ref() if self._graph_ref is not None else None
+        if graph is None:
+            raise RuntimeError(
+                "节点尚未加入图：先 graph.add_node(node) 或 canvas.create_node(...)"
+            )
+        return graph.add_edge(self, from_pin, target, to_pin, label=label)
 
     # -- 序列化 ----------------------------------------------------------
     def to_dict(self) -> dict:
@@ -383,18 +451,37 @@ class ElaBlueprintNode(QObject):
         return node
 
 
+def _node_id(value) -> str:
+    """把 ``ElaBlueprintNode`` / 字符串 id 归一成节点 id。"""
+    return value.id if isinstance(value, ElaBlueprintNode) else str(value)
+
+
+def _pin_id(value) -> str:
+    """把 ``ElaPin`` / 字符串 id 归一成引脚 id。"""
+    return value.id if isinstance(value, ElaPin) else str(value)
+
+
 class ElaBlueprintGraph(QObject):
     """蓝图图容器：节点与边的增删查、连线校验、序列化。
 
-    ``add_edge`` 校验规则（任一不满足返回 ``None``，不产生副作用）：
-    1. 节点与引脚必须存在；2. 方向必须相反；3. 数据类型兼容（any 通配）；
+    ``add_edge`` 校验规则（不满足抛 ``ValueError``，原因可读；不产生副作用）：
+    1. 节点与引脚必须存在；2. 必须是输出 → 输入；3. 数据类型兼容（any 通配）；
     4. 禁止自连与完全重复；5. 输入引脚非 multi 时保持单连接（旧边自动移除）。
+
+    节点 / 引脚既可以传对象，也可以传 id：
+
+    .. code-block:: python
+
+        graph.add_edge(encoder, "hidden", head, "hidden")
+        # 等价于 graph.add_edge(encoder.id, "hidden", head.id, "hidden")
     """
 
     node_added = pyqtSignal(object)
     node_removed = pyqtSignal(str)
     edge_added = pyqtSignal(object)
     edge_removed = pyqtSignal(str)
+    #: 连线数据变化（当前只有标签）；画布据此失效边部件缓存并局部重绘
+    edge_changed = pyqtSignal(object)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -403,22 +490,28 @@ class ElaBlueprintGraph(QObject):
 
     # -- 节点 ------------------------------------------------------------
     def add_node(self, node: ElaBlueprintNode) -> ElaBlueprintNode:
-        """加入节点（id 冲突时抛 ``ValueError``），发射 ``node_added``。"""
+        """加入节点（id 冲突 / 已属于别的图时抛 ``ValueError``），发射 ``node_added``。"""
         if node.id in self._nodes:
             raise ValueError(f"节点 id 冲突: {node.id}")
+        owner = node._graph_ref() if node._graph_ref is not None else None
+        if owner is not None and owner is not self:
+            raise ValueError("节点已属于另一个图，先从原图移除")
+        node._graph_ref = weakref.ref(self)
         self._nodes[node.id] = node
         self.node_added.emit(node)
         return node
 
-    def remove_node(self, node_id: str) -> bool:
-        """移除节点并连带移除其全部边，发射相应信号；不存在返回 ``False``。"""
-        node = self._nodes.pop(node_id, None)
-        if node is None:
+    def remove_node(self, node) -> bool:
+        """移除节点（对象或 id）并连带移除其全部边；不存在返回 ``False``。"""
+        nid = _node_id(node)
+        removed = self._nodes.pop(nid, None)
+        if removed is None:
             return False
+        removed._graph_ref = None
         for edge in list(self._edges.values()):
-            if edge.from_node == node_id or edge.to_node == node_id:
+            if edge.from_node == nid or edge.to_node == nid:
                 self.remove_edge(edge.id)
-        self.node_removed.emit(node_id)
+        self.node_removed.emit(nid)
         return True
 
     def node(self, node_id: str):
@@ -432,57 +525,104 @@ class ElaBlueprintGraph(QObject):
     # -- 边 --------------------------------------------------------------
     def add_edge(
         self,
-        from_node: str,
-        from_pin: str,
-        to_node: str,
-        to_pin: str,
+        from_node,
+        from_pin,
+        to_node,
+        to_pin,
         edge_id: str = None,
-    ):
-        """校验并建立连线，成功返回 ``ElaEdge``，失败返回 ``None``。
+        label: str = "",
+    ) -> ElaEdge:
+        """校验并建立连线，返回 ``ElaEdge``；非法连接抛 ``ValueError``（原因可读）。
+
+        ``from_node`` / ``to_node`` 接受 ``ElaBlueprintNode`` 或字符串 id，
+        ``from_pin`` / ``to_pin`` 接受 ``ElaPin`` 或字符串 id。
+        ``label`` 是连线中点显示的标签（支持 ``\n`` 多行）。
 
         ``edge_id`` 仅供 ``from_dict`` 往返时保留原 id（不给则新生成）。
         **它不跳过任何校验**（方向 / 类型 / 存在性 / 单连接替换都要过）；
-        与既有边 id 冲突同样拒绝，不允许「同 id 覆盖」这种静默丢边的
-        行为（被覆盖的旧边不会发 ``edge_removed``，画布会把旧部件泄漏在
-        ``_edge_widgets`` 之外）。
+        与既有边 id 冲突同样拒绝，不允许「同 id 覆盖」这种静默丢边。
         """
-        n1, n2 = self._nodes.get(from_node), self._nodes.get(to_node)
-        if n1 is None or n2 is None:
-            return None
+        n1, p_out, n2, p_in = self._resolve_edge(from_node, from_pin, to_node, to_pin)
         edge_id = str(edge_id) if edge_id else None
         if edge_id is not None and edge_id in self._edges:
-            return None  # id 冲突：拒绝而不是覆盖
-        p_out = next((p for p in n1.outputs if p.id == from_pin), None)
-        p_in = next((p for p in n2.inputs if p.id == to_pin), None)
-        if p_out is None or p_in is None:
-            return None
-        if from_node == to_node:
-            return None
-        if not types_compatible(p_out.data_type, p_in.data_type):
-            return None
-        for edge in self._edges.values():
-            if (
-                edge.from_node == from_node
-                and edge.from_pin == from_pin
-                and edge.to_node == to_node
-                and edge.to_pin == to_pin
-            ):
-                return None  # 完全重复
+            raise ValueError(f"边 id 冲突: {edge_id!r}")
         if not p_in.multi:
             for edge in list(self._edges.values()):
-                if edge.to_node == to_node and edge.to_pin == to_pin:
+                if edge.to_node == n2.id and edge.to_pin == p_in.id:
                     self.remove_edge(edge.id)  # 单连接替换
-        edge = ElaEdge(edge_id or _new_id(), from_node, from_pin, to_node, to_pin)
+        edge = ElaEdge(
+            edge_id or _new_id(),
+            n1.id,
+            p_out.id,
+            n2.id,
+            p_in.id,
+            "" if label is None else str(label),
+        )
         self._edges[edge.id] = edge
         self.edge_added.emit(edge)
         return edge
 
-    def remove_edge(self, edge_id: str) -> bool:
-        """移除边，发射 ``edge_removed``；不存在返回 ``False``。"""
-        edge = self._edges.pop(edge_id, None)
-        if edge is None:
+    def set_edge_label(self, edge, text: str) -> bool:
+        """设置连线标签（``edge`` 接受 ``ElaEdge`` 或 id；``text`` 支持多行）。
+
+        发 ``edge_changed``，画布自动失效标签缓存并局部重绘。边不存在 /
+        标签没变化返回 ``False``。
+        """
+        eid = edge.id if isinstance(edge, ElaEdge) else str(edge)
+        edge_obj = self._edges.get(eid)
+        if edge_obj is None:
             return False
-        self.edge_removed.emit(edge_id)
+        label = "" if text is None else str(text)
+        if edge_obj.label == label:
+            return False
+        edge_obj.label = label
+        self.edge_changed.emit(edge_obj)
+        return True
+
+    def validate_edge(self, from_node, from_pin, to_node, to_pin) -> str | None:
+        """校验一条连线：可连接返回 ``None``，否则返回人类可读的原因。"""
+        try:
+            self._resolve_edge(from_node, from_pin, to_node, to_pin)
+        except ValueError as exc:
+            return str(exc)
+        return None
+
+    def _resolve_edge(self, from_node, from_pin, to_node, to_pin):
+        """解析并校验连线端点；失败抛 ``ValueError``（供 add_edge / validate_edge）。"""
+        from_id, to_id = _node_id(from_node), _node_id(to_node)
+        n1 = self._nodes.get(from_id)
+        n2 = self._nodes.get(to_id)
+        if n1 is None:
+            raise ValueError(f"起点节点不存在: {from_id!r}")
+        if n2 is None:
+            raise ValueError(f"终点节点不存在: {to_id!r}")
+        if n1 is n2:
+            raise ValueError("不能把节点连到自身")
+        p_out = n1.output(_pin_id(from_pin))
+        p_in = n2.input(_pin_id(to_pin))
+        if p_out is None:
+            raise ValueError(f"起点没有输出引脚 {_pin_id(from_pin)!r}")
+        if p_in is None:
+            raise ValueError(f"终点没有输入引脚 {_pin_id(to_pin)!r}")
+        if not types_compatible(p_out.data_type, p_in.data_type):
+            raise ValueError(f"类型不兼容: {p_out.data_type!r} → {p_in.data_type!r}")
+        for edge in self._edges.values():
+            if (
+                edge.from_node == n1.id
+                and edge.from_pin == p_out.id
+                and edge.to_node == n2.id
+                and edge.to_pin == p_in.id
+            ):
+                raise ValueError("这条连线已存在")
+        return n1, p_out, n2, p_in
+
+    def remove_edge(self, edge) -> bool:
+        """移除边（对象或 id），发射 ``edge_removed``；不存在返回 ``False``。"""
+        eid = edge.id if isinstance(edge, ElaEdge) else str(edge)
+        removed = self._edges.pop(eid, None)
+        if removed is None:
+            return False
+        self.edge_removed.emit(eid)
         return True
 
     def edge(self, edge_id: str):
@@ -493,12 +633,11 @@ class ElaBlueprintGraph(QObject):
         """全部边列表（插入序）。"""
         return list(self._edges.values())
 
-    def edges_of(self, node_id: str) -> list:
-        """与某节点相连的全部边（两端任一命中）。"""
+    def edges_of(self, node) -> list:
+        """与某节点（对象或 id）相连的全部边（两端任一命中）。"""
+        nid = _node_id(node)
         return [
-            e
-            for e in self._edges.values()
-            if e.from_node == node_id or e.to_node == node_id
+            e for e in self._edges.values() if e.from_node == nid or e.to_node == nid
         ]
 
     def clear(self) -> None:
@@ -519,6 +658,9 @@ class ElaBlueprintGraph(QObject):
     @classmethod
     def from_dict(cls, data: dict) -> "ElaBlueprintGraph":
         """由 ``to_dict`` 结果重建整张图（节点 / 边顺序保持）。
+
+        **重建即换对象**：返回的是全新的 ``ElaBlueprintNode``（id 保留），
+        旧引用不要再用于连接 / 执行。
 
         与 ``canvas.from_dict`` 同一条契约：**边必须走 ``add_edge()``**
         校验（方向 / 类型兼容 / 存在性 / 单连接替换 / id 冲突），不过的
@@ -544,15 +686,14 @@ class ElaBlueprintGraph(QObject):
             except (TypeError, ValueError, KeyError) as exc:
                 logger.warning("跳过非法连线 %r（%s）", ed, exc)
                 continue
-            added = graph.add_edge(
-                raw.from_node,
-                raw.from_pin,
-                raw.to_node,
-                raw.to_pin,
-                edge_id=raw.id,
-            )
-            if added is None:
-                logger.warning(
-                    "跳过非法连线 %r（引脚缺失 / 类型不兼容 / id 冲突）", raw.id
+            try:
+                graph.add_edge(
+                    raw.from_node,
+                    raw.from_pin,
+                    raw.to_node,
+                    raw.to_pin,
+                    edge_id=raw.id,
                 )
+            except ValueError as exc:
+                logger.warning("跳过非法连线 %r（%s）", raw.id, exc)
         return graph

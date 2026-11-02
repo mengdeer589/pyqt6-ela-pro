@@ -12,8 +12,9 @@ from PyQt6.QtGui import (
     QPolygonF,
 )
 
+from ..._colors import text_on_color
 from .._tokens import T
-from .._utils import ON_FILL_WHITE, clamp as _clamp
+from .._utils import clamp as _clamp
 from .._utils import to_float as _to_float
 from .._utils import parse_color
 from ..axes import formatValue
@@ -181,14 +182,21 @@ class FunnelSeriesRenderer(SeriesRenderer):
         p.setFont(font)
         fm = QFontMetricsF(font)
         total = sum(layer["value"] for layer in self._layers) or 1.0
-        border = QColor(T("color.bg.base"))
+        border = QColor(T("color.bg.base", self.chart))
         c_text = self.labelColor()
+        explicit_label = self.labelTextStyle().get("color")
+        explicit_label = (
+            parse_color(explicit_label)
+            if isinstance(explicit_label, str) and explicit_label
+            else None
+        )
         hover = self.chart.hoverInfo()
         hovered = (
             hover[1].get("dataIndex")
             if hover is not None and hover[0] is self
             else None
         )
+        legend_hover = self.chart._legend_hover
         # 入场动画：自上而下逐层显现 + 宽度展开
         n = len(self._layers)
         for i, layer in enumerate(self._layers):
@@ -217,6 +225,9 @@ class FunnelSeriesRenderer(SeriesRenderer):
                 elif self.blursOtherItems():
                     blur = self.blurOpacity()
                     alpha *= blur if blur is not None else 0.35
+            elif legend_hover is not None and layer["name"] == legend_hover:
+                emphasis = self.emphasisColor(layer["index"])
+                color = emphasis if emphasis is not None else color.lighter(112)
             if alpha < 1.0:
                 color.setAlphaF(color.alphaF() * alpha)
             border_color, border_w = layer.get("border", (None, 0))
@@ -235,7 +246,7 @@ class FunnelSeriesRenderer(SeriesRenderer):
             cy = layer["cy"]
             left, right = layer["left"], layer["right"]
             if pos in ("inside", "insideLeft", "insideRight"):
-                p.setPen(QColor(ON_FILL_WHITE))
+                p.setPen(explicit_label or text_on_color(parse_color(layer["color"])))
                 if pos == "inside":
                     align = Qt.AlignmentFlag.AlignCenter
                     rect = QRectF(left, cy - fm.height() / 2, right - left, fm.height())
@@ -317,6 +328,7 @@ class FunnelSeriesRenderer(SeriesRenderer):
                 return {
                     "name": layer["name"],
                     "value": layer["value"],
+                    "color": layer.get("color"),
                     "series": self.name,
                     "dataIndex": layer["index"],
                 }

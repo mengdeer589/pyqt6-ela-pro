@@ -8,11 +8,13 @@ import math
 from PyQt6.QtCore import (
     QPointF,
     QTimer,
+    Qt,
     pyqtSignal,
 )
 from PyQt6.QtWidgets import QWidget
 
 from ..._internal import connect_theme_signal, disconnect_theme
+from .._theme import defaultChartTheme, theme_exists
 from .._utils import warn_key, warn_once
 from ..exporter import ChartExporter
 from ..interaction import ChartInteraction
@@ -43,10 +45,12 @@ class ElaChartWidget(
     _ChartQueryMixin,
     QWidget,
 ):
-    """类 ECharts 图表控件（Ela 主题感知，纯 QPainter 自绘）。
+    """类 ECharts 图表控件（Ela 主题 + 图表配色主题感知，纯 QPainter 自绘）。
 
     ``setOption`` 默认按 ECharts 语义合并；``resize`` / ``dispatchAction`` /
     ``on``&``off`` 等实例 API 与 ECharts 对齐。布局带缓存，动画期每帧重排。
+    配色用 ``setChartTheme`` 切换（``ela`` / ``echarts`` / ``matlab`` / ``plotly``
+    / ``ggplot2`` / ``seaborn`` / ``tableau``，或 ``registerChartTheme`` 自定义）。
     """
 
     #: 图例切换系列显隐：(系列名, 是否可见)
@@ -65,6 +69,8 @@ class ElaChartWidget(
     annotationEditRequested = pyqtSignal(dict)
     #: 标注标签提交：{seriesName, componentType, dataIndex, text}
     annotationEdited = pyqtSignal(dict)
+    #: 拖动可拖动标注（``annotations``）结束：{index, id, name, componentType, seriesName, text, x, y, ax, ay}
+    annotationDragged = pyqtSignal(dict)
     #: 动画播放完毕（ECharts ``finished`` 事件）
     finished = pyqtSignal()
 
@@ -91,6 +97,8 @@ class ElaChartWidget(
         self.setMouseTracking(True)
         self.setMinimumSize(200, 150)
         self._option = {}
+        #: 图表配色主题名（``setChartTheme``；默认取 ``defaultChartTheme()``）
+        self._chart_theme = defaultChartTheme()
         #: 全图字体族（``setFontFamily``；**单个族名**，空 = 系统默认）
         self._font_family = ""
         self._series = []  # [SeriesRenderer]
@@ -131,8 +139,12 @@ class ElaChartWidget(
         self._double_click_reset = True
         #: 图例悬停高亮的系列名（None = 无）
         self._legend_hover = None
-        #: 本次按下的 (位置, 是否被拖拽组件吞掉)——松开时判「点击 vs 拖拽」
+        #: 本次按下的 (位置, 是否被拖拽组件吞掉, 吞掉按下的组件)——松开时判「点击 vs 拖拽」
         self._press_ctx = None
+        #: 最近一次被鼠标钩子消费的组件（``consumesClick`` 用来吞掉原地点击）
+        self._last_hook_owner = None
+        #: 本次按下的鼠标键（标注只认左键拖动）
+        self._press_button = Qt.MouseButton.NoButton
         #: 标注标签行内编辑器与当前编辑目标（双击 markPoint/markLine 标签）
         self._annotation_editor = None
         self._annotation_target = None
@@ -191,6 +203,35 @@ class ElaChartWidget(
     def deleteLater(self) -> None:
         self._disconnect_theme()
         super().deleteLater()
+
+    # ------------------------------------------------------------ 配色主题
+    def setChartTheme(self, name) -> bool:
+        """切换图表配色主题（内置 / 已注册），立即失效缓存并重绘。
+
+        ``None`` / ``""`` 恢复全局默认主题；未知名称返回 ``False`` 且不改动。
+        主题只提供默认色：option 里的显式颜色（``color`` / ``series.color`` /
+        ``itemStyle`` 等）仍然优先。
+        """
+        if name is None or name == "":
+            self._chart_theme = defaultChartTheme()
+        elif not isinstance(name, str) or not theme_exists(name):
+            return False
+        else:
+            self._chart_theme = name
+        self._invalidate_theme_caches()
+        return True
+
+    def chartTheme(self) -> str:
+        """当前图表主题名（默认取 :func:`defaultChartTheme`）。"""
+        return self._chart_theme
+
+    def _invalidate_theme_caches(self) -> None:
+        """主题 / 明暗模式变化：布局、调色板与系列层位图都必须重算。"""
+        self._layout_key = None
+        self._palette_cache = None
+        self._series_pixmap_cache = None
+        self._series_pixmap_key = None
+        self.update()
 
     # ---------------------------------------------------------------- API
     #: ECharts 事件名 → Qt 信号（``on``/``off`` 的转发源）
@@ -507,6 +548,13 @@ class ElaChartWidget(
     def _seriesVisible(self, name) -> bool:
         return bool(self._series_state.get(str(name), True))
 
+    def _legendItemVisible(self, name) -> bool:
+        """图例条目是否可见：系列名走系列状态，饼 / 漏斗的数据项名走 item 状态。"""
+        key = str(name)
+        if any(r.name == key for r in self._series):
+            return self._seriesVisible(key)
+        return bool(self._item_state.get(key, True))
+
     def _legendSelectToggle(self, name: str) -> None:
         """图例点击：切换单个系列（selectedMode=single 时互斥）。
 
@@ -569,6 +617,7 @@ class ElaChartWidget(
         "brush",
         "timeline",
         "toolbox",
+        "annotations",
     )
 
     def setInteractive(self, enabled: bool) -> None:
@@ -595,7 +644,8 @@ class ElaChartWidget(
 
     def setInteractionEnabled(self, feature: str, enabled: bool) -> None:
         """逐功能开关（与总开关取与）；``feature`` 取 ``"tooltip"`` / ``"legend"``
-        / ``"dataZoom"`` / ``"brush"`` / ``"timeline"`` / ``"toolbox"``。
+        / ``"dataZoom"`` / ``"brush"`` / ``"timeline"`` / ``"toolbox"`` /
+        ``"annotations"``。
         """
         key = str(feature)
         if key not in self.INTERACTION_FEATURES:
@@ -861,14 +911,22 @@ class ElaChartWidget(
         return bool(self._feature_flags.get(str(feature), True))
 
     def _interactive_components(self) -> list:
-        """过滤后的组件列表（交互被关闭的组件不接收鼠标 / 滚轮事件）。"""
+        """过滤后的组件列表（交互被关闭的组件不接收鼠标 / 滚轮事件）。
+
+        ``annotations`` 排在最前：它们画在其它组件之上，命中也要优先，否则
+        压在 markPoint / graphic 上的标注会拖不动。
+        """
         result = []
+        annotations = []
         for comp in self._components:
             key = str(getattr(comp, "optionKey", ""))
             if key and not self.isInteractionEnabled(key):
                 continue
-            result.append(comp)
-        return result
+            if key == "annotations":
+                annotations.append(comp)
+            else:
+                result.append(comp)
+        return annotations + result
 
     def addComponent(self, comp) -> None:
         """挂接宿主自定义组件，跨 ``setOption`` 存活（``_rebuild`` 不会重建 / dispose 它）。
@@ -954,8 +1012,7 @@ class ElaChartWidget(
         # 配色经 T() 实时取；主题可能影响字体度量，保守失效布局缓存。
         if self._annotation_editor is not None and self._annotation_editor.isVisible():
             self._hide_annotation_editor()
-        self._layout_key = None
-        self.update()
+        self._invalidate_theme_caches()
 
     # -- 鼠标：legend 点击 / tooltip 跟随 / 组件钩子 ------------------------
     def _interactive_renderers(self) -> list:
@@ -987,13 +1044,20 @@ class ElaChartWidget(
             return False
 
     def _dispatch_hook(self, hook_name: str, *args) -> bool:
-        """按「组件优先、系列其次」的顺序分发钩子，任一消费则返回 True。"""
+        """按「组件优先、系列其次」的顺序分发钩子，任一消费则返回 True。
+
+        消费者记在 ``_last_hook_owner``：``consumesClick=True`` 的组件（标注）
+        在按下→原地松开时不能被当成数据点击。
+        """
+        self._last_hook_owner = None
         for comp in self._interactive_components():
             if self._call_hook(comp, hook_name, *args):
+                self._last_hook_owner = comp
                 return True
         if not self._interactive:
             return False
         for renderer in self._interactive_renderers():
             if self._call_hook(renderer, hook_name, *args):
+                self._last_hook_owner = renderer
                 return True
         return False

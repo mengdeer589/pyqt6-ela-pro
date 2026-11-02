@@ -5,6 +5,7 @@ from __future__ import annotations
 from PyQt6.QtCore import QRectF
 from PyQt6ElaWidgetTools import eTheme
 
+from ._theme import chart_theme_key
 from ._utils import warn_key, warn_once
 
 #: 底部组件条带顺序（从外到内，最外层贴近画布底边）
@@ -13,7 +14,7 @@ BOTTOM_BAND_ORDER = ("timeline", "dataZoom", "visualMap")
 
 def layout_cache_key(chart) -> tuple:
     """布局缓存键：option 版本 / 视口尺寸 / 主题 / dataZoom 窗口状态。"""
-    theme = eTheme.getThemeMode()
+    theme = (eTheme.getThemeMode(), chart_theme_key(chart))
     zoom = tuple(
         (getattr(component, "start", 0.0), getattr(component, "end", 100.0))
         for component in chart._components

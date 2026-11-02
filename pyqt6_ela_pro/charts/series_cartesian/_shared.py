@@ -8,15 +8,13 @@ import math
 from PyQt6.QtCore import QPointF, QRectF, Qt
 from PyQt6.QtGui import QTransform
 from PyQt6.QtGui import (
-    QColor,
     QPainter,
     QPainterPath,
 )
 
-from .._tokens import T
 from .. import _downsample as _ds
 from .._symbol import drawSymbol
-from .._utils import parse_color, to_float as _to_float
+from .._utils import to_float as _to_float
 from ..axes import formatValue
 
 
@@ -125,26 +123,6 @@ def _win_span(win, data_len: int):
     if size == 0:
         return -1, -1, 0
     return int(win[0]), int(win[-1]), size
-
-
-def _ramp_color(colors, t):
-    """多色带插值：colors 为颜色列表，t∈[0,1] → QColor。"""
-    cols = [parse_color(c) for c in (colors or []) if c]
-    if not cols:
-        return QColor(T("color.primary"))
-    if len(cols) == 1:
-        return cols[0]
-    t = max(0.0, min(1.0, float(t)))
-    pos = t * (len(cols) - 1)
-    i = min(int(pos), len(cols) - 2)
-    f = pos - i
-    a, b = cols[i], cols[i + 1]
-    return QColor(
-        int(_lerp(a.red(), b.red(), f)),
-        int(_lerp(a.green(), b.green(), f)),
-        int(_lerp(a.blue(), b.blue(), f)),
-        int(_lerp(a.alpha(), b.alpha(), f)),
-    )
 
 
 def _smooth_path(points, smooth=0.5):

@@ -135,7 +135,7 @@ class GaugeSeriesRenderer(SeriesRenderer):
                 a1 = start + (end - start) * prev_frac
                 self._arc(p, a1, end, r_arc, width, last_color)
         else:
-            self._arc(p, start, end, r_arc, width, _text_color("color.border"))
+            self._arc(p, start, end, r_arc, width, _text_color("color.border", self.chart))
         # 进度弧
         prog_opt = dict(self.opt.get("progress") or {})
         if bool(prog_opt.get("show", False)):
@@ -167,7 +167,7 @@ class GaugeSeriesRenderer(SeriesRenderer):
         anchor_opt = dict(self.opt.get("anchor") or {})
         if bool(anchor_opt.get("show", True)):
             size = _to_float(anchor_opt.get("size"), 10.0)
-            p.setPen(QPen(QColor(T("color.bg.elevated")), 2))
+            p.setPen(QPen(QColor(T("color.bg.elevated", self.chart)), 2))
             p.setBrush(self.color())
             p.drawEllipse(self._center, size / 2, size / 2)
         # 中央数值 + 名称
@@ -175,12 +175,7 @@ class GaugeSeriesRenderer(SeriesRenderer):
         fm_h = 0.0
         if bool(detail_opt.get("show", True)):
             detail_style = self.detailStyle()
-            font = chartFont(
-                detail_style.get("fontSize") or T("font.title.md"),
-                text_weight(detail_style.get("fontWeight"), T("font.weight.semibold")),
-                detail_style.get("fontFamily"),
-                text_italic(detail_style.get("fontStyle")),
-            )
+            font = self._detail_font(detail_style, r)
             p.setFont(font)
             fm = QFontMetricsF(font)
             fm_h = fm.height()
@@ -188,7 +183,7 @@ class GaugeSeriesRenderer(SeriesRenderer):
                 parse_color(detail_style.get("color"))
                 if isinstance(detail_style.get("color"), str)
                 and detail_style.get("color")
-                else _text_color("color.text.primary")
+                else _text_color("color.text.primary", self.chart)
             )
             p.drawText(
                 QRectF(
@@ -211,7 +206,7 @@ class GaugeSeriesRenderer(SeriesRenderer):
                 parse_color(title_style.get("color"))
                 if isinstance(title_style.get("color"), str)
                 and title_style.get("color")
-                else _text_color("color.text.secondary")
+                else _text_color("color.text.secondary", self.chart)
             )
             p.drawText(
                 QRectF(
@@ -228,6 +223,21 @@ class GaugeSeriesRenderer(SeriesRenderer):
     def detailStyle(self) -> dict:
         """中央数值样式（``detail`` 的 fontSize / fontWeight / color）。"""
         return merged_text_style(self.chart, self.opt.get("detail"))
+
+    def _detail_font(self, detail_style: dict, radius: float):
+        """中央数值字体：显式 fontSize 优先，否则随表盘半径自适应。"""
+        px = _to_float(detail_style.get("fontSize"), None)
+        if px is None:
+            label_px = _to_float(
+                self.labelTextStyle().get("fontSize"), T("font.xs")
+            )
+            px = _clamp(max(label_px + 2.0, radius * 0.32), 12.0, 22.0)
+        return chartFont(
+            px,
+            text_weight(detail_style.get("fontWeight"), T("font.weight.semibold")),
+            detail_style.get("fontFamily"),
+            text_italic(detail_style.get("fontStyle")),
+        )
 
     def titleStyle(self) -> dict:
         """名称样式（``title`` 的 fontSize / fontWeight / color）。"""
@@ -261,4 +271,9 @@ class GaugeSeriesRenderer(SeriesRenderer):
             if rel > (end - start) + 1e-6:
                 return None
         name = self._entries[0][0] if self._entries else self.name
-        return {"name": name, "value": self._value, "series": self.name}
+        return {
+            "name": name,
+            "value": self._value,
+            "color": self.color(),
+            "series": self.name,
+        }

@@ -279,19 +279,19 @@ class Legend:
         style = self.textStyle()
         iw, ih = self.itemWidth(), self.itemHeight()
         for (name, fallback), r in zip(self._page_items, self._item_rects):
-            enabled = self.chart._seriesVisible(name)
+            enabled = self.chart._legendItemVisible(name)
             live = self._item_color(name) if enabled else None
             swatch = parse_color(live) if live is not None else parse_color(fallback)
             if not enabled:
-                swatch = QColor(T("color.text.disabled"))
+                swatch = QColor(T("color.text.disabled", self.chart))
             text_c = parse_color(
-                style.get("color") or T("color.text.primary")
+                style.get("color") or T("color.text.primary", self.chart)
                 if enabled
-                else T("color.text.disabled")
+                else T("color.text.disabled", self.chart)
             )
             # 悬停高亮：该条目文字转强调色（对齐 Plotly 图例 hover）
             if enabled and self.chart._legend_hover == name:
-                text_c = QColor(T("color.primary"))
+                text_c = QColor(T("color.primary", self.chart))
             p.setPen(Qt.PenStyle.NoPen)
             p.setBrush(swatch)
             box = QRectF(r.left(), r.center().y() - ih / 2, iw, ih)
@@ -303,7 +303,7 @@ class Legend:
                 name,
             )
         if self._paginate and len(self._page_rects) == 2:
-            p.setPen(QColor(T("color.text.secondary")))
+            p.setPen(QColor(T("color.text.secondary", self.chart)))
             for rect, glyph in zip(self._page_rects, ("‹", "›")):
                 p.drawText(rect, Qt.AlignmentFlag.AlignCenter, glyph)
             p.setFont(

@@ -318,6 +318,57 @@ _PEN_STYLES = {
 }
 
 
+def _matrix_shape(data):
+    """2D 矩阵 / 3D RGB(A) 数据的 ``(rows, cols)``；非法 / 锯齿形状返回 ``None``。"""
+    try:
+        rows = len(data)
+    except TypeError:
+        return None
+    if rows <= 0:
+        return None
+    try:
+        first = data[0]
+        cols = len(first)
+    except (TypeError, IndexError, KeyError):
+        return None
+    if cols <= 0:
+        return None
+    for index in range(1, rows):
+        try:
+            if len(data[index]) != cols:
+                return None
+        except (TypeError, IndexError, KeyError):
+            return None
+    return rows, cols
+
+
+def _series_image_extent(series_opt: dict):
+    """``type="image"`` 系列的数据范围 ``(x0, x1, y0, y1)``；非法数据返回 ``None``。
+
+    默认按像素中心取 ``[-0.5, N-0.5, -0.5, M-0.5]``（matplotlib imshow 口径）。
+    """
+    shape = _matrix_shape(series_opt.get("data"))
+    if shape is None:
+        return None
+    rows, cols = shape
+    raw = series_opt.get("extent")
+    if isinstance(raw, (list, tuple)) and len(raw) == 4:
+        values = []
+        for item in raw:
+            try:
+                value = float(item)
+            except (TypeError, ValueError, OverflowError):
+                values = None
+                break
+            if not math.isfinite(value):
+                values = None
+                break
+            values.append(value)
+        if values and values[0] != values[1] and values[2] != values[3]:
+            return tuple(values)
+    return (-0.5, cols - 0.5, -0.5, rows - 0.5)
+
+
 def _axis_options(value) -> list:
     """``xAxis`` / ``yAxis`` → option dict 列表（单 dict 与数组两种写法）。"""
     if isinstance(value, dict):

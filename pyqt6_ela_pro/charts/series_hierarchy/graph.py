@@ -376,7 +376,7 @@ class GraphSeriesRenderer(SeriesRenderer):
         p.save()
         pts = self._animated_points(anim_t)
         # 边
-        p.setPen(QPen(with_alpha(_text_color("color.border.strong"), 160), 1.2))
+        p.setPen(QPen(with_alpha(_text_color("color.border.strong", self.chart), 160), 1.2))
         p.setBrush(Qt.BrushStyle.NoBrush)
         for s, t in self._edges:
             if 0 <= s < len(pts) and 0 <= t < len(pts):
@@ -384,7 +384,7 @@ class GraphSeriesRenderer(SeriesRenderer):
         # 节点 + 标签
         label_opt = dict(self.opt.get("label") or {})
         label_show = bool(label_opt.get("show", True))
-        c_label = self.labelColor(_text_color("color.text.primary"))
+        c_label = self.labelColor(_text_color("color.text.primary", self.chart))
         font = _label_font(self, label_opt)
         p.setFont(font)
         fm = QFontMetricsF(font)
@@ -417,7 +417,7 @@ class GraphSeriesRenderer(SeriesRenderer):
                     alpha *= blur if blur is not None else 0.4
             if alpha < 1.0:
                 color.setAlphaF(color.alphaF() * alpha)
-            p.setPen(QPen(QColor(T("color.bg.elevated")), 1.5))
+            p.setPen(QPen(QColor(T("color.bg.elevated", self.chart)), 1.5))
             p.setBrush(color)
             p.drawEllipse(pt, r, r)
             if label_show and nd["name"]:
@@ -446,9 +446,17 @@ class GraphSeriesRenderer(SeriesRenderer):
             return None
         i, nd = best
         value = nd.get("value")
+        style = nd.get("item_style") or {}
+        raw = style.get("color")
+        color = (
+            parse_color(raw)
+            if isinstance(raw, str) and raw
+            else parse_color(nd["color"])
+        )
         return {
             "name": nd["name"],
             "value": i if value is None else value,
+            "color": color,
             "series": self.name,
             "dataIndex": i,
         }

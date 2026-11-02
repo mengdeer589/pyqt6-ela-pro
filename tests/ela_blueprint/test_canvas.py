@@ -57,8 +57,8 @@ def send_to(widget, t, pos, button, buttons):
 
 
 class TestCreation:
-    def test_add_node_at_creates_widget(self, canvas):
-        node = canvas.add_node_at("start", QPointF(60, 120))
+    def test_create_node_creates_widget(self, canvas):
+        node = canvas.create_node("start", QPointF(60, 120))
         assert canvas.node_widget(node.id) is not None
         assert node.pos == QPointF(60, 120)
 
@@ -68,10 +68,23 @@ class TestCreation:
         canvas.add_node(node, QPointF(10, 10))
         assert canvas.graph.node(node.id) is node
 
+    def test_create_node_applies_title_before_body(self, canvas):
+        seen = {}
+
+        def body(node, container):
+            seen["title"] = node.title
+            seen["value"] = int(node.properties.get("n", 0))
+
+        register_node_type("titled", "默认标题", "演示", body_builder=body)
+        node = canvas.create_node("titled", (0, 0), {"n": 7}, title="覆盖标题")
+        assert node.title == "覆盖标题"
+        # 节点体构建时已经能读到覆盖后的标题与属性
+        assert seen == {"title": "覆盖标题", "value": 7}
+
     def test_owner_scope(self, qapp, clean_registry):
         register_node_type("only_plug", "仅插件", "插件", owner="plug")
         c = ElaBlueprintCanvas(owner="plug")
-        node = c.add_node_at("only_plug", QPointF(0, 0))
+        node = c.create_node("only_plug", QPointF(0, 0))
         assert node is not None
         c.deleteLater()
 
@@ -84,7 +97,7 @@ class TestCoordinates:
         assert canvas.view_to_scene(canvas.scene_to_view(pt)) == pt
 
     def test_pin_scene_pos(self, canvas):
-        node = canvas.add_node_at("start", QPointF(100, 100))
+        node = canvas.create_node("start", QPointF(100, 100))
         widget = canvas.node_widget(node.id)
         pin = node.outputs[0]
         expected = node.pos + widget.pin_logical_center(pin)
@@ -93,7 +106,7 @@ class TestCoordinates:
 
 class TestInteraction:
     def test_drag_node_moves_and_emits(self, canvas):
-        node = canvas.add_node_at("start", QPointF(100, 150))
+        node = canvas.create_node("start", QPointF(100, 150))
         widget = canvas.node_widget(node.id)
         moved = []
         canvas.node_moved.connect(lambda nid, pos: moved.append((nid, pos)))
@@ -123,8 +136,8 @@ class TestInteraction:
         assert moved and moved[0][0] == node.id
 
     def test_wire_drag_creates_edge(self, canvas):
-        n1 = canvas.add_node_at("start", QPointF(100, 150))
-        n2 = canvas.add_node_at("proc", QPointF(400, 150))
+        n1 = canvas.create_node("start", QPointF(100, 150))
+        n2 = canvas.create_node("proc", QPointF(400, 150))
         h1 = canvas.node_widget(n1.id).pin_widget("out", None)
         h2 = canvas.node_widget(n2.id).pin_widget("in", None)
         p1, p2 = h1.rect().center(), h2.rect().center()
@@ -136,7 +149,11 @@ class TestInteraction:
             Qt.MouseButton.LeftButton,
         )
         send_to(
-            h2, QEvent.Type.MouseMove, p2, Qt.MouseButton.NoButton, Qt.MouseButton.LeftButton
+            h2,
+            QEvent.Type.MouseMove,
+            p2,
+            Qt.MouseButton.NoButton,
+            Qt.MouseButton.LeftButton,
         )
         send_to(
             h2,
@@ -159,8 +176,8 @@ class TestInteraction:
             "输出",
             inputs=[{"id": "t", "data_type": "tensor"}],
         )
-        a = canvas.add_node_at("img_src", QPointF(100, 150))
-        b = canvas.add_node_at("tensor_sink", QPointF(400, 150))
+        a = canvas.create_node("img_src", QPointF(100, 150))
+        b = canvas.create_node("tensor_sink", QPointF(400, 150))
         h1 = canvas.node_widget(a.id).pin_widget("img", None)
         h2 = canvas.node_widget(b.id).pin_widget("t", None)
         p1, p2 = h1.rect().center(), h2.rect().center()
@@ -172,7 +189,11 @@ class TestInteraction:
             Qt.MouseButton.LeftButton,
         )
         send_to(
-            h2, QEvent.Type.MouseMove, p2, Qt.MouseButton.NoButton, Qt.MouseButton.LeftButton
+            h2,
+            QEvent.Type.MouseMove,
+            p2,
+            Qt.MouseButton.NoButton,
+            Qt.MouseButton.LeftButton,
         )
         send_to(
             h2,
@@ -189,8 +210,8 @@ class TestInteraction:
         QApplication.instance().processEvents()
 
     def test_box_select(self, canvas):
-        n1 = canvas.add_node_at("start", QPointF(100, 100))
-        canvas.add_node_at("proc", QPointF(500, 400))
+        n1 = canvas.create_node("start", QPointF(100, 100))
+        canvas.create_node("proc", QPointF(500, 400))
         vp = canvas._viewport
         # 框住 n1 的区域（视口坐标 = 场景坐标，zoom=1, offset=0）
         start, end = QPoint(80, 80), QPoint(320, 260)
@@ -215,11 +236,11 @@ class TestInteraction:
             Qt.MouseButton.LeftButton,
             Qt.MouseButton.NoButton,
         )
-        assert canvas.selected_nodes() == [n1.id]
+        assert canvas.selected_node_ids() == [n1.id]
 
     def test_delete_selection_removes_nodes_and_edges(self, canvas):
-        n1 = canvas.add_node_at("start", QPointF(100, 100))
-        n2 = canvas.add_node_at("proc", QPointF(400, 100))
+        n1 = canvas.create_node("start", QPointF(100, 100))
+        n2 = canvas.create_node("proc", QPointF(400, 100))
         canvas.graph.add_edge(n1.id, "out", n2.id, "in")
         canvas.select_nodes([n1.id])
         canvas.delete_selection()
@@ -255,7 +276,7 @@ class TestInteraction:
         assert canvas.zoom() == 0.25
 
     def test_duplicate_node(self, canvas):
-        n1 = canvas.add_node_at("start", QPointF(100, 100))
+        n1 = canvas.create_node("start", QPointF(100, 100))
         canvas._duplicate_node(n1.id)
         copies = [n for n in canvas.graph.nodes() if n.id != n1.id]
         assert len(copies) == 1
@@ -264,8 +285,8 @@ class TestInteraction:
 
 class TestSerialization:
     def test_roundtrip_preserves_graph_and_view(self, canvas):
-        n1 = canvas.add_node_at("start", QPointF(100, 100))
-        n2 = canvas.add_node_at("proc", QPointF(400, 100))
+        n1 = canvas.create_node("start", QPointF(100, 100))
+        n2 = canvas.create_node("proc", QPointF(400, 100))
         canvas.graph.add_edge(n1.id, "out", n2.id, "in")
         canvas.set_zoom(1.7)
         canvas._offset = QPointF(25.0, -40.0)
@@ -286,16 +307,16 @@ class TestSerialization:
         assert canvas._offset == QPointF(0.0, 0.0)
 
     def test_fit_view_with_nodes(self, canvas):
-        canvas.add_node_at("start", QPointF(100, 100))
-        canvas.add_node_at("end", QPointF(600, 400))
+        canvas.create_node("start", QPointF(100, 100))
+        canvas.create_node("end", QPointF(600, 400))
         canvas.fit_view()
         assert 0.25 <= canvas.zoom() <= 2.5
 
 
 class TestExecutionIntegration:
     def test_run_sequence_updates_status(self, canvas):
-        n1 = canvas.add_node_at("start", QPointF(100, 100))
-        n2 = canvas.add_node_at("proc", QPointF(400, 100))
+        n1 = canvas.create_node("start", QPointF(100, 100))
+        n2 = canvas.create_node("proc", QPointF(400, 100))
         canvas.graph.add_edge(n1.id, "out", n2.id, "in")
         ex = canvas.execution()
         ex.set_path([n1.id, n2.id])
@@ -311,8 +332,8 @@ class TestExecutionIntegration:
         assert ex.path_edge_ids() == []
 
     def test_finished_signal(self, canvas):
-        n1 = canvas.add_node_at("start", QPointF(100, 100))
-        n2 = canvas.add_node_at("proc", QPointF(400, 100))
+        n1 = canvas.create_node("start", QPointF(100, 100))
+        n2 = canvas.create_node("proc", QPointF(400, 100))
         ex = canvas.execution()
         done = []
         ex.finished.connect(lambda: done.append(True))
@@ -327,8 +348,8 @@ class TestExecutionIntegration:
 
 class TestRendering:
     def test_canvas_renders_with_nodes(self, canvas):
-        n1 = canvas.add_node_at("start", QPointF(100, 100))
-        n2 = canvas.add_node_at("proc", QPointF(400, 100))
+        n1 = canvas.create_node("start", QPointF(100, 100))
+        n2 = canvas.create_node("proc", QPointF(400, 100))
         canvas.graph.add_edge(n1.id, "out", n2.id, "in")
         canvas.select_nodes([n1.id])
         pm = canvas.grab()
@@ -336,13 +357,13 @@ class TestRendering:
         assert pm.width() == 900 and pm.height() == 600
 
     def test_node_widget_paints_content(self, canvas):
-        node = canvas.add_node_at("start", QPointF(100, 100))
+        node = canvas.create_node("start", QPointF(100, 100))
         widget = canvas.node_widget(node.id)
         pm = widget.grab()
         assert not pm.isNull()
 
     def test_theme_switch_no_crash(self, canvas):
-        canvas.add_node_at("start", QPointF(100, 100))
+        canvas.create_node("start", QPointF(100, 100))
         canvas._retheme()
         pm = canvas.grab()
         assert not pm.isNull()

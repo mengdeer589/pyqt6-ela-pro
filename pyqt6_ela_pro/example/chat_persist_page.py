@@ -33,7 +33,8 @@ from pyqt6_ela_pro.chat import (
 )
 
 from .base_page import ExamplePage
-from .chat_demo_kit import _ScriptPlayer, note, readonly_chat
+from ._step_player import _ScriptPlayer
+from .chat_demo_kit import note, readonly_chat
 
 #: 这一轮的提问（journal 只记**助手**那条，用户那条由宿主自己存）
 _PROMPT = "把这次压缩的判据写清楚"

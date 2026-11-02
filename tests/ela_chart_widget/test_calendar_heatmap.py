@@ -88,6 +88,13 @@ class TestCalendarCoord:
         assert coord.dateAt(rect.center()) == day
         assert coord.mapPoint(day) == rect.center()
 
+    def test_grid_rect_covers_cells(self):
+        coord = _coord()
+        coord.layout(QRectF(0, 0, 900, 200))
+        grid = coord.gridRect()
+        assert not grid.isNull()
+        assert grid.contains(coord.cellRect(date(2026, 6, 15)).center())
+
     def test_out_of_range_dates(self):
         coord = _coord()
         assert coord.cellRect(date(2025, 12, 31)).isNull()
@@ -222,6 +229,73 @@ class TestCalendarHeatmapRenderer:
         )._bar
         grid_right = coord._origin.x() + coord.weeks() * coord.cellSize()
         assert grid_right <= bar.left()
+        chart.deleteLater()
+
+    def test_horizontal_visual_map_sits_below_grid(self):
+        option = _calendar_option()
+        option["visualMap"] = {"min": 0, "max": 23, "orient": "horizontal"}
+        chart = _make_chart(option)
+        chart._layout_all(force=True)
+        coord = chart._coords[0]
+        bar = next(
+            comp
+            for comp in chart.components
+            if getattr(comp, "optionKey", "") == "visualMap"
+        )._bar
+        gap = bar.top() - coord.gridRect().bottom()
+        assert 0 <= gap <= 12
+        chart.deleteLater()
+
+    def test_vertical_visual_map_starts_at_grid_top(self):
+        option = _calendar_option()
+        option["visualMap"] = {"min": 0, "max": 23, "orient": "vertical"}
+        chart = _make_chart(option)
+        chart._layout_all(force=True)
+        coord = chart._coords[0]
+        bar = next(
+            comp
+            for comp in chart.components
+            if getattr(comp, "optionKey", "") == "visualMap"
+        )._bar
+        assert abs(bar.top() - coord.gridRect().top()) <= 1
+        chart.deleteLater()
+
+    def test_piecewise_visual_map_sits_below_grid(self):
+        option = _calendar_option()
+        option["visualMap"] = {
+            "type": "piecewise",
+            "orient": "horizontal",
+            "pieces": [{"min": 0, "max": 10}, {"min": 10, "max": 23}],
+        }
+        chart = _make_chart(option)
+        chart._layout_all(force=True)
+        coord = chart._coords[0]
+        component = next(
+            comp
+            for comp in chart.components
+            if getattr(comp, "optionKey", "") == "visualMap"
+        )
+        gap = component._piece_rects[0][0].top() - coord.gridRect().bottom()
+        assert 0 <= gap <= 1
+        chart.deleteLater()
+
+    def test_vertical_piecewise_visual_map_starts_at_grid_top(self):
+        option = _calendar_option()
+        option["visualMap"] = {
+            "type": "piecewise",
+            "orient": "vertical",
+            "pieces": [{"min": 0, "max": 10}, {"min": 10, "max": 23}],
+        }
+        chart = _make_chart(option)
+        chart._layout_all(force=True)
+        coord = chart._coords[0]
+        component = next(
+            comp
+            for comp in chart.components
+            if getattr(comp, "optionKey", "") == "visualMap"
+        )
+        gap = component._piece_rects[0][0].top() - coord.gridRect().top()
+        assert 0 <= gap <= 1
         chart.deleteLater()
 
 

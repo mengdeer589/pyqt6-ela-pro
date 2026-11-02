@@ -142,8 +142,8 @@ class PolarCoord(Coord):
 
     def paintAxes(self, p: QPainter) -> None:
         p.save()
-        c_grid = QColor(T("color.border"))
-        c_text = QColor(T("color.text.secondary"))
+        c_grid = QColor(T("color.border", self.chart))
+        c_text = QColor(T("color.text.secondary", self.chart))
         font = self.radius_axis.labelFont()
         p.setFont(font)
         fm = QFontMetricsF(font)
@@ -196,7 +196,7 @@ class PolarCoord(Coord):
             return
         p.save()
         style = line_style if isinstance(line_style, dict) else {}
-        pen = _line_pen({"lineStyle": style}, T("color.border.strong"))
+        pen = _line_pen({"lineStyle": style}, T("color.border.strong", self.chart))
         if not isinstance(style.get("type"), str):
             pen.setStyle(Qt.PenStyle.DashLine)
         p.setPen(pen)

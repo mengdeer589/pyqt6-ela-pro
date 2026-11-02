@@ -82,9 +82,7 @@ class TestOwnerNamespace:
         clean_registry.register(_spec("shared"), owner="plugin_a")
 
         assert clean_registry.unregister("shared", owner="plugin_a") is True
-        assert clean_registry.spec("shared", owner=None) is not None, (
-            "全局定义被误删"
-        )
+        assert clean_registry.spec("shared", owner=None) is not None, "全局定义被误删"
         assert clean_registry.unregister("shared", owner="plugin_a") is False
 
     def test_unregister_global_needs_no_owner(self, clean_registry):

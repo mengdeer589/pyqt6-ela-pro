@@ -192,9 +192,13 @@ class LinesSeriesRenderer(SeriesRenderer):
         if best is None:
             return None
         i, seg = best
+        line_style = self.opt.get("lineStyle") or {}
+        raw = line_style.get("color") if isinstance(line_style, dict) else None
+        color = parse_color(str(raw)) if raw else self.color()
         return {
             "name": seg["name"] or self.name,
             "value": seg["value"],
+            "color": color,
             "series": self.name,
             "dataIndex": i,
         }

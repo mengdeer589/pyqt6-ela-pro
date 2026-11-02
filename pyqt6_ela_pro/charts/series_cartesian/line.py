@@ -670,7 +670,7 @@ class LineSeriesRenderer(_LineSamplingMixin, _LineSymbolMixin, SeriesRenderer):
                     sprite = symbolPixmap(
                         "circle",
                         r * 2,
-                        QColor(T("color.bg.elevated")),
+                        QColor(T("color.bg.elevated", self.chart)),
                         border_color
                         or with_alpha(parse_color(uni_color), int(235 * alpha)),
                         border_w or 1.5,
@@ -730,7 +730,7 @@ class LineSeriesRenderer(_LineSamplingMixin, _LineSymbolMixin, SeriesRenderer):
                             border_w or 1.5,
                         )
                     )
-                    p.setBrush(QColor(T("color.bg.elevated")))
+                    p.setBrush(QColor(T("color.bg.elevated", self.chart)))
                     p.drawEllipse(pt, rr, rr)
                 else:
                     p.setPen(
@@ -752,7 +752,7 @@ class LineSeriesRenderer(_LineSamplingMixin, _LineSymbolMixin, SeriesRenderer):
                 pt = QPointF(info["pos"])
                 style = self.selectItemStyle(orig)
                 fill = self.selectColor(orig) or self.itemColor(orig)
-                border = style.get("borderColor") or T("color.bg.elevated")
+                border = style.get("borderColor") or T("color.bg.elevated", self.chart)
                 width = _to_float(style.get("borderWidth"), 1.6)
                 p.setPen(QPen(parse_color(border), width))
                 p.setBrush(fill)
@@ -887,6 +887,7 @@ class LineSeriesRenderer(_LineSamplingMixin, _LineSymbolMixin, SeriesRenderer):
         return {
             "name": self.name,
             "value": self._raw_value(orig),
+            "color": self.itemColor(orig),
             "series": self.name,
             "dataIndex": orig,
             "x": self._x_at(orig),
@@ -930,6 +931,7 @@ class LineSeriesRenderer(_LineSamplingMixin, _LineSymbolMixin, SeriesRenderer):
         return {
             "name": self.name,
             "value": y,
+            "color": self.itemColor(idx),
             "series": self.name,
             "dataIndex": idx,
             "pos": pos,

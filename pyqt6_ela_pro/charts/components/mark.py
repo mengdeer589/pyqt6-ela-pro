@@ -77,7 +77,7 @@ class _SeriesMarkBase:
         r = self._renderer()
         if r is not None:
             return r.color()
-        return QColor(T("color.primary"))
+        return QColor(T("color.primary", self.chart))
 
     def _visible(self) -> bool:
         r = self._renderer()
@@ -208,7 +208,7 @@ class MarkPointComponent(_SeriesMarkBase):
             size = max(3.0, _to_float(m.get("symbolSize"), 8.4))
             kind = str(m.get("symbol") or "circle").strip() or "circle"
             # 符号（默认实心圆；``symbol`` / ``symbolSize`` 可覆盖）
-            p.setPen(QPen(QColor(T("color.bg.elevated")), 1.4))
+            p.setPen(QPen(QColor(T("color.bg.elevated", self.chart)), 1.4))
             p.setBrush(color)
             if kind in ("", "none"):
                 kind = "circle"
@@ -225,7 +225,7 @@ class MarkPointComponent(_SeriesMarkBase):
             p.setPen(
                 parse_color(label_color)
                 if isinstance(label_color, str) and label_color
-                else QColor(T("color.text.primary"))
+                else QColor(T("color.text.primary", self.chart))
             )
             p.setFont(m["font"])
             p.drawText(
@@ -243,6 +243,7 @@ class MarkPointComponent(_SeriesMarkBase):
                 return {
                     "name": m["text"],
                     "value": m["y"],
+                    "color": self._color(),
                     "series": r.name if r is not None else "markPoint",
                 }
         return None
@@ -499,14 +500,13 @@ class MarkLineComponent(_SeriesMarkBase):
         p.setFont(ln["font"])
         p.drawText(ln["rect"], ln["align"], ln["text"])
 
-    @staticmethod
-    def _paint_mark_symbols(p: QPainter, ln: dict, color: QColor, points) -> None:
+    def _paint_mark_symbols(self, p: QPainter, ln: dict, color: QColor, points) -> None:
         symbol = ln.get("symbol")
         if symbol == "none":
             return
         size = max(2.0, _to_float(ln.get("symbolSize"), 6.0) / 2.0)
         p.setPen(QPen(color, 1.2))
-        p.setBrush(QColor(T("color.bg.elevated")))
+        p.setBrush(QColor(T("color.bg.elevated", self.chart)))
         for point in points:
             p.drawEllipse(point, size, size)
 
@@ -516,6 +516,7 @@ class MarkLineComponent(_SeriesMarkBase):
             return None
         plot = coord.plot
         for ln in self._lines:
+            color = self._line_pen(ln, self._color()).color()
             if ln["orient"] == "arbitrary":
                 p1, p2 = ln.get("p1"), ln.get("p2")
                 if p1 is not None and p2 is not None:
@@ -524,6 +525,7 @@ class MarkLineComponent(_SeriesMarkBase):
                         return {
                             "name": ln["text"],
                             "value": ln.get("value"),
+                            "color": color,
                             "series": r.name if r is not None else "markLine",
                         }
                 continue
@@ -536,6 +538,7 @@ class MarkLineComponent(_SeriesMarkBase):
                     return {
                         "name": ln["text"],
                         "value": ln["value"],
+                        "color": color,
                         "series": r.name if r is not None else "markLine",
                     }
             else:
@@ -545,6 +548,7 @@ class MarkLineComponent(_SeriesMarkBase):
                     return {
                         "name": ln["text"],
                         "value": ln["value"],
+                        "color": color,
                         "series": r.name if r is not None else "markLine",
                     }
         return None
@@ -639,7 +643,7 @@ class MarkAreaComponent(_SeriesMarkBase):
         if not self._areas or not self._visible():
             return
         p.save()
-        fill = QColor(T("color.primary"))
+        fill = QColor(T("color.primary", self.chart))
         fill.setAlpha(28)
         p.setPen(Qt.PenStyle.NoPen)
         p.setBrush(fill)

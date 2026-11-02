@@ -147,6 +147,15 @@ class TestMarkAreaDoesNotStealHover:
         assert "graphic" not in _HOVERABLE_COMPONENTS
         assert {"markPoint", "markLine"} <= _HOVERABLE_COMPONENTS
 
+    def test_annotations_are_editable_but_not_hoverable(self):
+        from pyqt6_ela_pro.charts.core import (
+            _EDITABLE_COMPONENTS,
+            _HOVERABLE_COMPONENTS,
+        )
+
+        assert "annotations" in _EDITABLE_COMPONENTS
+        assert "annotations" not in _HOVERABLE_COMPONENTS
+
     def test_hovering_inside_mark_area_still_hits_the_series(self, make):
         chart = _chart(make, self.OPT)
         comp = next(

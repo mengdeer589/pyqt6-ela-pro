@@ -20,7 +20,7 @@ from .._tokens import (
     T,
 )
 from ._shared import (
-    _HOVERABLE_COMPONENTS,
+    _EDITABLE_COMPONENTS,
 )
 from .annotation import _AnnotationEditor
 
@@ -48,9 +48,18 @@ class _ChartAnnotationMixin:
 
     def _annotation_target_at(self, pos: QPointF):
         """查找双击位置下的标注标签 → ``{component, ...}`` 或 None。"""
+        annotations = []
+        others = []
         for comp in self._components:
-            if str(getattr(comp, "optionKey", "")) not in _HOVERABLE_COMPONENTS:
+            key = str(getattr(comp, "optionKey", ""))
+            if key not in _EDITABLE_COMPONENTS:
                 continue
+            if key == "annotations":
+                annotations.append(comp)
+            else:
+                others.append(comp)
+        # annotations 画在最上层：后画的先命中；其余组件保持原注册顺序。
+        for comp in list(reversed(annotations)) + others:
             hit = getattr(comp, "labelEditHit", None)
             if not callable(hit):
                 continue
@@ -62,6 +71,12 @@ class _ChartAnnotationMixin:
                 continue
             index, rect = found
             renderer = comp._renderer() if hasattr(comp, "_renderer") else None
+            if renderer is not None:
+                series_name = renderer.name
+            else:
+                series_name = str(
+                    (getattr(comp, "series_opt", None) or {}).get("name") or ""
+                )
             text = ""
             edit_text = getattr(comp, "labelEditText", None)
             if callable(edit_text):
@@ -69,13 +84,21 @@ class _ChartAnnotationMixin:
                     text = edit_text(index)
                 except Exception:
                     text = ""
+            raw_text = None
+            raw_getter = getattr(comp, "labelEditRawText", None)
+            if callable(raw_getter):
+                try:
+                    raw_text = raw_getter(index)
+                except Exception:
+                    raw_text = None
             return {
                 "component": comp,
                 "componentType": str(getattr(comp, "optionKey", "")),
                 "dataIndex": int(index),
                 "rect": QRectF(rect),
                 "text": text,
-                "seriesName": renderer.name if renderer is not None else "",
+                "rawText": raw_text,
+                "seriesName": series_name,
             }
         return None
 
@@ -132,18 +155,23 @@ class _ChartAnnotationMixin:
         editor.setFrame(False)
         editor.setAutoFillBackground(True)
         editor.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
-        palette = editor.palette()
-        palette.setColor(QPalette.ColorRole.Base, QColor(T("color.bg.elevated")))
-        palette.setColor(QPalette.ColorRole.Window, QColor(T("color.bg.elevated")))
-        palette.setColor(QPalette.ColorRole.Text, QColor(T("color.text.primary")))
-        editor.setPalette(palette)
+        self._apply_annotation_editor_palette(editor)
         editor.editingFinished.connect(self._commit_annotation_edit)
         editor.cancelled.connect(self._cancel_annotation_edit)
         self._annotation_editor = editor
         return editor
 
+    def _apply_annotation_editor_palette(self, editor) -> None:
+        """编辑器调色板按当前主题刷新（主题切换后再次打开也要正确）。"""
+        palette = editor.palette()
+        palette.setColor(QPalette.ColorRole.Base, QColor(T("color.bg.elevated", self)))
+        palette.setColor(QPalette.ColorRole.Window, QColor(T("color.bg.elevated", self)))
+        palette.setColor(QPalette.ColorRole.Text, QColor(T("color.text.primary", self)))
+        editor.setPalette(palette)
+
     def _show_annotation_editor(self, target: dict) -> None:
         editor = self._ensure_annotation_editor()
+        self._apply_annotation_editor_palette(editor)
         self._annotation_target = target
         rect = QRectF(target["rect"]).adjusted(-4, -4, 4, 4)
         rect = rect.intersected(QRectF(self.rect()))
@@ -171,6 +199,10 @@ class _ChartAnnotationMixin:
         if target is None or editor is None:
             return
         text = editor.text()
+        # 多行标注：编辑器是单行，未改动时保留原始换行。
+        raw_text = target.get("rawText")
+        if raw_text is not None and text == target.get("text"):
+            text = raw_text
         self._annotation_target = None
         editor.hide()
         if target.get("kind") == "seriesLabel":
@@ -232,12 +264,67 @@ class _ChartAnnotationMixin:
         seriesId: Optional[str] = None,
         rebuild: bool = True,
     ) -> bool:
-        """修改标注标签文本（markPoint / markLine 的 ``name``）。
+        """修改标注标签文本（markPoint / markLine 的 ``name`` 或 annotations 的 ``text``）。
 
         系列寻址：``seriesId`` → ``seriesName`` → ``seriesIndex``（都为空时取
-        首个含该组件的系列）。返回是否成功。
+        首个含该组件的系列）。``annotations`` 的 ``dataIndex`` 是同层数组下标。
+        返回是否成功。
         """
         wanted = str(componentType or "")
+        try:
+            index = int(dataIndex)
+        except (TypeError, ValueError, OverflowError):
+            return False
+        if wanted == "annotations":
+            series_filter = str(seriesName or "")
+            if not series_filter and (seriesId is not None or seriesIndex is not None):
+                resolved = self._resolve_series(seriesName, seriesIndex, seriesId)
+                if resolved is None:
+                    return False
+                series_filter = resolved.name
+            target_comp = None
+            for comp in self._components:
+                if str(getattr(comp, "optionKey", "")) != wanted:
+                    continue
+                comp_name = str(
+                    (getattr(comp, "series_opt", None) or {}).get("name") or ""
+                )
+                if series_filter and comp_name != series_filter:
+                    continue
+                try:
+                    if int(comp.annotationIndex()) != index:
+                        continue
+                except Exception:
+                    continue
+                target_comp = comp
+                break
+            if target_comp is None:
+                return False
+            resolved_name = str(
+                (getattr(target_comp, "series_opt", None) or {}).get("name") or ""
+            )
+            setter = getattr(target_comp, "setLabelText", None)
+            if not callable(setter):
+                return False
+            try:
+                if not setter(index, str(text)):
+                    return False
+            except Exception:
+                return False
+            self._opt_version += 1
+            if rebuild:
+                self._rebuild()
+            self.update()
+            self.annotationEdited.emit(
+                {
+                    "seriesName": resolved_name,
+                    "componentType": wanted,
+                    "dataIndex": index,
+                    "text": str(text),
+                }
+            )
+            return True
+
         explicit = seriesId is not None or seriesIndex is not None or bool(seriesName)
         renderer = self._resolve_series(seriesName, seriesIndex, seriesId)
         target_comp = None
@@ -261,19 +348,19 @@ class _ChartAnnotationMixin:
         if not callable(setter):
             return False
         try:
-            if not setter(int(dataIndex), str(text)):
+            if not setter(index, str(text)):
                 return False
         except Exception:
             return False
         self._opt_version += 1
         if rebuild:
             self._rebuild()
-            self.update()
+        self.update()
         self.annotationEdited.emit(
             {
                 "seriesName": resolved_name,
                 "componentType": wanted,
-                "dataIndex": int(dataIndex),
+                "dataIndex": index,
                 "text": str(text),
             }
         )

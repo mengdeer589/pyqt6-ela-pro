@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import pytest
 from PyQt6.QtCore import QPointF, QSizeF
 
 from pyqt6_ela_pro.blueprint import (
@@ -122,11 +123,15 @@ class TestGraph:
 
     def test_add_edge_missing_node(self):
         g, a, b = self._graph()
-        assert g.add_edge("nope", "out", b.id, "in") is None
+        assert "不存在" in g.validate_edge("nope", "out", b.id, "in")
+        with pytest.raises(ValueError, match="不存在"):
+            g.add_edge("nope", "out", b.id, "in")
 
     def test_add_edge_wrong_direction(self):
         g, a, b = self._graph()
-        assert g.add_edge(b.id, "in", a.id, "out") is None
+        assert g.validate_edge(b.id, "in", a.id, "out")
+        with pytest.raises(ValueError):
+            g.add_edge(b.id, "in", a.id, "out")
 
     def test_add_edge_type_mismatch(self):
         g = ElaBlueprintGraph()
@@ -136,17 +141,68 @@ class TestGraph:
         b.add_input("in", "进入", "tensor")
         g.add_node(a)
         g.add_node(b)
-        assert g.add_edge(a.id, "out", b.id, "in") is None
+        assert "类型不兼容" in g.validate_edge(a.id, "out", b.id, "in")
+        with pytest.raises(ValueError, match="类型不兼容"):
+            g.add_edge(a.id, "out", b.id, "in")
 
     def test_add_edge_self_loop(self):
         g, a, b = self._graph()
         a.add_input("in", "进入", "exec")
-        assert g.add_edge(a.id, "out", a.id, "in") is None
+        with pytest.raises(ValueError, match="自身"):
+            g.add_edge(a.id, "out", a.id, "in")
 
     def test_add_edge_duplicate(self):
         g, a, b = self._graph()
         assert g.add_edge(a.id, "out", b.id, "in") is not None
-        assert g.add_edge(a.id, "out", b.id, "in") is None  # 完全重复
+        with pytest.raises(ValueError, match="已存在"):
+            g.add_edge(a.id, "out", b.id, "in")
+
+    def test_add_edge_accepts_node_objects(self):
+        g, a, b = self._graph()
+        edge = g.add_edge(a, "out", b, "in")
+        assert edge is not None and isinstance(edge, ElaEdge)
+
+    def test_node_connect_label(self):
+        g, a, b = self._graph()
+        edge = a.connect(b, "out", "in", label="tokens [B, 512]")
+        assert edge.label == "tokens [B, 512]"
+
+    def test_set_edge_label(self):
+        g, a, b = self._graph()
+        edge = g.add_edge(a.id, "out", b.id, "in")
+        seen = []
+        g.edge_changed.connect(lambda item: seen.append(item))
+        assert g.set_edge_label(edge, "hidden\n[B, 512]") is True
+        assert edge.label == "hidden\n[B, 512]"
+        assert seen == [edge]
+        assert g.set_edge_label(edge, "hidden\n[B, 512]") is False
+        assert g.set_edge_label("missing", "x") is False
+
+    def test_edge_label_serialization(self):
+        edge = ElaEdge("e1", "a", "o", "b", "i", "hidden\n[B, 512]")
+        restored = ElaEdge.from_dict(edge.to_dict())
+        assert restored == edge
+        bare = ElaEdge.from_dict(
+            {
+                "id": "e2",
+                "from_node": "a",
+                "from_pin": "o",
+                "to_node": "b",
+                "to_pin": "i",
+            }
+        )
+        assert bare.label == ""
+
+    def test_node_connect_requires_graph(self):
+        node = _mk_node("solo")
+        with pytest.raises(RuntimeError):
+            node.connect(_mk_node("other"), "out", "in")
+
+    def test_node_connect(self):
+        g, a, b = self._graph()
+        edge = a.connect(b, "out", "in")
+        assert edge is not None
+        assert g.edges() == [edge]
 
     def test_single_connection_replaces(self):
         g = ElaBlueprintGraph()

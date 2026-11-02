@@ -25,7 +25,7 @@ _EXAMPLE_DIR = pathlib.Path(__file__).resolve().parents[2] / "pyqt6_ela_pro" / "
 
 _TITLE_RE = re.compile(r"^(\d+)\.\s*(.*)$")
 _GROUP_RE = re.compile(r"^===.*===$")
-_HEADER_CALLS = ("_createHeaderRow", "_createSectionHeader")
+_HEADER_CALLS = ("_createHeaderRow", "_createSectionHeader", "_section_header")
 
 
 def _self_calls(func: ast.AST) -> list[str]:

@@ -30,8 +30,8 @@ def _parse_pct(v, base, default=0.0):
     return _to_float(v, default)
 
 
-def _text_color(key="color.text.primary"):
-    return QColor(T(key))
+def _text_color(key, chart):
+    return QColor(T(key, chart))
 
 
 def _label_font(series, style=None):
@@ -52,7 +52,7 @@ def _series_palette_color(chart, index):
     """按序号取全局调色板颜色（越界循环）。"""
     pal = chart.palette()
     if not pal:
-        return QColor(T("color.primary"))
+        return QColor(T("color.primary", chart))
     return parse_color(pal[index % len(pal)])
 
 

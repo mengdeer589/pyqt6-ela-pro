@@ -11,12 +11,10 @@ from pyqt6_ela_pro.blueprint import (
     ElaBlueprintCanvas,
     ElaNodeCreationMenu,
     ElaPinDirectionType,
-    ElaTempWire,
-    bezier_path,
-    format_elapsed,
     register_node_type,
 )
-from pyqt6_ela_pro.blueprint.node_widget import BODY_MIN_ZOOM
+from pyqt6_ela_pro.blueprint.edge_widget import ElaTempWire, bezier_path
+from pyqt6_ela_pro.blueprint.node_widget import BODY_MIN_ZOOM, format_elapsed
 
 
 @pytest.fixture
@@ -61,8 +59,8 @@ class TestBezier:
 
 class TestEdgeWidget:
     def test_geometry_and_hit(self, canvas):
-        n1 = canvas.add_node_at("start", QPointF(100, 100))
-        n2 = canvas.add_node_at("proc", QPointF(400, 100))
+        n1 = canvas.create_node("start", QPointF(100, 100))
+        n2 = canvas.create_node("proc", QPointF(400, 100))
         edge = canvas.graph.add_edge(n1.id, "out", n2.id, "in")
         ew = canvas.edge_widget(edge.id)
         assert ew is not None
@@ -74,8 +72,8 @@ class TestEdgeWidget:
         assert not ew.contains(QPointF(-500, -500))
 
     def test_flowing_state(self, canvas):
-        n1 = canvas.add_node_at("start", QPointF(100, 100))
-        n2 = canvas.add_node_at("proc", QPointF(400, 100))
+        n1 = canvas.create_node("start", QPointF(100, 100))
+        n2 = canvas.create_node("proc", QPointF(400, 100))
         edge = canvas.graph.add_edge(n1.id, "out", n2.id, "in")
         ew = canvas.edge_widget(edge.id)
         assert not ew.flowing
@@ -86,8 +84,8 @@ class TestEdgeWidget:
         assert not ew.flowing
 
     def test_invalidate_color_after_theme(self, canvas):
-        n1 = canvas.add_node_at("start", QPointF(100, 100))
-        n2 = canvas.add_node_at("proc", QPointF(400, 100))
+        n1 = canvas.create_node("start", QPointF(100, 100))
+        n2 = canvas.create_node("proc", QPointF(400, 100))
         edge = canvas.graph.add_edge(n1.id, "out", n2.id, "in")
         ew = canvas.edge_widget(edge.id)
         ew._color()  # 惰性缓存
@@ -109,7 +107,7 @@ class TestTempWire:
 
 class TestNodeWidget:
     def test_layout_and_pin_handles(self, canvas):
-        node = canvas.add_node_at("start", QPointF(100, 100))
+        node = canvas.create_node("start", QPointF(100, 100))
         widget = canvas.node_widget(node.id)
         assert widget.pin_widget("out") is not None
         assert widget.node.size.width() >= 160.0
@@ -118,21 +116,21 @@ class TestNodeWidget:
         assert c.x() == pytest.approx(widget.node.size.width())
 
     def test_apply_view_zoom(self, canvas):
-        node = canvas.add_node_at("start", QPointF(100, 100))
+        node = canvas.create_node("start", QPointF(100, 100))
         widget = canvas.node_widget(node.id)
         w0 = widget.width()
         canvas.set_zoom(2.0)
         assert widget.width() > w0
 
     def test_selection_border(self, canvas):
-        node = canvas.add_node_at("start", QPointF(100, 100))
+        node = canvas.create_node("start", QPointF(100, 100))
         widget = canvas.node_widget(node.id)
         assert not widget.is_selected()
         widget.set_selected(True)
         assert widget.is_selected()
 
     def test_elapsed_badge(self, canvas):
-        node = canvas.add_node_at("start", QPointF(100, 100))
+        node = canvas.create_node("start", QPointF(100, 100))
         widget = canvas.node_widget(node.id)
         node.set_status("done")
         node.set_elapsed_ms(42)
@@ -142,7 +140,7 @@ class TestNodeWidget:
         assert widget.elapsed_text() == ""
 
     def test_status_spinner_visibility(self, canvas):
-        node = canvas.add_node_at("start", QPointF(100, 100))
+        node = canvas.create_node("start", QPointF(100, 100))
         widget = canvas.node_widget(node.id)
         assert not widget._spinner.isVisible()
         node.set_status("running")
@@ -158,7 +156,7 @@ class TestNodeWidget:
             outputs=[{"id": "o", "data_type": "exec"}],
             body_builder=lambda node, container: None,
         )
-        node = canvas.add_node_at("has_body", QPointF(100, 100))
+        node = canvas.create_node("has_body", QPointF(100, 100))
         widget = canvas.node_widget(node.id)
         assert widget._body is not None
         widget.apply_view(QPointF(100, 100), BODY_MIN_ZOOM + 0.1)
@@ -215,18 +213,28 @@ class TestViewport:
     def test_gl_env_off_forces_raster(self, qapp, monkeypatch):
         monkeypatch.setenv("ELABLUEPRINT_GL", "off")
         vp_mod._GL_STATE = None  # 重置模块级探测缓存
-        c = ElaBlueprintCanvas()
-        assert isinstance(c._viewport, vp_mod._RasterViewport)
-        assert c._viewport.supports_node_proxy is False
-        c.deleteLater()
+        try:
+            c = ElaBlueprintCanvas()
+            assert isinstance(c._viewport, vp_mod._RasterViewport)
+            assert c._viewport.supports_node_proxy is False
+            c.deleteLater()
+            qapp.processEvents()
+        finally:
+            # 探测结果是**模块级缓存**：不回滚的话，后续用例会继续按本用例的
+            # 环境选视口（`_GL_STATE=True` 会让软件用例走 GL 代理分支）
+            vp_mod._GL_STATE = None
 
     def test_gl_env_on(self, qapp, monkeypatch):
         monkeypatch.setenv("ELABLUEPRINT_GL", "on")
         vp_mod._GL_STATE = None
-        c = ElaBlueprintCanvas()
-        # 支持 GL 的环境用 GL 视口，否则回退软件渲染（两者都是合法路径）
-        assert isinstance(c._viewport, (vp_mod._GLViewport, vp_mod._RasterViewport))
-        c.deleteLater()
+        try:
+            c = ElaBlueprintCanvas()
+            # 支持 GL 的环境用 GL 视口，否则回退软件渲染（两者都是合法路径）
+            assert isinstance(c._viewport, (vp_mod._GLViewport, vp_mod._RasterViewport))
+            c.deleteLater()
+            qapp.processEvents()
+        finally:
+            vp_mod._GL_STATE = None
 
     def test_viewport_mirrors_canvas(self, canvas):
         assert canvas._viewport.size() == canvas.size()

@@ -97,7 +97,7 @@ def registerComponent(name: str, cls) -> None:
 
 
 def defaultPalette() -> list:
-    """默认调色板（主题感知：随 eTheme 模式取色，重绘即生效）。"""
+    """全局默认主题的数据系列调色板（图表实例可用 ``setChartTheme`` 覆盖）。"""
     return palette_for_mode(eTheme.getThemeMode())
 
 
@@ -134,6 +134,7 @@ GRID_SERIES_TYPES = frozenset(
         "boxplot",
         "heatmap",
         "lines",
+        "image",
     }
 )
 
@@ -167,6 +168,8 @@ def _opt_float(value, default):
 
 
 _HOVERABLE_COMPONENTS = frozenset({"markPoint", "markLine"})
+#: 支持双击行内编辑的组件（标注 `annotations` 只编辑、不参与数据命中）
+_EDITABLE_COMPONENTS = frozenset({"markPoint", "markLine", "annotations"})
 _ANIM_EASINGS = {
     "linear": QEasingCurve.Type.Linear,
     "quadraticin": QEasingCurve.Type.InQuad,

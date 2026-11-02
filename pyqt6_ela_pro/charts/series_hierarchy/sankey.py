@@ -269,7 +269,7 @@ class SankeySeriesRenderer(SeriesRenderer):
         font = _label_font(self, label_opt)
         p.setFont(font)
         fm = QFontMetricsF(font)
-        c_text = self.labelColor(_text_color("color.text.primary"))
+        c_text = self.labelColor(_text_color("color.text.primary", self.chart))
         max_depth = max((nd["depth"] for nd in self._nodes), default=0)
         for nd in self._nodes:
             r = nd["rect"]
@@ -319,6 +319,7 @@ class SankeySeriesRenderer(SeriesRenderer):
                 return {
                     "name": nd["name"],
                     "value": nd["value"],
+                    "color": nd.get("color"),
                     "series": self.name,
                     "depth": nd["depth"],
                     "dataIndex": nd.get("index"),
@@ -328,6 +329,7 @@ class SankeySeriesRenderer(SeriesRenderer):
                 return {
                     "name": f"{band['source']} → {band['target']}",
                     "value": band["value"],
+                    "color": band.get("color"),
                     "series": self.name,
                     "source": band["source"],
                     "target": band["target"],

@@ -16,9 +16,29 @@ class ChartInteraction:
     def __init__(self, chart) -> None:
         self._chart = chart
 
+    def _annotation_at(self, pos: QPointF):
+        """光标下的可拖动标注（``annotations`` 组件）；无命中 None。"""
+        for comp in self._chart._interactive_components():
+            if str(getattr(comp, "optionKey", "")) != "annotations":
+                continue
+            hit = getattr(comp, "boxHitTest", None)
+            if not callable(hit):
+                continue
+            try:
+                if hit(pos):
+                    return comp
+            except Exception:
+                continue
+        return None
+
     def _cursor_shape(self, pos: QPointF):
         """按悬停目标 / 拖拽模式给出光标形状。"""
         chart = self._chart
+        annotation = self._annotation_at(pos)
+        if annotation is not None:
+            if getattr(annotation, "isDragging", None) and annotation.isDragging():
+                return Qt.CursorShape.ClosedHandCursor
+            return Qt.CursorShape.OpenHandCursor
         if getattr(chart, "_press_ctx", None) is not None and chart.dragMode() == "pan":
             return Qt.CursorShape.ClosedHandCursor
         zoom = chart._component("dataZoom")
@@ -59,9 +79,14 @@ class ChartInteraction:
         if chart._loading:
             return
         pos = event.position()
+        chart._press_button = event.button()
         consumed = chart._dispatch_hook("onMousePress", pos)
         # 拖拽类组件会吞掉按下事件；按下→原地松开仍是点击，记下上下文在松开时补发。
-        chart._press_ctx = (QPointF(pos), bool(consumed))
+        chart._press_ctx = (
+            QPointF(pos),
+            bool(consumed),
+            getattr(chart, "_last_hook_owner", None),
+        )
         if consumed:
             if (
                 chart.dragMode() == "pan"
@@ -129,6 +154,7 @@ class ChartInteraction:
                 if chart.tooltip.active:
                     chart.tooltip.hide()
                     chart._broadcastGroup("axisTipHide", {})
+                chart._tooltip_axis_clear()
                 if chart._hover is not None:
                     chart._clear_hover()
                     chart.update()
@@ -136,6 +162,7 @@ class ChartInteraction:
                 chart._update_tooltip(pos)
             elif chart.tooltip.active:
                 chart.tooltip.hide()
+                chart._tooltip_axis_clear()
                 chart.update()
         self._sync_cursor(pos)
         QWidget.mouseMoveEvent(chart, event)
@@ -149,9 +176,13 @@ class ChartInteraction:
         ctx = getattr(chart, "_press_ctx", None)
         chart._press_ctx = None
         if ctx is not None:
-            start, consumed = ctx
+            start, consumed, owner = ctx
             dragged = math.hypot(pos.x() - start.x(), pos.y() - start.y()) > 4.0
-            if consumed and not dragged:
+            if (
+                consumed
+                and not dragged
+                and not bool(getattr(owner, "consumesClick", False))
+            ):
                 over_legend = False
                 legend = chart.legendAt(start)
                 if legend is not None:
@@ -164,6 +195,10 @@ class ChartInteraction:
         chart = self._chart
         if chart._loading:
             return
+        # 可拖动标注在最上层：双击它只发编辑请求，不落到 resetView / 标签编辑
+        if chart._dispatch_hook("onMouseDoubleClick", event.position()):
+            event.accept()
+            return
         # 标注标签优先：双击标签进入编辑，不触发 resetView
         try:
             if chart._begin_annotation_edit(event.position()):
@@ -171,9 +206,6 @@ class ChartInteraction:
                 return
         except Exception:
             pass
-        if chart._dispatch_hook("onMouseDoubleClick", event.position()):
-            QWidget.mouseDoubleClickEvent(chart, event)
-            return
         if chart._double_click_reset:
             chart.resetView()
             event.accept()

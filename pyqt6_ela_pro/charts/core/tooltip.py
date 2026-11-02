@@ -61,6 +61,7 @@ class Tooltip:
         self._markers = []  # axis 模式：每条系列命中点的 [(QPointF, QColor)]
         self._axis_pointer = False  # 只有 axis 触发才画指示线（ECharts 语义）
         self._axis_label = None  # 轴上数值气泡文案（axisPointer.label）
+        self._pointer_axis = "x"  # 指示线 / 轴气泡朝向（x / y；横向柱用 y）
         self._coord = None  # 本帧 axis 提示所属坐标系（多网格）
         self._x_axis_index = 0
 
@@ -233,6 +234,7 @@ class Tooltip:
         markers: list = None,
         axis_pointer: bool = False,
         axis_label: str = None,
+        pointer_axis: str = "x",
         coord=None,
         x_axis_index: int = 0,
     ) -> None:
@@ -240,6 +242,7 @@ class Tooltip:
 
         ``lines``: ``[(color, name, value_str), ...]``；``markers``: axis 模式下
         每条系列命中点；``axis_pointer``: 是否画指示线（item 触发不画）。
+        ``pointer_axis``: 指示线 / 轴气泡朝向（``"x"`` 默认；横向柱传 ``"y"``）。
         """
         self._active = True
         self._pos = QPointF(pos)
@@ -248,6 +251,7 @@ class Tooltip:
         self._markers = list(markers or [])
         self._axis_pointer = bool(axis_pointer)
         self._axis_label = str(axis_label) if axis_label else None
+        self._pointer_axis = "y" if str(pointer_axis).lower() == "y" else "x"
         self._coord = coord
         self._x_axis_index = int(x_axis_index)
 
@@ -257,6 +261,7 @@ class Tooltip:
         self._markers = []
         self._axis_pointer = False
         self._axis_label = None
+        self._pointer_axis = "x"
         self._coord = None
 
     # -- 绘制 -------------------------------------------------------------
@@ -277,6 +282,7 @@ class Tooltip:
                 self.axisPointerType(),
                 self._x_axis_index,
                 self.axisPointerLineStyle(),
+                axis=self._pointer_axis,
             )
         # axis 模式：每条系列在命中点画一个强调圆点（ECharts 同款）
         if self._axis_pointer and self._markers:
@@ -284,7 +290,7 @@ class Tooltip:
             p.setRenderHint(QPainter.RenderHint.Antialiasing)
             for point, color in self._markers:
                 dot_color = parse_color(color)
-                ring = QColor(T("color.bg.elevated"))
+                ring = QColor(T("color.bg.elevated", self.chart))
                 p.setPen(QPen(ring, 1.6))
                 p.setBrush(dot_color)
                 p.drawEllipse(QPointF(point), 4.2, 4.2)
@@ -328,7 +334,7 @@ class Tooltip:
         box = QRectF(x, y, w, h)
         radius = float(T("radius.md"))
         # 近似阴影：三层外扩低透明度圆角矩形
-        shadow_c = QColor(T("color.text.primary"))
+        shadow_c = QColor(T("color.text.primary", self.chart))
         for i, alpha in ((6, 16), (4, 22), (2, 30)):
             sc = parse_color(shadow_c)
             sc.setAlpha(alpha)
@@ -347,13 +353,19 @@ class Tooltip:
         except (TypeError, ValueError, OverflowError):
             border_w = 1.0
         if border_w > 0:
-            p.setPen(QPen(parse_color(border or T("color.border")), border_w))
+            p.setPen(
+                QPen(parse_color(border or T("color.border", self.chart)), border_w)
+            )
         else:
             p.setPen(Qt.PenStyle.NoPen)
-        p.setBrush(parse_color(bg) if bg else QColor(T("color.bg.elevated")))
+        p.setBrush(
+            parse_color(bg) if bg else QColor(T("color.bg.elevated", self.chart))
+        )
         p.drawRoundedRect(box, radius, radius)
         # 文本行（缩进仅对带圆点的行生效；标题行 color 为 None 不缩进）
-        text_color = parse_color(style.get("color") or T("color.text.primary"))
+        text_color = parse_color(
+            style.get("color") or T("color.text.primary", self.chart)
+        )
         ty = box.top() + pad_y
         for color, label in rows:
             tx = box.left() + pad_x
@@ -412,14 +424,28 @@ class Tooltip:
         w = fm.horizontalAdvance(text) + 12
         h = fm.height() + 5
         plot = coord.plot
-        x = min(max(anchor.x() - w / 2, plot.left()), plot.right() - w)
-        y = plot.bottom() - h / 2
+        if self._pointer_axis == "y":
+            # 横向柱：类目气泡放在 y 轴左侧，垂直居中于当前行。
+            x = max(2.0, plot.left() - w - 2.0)
+            y = min(max(anchor.y() - h / 2, plot.top()), plot.bottom() - h)
+        else:
+            x = min(max(anchor.x() - w / 2, plot.left()), plot.right() - w)
+            y = plot.bottom() - h / 2
         box = QRectF(x, y, w, h)
         p.setPen(
-            QPen(parse_color(opt.get("borderColor") or T("color.border.strong")), 1)
+            QPen(
+                parse_color(
+                    opt.get("borderColor") or T("color.border.strong", self.chart)
+                ),
+                1,
+            )
         )
-        p.setBrush(parse_color(opt.get("backgroundColor") or T("color.bg.elevated")))
+        p.setBrush(
+            parse_color(
+                opt.get("backgroundColor") or T("color.bg.elevated", self.chart)
+            )
+        )
         p.drawRoundedRect(box, 3, 3)
-        p.setPen(parse_color(style.get("color") or T("color.text.primary")))
+        p.setPen(parse_color(style.get("color") or T("color.text.primary", self.chart)))
         p.drawText(box, Qt.AlignmentFlag.AlignCenter, text)
         p.restore()

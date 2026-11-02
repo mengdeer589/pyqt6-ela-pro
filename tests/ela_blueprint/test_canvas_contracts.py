@@ -193,9 +193,7 @@ class TestAccentColorDegrades:
     ``QColor``，而 ``QColor`` 不解析 CSS 函数记法 → accent 栏**静默变黑**。
     """
 
-    @pytest.mark.parametrize(
-        "value", ["#C080D0", "red", "primary", None]
-    )
+    @pytest.mark.parametrize("value", ["#C080D0", "red", "primary", None])
     def test_valid_values_still_work(self, value):
         from pyqt6_ela_pro.blueprint.node_widget import _resolve_color
 
@@ -319,12 +317,22 @@ class TestFromDictValidatesEdges:
                         "pos": [0, 0],
                         "size": [180, 80],
                         "inputs": [
-                            {"id": "i1", "name": "in", "direction": "input",
-                             "data_type": "int", "multi": False}
+                            {
+                                "id": "i1",
+                                "name": "in",
+                                "direction": "input",
+                                "data_type": "int",
+                                "multi": False,
+                            }
                         ],
                         "outputs": [
-                            {"id": "o1", "name": "out", "direction": "output",
-                             "data_type": "int", "multi": False}
+                            {
+                                "id": "o1",
+                                "name": "out",
+                                "direction": "output",
+                                "data_type": "int",
+                                "multi": False,
+                            }
                         ],
                     },
                     {
@@ -334,23 +342,53 @@ class TestFromDictValidatesEdges:
                         "pos": [300, 0],
                         "size": [180, 80],
                         "inputs": [
-                            {"id": "i1", "name": "in", "direction": "input",
-                             "data_type": "int", "multi": False},
-                            {"id": "is", "name": "s", "direction": "input",
-                             "data_type": "str", "multi": True},
+                            {
+                                "id": "i1",
+                                "name": "in",
+                                "direction": "input",
+                                "data_type": "int",
+                                "multi": False,
+                            },
+                            {
+                                "id": "is",
+                                "name": "s",
+                                "direction": "input",
+                                "data_type": "str",
+                                "multi": True,
+                            },
                         ],
                         "outputs": [],
                     },
                 ],
                 "edges": [
-                    {"id": "e_ok", "from_node": "a", "from_pin": "o1",
-                     "to_node": "b", "to_pin": "i1"},
-                    {"id": "e_dup", "from_node": "a", "from_pin": "o1",
-                     "to_node": "b", "to_pin": "i1"},
-                    {"id": "e_ghost", "from_node": "a", "from_pin": "o1",
-                     "to_node": "zzz", "to_pin": "nope"},
-                    {"id": "e_self", "from_node": "a", "from_pin": "o1",
-                     "to_node": "a", "to_pin": "i1"},
+                    {
+                        "id": "e_ok",
+                        "from_node": "a",
+                        "from_pin": "o1",
+                        "to_node": "b",
+                        "to_pin": "i1",
+                    },
+                    {
+                        "id": "e_dup",
+                        "from_node": "a",
+                        "from_pin": "o1",
+                        "to_node": "b",
+                        "to_pin": "i1",
+                    },
+                    {
+                        "id": "e_ghost",
+                        "from_node": "a",
+                        "from_pin": "o1",
+                        "to_node": "zzz",
+                        "to_pin": "nope",
+                    },
+                    {
+                        "id": "e_self",
+                        "from_node": "a",
+                        "from_pin": "o1",
+                        "to_node": "a",
+                        "to_pin": "i1",
+                    },
                 ],
             },
             "view": {"zoom": 1.0, "offset": [0.0, 0.0]},

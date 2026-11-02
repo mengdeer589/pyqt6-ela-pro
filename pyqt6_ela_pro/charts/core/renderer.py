@@ -487,7 +487,7 @@ class SeriesRenderer:
                 return color
         if default is not None:
             return parse_color(default) if not isinstance(default, QColor) else default
-        return QColor(T("color.text.secondary"))
+        return QColor(T("color.text.secondary", self.chart))
 
     def labelColorFor(self, index=None) -> QColor:
         """单个数据点的标签颜色（item ``label.color`` 优先）。"""

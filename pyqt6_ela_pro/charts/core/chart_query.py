@@ -16,8 +16,10 @@ from PyQt6.QtGui import (
 )
 from PyQt6ElaWidgetTools import eTheme
 
+from .._theme import chart_theme_key
 from .._tokens import (
     T,
+    palette_for_mode,
 )
 from .._utils import warn_key, warn_once
 from .._utils import parse_color
@@ -28,7 +30,6 @@ from ..axes import (
 from ._shared import (
     _HOVERABLE_COMPONENTS,
     _sort_value,
-    defaultPalette,
     parseDataPoint,
 )
 from .renderer import SeriesRenderer
@@ -211,6 +212,7 @@ class _ChartQueryMixin:
         has_custom = isinstance(custom, list) and bool(custom)
         key = (
             eTheme.getThemeMode(),
+            chart_theme_key(self),
             id(custom) if has_custom else 0,
             len(custom) if has_custom else 0,
         )
@@ -221,7 +223,7 @@ class _ChartQueryMixin:
         if has_custom:
             pal = [parse_color(c) for c in custom]
         else:
-            pal = defaultPalette()
+            pal = palette_for_mode(eTheme.getThemeMode(), self)
         self._palette_cache = (key, custom, pal)
         return [parse_color(c) for c in pal]
 
@@ -673,7 +675,7 @@ class _ChartQueryMixin:
         if self._emptyAreaEnabled("hoveranywhere"):
             empty = self._emptyAreaHit(pos)
             if empty is not None:
-                color = QColor(T("color.text.secondary"))
+                color = QColor(T("color.text.secondary", self))
                 self.tooltip.showAt(pos, self.tooltip.buildLines(empty, color, ""))
                 self.update()
                 return
@@ -687,6 +689,13 @@ class _ChartQueryMixin:
             # 坐标系不支持反查：退化为 item 模式
             self._tooltip_axis_clear()
             self._tooltip_item(pos)
+            return
+        if not coord.plot.adjusted(-1.0, -1.0, 1.0, 1.0).contains(pos):
+            # 光标离开绘图区（标题 / 图例 / 边距）→ 隐藏，不能继续按最近的 x 显示。
+            if self.tooltip.active:
+                self._broadcastGroup("axisTipHide", {})
+            self.tooltip.hide()
+            self._tooltip_axis_clear()
             return
         x_axis_index, _y_axis_index = self._grid_axis_indices(coord)
         anchor = None
@@ -704,7 +713,9 @@ class _ChartQueryMixin:
             self._tooltip_item(pos)
             return
 
-        is_category = coord.x_axis.type == "category"
+        x_category = coord.x_axis.type == "category"
+        y_category = not x_category and coord.y_axis.type == "category"
+        category_axis = x_category or y_category
         rows = []
         markers = []
         axis_hover = []
@@ -720,10 +731,21 @@ class _ChartQueryMixin:
                     and series_coord.grid_index != coord.grid_index
                 ):
                     continue
-                if is_category:
+                if x_category:
                     # 每个系列按自己的 x 轴反查窗口内类目下标（多 x 轴类目列表可能不同）。
                     local = series_coord.x_axis.invert(
                         pos.x(), series_coord.plot.left(), series_coord.plot.right()
+                    )
+                    if isinstance(local, (int, float)) and math.isfinite(local):
+                        index = int(local)
+                        info = r.valueAtIndex(index)
+                        if primary_index is None:
+                            primary_index = index
+                elif y_category:
+                    # 横向柱：类目在 y 轴，按光标所在行取数据项，不能按 x 值找最近柱。
+                    # 类目 0 在顶部：invert 的 start/end 要按 top→bottom 传（与 value 轴相反）。
+                    local = series_coord.y_axis.invert(
+                        pos.y(), series_coord.plot.top(), series_coord.plot.bottom()
                     )
                     if isinstance(local, (int, float)) and math.isfinite(local):
                         index = int(local)
@@ -778,8 +800,12 @@ class _ChartQueryMixin:
         elif order in ("valuedesc", "value descending", "descending"):
             rows.sort(key=lambda row: _sort_value(row[3]), reverse=True)
         title = None
-        if is_category:
+        if x_category:
             cats = coord.x_axis.categories
+            if isinstance(primary_index, int) and 0 <= primary_index < len(cats):
+                title = cats[primary_index]
+        elif y_category:
+            cats = coord.y_axis.categories
             if isinstance(primary_index, int) and 0 <= primary_index < len(cats):
                 title = cats[primary_index]
         else:
@@ -789,7 +815,7 @@ class _ChartQueryMixin:
         if title:
             lines.insert(0, (None, "", title))
         marker = markers[0][0] if markers else pos
-        pointer = marker if self.tooltip.axisPointerSnap(is_category) else pos
+        pointer = marker if self.tooltip.axisPointerSnap(category_axis) else pos
         self.tooltip.showAt(
             pos,
             lines,
@@ -797,6 +823,7 @@ class _ChartQueryMixin:
             markers=markers,
             axis_pointer=True,
             axis_label=title,
+            pointer_axis="y" if y_category else "x",
             coord=coord,
             x_axis_index=x_axis_index,
         )
