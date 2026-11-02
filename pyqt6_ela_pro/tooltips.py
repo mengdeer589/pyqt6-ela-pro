@@ -29,7 +29,7 @@ from PyQt6.QtCore import (
 )
 
 from ._colors import parse_color
-from ._internal import is_deleted, single_shot_on
+from ._internal import connect_theme_signal, is_deleted, single_shot_on
 from ._motion import Duration, start_idle_loop, start_transition
 from ._styles import SHADOW_MARGIN, ColorText, paintOverlayShadow, paintRoundedCard
 from ._theme import ElaStatusRoleType, accent, border, statusColor, surfacePopup
@@ -172,8 +172,11 @@ class ElaToolTip(QWidget):
         self._label.setFont(font)
         self._apply_text_color()
 
-        # 跟随主题切换（绑定方法连接，对象销毁时 Qt 自动断开）
-        eTheme.themeModeChanged.connect(self._onThemeChanged)
+        # 跟随主题切换。不能裸连绑定方法：编译形态（Nuitka 单模块 pyd）下
+        # PyQt 不会自动断开已销毁包装器的连接，下次切主题在槽里摸已删子控件
+        # 会穿出 C++ 信号链 = 0xC0000409 静默终止。connect_theme_signal 的
+        # 槽内 is_deleted 自愈不依赖 destroyed 送达（销毁期读不到包装器属性）。
+        connect_theme_signal(self)
 
         self._updateSize()
 

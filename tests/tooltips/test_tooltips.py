@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import pytest
 from PyQt6 import sip
 from PyQt6.QtCore import QCoreApplication, QEvent, QObject, QPoint, Qt, pyqtSignal
 from PyQt6.QtGui import QColor, QHelpEvent, QPalette
 from PyQt6.QtWidgets import QApplication, QLabel, QVBoxLayout, QWidget
 from PyQt6ElaWidgetTools import ElaIconButton, ElaThemeType, eTheme
 
+import pyqt6_ela_pro._internal as internal_module
 import pyqt6_ela_pro.tooltips as tooltips_module
 from pyqt6_ela_pro._styles import SHADOW_MARGIN
 from pyqt6_ela_pro._theme import ElaStatusRoleType, accent, statusColor, surfacePopup
@@ -513,7 +515,10 @@ class TestToolTipTheme:
                 )
 
         fake = _FakeTheme()
+        # connect_theme_signal 用 _internal 里的 eTheme；颜色读取用 tooltips 里的，
+        # 两个模块全局都要换成同一个假主题，否则连接连到真单例、emit 不会触发。
         monkeypatch.setattr(tooltips_module, "eTheme", fake)
+        monkeypatch.setattr(internal_module, "eTheme", fake)
         tooltip = tooltips_module.ElaToolTip("提示")
         assert (
             tooltip._label.palette().color(QPalette.ColorRole.WindowText).name()
@@ -527,6 +532,43 @@ class TestToolTipTheme:
         )
         tooltip.deleteLater()
         qapp.processEvents()
+
+    def test_theme_switch_calls_slot_once(self, qapp):
+        """主题槽只连一次：切一次主题只更新一次（防止叠连接）。"""
+        calls = []
+
+        class _Counting(ElaToolTip):
+            def _onThemeChanged(self, mode):
+                calls.append(mode)
+                super()._onThemeChanged(mode)
+
+        tooltip = _Counting("提示")
+        mode = eTheme.getThemeMode()
+        eTheme.themeModeChanged.emit(mode)
+        assert calls == [mode]
+        tooltip.deleteLater()
+        qapp.processEvents()
+
+    def test_theme_connection_self_heals_after_destroy(self, qapp):
+        """C++ 对象销毁后，连接必须在首次切主题时自愈断开。
+
+        编译形态（Nuitka 单模块 pyd）下 PyQt 不会自动断开裸连的绑定方法，
+        这是「切主题即崩」的根因；connect_theme_signal 的槽内 is_deleted
+        短路是唯一不依赖 destroyed 送达的兜底。
+        """
+        tooltip = ElaToolTip("提示")
+        assert tooltip._theme_connected is True
+        slot = tooltip._theme_slot
+        assert slot is not None
+
+        tooltip.deleteLater()
+        qapp.processEvents()
+        QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+        assert sip.isdeleted(tooltip)
+
+        eTheme.themeModeChanged.emit(eTheme.getThemeMode())
+        with pytest.raises(TypeError):
+            eTheme.themeModeChanged.disconnect(slot)
 
 
 class TestStateToolTip:
