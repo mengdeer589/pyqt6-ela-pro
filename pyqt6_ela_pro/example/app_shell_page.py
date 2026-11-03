@@ -1,16 +1,4 @@
-"""启动与托盘
-
-应用外壳：启动画面（`ElaSplashScreen`）、任务栏进度（`ElaTaskbarProgress`）、
-系统托盘（`ElaTrayIcon` / `ElaTrayHost`）。
-
-这三样此前分散在「应用辅助」（2 个组件）和「托盘图标」两页，而它们回答的是
-同一个问题：**我的程序怎么在系统里露出存在**。合到一页后这个问题有一个
-地方可查，而不是让用户在侧边栏里凭标题猜。
-
-托盘菜单**不许出现 checkable 项** —— `ElaMenu` 的图标列与勾选框互斥，
-一旦有 checkable 项，所有项的 ElaAwesome 图标都不再绘制；开关状态要写进
-文案并换图标（见 `tray_host.py` 的 `_syncToggleItem`）。
-"""
+"""启动与托盘?"""
 
 from __future__ import annotations
 
@@ -156,10 +144,7 @@ class AppShellPage(ExamplePage):
     PAGE_TITLE = "启动与托盘"
 
     def __init__(self, parent=None):
-        # 托盘 / 宿主 / 日志在 demo 方法里**延迟创建**（点按钮才建），
-        # 但「先写日志再创日志控件」的顺序在真实使用里很常见
-        # （_demoHost 结束时要写一行，_demoEvents 才建 ElaPlainTextEdit），
-        # 所以这里先给 None，让 _log_line 能提前判空返回。
+        # 托盘 / 宿主 / 日志在 demo 方法里延迟创建；先给 None，让 _log_line 能提前判空。
         self._tray = None
         self._host = None
         self._log = None
@@ -360,7 +345,6 @@ class AppShellPage(ExamplePage):
 
     def _buildTrayMenu(self):
         """裸 ElaMenu 直接 setContextMenu 即可（托盘菜单只认原生 QMenu 体系）。
-
         注意 ElaMenu 的父对象必须是 **QWidget**（ElaTrayIcon 是 QObject，不行），
         所以挂到页面自身。
         """
@@ -379,10 +363,8 @@ class AppShellPage(ExamplePage):
 
     def _ensure_tray_visible(self):
         """首次交互时把裸托盘图标显示出来。
-
         本页第 03 节的 ``ElaTrayIcon`` 演示对象默认**不占**系统托盘（第 04 节的
         宿主演示已经有一个图标在托盘里）。不显示的话三态切换 / 气泡通知都没有
-        可见载体 —— 症状就是「点了按钮没反应」。
         """
         if self._tray is None or self._tray.isVisible():
             return
@@ -492,18 +474,14 @@ class AppShellPage(ExamplePage):
 
     def _find_selection_page(self):
         """定位划词助手页面。
-
         ``ElaWindow`` **没有**「按 widget 查页面」的 API（只有
         ``navigation(pageKey)``），但 ``addPageNode`` 会把页面 reparent 进
-        内容区，所以页面就是主窗口的子控件，用 ``findChildren`` 找。
         """
         window = self.window()
         if window is None:
             return None
         pages = window.findChildren(SelectionAssistantPage)
         return pages[0] if pages else None
-
-    # -- 分区 03：日志 -----------------------------------------------------
 
     def _on_host_action(self, actionId):  # noqa: N803 (Qt 命名)
         if actionId == TOGGLE_WINDOW_ID:
@@ -613,10 +591,8 @@ class AppShellPage(ExamplePage):
         self._log.setMinimumHeight(140)
         main_layout.addWidget(self._log)
 
-    # -- 信号回调（这些是**槽**，抽取时不会被依赖闭包带上，必须显式声明）----
     # 依赖闭包只认 `self._x(...)`；`btn.clicked.connect(self._on_x)` 这种
     # 裸引用不匹配，早期版本漏掉它们，症状是运行期 AttributeError 而 lint 全绿。
 
-    # -- 信号回调（这些是**槽**，抽取时不会被依赖闭包带上，必须显式声明）----
     # 依赖闭包只认 `self._x(...)`；`btn.clicked.connect(self._on_x)` 这种
     # 裸引用不匹配，早期版本漏掉它们，症状是运行期 AttributeError 而 lint 全绿。

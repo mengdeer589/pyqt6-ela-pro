@@ -1,16 +1,4 @@
-"""
-步骤条组件，风格参考 ElaWidgetTools 的 ElaSteps。
-
-支持设置步骤标题、前进/后退切换，水平 / 竖直两种排布。
-步骤数由标题列表自动决定。
-
-用法::
-
-    steps = ElaSteps(parent=self)
-    steps.step_titles = ["步骤一", "步骤二", "步骤三"]
-    steps.setOrientation("vertical")
-    steps.currentStepChanged.connect(lambda v: print(f"当前步骤: {v}"))
-"""
+"""步骤条组件，风格参考 ElaWidgetTools 的 ElaSteps。"""
 
 from __future__ import annotations
 

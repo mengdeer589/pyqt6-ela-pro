@@ -1,12 +1,4 @@
-"""按钮与菜单
-
-所有「点一下会做事」的控件。
-
-原「增强按钮」页第 01 节是 ElaTagLineEdit（输入框），页名与内容
-不符，已挪到「输入与选择」。原生 ElaPushButton / ElaToolButton /
-ElaIconButton 从「基础控件」并到这里 —— 它们和 ElaButton 是同一族，
-拆两页等于逼用户自己判断「该用哪个」。
-"""
+"""按钮与菜单?"""
 
 from functools import partial
 

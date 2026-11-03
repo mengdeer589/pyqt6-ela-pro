@@ -1,10 +1,4 @@
-"""模型定价与花费换算（``pyqt6_ela_pro.chat`` 内部模块）。
-
-定价表不烤进库（价格会变、分上下文长度阶梯），这里只提供纯换算函数，价格表由
-宿主持有并传入。口径对齐 opencode ``calculateCost``：按输入侧总量
-（``prompt + cache_read + cache_write``）选**超过阈值**的档，输出与 reasoning
-同价，最后除以 1e6；空定价表 / 缺字段按 0 计。
-"""
+"""模型定价与花费换算（``pyqt6_ela_pro.chat`` 内部模块）。"""
 
 from __future__ import annotations
 
@@ -88,7 +82,6 @@ def selectPricing(
     promptTokens: int, pricing: Optional[ModelPricing]
 ) -> Optional[ModelPricing]:
     """按输入侧总量选定价档（取超过阈值的那一档）。
-
     判据是 ``used > threshold``，恰好等于阈值仍算基础档；``tiers`` 自身不参与
     选档（避免递归）。``pricing`` 为 ``None`` / 全零返回 ``None``。
     """
@@ -111,7 +104,6 @@ def selectPricing(
 
 def stats_cost(stats, pricing: Optional[ModelPricing] = None) -> float:
     """把 :class:`~pyqt6_ela_pro.chat.message.ElaChatStats` 换算成美元花费。
-
     ``completion`` 已含 reasoning（不重复加）；``stats`` / ``pricing`` 为
     ``None`` 返回 0.0。
     """

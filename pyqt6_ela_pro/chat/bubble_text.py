@@ -40,7 +40,6 @@ class _BubbleTextMixin:
 
     def _write_chunk(self, partId: str, chunk: str) -> None:
         """写入一个文本分片：流式时入缓冲，非流式时直接落定。
-
         「在途」只存在于流式回合内：已结束的消息走缓冲就再没有 ``endText()``
         来结算，``part.text`` 会永远为空。
         """
@@ -121,7 +120,6 @@ class _BubbleTextMixin:
 
     def _defer_viewer_append(self, partId: str, widget: QWidget) -> bool:
         """追加路径的延迟闸门；``True`` = 已登记待渲染，调用方不要再写查看器。
-
         ``setParts`` 的重放最终落在 ``appendMarkdown`` 上，不看
         ``_render_deferred`` 的话批量加载仍会同步渲染全部 Markdown。
         """
@@ -134,7 +132,6 @@ class _BubbleTextMixin:
 
     def setViewersSuspended(self, on: bool) -> None:
         """挂起 / 恢复全部 Markdown 查看器（视口外消息省内存与 reflow）。
-
         挂起时用等高透明占位控件替换查看器（``parts`` 数据不变），流式中的
         分段不会被挂起。
         """
@@ -284,7 +281,6 @@ class _BubbleTextMixin:
 
     def appendText(self, chunk: str) -> None:
         """追加文本（助手消息追加到当前正文段，用户消息追加到气泡）。
-
         纯空白分片不开正文段：先攒进 ``_pending_text_lead``，等首个非空白分片
         一起开段，避免时间线上留下空 text part；中段空白照常保留。
         """

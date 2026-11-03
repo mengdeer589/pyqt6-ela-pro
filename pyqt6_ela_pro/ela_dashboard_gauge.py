@@ -1,20 +1,4 @@
-"""
-ElaDashboardGauge - 仪表盘组件。
-
-全 QPainter 自绘，支持值范围、刻度、指针、颜色分段、
-动画过渡和深浅色主题自适应。
-
-用法::
-
-    from pyqt6_ela_pro import ElaDashboardGauge
-
-    gauge = ElaDashboardGauge(parent=self)
-    gauge.setMinimum(0)
-    gauge.setMaximum(200)
-    gauge.setValue(120)
-    gauge.setTitle("转速")
-    gauge.setUnit("r/min")
-"""
+"""ElaDashboardGauge - 仪表盘组件。"""
 
 from __future__ import annotations
 
@@ -105,10 +89,8 @@ class ElaDashboardGauge(ElaThemeWidget):
 
     def _clamp_anim_bounds(self) -> None:
         """量程变更后重夹插值两端。
-
         不重夹的话：先 ``setValue(100)``（动画中）再 ``setMaximum(50)``，后续
         tick 会把 ``_animated_value`` 插回 100 —— 指针与数值文本短暂超出新量程
-        （实测），直到动画落地。
         """
         self._anim_start = max(self._minimum, min(self._anim_start, self._maximum))
         self._anim_target = max(self._minimum, min(self._anim_target, self._maximum))

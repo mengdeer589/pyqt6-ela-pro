@@ -42,7 +42,7 @@ from ._helpers import PREVIEW_MAX_CHARS, RETRYABLE_ERROR_TYPES
 class SteerNotice(_ThemeAwareMixin, QWidget):
     """插话回执行（``kind == Synthetic``）：左竖线 + ``↳ <文本>``。
 
-    刻意不插用户气泡 —— 助手正在流式输出，旁注形式视觉连续且随消息持久化。
+    刻意不插用户气泡：旁注形式与正在流式输出的助手视觉连续。
     """
 
     def __init__(self, parent: Optional[QWidget] = None) -> None:
@@ -88,13 +88,13 @@ class SteerNotice(_ThemeAwareMixin, QWidget):
 class CompactionSeparator(_ThemeAwareMixin, ElaScrollPageArea):
     """上下文压缩分隔卡（``kind == Compaction``）：如实表达「历史已被摘要替代」。
 
-    库只负责表达与持久化，压缩算法 / 摘要模板 / 词元估算全归宿主。
+    压缩算法 / 摘要模板 / 词元估算全归宿主，库只负责表达与持久化。
     """
 
     #: 展开 / 收起摘要
     toggled = pyqtSignal(bool)
 
-    #: 分隔文案模板（``{count}`` 会被替换成被压缩的历史条数）
+    #: 分隔文案模板（``{count}`` = 被压缩的消息条数）
     LABEL_TEMPLATE = "已压缩 {count} 条历史"
     #: 调用方没给条数时的文案：``historyCount`` 默认 0 是「不知道」，不是「压了 0 条」。
     LABEL_NO_COUNT = "已压缩历史"
@@ -157,8 +157,6 @@ class CompactionSeparator(_ThemeAwareMixin, ElaScrollPageArea):
         self._chevron.mousePressEvent = self._toggle_from_header  # type: ignore[method-assign]
         self._apply_theme()
 
-    # -- 数据 --------------------------------------------------------------
-
     def setSummary(self, summary: str) -> None:
         """设置摘要文本。"""
         self._summary = summary or ""
@@ -170,7 +168,7 @@ class CompactionSeparator(_ThemeAwareMixin, ElaScrollPageArea):
     def _preview_text(summary: str) -> str:
         """折叠态那一行：摘要首行，超长按字符数截断。
 
-        ``ColorText`` 不按宽度省略（``ElaText.sizeHint`` 无视 ``wordWrap``），只能自己截。
+        ``ColorText`` 不按宽度省略（``ElaText.sizeHint`` 无视 ``wordWrap``）。
         """
         for line in (summary or "").splitlines():
             line = line.strip()
@@ -311,8 +309,7 @@ class CompactionSeparator(_ThemeAwareMixin, ElaScrollPageArea):
 class ErrorCard(_ThemeAwareMixin, ElaScrollPageArea):
     """错误卡片（左 danger 竖线 + 图标 + 标题 + 详情 + 动作区）。
 
-    「重试」只对 :data:`RETRYABLE_ERROR_TYPES` 里的类型显示（换次机会大概率成功）；
-    「重新生成」对任何错误都有意义。两个动作都只发信号，不自己发请求。
+    「重试」只对 :data:`RETRYABLE_ERROR_TYPES` 显示；两个动作都只发信号，不自己发请求。
     """
 
     #: 点击「重试」（由气泡转发成 view / widget 的 ``retryRequested``）
@@ -364,8 +361,8 @@ class ErrorCard(_ThemeAwareMixin, ElaScrollPageArea):
     def setMessage(self, message: str, errorType: str = "") -> None:
         """设置错误文本与类型（空文本则隐藏整张卡）。
 
-        :param errorType: 错误类型（``"RateLimit"`` / ``"Timeout"`` / ...），
-            只用于决定动作可用性，不拼进文案 —— 类型一旦格式化进文本就取不回来。
+        :param errorType: 错误类型（``"RateLimit"`` / ``"Timeout"`` / ...），只决定动作
+            可用性；一旦格式化进文案就取不回来。
         """
         self._message = message or ""
         self._error_type = str(errorType or "")

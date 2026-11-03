@@ -29,7 +29,6 @@ from ._shared import (
 
 class TreemapSeriesRenderer(SeriesRenderer):
     """矩形树图（squarified 布局，父子分层渲染）。
-
     支持 ``data`` / ``breadcrumb`` / ``label`` / ``gapWidth``；点击父块下钻，
     点击空白 / 面包屑返回上级（``resetDrill()`` 回顶层）。
     """

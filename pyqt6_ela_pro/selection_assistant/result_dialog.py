@@ -1,39 +1,7 @@
-"""划词结果对话框（``pyqt6_ela_pro.selection_assistant``）。
+"""划词结果对话框：流式显示模型输出，支持复制 / 重新生成。
 
-:class:`ElaSelectionResultDialog` 是划词动作条点中「翻译 / 解释 / 总结」这类
-**要跑模型**的动作后弹出的浮动窗，实时显示大模型流式返回的 Markdown，
-结束后可复制（**``Ctrl+C`` = 纯文本**；Markdown 源走「复制 Markdown」/
-``Ctrl+Shift+C``）/ 重新生成。参照 Cherry Studio 的 selection action window。
-
-**基类是上游 :class:`~PyQt6ElaWidgetTools.ElaWidget.ElaWidget`，不是自绘
-``QWidget``**：ElaWidget 自带 ElaAppBar（图标 + 标题 + 窗口按钮）、窗口阴影
-（``QEvent::Show`` 时补 ``WS_THICKFRAME``，Win7 另加 ``CS_DROPSHADOW``）、
-拖动与边缘缩放、Mica 背景、主题适配。所以本组件**零 QSS、零 ``paintEvent``
-自绘、零阴影边距常量** —— ``ElaSelectionPopup`` / ``ElaNotifyPopup`` 里那套手写
-圆角 + 阴影是因为它们是**弹层**不是窗口，窗口别学。
-
-窗口按钮只留「置顶 + 关闭」：置顶按钮（``StayTopButtonHint``，上游画的是图钉）
-就是这种浮动面板该有的 pin，顺带白拿。焦点行为**抢焦点**（与 Cherry 的 action
-window 一致）：Esc / Ctrl+C 快捷键和按钮点击都需要它，代价是源应用的选区高亮
-消失 —— 划词原文会在正文上方单行展示，用户不至于完全失去上下文。
-
-**组件不碰网络。** 流式内容全部由宿主推进（:meth:`beginStream` /
-:meth:`appendMarkdown` / :meth:`endStream` / :meth:`setError`）；取消走
-:attr:`~ElaSelectionResultDialog.stopRequested` 信号，**宿主必须在那里 abort
-自己的后端**。Cherry Studio 在这一点上是坏的 —— ``ActionUtils.ts:85`` 传了空
-``requestOptions``，从头到尾没注册过 ``AbortSignal``，停止按钮点了不真停，
-只是靠 renderer 进程死亡顺带杀掉 fetch；Qt 里宿主线程照跑，所以这里把
-「关窗即中止」做成一等公民（:meth:`closeEvent`）。
-
-回合状态机：每次 :meth:`openFor` 递增 ``_turn_id``；所有结束路径（标题栏 ✕ /
-Esc / 停止 / 重新生成 / 再次 :meth:`openFor`）汇到唯一的 :meth:`_endTurn`：
-
-1. 按 turn id 丢弃**迟到分片**（被中止的回合之后宿主仍可能推几片在途）；
-2. 仍在流式时发 :attr:`stopRequested`；
-3. 只在**正常落定**（:meth:`endStream` / :meth:`setResult`）时发
-   :attr:`finished` —— 半句话不算结果，复制保持禁用。
-
-命名规范与库内一致（``camelCase``）。
+组件不碰网络，取消走 ``stopRequested``（宿主必须 abort 后端）；状态机与用法见
+``docs/selection-assistant.md``。
 """
 
 from __future__ import annotations
@@ -76,24 +44,22 @@ _EDGE_GAP = 6
 _PAD = 12
 #: 落点偏移（弹窗水平居中于落点后，再往下让一点；放不下就翻到上方）
 _PLACE_OFFSET = QPoint(0, 18)
-#: app bar 高度（Cherry 同值；ElaWidget 默认 45）
+#: app bar 高度（ElaWidget 默认 45）
 _APP_BAR_HEIGHT = 32
 #: 状态行忙碌指示的边长
 _RING_SIZE = 16
 #: 标题栏图标的物理边长
 _TITLE_ICON_PX = 18
-#: 原文预览参与省略计算的字符上限。省略到控件宽度（几百 px ≈ 几十个汉字）之后
-#: 更后面的内容永远露不出来，所以一次划词几百万字时也不必让 ``elidedText`` 在
-#: 全文上扫 —— 只喂前 400 字给它，QString 拷贝与扫描都变成常数级
+#: 原文预览参与省略计算的字符上限：省略到控件宽度后更远内容露不出来，
+#: 只喂前 400 字让 ``elidedText`` 的拷贝与扫描保持常数级。
 _PREVIEW_SOURCE_MAX = 400
-#: 原文预览悬浮提示的字符上限。折行有界（见 ``_PREVIEW_TIP_WIDTH``）后不能
-#: 再喂两千字：``ElaToolTip`` 要排版 + 自绘绘制全文，且几十行高的提示框本身
-#: 就不可读。完整原文由 :meth:`_PreviewText.fullText` 提供，宿主想要就取。
+#: 原文预览悬浮提示的字符上限。提示框要排版并自绘全文，太长既慢又不可读；
+#: 完整原文由 :meth:`_PreviewText.fullText` 提供。
 _PREVIEW_TIP_MAX = 400
 #: 原文预览悬浮提示的最大宽度（折行，避免拉成远宽于屏幕的单行横条）
 _PREVIEW_TIP_WIDTH = 480
-#: ``WS_THICKFRAME`` 撑高的高度上限（像素）。实测 +31（与 app bar 高度无关）；
-#: 留一点余量给不同 DPI / 系统度量，但远小于用户拖一次边框的幅度。
+#: ``WS_THICKFRAME`` 撑高的高度上限（像素）；上游通常 +31，留余量给不同 DPI，
+#: 但远小于用户拖一次边框的幅度。
 _WM_GROW_MAX_PX = 64
 
 #: 状态行文案（落定且有正文时状态行整行隐藏）
@@ -104,13 +70,9 @@ _TEXT_FAILED = "生成失败"
 
 
 def _cleanup_on_destroy(dialog, _object=None) -> None:  # noqa: ANN001
-    """对话框析构时收尾：断掉 ``eTheme.themeModeChanged`` 上的连接。
-
-    **必须是普通函数，不能是绑定方法** —— PyQt6 不调用「绑定到发出信号的那个
-    对象自己」的 ``destroyed`` 槽（见 AGENTS.md 与 ``assistant._cleanup_on_destroy``）。
-
-    显式断的理由：这是**无父顶层窗**，进程退出期 ``deleteLater()`` 未必被派发，
-    单例信号上残留的连接会在下一次切主题时打进已释放的 C++ 对象。
+    """对话框析构时断开主题信号。
+    必须是普通函数而非绑定方法；无父顶层窗在进程退出期不一定会派发
+    ``deleteLater()``，残留连接会在下次切主题时打到已释放的 C++ 对象。
     """
     if is_deleted(dialog):
         return
@@ -121,12 +83,9 @@ def _cleanup_on_destroy(dialog, _object=None) -> None:  # noqa: ANN001
 
 
 class _PreviewText(ColorText):
-    """划词原文的单行预览（按**可用宽度**省略，完整内容进悬浮提示）。
+    """划词原文单行预览（按可用宽度省略，全文见 :meth:`fullText`）。
 
-    ``ColorText`` 本身不省略（它是 ``QLabel``，没有 elide 支持）。这里在
-    ``resizeEvent`` 里用 ``QFontMetrics.elidedText`` 重算 —— 省略结果依赖字体
-    度量，``windows`` 与 ``offscreen`` 两个平台算出来不一样，所以**测试不能钉
-    省略位置**，只能钉「全文始终拿得到」（:meth:`fullText`）与「不换行」。
+    省略位置依赖字体度量，测试只钉全文可取得与不换行。
     """
 
     def __init__(self, parent: Optional[QWidget] = None) -> None:
@@ -198,19 +157,6 @@ class _PreviewText(ColorText):
 class ElaSelectionResultDialog(ElaWidget):
     """划词结果对话框：流式显示大模型返回内容（可独立复用）。
 
-    典型用法::
-
-        from pyqt6_ela_pro import ElaSelectionResultDialog
-
-        dialog = ElaSelectionResultDialog()
-        dialog.stopRequested.connect(backend.abort)        # ★ 必须接
-        dialog.regenerateRequested.connect(lambda aid: run(aid))
-
-        def on_action(actionId, text, pos):
-            if actionId == "translate":
-                dialog.openFor(actionId, "翻译", text, pos)
-                run(actionId)
-
     :param parent: 父组件（一般留 ``None`` —— 这是独立浮动窗）
     """
 
@@ -238,10 +184,8 @@ class ElaSelectionResultDialog(ElaWidget):
         self.setWindowButtonFlag(ElaAppBarType.ButtonType.StayTopButtonHint, True)
         self.setWindowButtonFlag(ElaAppBarType.ButtonType.CloseButtonHint, True)
         self.setIsStayTop(True)
-        # Qt.WindowType.Tool 让它不进任务栏、不进 Alt-Tab（Cherry 的 skipTaskbar）。
-        # **必须在首次 show 之前设**：ElaAppBar 的 eventFilter 在 ``QEvent::Show``
-        # 分支里给 HWND 打 ``WS_THICKFRAME``（Win7 再加 ``CS_DROPSHADOW``），
-        # show 之后再改 window flags 会重建 HWND，那些样式要等下一次 show 才补。
+        # Qt.WindowType.Tool：不进任务栏 / Alt-Tab。必须在首次 show 前设 ——
+        # show 后改 flags 会重建 HWND，上游补的 ``WS_THICKFRAME`` / 阴影要等下次 show。
         self.setWindowFlag(Qt.WindowType.Tool, True)
         self.setMinimumSize(_MIN_SIZE)
         self.resize(_DEFAULT_SIZE)
@@ -262,10 +206,9 @@ class ElaSelectionResultDialog(ElaWidget):
         self._preferred_size = QSize(_DEFAULT_SIZE)
         #: 定位过程中为 True —— 此时的 resize 是程序夹取，不是用户意图
         self._placing = False
-        #: ``WS_THICKFRAME`` 撑高（宽度不变、高度 +31）的判定材料：
-        #: ``_wm_grow_pending`` 是「可能还有一次撑高没落地」，
-        #: ``_wm_grow_request`` 是 ``_place`` 请求的尺寸（按形状识别撑高），
-        #: ``_user_resizing`` 记录用户是否亲手拖过边框（拖过就一定是用户意图）。
+        #: ``WS_THICKFRAME`` 撑高的判定材料：``_wm_grow_pending`` 表示可能还有一次
+        #: 撑高未落地，``_wm_grow_request`` 是 ``_place`` 请求的尺寸（按形状识别），
+        #: ``_user_resizing`` 记录用户是否亲手拖过边框。
         self._wm_grow_pending = False
         self._wm_grow_request: Optional[QSize] = None
         self._user_resizing = False
@@ -279,10 +222,8 @@ class ElaSelectionResultDialog(ElaWidget):
     # ── UI ─────────────────────────────────────────────────────
 
     def _build_ui(self) -> None:
-        # ElaWidget 的**窗口内容边距**被 ElaAppBar 设成 (0, appBarHeight, 0, 0)，
-        # 正文自动落在标题栏之下。所以外层布局一个像素的边距都不许动 ——
-        # QLayout.setContentsMargins 会写回 QWidget.setContentsMargins，一调就把
-        # appBar 让出的顶部空间清掉、正文压到标题栏上。卡内边距因此走内嵌容器。
+        # ElaWidget 的窗口内容边距由 ElaAppBar 设为 (0, appBarHeight, 0, 0)，
+        # 正文自动落在标题栏下；外层布局不能动边距，否则顶部空间会被清掉。
         outer = QVBoxLayout(self)
         outer.setContentsMargins(0, 0, 0, 0)
         outer.setSpacing(0)
@@ -394,10 +335,8 @@ class ElaSelectionResultDialog(ElaWidget):
         )
         set_tooltip(self._regen_button, "用同样的输入重新生成", ElaToolTipPositionType.Top)
 
-        # 标题栏的 ✕ **不用**接：上游 ``IsDefaultClosed`` 默认 true，点它就是
-        # ``window()->close()``（ElaAppBarPrivate.cpp:52-56），会正常走到
-        # ``closeEvent`` —— 与 Esc、页脚「关闭」共用同一个收尾入口。
-        # 只有把 ``setIsDefaultClosed(False)`` 时上游才改发 ``closeButtonClicked``。
+        # 标题栏 ✕ 不用接：上游默认 ``IsDefaultClosed``，点它就是 ``window()->close()``，
+        # 会正常走到 ``closeEvent``（与 Esc、页脚「关闭」同一入口）。
 
     # ── 公开 API：打开与回合 ──────────────────────────────────────
 
@@ -409,23 +348,16 @@ class ElaSelectionResultDialog(ElaWidget):
         anchor: Optional[QPoint] = None,
         icon=None,
     ) -> int:
-        """为一次划词动作打开对话框，返回本次回合的 turn token。
+        """为一次划词动作打开对话框，返回本回合的 turn token。
 
-        **上一回合若仍在流式，会先中止它**（发 :attr:`stopRequested` 带上旧动作
-        id）—— 一次只处理一个回合，否则迟到分片会串进新动作。
+        上一回合仍在流式时先中止它，避免迟到分片串进新动作。
 
-        :param actionId: 动作 id（原样回传给各信号，供宿主区分行为）
-        :param title: 标题栏文字（通常是动作名，如「翻译」）
-        :param selectedText: 划词原文，显示在正文上方的预览行
-        :param anchor: 落点全局逻辑坐标（与 ``actionTriggered`` 的 pos 同源），
-            传了才重新定位。**``None`` 表示复用当前位置** —— 「重新生成」是同一次
-            划词的重跑，用户多半已经把窗口挪到顺手的位置了，再用锚点重算一遍
-            等于把窗子从他眼前抽走。纯重跑其实更该直接调 :meth:`beginStream`
-            （连标题与原文都不用重设），``anchor=None`` 是给想复用 ``openFor``
-            整条链路的宿主留的出口
-        :param icon: 标题栏图标（``ElaIconType.IconName``；``None`` 则不显示）
-        :returns: 本回合的 turn token，传给 :meth:`appendMarkdown` /
-            :meth:`endStream` 可彻底挡掉迟到分片
+        :param actionId: 动作 id（原样回传给各信号）
+        :param title: 标题栏文字（通常是动作名）
+        :param selectedText: 划词原文，显示在正文上方
+        :param anchor: 落点全局坐标；``None`` 表示复用当前位置
+        :param icon: 标题栏图标（``None`` 不显示）
+        :returns: 本回合 token，传给 :meth:`appendMarkdown` / :meth:`endStream` 挡迟到分片
         """
         if self._streaming:
             self._endTurn("replaced")
@@ -445,10 +377,8 @@ class ElaSelectionResultDialog(ElaWidget):
         self._error_text.setText("")
         self._error_row.setVisible(False)
         self._sync_controls()
-        # **先 show 再定位**：上游 ElaAppBar 在 QEvent::Show 里给 HWND 补
-        # WS_THICKFRAME，Qt 会因此把窗口**首次**撑高约 31px（实测与 app bar
-        # 高度无关，offscreen 无窗口管理器则不涨）。show 之前算好的位置会因此
-        # 差出这 31px，锚点贴屏幕下沿时整块溢出屏幕外。
+        # 先 show 再定位：上游在 QEvent::Show 里补 WS_THICKFRAME，首次 show 会把
+        # 窗口撑高约 31px；show 前算好的位置会差这 31px，锚点贴底时溢出屏幕。
         was_visible = self.isVisible()
         self.show()
         if anchor is not None:
@@ -521,12 +451,9 @@ class ElaSelectionResultDialog(ElaWidget):
         self.finished.emit(self._action_id, self._result_text)
 
     def setError(self, message: str) -> None:
-        """显示错误并结束回合（复制保持禁用 —— 没有可用结果）。
+        """显示错误并结束回合（复制保持禁用）。
 
-        **必须冲掉查看器的流式态**（判据是「本回合是否流式过」，与
-        :meth:`_endTurn` 一致）：流式中途出错时，``ElaMarkdownViewer`` 还在
-        流式缓冲里、流式光标还在闪，用户看到的是「已经报错了，正文却还在
-        打字」，而且那半截内容要等下一次 flush 才落屏。
+        本回合流式过时必须冲掉查看器缓冲，否则错误行会与仍在闪的光标 / 半截正文并存。
         """
         wasStreaming = self._streaming or self._viewer.isStreaming()
         self._streaming = False
@@ -571,11 +498,9 @@ class ElaSelectionResultDialog(ElaWidget):
         return self._result_text
 
     def copyPlainText(self) -> None:  # noqa: N802 (Qt 命名)
-        """复制**纯文本结果**（渲染后的文本，去掉 Markdown 标记）。
+        """复制纯文本结果（默认复制：``Ctrl+C`` 与页脚按钮）。
 
-        **这是默认复制**：``Ctrl+C`` 与页脚「复制纯文本」都走这里；要原始
-        Markdown 源用 :meth:`_on_copy`（页脚「复制 Markdown」/ ``Ctrl+Shift+C``，
-        发 :attr:`copied`）。没有落定结果时不做任何事（半句话不复制）。
+        没有落定结果时不复制（半句话不算结果）。
         """
         if not self.hasResult():
             return
@@ -604,11 +529,7 @@ class ElaSelectionResultDialog(ElaWidget):
     # ── 事件 ────────────────────────────────────────────────────
 
     def keyPressEvent(self, event) -> None:  # noqa: N802 (Qt 命名)
-        """Esc 分流：流式中=停止（留在窗口里），空闲时=关闭。
-
-        ``Ctrl+C`` = **纯文本**（默认，与「复制纯文本」按钮同源）；
-        ``Ctrl+Shift+C`` = Markdown 源（「复制 Markdown」按钮的快捷键）。
-        """
+        """Esc：流式中停止，空闲时关闭；``Ctrl+C`` 复制纯文本，``Ctrl+Shift+C`` 复制 Markdown。"""
         key = event.key()
         ctrl = bool(event.modifiers() & Qt.KeyboardModifier.ControlModifier)
         if key == Qt.Key.Key_Escape:
@@ -629,14 +550,7 @@ class ElaSelectionResultDialog(ElaWidget):
         super().keyPressEvent(event)
 
     def closeEvent(self, event) -> None:  # noqa: N802 (Qt 命名)
-        """关窗即中止。
-
-        Cherry Studio 没有任何 unload / abort 处理，关窗只是销毁 renderer
-        进程顺带把 fetch 带走（``SelectionService.ts`` 全文无 abort）；Qt 里宿主的
-        后端线程照跑，所以这里必须显式发 :attr:`stopRequested`，否则就是
-        「面板关掉了但模型还在烧 token」。标题栏 ✕ / Esc / 页脚「关闭」/ 程序化
-        ``close()`` 全部汇到这里，是唯一的收尾路径。
-        """
+        """关窗即中止：显式发 ``stopRequested``，否则面板关了模型还在跑。"""
         self._endTurn("closed")
         super().closeEvent(event)
 
@@ -648,14 +562,9 @@ class ElaSelectionResultDialog(ElaWidget):
         if self._placing or not self.isVisible():
             return
         if self._wm_grow_pending:
-            # 上游在 ``QEvent::Show`` 里补的 ``WS_THICKFRAME`` 会把窗口**撑高
-            # 约 31px**，而这一次 resize **投递时机不确定**：有时同步落在
-            # ``_place()`` 内（被 ``_placing`` 盖住），有时被 Qt 排进事件队列、
-            # 在 ``_placing`` 复位之后才到（实测两种都发生过），有时**干脆不来**。
-            # 所以不能无条件把「下一次可见期 resize」当撑高（那会吞掉用户打开后
-            # 第一次调尺寸），按形状 + 用户是否拖过边框判定：
-            #   撑高 = 宽度与 ``_place`` 请求值相同、高度多出 1~_WM_GROW_MAX_PX、
-            #   且用户没亲手拖过边框（拖过 = ``NonClientAreaMouseButtonPress``）。
+            # 上游补 WS_THICKFRAME 会把窗口撑高约 31px，投递时机不确定；按形状 +
+            # 用户是否拖过边框判定，避免吞掉用户打开后的第一次调尺寸：
+            # 撑高 = 宽度不变、高度多出 1~_WM_GROW_MAX_PX，且用户没拖过边框。
             requested = self._wm_grow_request
             self._wm_grow_pending = False
             self._wm_grow_request = None
@@ -669,11 +578,7 @@ class ElaSelectionResultDialog(ElaWidget):
         self._preferred_size = QSize(self.size())
 
     def event(self, event) -> bool:  # noqa: N802 (Qt 命名)
-        """记录用户是否亲手拖过窗口边框。
-
-        拖边框是**非客户区**按下（``NonClientAreaMouseButtonPress``）；据此把
-        随后的 resize 与上游补 ``WS_THICKFRAME`` 的撑高区分开（见 ``resizeEvent``）。
-        """
+        """记录用户是否亲手拖过窗口边框（非客户区按下），用于区分撑高与用户 resize。"""
         if event.type() == QEvent.Type.NonClientAreaMouseButtonPress:
             self._user_resizing = True
         return super().event(event)
@@ -682,29 +587,16 @@ class ElaSelectionResultDialog(ElaWidget):
 
     def _endTurn(self, reason: str) -> None:
         """所有结束路径的唯一入口。
-
-        ``reason``：
-
-        - ``"stopped"`` —— 用户中止（停止按钮 / 流式中 Esc / 关窗）：**留在窗口
-          里**，半截内容保留但不算结果（复制保持禁用）；
-        - ``"closed"`` —— 关闭窗口；
-        - ``"replaced"`` —— 新的 :meth:`openFor` 顶掉了本回合。
+        ``reason``：``stopped`` = 用户中止（保留半截内容但不算结果）；
+        ``closed`` = 关窗；``replaced`` = 新 ``openFor`` 顶掉本回合。
         """
         was_streaming = self._streaming
         self._streaming = False
         if was_streaming:
             self.stopRequested.emit(self._action_id)
         if was_streaming:
-            # **必须冲掉查看器的流式缓冲**，否则用户看到的是空盒子 / 半截旧文：
-            # ElaMarkdownViewer 把分片攒在 QTimer 里按节流提交，用户在定时器
-            # 触发前点「停止」或直接关窗，缓冲里那半截就永远没进文档（截图实测：
-            # 状态行写着「已停止」而正文全白）。判据是 ``was_streaming`` 而不是
-            # ``reason == "stopped"`` —— 关窗走的是 ``reason == "closed"``，
-            # 只判 stopped 会漏掉「生成中直接关窗」这条最常见的路径。
-            #
-            # 调的是**查看器**的 ``endStream``：它只做「停缓冲 + 全量重渲染 +
-            # 发 ``streamFinished``」，不碰本组件的 ``_settled`` 与 ``finished``，
-            # 所以「半句话不算结果」的契约不受影响（正文可见 ≠ 可复制）。
+            # 必须冲掉查看器的流式缓冲：分片攒在 QTimer 里，停止 / 关窗时半截
+            # 内容还没进文档。判据用 was_streaming 而非 reason == "stopped"。
             self._viewer.endStream()
         if reason in ("stopped", "replaced"):
             self._settled = False
@@ -723,8 +615,7 @@ class ElaSelectionResultDialog(ElaWidget):
         self.regenerateRequested.emit(self._action_id)
 
     def _on_copy(self) -> None:
-        # 复制只在**已落定**时可用 —— 复制半句话是错的（Cherry 也只在 onFinish
-        # 里填 contentToCopy，从不给半截）。
+        # 复制只在已落定时可用：半句话不算结果。
         if not self.hasResult():
             return
         clipboard = QApplication.clipboard()
@@ -765,10 +656,7 @@ class ElaSelectionResultDialog(ElaWidget):
             button.setVisible(not streaming)
         self._copy_button.setEnabled(self.hasResult())
         self._plain_copy_button.setEnabled(self.hasResult())
-        # 「重新生成」只要**这个回合动过手**就可用 —— 判据刻意不是 `_settled`：
-        # 出错与被中止之后用户最想干的就是重试，把按钮留着灰的等于把重试入口
-        # 藏起来了（截图实测：报错页与停止页上「重新生成」都是灰的）。
-        # `openFor` 之后仍然禁用：那时宿主还没发过请求，没有「重来」可言。
+        # 本回合动过手就允许重新生成（含出错 / 中止）；``openFor`` 后尚未发请求时不启用。
         self._regen_button.setEnabled(
             not streaming and self._turn_started and bool(self._action_id)
         )
@@ -777,11 +665,8 @@ class ElaSelectionResultDialog(ElaWidget):
 
     def _title_icon(self) -> QIcon:
         """标题栏图标：当前主题正文色上色的动作图标。
-
-        ``ElaAppBar`` 在 ``windowIcon().isNull()`` 时整块隐藏图标位，所以无图标
-        直接给空 ``QIcon`` 即可，不需要额外开关。没调 ``eApp.init()`` 时
-        ``getElaIcon`` 返回的是全透明 pixmap（图标「画不出来」），那是宿主的
-        责任，不该让开窗失败。
+        ``windowIcon()`` 为空时上游会隐藏图标位；没调 ``eApp.init()`` 时取到的是
+        全透明 pixmap（宿主责任），不应让开窗失败。
         """
         if self._icon_name is None:
             return QIcon()
@@ -795,23 +680,9 @@ class ElaSelectionResultDialog(ElaWidget):
     # ── 内部：定位 ────────────────────────────────────────────────
 
     def _place(self) -> None:
-        """落到锚点附近：水平居中于落点、默认在下方，下方放不下翻到上方。
-
-        必须在 :meth:`show` **之后**调用（见 :meth:`openFor` 的说明：上游补
-        ``WS_THICKFRAME`` 会让窗口首次撑高约 31px）。
-
-        最后水平 / 垂直夹回 ``availableGeometry()``（排除任务栏）—— 与
-        :meth:`ElaSelectionPopup.popupAt` / :meth:`ElaToolTip.showAt` 同一套规则。
-
-        **夹取按画框（``frameGeometry``）而不是客户区**：上游在首次 ``show``
-        时补的 ``WS_THICKFRAME`` 让**不可见拖拽边框**比客户区高 32px / 宽 2px
-        （实测）。按 ``self.width()/height()`` 算，锚点贴工作区右下角时画框底部
-        溢出 42px 到屏幕外。
-
-        而且那圈边距**不是常数**：实测同一个窗口先测得 top=31，移动后又变成 0
-        （无边框窗 + THICKFRAME 的 DWM 报告随状态变），所以**不能用「客户区 +
-        固定常量」推算**。做法是「先按客户区算 → move → 量真实画框 → 按溢出量
-        纠正一次」：平移是线性的，一次纠正即到位。
+        """落到锚点附近：水平居中、默认下方，放不下翻到上方，最后夹回工作区。
+        必须在 :meth:`show` 之后调用（上游补 ``WS_THICKFRAME`` 会撑高约 31px）。
+        夹取按 ``frameGeometry`` 而非客户区，且那圈不可见边框不是常数 —— 先按
         """
         area = self._work_area()
         width = max(
@@ -822,11 +693,8 @@ class ElaSelectionResultDialog(ElaWidget):
             _MIN_SIZE.height(),
             min(self._preferred_size.height(), area.height() - 2 * _EDGE_GAP),
         )
-        # **整个「按工作区夹取 + 摆位」过程都是程序行为**，`_placing` 必须
-        # 覆盖到 move 之后：THICKFRAME 的纠正步会再发一次 resize（见
-        # ``_nudge_inside_work_area``），它同样不能被记成用户偏好。
-        # （原先只在 ``resize()`` 前后置位，随后 ``move()`` 与纠正步都在保护
-        # 之外，那两步触发的 resize 会把夹取结果写进偏好。）
+        # 整个「夹取 + 摆位」过程都是程序行为，``_placing`` 必须覆盖到 move 之后：
+        # THICKFRAME 的纠正步会再发一次 resize，不能记成用户偏好。
         self._placing = True
         try:
             self.resize(width, height)
@@ -845,18 +713,10 @@ class ElaSelectionResultDialog(ElaWidget):
             y = max(area.top(), min(y, area.bottom() - height + 1))
             self.move(int(x), int(y))
             # 纠正画框溢出：THICKFRAME 的那圈不可见边框不体现在 size() 里，
-            # 但它才是屏幕上真正占的矩形（见上方 docstring 的实测数据）
+            # 但它才是屏幕上真正占的矩形（见上方 docstring）
             self._nudge_inside_work_area(area)
-            # 记账：拿到**正好**是请求的尺寸，说明上游补的 WS_THICKFRAME 撑高
-            # 还在事件队列里没落地 —— 那一次 resize 不是用户意图，别记进偏好
-            # （见 resizeEvent）。反之尺寸已经被撑过了（或布局顶大了），就说明
-            # 撑高同步发生过了 / 本平台没有窗口管理器，此后可见期的每次 resize
-            # 都该按用户意图处理。
-            #
-            # 只记布尔不够：撑高**可能永远不来**（投递时机不确定），若把「下一次
-            # 可见期 resize」无条件当撑高，用户打开后第一次调尺寸就被吞掉。所以
-            # 同时记下请求尺寸，由 ``resizeEvent`` 按形状 + 用户是否拖过边框判断
-            # （实测撑高 = 宽度不变、高度 +31）。
+            # 拿到正好是请求尺寸，说明撑高还在事件队列里没落地；撑高也可能永远
+            # 不来，所以同时记下请求尺寸，由 ``resizeEvent`` 按形状判断。
             self._wm_grow_request = QSize(width, height)
             self._user_resizing = False
             self._wm_grow_pending = self.width() == width and self.height() == height
@@ -865,17 +725,8 @@ class ElaSelectionResultDialog(ElaWidget):
 
     def _nudge_inside_work_area(self, area: QRect) -> None:
         """按真实 ``frameGeometry`` 把窗口纠正回工作区内（纯平移，幂等）。
-
-        必须在 ``_placing`` 保护内调用（纠正也是程序行为，不是用户意图）。
-
-        「一次纠正即到位」靠的是**平移的线性性**：``move()`` 对一个无边框 +
-        ``WS_THICKFRAME`` 窗口作用在**画框**原点上（实测：``move(100,100)``
-        之后 ``frameGeometry().topLeft()`` 恰为 (100,100)），所以按当前画框
-        溢出量反向平移即精确落位。
-
-        窗口比工作区还高时上下都溢出，无法同时满足 —— 此时对齐**顶部**而不是
-        居中：多出来的部分落在屏幕外是没法避免的，但标题栏必须留在可视区里
-        （居中会让标题栏直接被顶出屏幕）。
+        必须在 ``_placing`` 保护内调用；``move()`` 作用于画框原点，按溢出量反向
+        平移一次即可。窗口比工作区还高时对齐顶部，保证标题栏可见。
         """
         frame = self.frameGeometry()
         dx = dy = 0
@@ -906,11 +757,9 @@ class ElaSelectionResultDialog(ElaWidget):
     # ── 主题 ────────────────────────────────────────────────────
 
     def _apply_theme(self, mode) -> None:  # noqa: ANN001
-        """重刷自绘颜色的子控件与标题栏图标。
+        """重刷子控件颜色与标题栏图标。
 
-        ``ColorText`` 的显式色是**快照**（``ElaText`` 在 C++ 里连着
-        ``themeModeChanged`` 把 palette 刷回 BasicText），所以切主题必须重新
-        ``setTextColor``。``ElaWidget`` 自己会 ``update()``，这里只管子控件。
+        ``ColorText`` 的显式色是快照，主题切换后必须重新 ``setTextColor``。
         """
         self._status_text.setTextColor(textMuted(mode))
         self._preview_text.setTextColor(textMuted(mode))

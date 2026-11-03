@@ -386,10 +386,8 @@ def _iter_heading_matches(pattern, text):
 
 def extractReasoningHeading(text: str) -> str:
     """从推理文本中抽取标题（ATX / 加粗行 / Setext），并清洗行内标记。
-
     按模式优先级返回首个清洗后非空的命中；只认显式 Markdown 标题，普通正文不返回首行
     （避免与思考正文重复）。与 :class:`_HeadingScanner` 保持同一语义，含「单行超长视为
-    不可能」这一条。
     """
     if not text:
         return ""
@@ -404,10 +402,8 @@ def extractReasoningHeading(text: str) -> str:
 
 class _HeadingScanner:
     """增量标题扫描器：逐分片喂入，结果与 ``extractReasoningHeading(全文)`` 一致。
-
     按行跟踪「上一完整行 + 当前行」：完整行命中不可撤销，当前行命中是临时的（行继续
     增长可能失效）；单行超过 ``_HEADING_LINE_LIMIT`` 视为不可能。每分片开销与分片长度
-    成正比，避免长思考文本的逐片全量正则扫描。
     """
 
     def __init__(self) -> None:

@@ -95,8 +95,6 @@ class ElaChatSearchBar(_ThemeAwareMixin, QWidget):
         self.hide()
         self._apply_theme()
 
-    # -- 内容 --------------------------------------------------------------
-
     def query(self) -> str:
         """当前查询文本。"""
         return self._edit.text()
@@ -130,8 +128,6 @@ class ElaChatSearchBar(_ThemeAwareMixin, QWidget):
         self._edit.setFocus(Qt.FocusReason.ShortcutFocusReason)
         self._edit.selectAll()
 
-    # -- 事件 --------------------------------------------------------------
-
     def keyPressEvent(self, event) -> None:  # noqa: N802
         if event.key() == Qt.Key.Key_Escape:
             self.closeBar()
@@ -144,8 +140,6 @@ class ElaChatSearchBar(_ThemeAwareMixin, QWidget):
 
     def _emit_query(self) -> None:
         self.queryChanged.emit(self._edit.text())
-
-    # -- 主题 --------------------------------------------------------------
 
     def _apply_theme(self) -> None:
         mode = self._theme_mode

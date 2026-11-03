@@ -1,37 +1,6 @@
-"""Windows 任务栏进度条组件。
+"""Windows 任务栏进度条（直接调 COM ``ITaskbarList3`` / ``ITaskbarList4``）。
 
-Qt6 里没有 ``QtWinExtras``（``QWinTaskbarButton`` / ``QWinTaskbarProgress`` 已随
-Qt5 退役），本组件改为直接调 COM 的 ``ITaskbarList3`` / ``ITaskbarList4``，在任务栏
-图标上展示进度条（正常 / 暂停 / 错误 / 不确定 / 隐藏）。
-
-**接口按版本回退**：先要 ``ITaskbarList4``（Win8+），失败再要 ``ITaskbarList3``
-（Win7）。两者的进度方法在 vtable 里位置相同（v4 是 v3 的超集），所以共用同一张
-方法表。实测有系统（Win11 26H2 / build 26300）只接受 v4 的 IID、对 v3 返回
-``E_NOINTERFACE`` —— 只请求 v3 会让整个组件静默失效。
-
-非 Windows 或缺少 ``comtypes``（``[all] extra``）时所有方法为空操作；可用性可以
-通过 :meth:`ElaTaskbarProgress.available` / :meth:`~ElaTaskbarProgress.unavailableReason`
-查询，首次判定不可用时会发 :attr:`ElaTaskbarProgress.unavailable` 并打一条 warning
-（以前是**静默**什么都不做，排查成本很高）。
-
-用法::
-
-    from pyqt6_ela_pro import ElaTaskbarProgress
-
-    tb = ElaTaskbarProgress(my_window)
-    if not tb.available():
-        print("任务栏进度不可用:", tb.unavailableReason())
-    tb.setRange(0, 100)
-    tb.setValue(0)
-    tb.show()
-    for i in range(100):
-        tb.setValue(i)
-        # ...
-    tb.hide()
-
-:param window: 要关联进度的窗口控件（传子控件也行，会自动上溯到顶层窗口）
-:type window: QWidget
-"""
+按系统版本回退接口；用法与限制见 ``docs/core.md``。"""
 
 from __future__ import annotations
 
@@ -52,7 +21,6 @@ try:  # comtypes 是可选依赖（[all] extra），缺失时整组件退化为�
 
     def _taskbar_methods() -> list:
         """``ITaskbarList`` → ``ITaskbarList3`` 的 vtable 前缀（按顺序绑定）。
-
         前面用不到的方法也必须照样声明；``SetProgressValue`` / ``SetProgressState``
         是 ``ITaskbarList3`` 的第 7、8 个方法（v4 位置相同）。
         """
@@ -122,7 +90,6 @@ _CLSID_TASKBAR_LIST = "{56FDF344-FD6D-11d0-958A-006097C9A090}"
 
 def _create_taskbar():
     """创建并初始化任务栏对象，返回 ``(taskbar, reason)``。
-
     成功时 ``reason`` 是空串；失败时 ``taskbar`` 为 ``None``，``reason`` 是**能
     直接给用户看**的原因（含各接口的 HRESULT）。不抛异常 —— 它跑在 Qt 回调链上。
     """
@@ -157,11 +124,8 @@ def _create_taskbar():
 
 class ElaTaskbarProgress(QObject):
     """Windows 任务栏进度条组件。
-
     在 Windows 任务栏图标上展示进度条，支持暂停 / 恢复 / 停止 / 隐藏。
-
     传**子控件**也行：内部会上溯到 ``window()``（子控件没有自己的原生窗口句柄）。
-    窗口重建（``winId`` 变化）会自动重新挂接，不会把进度推到旧句柄上。
     """
 
     valueChanged = pyqtSignal(int)

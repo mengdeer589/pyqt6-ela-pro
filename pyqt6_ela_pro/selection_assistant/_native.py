@@ -1,24 +1,4 @@
-"""划词助手 Win32 原生层（``pyqt6_ela_pro.selection_assistant``）。
-
-- :class:`ElaMouseMonitor`：**轮询式**全局鼠标监视（``GetAsyncKeyState`` +
-  ``GetCursorPos``，QTimer 在主线程，默认 15ms 一次）。刻意不使用
-  ``WH_MOUSE_LL`` 全局钩子：钩子回调运行在独立线程且需要抢 GIL，一旦回调
-  阻塞会拖住整个系统的鼠标输入（表现为机器卡死），还受杀软 / Win7 钩子
-  超时影响；
-- :func:`send_copy`：``SendInput`` 向当前前台窗口发送 Ctrl+C —— **本模块
-  是划词助手唯一会影响用户正常复制粘贴的地方**，所以它默认带两道闸门
-  （修饰键按下不注入、距上次注入不足 ``_MIN_INJECT_INTERVAL_MS`` 不注入）；
-- :func:`any_modifier_down` / :func:`clipboard_sequence_number` /
-  :func:`window_rect_at`：上面三道闸门 / 恢复逻辑要用的 Win32 查询；
-- :func:`to_logical_pos`：物理像素 → Qt 逻辑坐标（多屏 DPI 尽力而为）；
-- :func:`window_pid_at` / :func:`foreground_pid`：窗口归属进程查询。
-
-非 Windows 环境下 :meth:`ElaMouseMonitor.start` 抛 ``RuntimeError``，
-由 :class:`~pyqt6_ela_pro.selection_assistant.assistant.ElaSelectionAssistant`
-转换为 ``errorOccurred`` 信号。
-
-命名规范与库内一致（``camelCase``）。
-"""
+"""划词助手 Win32 原生层（``pyqt6_ela_pro.selection_assistant``）。"""
 
 from __future__ import annotations
 
@@ -42,13 +22,9 @@ _warned_poll_errors: set = set()
 def safe_connect(obj, signal_name: str, slot, label: str = "") -> None:
     """连接一个**受保护**的槽：槽内异常被捕获并告警，不会杀掉进程。
 
-    为什么要这个helper：PyQt6 里，槽（slot）抛出的 Python 异常**不会**
-    传播给 ``signal.emit()`` 的调用方 —— PyQt6 打印 traceback 后直接
-    ``abort()``（0xC0000409）。所以在 emit 外面包 ``try/except`` 是无效的，
-    唯一的防线就在槽本身。
-
-    划词助手的槽会走 ``capture()`` -> Win32 ``SendInput``，宿主一旦抛异常，
-    整个应用连同助手一起消失。因此库内部一律用本helper连接。
+    PyQt6 中槽抛出的异常不会传播给 ``signal.emit()`` 调用方，而是打印
+    traceback 后直接 ``abort()``（0xC0000409）；在 emit 外面包 ``try/except``
+    无效，唯一防线在槽本身。划词助手的槽会走 ``SendInput``，库内一律用它连接。
 
     :param obj: 拥有信号的对象
     :param signal_name: 信号名
@@ -71,8 +47,7 @@ def safe_connect(obj, signal_name: str, slot, label: str = "") -> None:
 def _warn_once(prefix: str, exc: BaseException) -> None:
     """同一个「来源 + 异常类型」只提示一次，避免 15ms 一次地刷屏。
 
-    key 里带上 ``prefix``：不同槽 / 不同闸门各自去重、互不吞告警
-    （曾只用 ``type(exc)``，一种类型先出现就会把别处的同类型异常静默）。
+    key 带 ``prefix``：不同槽 / 不同闸门各自去重、互不吞告警。
     """
     key = (prefix, type(exc))
     if key in _warned_poll_errors:
@@ -204,20 +179,16 @@ def _async_key_down(vk: int) -> bool:
 
 def any_modifier_down() -> bool:
     """Shift / Ctrl / Alt 中是否有任意一个正被按下。
-
     注入 Ctrl+C 前必须问一句：用户按着修饰键时，注入出去的其实是
     Ctrl+Shift+C / Ctrl+Alt+C —— 在不少终端里那恰好是「复制」绑定，
-    语义完全跑偏。
     """
     return any(_async_key_down(vk) for vk in (_VK_SHIFT, _VK_CONTROL, _VK_MENU))
 
 
 def clipboard_sequence_number() -> int:
     """Windows 剪贴板序列号（内容每变化一次递增）；不可用返回 ``0``。
-
     「文本相同」无法区分「用户又复制了一遍同样的内容」与「没人动过」，
     序列号可以 —— 恢复剪贴板前用它兜一道。取不到时调用方按「不可用」
-    回退到纯文本比较（本模块的平台分支刻意不引 pywin32 / win32api）。
     """
     if not _IS_WINDOWS:  # pragma: no cover - 平台分支
         return 0
@@ -229,7 +200,6 @@ def clipboard_sequence_number() -> int:
 
 def window_rect_at(x: int, y: int):
     """该物理坐标处**顶层窗口**的矩形 ``(left, top, right, bottom)``。
-
     取不到（无窗口 / API 失败）返回 ``None``。内置拖选过滤器用它排除
     「按在窗口边框上」——那是在调窗口大小，不是在划词。
     """
@@ -258,16 +228,8 @@ def _send_key(vk: int, flags: int = 0) -> None:
 
 def send_copy(force: bool = False) -> bool:
     """向当前前台窗口发送 Ctrl+C；返回**是否真的注入**。
-
-    默认两道闸门（任一命中就返回 ``False``，一个键都不发）：
-
-    1. **任何修饰键正被按下** —— 否则注入出去的是 Ctrl+Shift+C /
-       Ctrl+Alt+C 之类，在不少终端里语义直接跑偏；
-    2. **距上次注入不足 :data:`MIN_INJECT_INTERVAL_MS`** —— 连续划词时
-       不连发，也顺带收窄「注入的那次 Ctrl+C 撞上用户自己按的 Ctrl+C」
-       的窗口（撞上了会让恢复逻辑把用户刚复制的内容覆盖回旧值）。
-
-    ``force=True`` 跳过全部闸门，供明确知道自己在做什么的调用方使用。
+    默认两道闸门（任一命中返回 ``False``，一个键都不发）：任何修饰键正按下
+    （否则注入出去的是 Ctrl+Shift+C 等，语义跑偏）；距上次注入不足
     """
     global _last_inject_at
     if not _IS_WINDOWS:  # pragma: no cover - 平台分支
@@ -313,13 +275,10 @@ def foreground_pid() -> int:
 class ElaMouseMonitor(QObject):
     """轮询式全局鼠标监视（主线程 QTimer，无全局钩子、无额外线程）。
 
-    「左键」指**系统主键**（尊重 Windows 主 / 次键互换设置；交换后物理右键
-    即主键）。信号参数中的坐标一律为 Win32 物理像素 ``(x, y)``，宿主 / 组件
-    负责换算为 Qt 逻辑坐标（见 :func:`to_logical_pos`）。
-
-    已知限制：单次按下 / 抬起间隔短于轮询间隔（默认 15ms）的极快点击可能
-    被漏检；滚轮事件无法轮询，``wheelScrolled`` 仅为契约保留（真实监视不会
-    发射）。
+    「左键」指**系统主键**（尊重 Windows 主 / 次键互换）。信号坐标为 Win32
+    物理像素 ``(x, y)``，由宿主换算为 Qt 逻辑坐标（见 :func:`to_logical_pos`）。
+    短于轮询间隔（默认 15ms）的极快点击可能漏检；滚轮无法轮询，
+    ``wheelScrolled`` 仅为契约保留。
 
     :param parent: 父对象
     :param pollMs: 轮询间隔毫秒数
@@ -351,8 +310,6 @@ class ElaMouseMonitor(QObject):
         self._timer.setInterval(max(1, int(pollMs)))
         self._timer.timeout.connect(self._poll)
 
-    # -- 生命周期 ----------------------------------------------------------
-
     def start(self) -> bool:
         """开始轮询；失败抛 ``RuntimeError``（非 Windows）。"""
         if not _IS_WINDOWS:
@@ -380,8 +337,6 @@ class ElaMouseMonitor(QObject):
     def pollMs(self) -> int:
         """轮询间隔毫秒数。"""
         return self._timer.interval()
-
-    # -- 轮询 --------------------------------------------------------------
 
     def _refresh_buttons(self) -> None:
         """按系统「主 / 次键互换」设置决定哪个虚拟键算主键。"""

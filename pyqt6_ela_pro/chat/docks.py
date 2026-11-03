@@ -106,8 +106,6 @@ class ElaChatQueueDock(_ThemeAwareMixin, ElaScrollPageArea):
         self.hide()
         self._apply_theme()
 
-    # -- 数据 --------------------------------------------------------------
-
     def setMessages(self, messages: list) -> None:
         """整体替换排队消息（``dict``：``id`` / ``text`` / ``attachments``）。"""
         self._messages = [
@@ -168,8 +166,6 @@ class ElaChatQueueDock(_ThemeAwareMixin, ElaScrollPageArea):
     def isExpanded(self) -> bool:
         """是否展开明细。"""
         return self._header.isChecked()
-
-    # -- 内部 --------------------------------------------------------------
 
     def _on_toggled(self, checked: bool) -> None:
         self._rows.setVisible(bool(checked))
@@ -307,8 +303,6 @@ class ElaChatInputDock(_ThemeAwareMixin, ElaScrollPageArea):
         self.hide()
         self._apply_theme()
 
-    # -- 内容 --------------------------------------------------------------
-
     def setTitle(self, text: str) -> None:
         """设置 dock 标题（空则不显示）。"""
         self._title = text or ""
@@ -327,7 +321,6 @@ class ElaChatInputDock(_ThemeAwareMixin, ElaScrollPageArea):
         ownership: ElaWidgetOwnershipType = ElaWidgetOwnershipType.Borrowed,
     ) -> bool:
         """设置 dock 内容；``replace=True`` 表示替换输入区（输入区不可用）。
-
         ``ownership`` 默认 ``Borrowed``（交还调用方），``Owned`` 时由本 dock
         ``deleteLater()``。返回是否挂载成功。
         """
@@ -425,7 +418,6 @@ class ElaChatPermissionDock(_ThemeAwareMixin, ElaScrollPageArea):
 
     def setCard(self, card: Optional[QWidget]) -> None:  # noqa: N802
         """设置当前交互卡（``None`` 收起整个 dock）。
-
         显示时机只在这里：卡片自己 ``show()`` 时若尚无 parent，Qt 会把它当顶层
         窗口弹出来。
         """

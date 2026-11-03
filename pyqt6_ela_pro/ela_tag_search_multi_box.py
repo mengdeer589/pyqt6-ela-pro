@@ -27,17 +27,8 @@ from ._internal import single_shot_on, hideComboboxPopup
 class ElaTagSearchMultiBox(_TagBoxThemeMixin, _TagBoxAnimMixin, ElaSearchMultiBox):
     """具名可搜索多选下拉框。
 
-    带有标题标签的可搜索多选下拉框，支持汉字原文、全拼与拼音首字母搜索。
-    继承自 ElaSearchMultiBox，使用胶囊样式。
-
     :param title: 标题文字
     :param parent: 父控件
-
-    Example::
-
-        combo = ElaTagSearchMultiBox(title="语言", parent=parent)
-        combo.addItems(["Python", "C++", "JavaScript", "上海", "北京"])
-        combo.setCurrentSelection(["Python", "上海"])
     """
 
     def __init__(
@@ -66,7 +57,6 @@ class ElaTagSearchMultiBox(_TagBoxThemeMixin, _TagBoxAnimMixin, ElaSearchMultiBo
 
     def setCurrentSelection(self, selection: Union[str, list[str], None]) -> None:
         """设置选中项，**接受 None / 单个字符串 / 字符串列表**（与 :class:`ElaTagMultiBox` 同款）。
-
         ``None`` 与空列表等价；基类直接 ``list(selection)`` 时字符串会被拆成单个
         字符 —— 匹配不到任何选项，表现为「设了没反应」。
         """

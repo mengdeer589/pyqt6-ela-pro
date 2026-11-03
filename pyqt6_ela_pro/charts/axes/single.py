@@ -20,7 +20,6 @@ from .base import AxisModel, Coord
 
 class SingleAxisCoord(Coord):
     """横向单轴坐标系（一行数值轴，系列在其上排布）。
-
     ``singleAxis`` 收 left/right/top/bottom/type/min/max/name；left/right 默认
     40，top/bottom 不给时垂直居中。``mapPoint(value)`` 单参返回轴线上像素点。
     """

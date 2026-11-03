@@ -30,11 +30,9 @@ from ._shared import (
 
 
 class BarSeriesRenderer(SeriesRenderer):
-    """柱状图。
+    """柱状图：``stack`` 同名堆叠（正值向上、负值向下），yAxis 为 ``category`` 时自动水平。
 
-    ``stack``：同名堆叠（正值向上、负值向下累加）；``barWidth``：像素（>1）或
-    占槽位比例（0~1]）；``itemStyle.borderRadius``：圆角 px（列表取最大）。
-    yAxis 为 ``category`` 时自动切换为水平条形。
+    ``barWidth`` 为像素（>1）或占槽比例（0~1]；``itemStyle.borderRadius`` 圆角 px（列表取最大）。
     """
 
     def __init__(self, chart, opt):
@@ -43,7 +41,6 @@ class BarSeriesRenderer(SeriesRenderer):
         self._horizontal = False
         self._plot = QRectF()
 
-    # -- 布局 -------------------------------------------------------------
     def layout(self, rect: QRectF) -> None:
         self._bars = []
         coord = self.chart.coordFor(self.opt)
@@ -107,7 +104,7 @@ class BarSeriesRenderer(SeriesRenderer):
             inner_gap = self._resolve_gap(bar_gap_raw, slot_w)
             bar_w = max(2.0, bar_w - inner_gap * (n_slots - 1) / n_slots)
 
-        # 堆叠基线：同 stack 且排在我之前的可见 bar 系列按正负分桶累加
+        # 堆叠基线：同 stack 且排在本系列前面的可见 bar 系列按正负分桶累加
         pos_bases, neg_bases = self._stack_bases()
         prev = self.prev_data if isinstance(self.prev_data, list) else None
         radius = self.itemStyle().get("borderRadius", 0)
@@ -263,7 +260,6 @@ class BarSeriesRenderer(SeriesRenderer):
                 out.append(formatValue(x))
         return out
 
-    # -- 绘制 -------------------------------------------------------------
     def _animated_value(self, bar, anim_t):
         y, prev_y = bar["y"], bar["prev_y"]
         if prev_y is not None and anim_t < 1.0:
@@ -428,12 +424,10 @@ class BarSeriesRenderer(SeriesRenderer):
         hit = paint_label_at(p, anchor, text, fm, rotate)
         return hit.adjusted(-2, -2, 2, 2), text
 
-    # -- 交互 -------------------------------------------------------------
     def hitTest(self, pos: QPointF):
         """柱命中检测：命中框（外扩 2px）内第一根柱。
-
-        线性扫描即正确实现：柱数与绘图区宽度同量级，且语义是「第一根」而非最近者；
-        二分索引会让重叠柱与跨轴判定出现不一致。动画期用 ``_animated_rect`` 现算几何。
+        线性扫描是刻意的：柱数与绘图区宽度同量级，语义是「第一根」而非最近者；
+        二分会让重叠柱与跨轴判定不一致。
         """
         coord = self.chart.coordFor(self.opt)
         if not isinstance(coord, GridCoord):

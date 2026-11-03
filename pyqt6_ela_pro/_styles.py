@@ -1,12 +1,6 @@
-"""
-共用样式 / 自绘原语（内部模块，不作为公共 API 暴露）。
+"""共用样式 / 自绘原语（内部模块）。
 
-**全库禁 QSS**：需要「非主题色文字 / 纯色底 / 透明底 / 圆角卡片 / 无外观按钮」时用
-这里的原语，不要写 ``setStyleSheet``（守卫见 ``tests/styles/test_qss_free_guard.py``）。
-
-``ElaText`` 上不了非主题色 —— 它的 ``paintEvent`` 开头就把 palette 重置回主题
-``BasicText``，所以 :class:`ColorText` 在有显式颜色时改走 ``QLabel::paintEvent``。
-"""
+全库禁 QSS；非主题色文字 / 纯色底 / 圆角卡片 / 无外观按钮都用这里的原语。"""
 
 from __future__ import annotations
 
@@ -30,17 +24,8 @@ from ._colors import parse_color
 
 class EditBorderlessStyle(QProxyStyle):
     """去掉 ``ElaPlainTextEdit`` 原生自绘边框的代理样式。
-
-    ``ElaPlainTextEditStyle`` 在 ``CE_ShapedFrame`` 里画 1px 边框 + 底色 + 底部
-    粗线 + 聚焦展开条；由外层容器接管这些视觉时跳过该元素即可。注意
-    ``setFrameShape(NoFrame)`` **单独无效** —— 原生 style 不看 frameShape，
-    必须换掉 style。
-
-    典型用法（**必须**走 :func:`editBorderlessStyle`，不要直接实例化）::
-
-        edit = ElaPlainTextEdit(parent)
-        edit.setStyle(editBorderlessStyle())
-        edit.setFrameShape(QFrame.Shape.NoFrame)   # 冗余但无害
+    ``setFrameShape(NoFrame)`` 单独无效，必须换掉 style；外层容器接管视觉时用
+    :func:`editBorderlessStyle`，不要直接实例化。
     """
 
     def drawControl(  # noqa: N802 (Qt 命名)
@@ -58,9 +43,7 @@ _EDIT_BORDERLESS_STYLE: Optional[EditBorderlessStyle] = None
 
 def editBorderlessStyle() -> EditBorderlessStyle:  # noqa: N802 (Qt 命名)
     """取共享的无边框代理样式（**进程级单例**）。
-
     **不要给每个控件各建一个** —— ``QWidget.setStyle()`` 不接管所有权，引用一消失
-    sip 就会 delete 掉它，而 Qt 的样式解析链仍持有该指针 → 之后任意重绘就是
     0xC0000005（无 traceback）。样式本身无状态，共享无副作用。
     """
     global _EDIT_BORDERLESS_STYLE
@@ -83,11 +66,8 @@ def setSolidBackground(widget: QWidget, color) -> None:  # noqa: N802 (Qt 命名
 
 class PlainFrameStyle(QProxyStyle):
     """给 ``QFrame(Box|Plain)`` 画「1px 实线描边」，颜色取自控件动态属性。
-
     :meth:`setPlainFrame` 的绘制后端 —— 见该函数的说明（Qt6 的 ``windows11``
     style 不读 palette ``WindowText``）。实测该 style 把 ``QFrame`` 的框走的是
-    ``CE_ShapedFrame``（Qt5 的 ``windowsvista`` 走 ``PE_Frame``），两个元素都接管；
-    其余元素透传。
     """
 
     #: 边框颜色所在的控件动态属性名（值类型 ``QColor``）
@@ -137,7 +117,6 @@ _PLAIN_FRAME_STYLE: Optional[PlainFrameStyle] = None
 
 def plainFrameStyle() -> PlainFrameStyle:  # noqa: N802 (Qt 命名)
     """取共享的「1px 描边」代理样式（**进程级单例**，不要逐个控件新建）。
-
     ``QWidget.setStyle()`` 不接管所有权，逐控件新建会在 Python 引用消失时被
     回收，而 Qt 样式解析链仍持有该指针（同 :func:`editBorderlessStyle`）。
     """
@@ -149,11 +128,8 @@ def plainFrameStyle() -> PlainFrameStyle:  # noqa: N802 (Qt 命名)
 
 def setPlainFrame(widget, background, border) -> None:  # noqa: N802 (Qt 命名)
     """给 ``QFrame`` 套「1px 实线描边 + 纯色底」，替代 QSS ``background + border``。
-
     **描边由 :class:`PlainFrameStyle` 自绘**：Qt6 在 Windows 11 上默认走
     ``windows11`` style，它不再读 palette ``WindowText`` 画 ``QFrame`` 的框
-    （Qt5 的 ``windowsvista`` 会读）—— 沿用「设 palette」的旧写法会让边框颜色
-    被静默忽略。颜色存在控件动态属性上，改色只需重新调用本函数。
     """
     widget.setFrameShape(QFrame.Shape.Box)
     widget.setFrameShadow(QFrame.Shadow.Plain)
@@ -165,7 +141,6 @@ def setPlainFrame(widget, background, border) -> None:  # noqa: N802 (Qt 命名)
 
 def setTextColor(widget: QWidget, color) -> None:  # noqa: N802 (Qt 命名)
     """给普通控件（``QLabel`` 等）设文字色（palette ``WindowText``），替代 QSS ``color:``。
-
     **不适用于 ``ElaText``** —— 它会在 paint 时把 palette 重置回主题色（见模块
     docstring），那类控件要用 :class:`ColorText` / 它的 ``setTextColor()``。
     """
@@ -176,19 +151,9 @@ def setTextColor(widget: QWidget, color) -> None:  # noqa: N802 (Qt 命名)
 
 
 def setTextBaseColor(widget: QWidget, color=None) -> None:  # noqa: N802 (Qt 命名)
-    """设置文本类控件（``QTextBrowser`` / ``QTextEdit``）的视口底色。
-
-    - ``color=None``：透明（等价 QSS ``background-color: transparent``）—— palette 的
-      ``Base``（``QAbstractScrollArea`` 视口的背景角色）设成透明刷并关掉视口自动填充，
-      控件本体不加 ``WA_TranslucentBackground``，父级背景照常透出；
-    - 给定颜色：用该色作**不透明** ``Base`` 并打开视口自动填充。外观与「透明 + 同色
-      父背景」逐像素一致，但走不透明重绘快路径 —— 透明视口在部分平台（Win7）上会
-      触发慢速 paint 路径（滚动重绘 ×8，见 bugs #14）。
-
-    **Base 必须同时写到 viewport 上**：``QAbstractScrollArea`` 的视口带自己的显式
-    palette（``WA_SetPalette``），**不跟随**控件的 ``setPalette`` —— 只设控件时，
-    视口 ``autoFillBackground`` 填充用的仍是首次解析出的旧色（换主题后聊天里的
-    查看器留浅色横条就是这个：控件 palette 已是新色、视口没跟上）。
+    """设置文本类控件的视口底色。
+    ``None`` = 透明；给定颜色 = 不透明 ``Base``（Win7 上避免透明视口的慢速重绘）。
+    ``Base`` 必须同时写到 viewport 上，否则换主题后视口会留旧色。
     """
     palette = widget.palette()
     viewport = widget.viewport() if hasattr(widget, "viewport") else None
@@ -215,9 +180,7 @@ def setTextBaseColor(widget: QWidget, color=None) -> None:  # noqa: N802 (Qt 命
 
 def elaIconPixmap(icon, color, size, ratio: float = 1.0) -> QPixmap:  # noqa: N802
     """按**物理**像素尺寸取一个上好色的 ElaAwesome 字形位图。
-
     上游 ``eTheme`` 只暴露 ``drawEffectShadow``，没有 ``drawElaIcon``，所以走
-    ``ElaIcon.getInstance().getElaIcon(name, color)``。按 ``size * ratio`` 请求是
     为高 DPI：``QIcon.pixmap(QSize)`` 用主屏 DPR，在副屏上会发虚。
     """
     from PyQt6ElaWidgetTools import ElaIcon
@@ -248,8 +211,6 @@ def coerceElaIcon(icon):  # noqa: N802 (Qt 命名)
 
 def iconGlyph(icon) -> str:
     """取 ``icon`` 对应的 ElaAwesome **字形字符**（枚举成员 / 整数都收）。
-
-    画字形的组件（时间线 / 信息徽标 / 下拉按钮…）全在 ``paintEvent`` 里调它 ——
     PyQt6 的枚举成员不是 int，``int(成员)`` 抛 ``TypeError`` 会直接让进程静默
     abort（0xC0000409，无 traceback），所以取值统一走 ``.value`` 兜底。
     """
@@ -392,19 +353,9 @@ _SIZE_CACHE_MISS = object()
 
 
 class ColorText(ElaText):
-    """``ElaText`` 的「显式文字色」版本（禁 QSS 后的上色正路）。
-
-    有显式颜色时改走 ``QLabel::paintEvent``（用我们设的 palette 上色）；图标模式 /
-    wrap-anywhere 两种特例仍交回 ``ElaText`` 原实现。颜色是**快照**：主题切换时各
-    组件在自己的 ``_apply_theme()`` 里重新 ``setTextColor(...)`` 刷新即可。
-
-    **每个实例都必须显式 ``setTextPixelSize``** —— 不设就是 ``ElaText`` 的默认字号
-    （实测 28px），比组件的 11~14px 标尺大一大截，且不报错只是「大」。
-
-    **尺寸查询带缓存**：``QLabel.heightForWidth`` 每次都要重新折行整段文字
-    （18KB 文本 ~5-15ms），而一次展开 / 尺寸变化会被布局链反复询问十几次
-    （实测聊天里 18KB 思考块展开 343ms）。键 = 文本摘要 + 宽度 + 字体 + 外观，
-    不持有全文引用；文本 / 宽度 / 字体任一变化自然换键，缓存条数有上限。
+    """``ElaText`` 的显式文字色版本（禁 QSS 后的上色正路）。
+    有显式颜色时走 ``QLabel::paintEvent``；颜色是快照，主题切换时由组件重新
+    ``setTextColor``。每个实例必须显式 ``setTextPixelSize``（默认 28px 过大）。
     """
 
     def __init__(self, *args, color=None, pixelSize=None) -> None:
@@ -483,7 +434,7 @@ class ColorText(ElaText):
         return self._size_metric("s", -1)
 
     def minimumSizeHint(self) -> QSize:  # noqa: N802 (Qt 命名)
-        # 非换行标签的 minimumSizeHint 与 sizeHint 同值（实测短/长文本逐值相等），
+        # 非换行标签的 minimumSizeHint 与 sizeHint 同值（短/长文本逐值相等），
         # 复用后者可省一次完整 shaping；换行标签仍交给 Qt 按最小宽度算。
         if not self.wordWrap():
             return self.sizeHint()
@@ -507,13 +458,9 @@ class ColorText(ElaText):
         self.setFont(font)
 
     def _apply_text_color(self) -> None:
-        """把显式文字色写进 palette 的**前景色角色**。
+        """把显式文字色写进 palette 的 ``foregroundRole()``。
 
-        **必须写 ``foregroundRole()`` 而不是写死 ``WindowText``。** 写死时
-        ``textColor()`` 与 ``palette().color(WindowText)`` 读回来都对，唯独绘制走的
-        ``foregroundRole()`` 仍是主题 BasicText —— 症状是「设了颜色却画成黑字」且
-        **无任何报错**（Ela 控件树里同一个 ``ColorText`` 实测能拿到
-        ``8 = ButtonText``）。
+        写死 ``WindowText`` 会让绘制仍走主题色（设了颜色却画成黑字，且无报错）。
         """
         if self._text_color is None:
             return
@@ -522,10 +469,8 @@ class ColorText(ElaText):
         self.setPalette(palette)
 
     def paintEvent(self, event) -> None:  # noqa: N802 (Qt 命名)
-        # ``getElaIcon()`` 在 PyQt6 里返回的是**枚举成员**：无图标时也给
-        # ``IconName.None_``（成员恒为真值），直接当布尔用会让下面的自愈
-        # 永不执行、显式色被静默丢掉。所以取 ``value`` 判 0；
-        # ``getattr(..., "value", ...)`` 兜住「上游改回裸 int」的形态。
+        # ``getElaIcon()`` 返回枚举成员，无图标时也是真值；取 ``value`` 判 0，
+        # 否则自愈永不执行、显式色被静默丢掉。
         icon = self.getElaIcon()
         if (
             self._text_color is None
@@ -546,7 +491,6 @@ class ColorText(ElaText):
 
 class BareButton(QPushButton):
     """什么都不自绘的按钮（替代 QSS ``background: transparent; border: none;``）。
-
     用于头部 / 折叠行这类「按钮当布局容器、内容全是子控件」的场景 —— ``setFlat(True)``
     仍会画悬浮 / 按下底色，不符原视觉。
     """

@@ -1,14 +1,4 @@
-"""
-内置精简旋转圈指示器（SpinnerArc）。
-
-源引擎的节点运行状态依赖 ``anim.painted.SpinnerArc``（52 动画预设包中的
-一个组件）。此处内置等价的精简实现（QTimer 驱动圆弧旋转、主题主色），
-避免为单个组件引入整个动画包；行为对齐源实现：``start()`` / ``stop()`` /
-``isRunning()``。
-
-移植自 InstructionX_UIKit.anim.painted.SpinnerArc（原库为 PyQt6，
-主题令牌经 blueprint._tokens 适配 eTheme；原库无 LICENSE，保留出处）。
-"""
+"""内置精简旋转圈指示器（SpinnerArc）。"""
 
 from __future__ import annotations
 

@@ -1,26 +1,4 @@
-"""
-标签纸片组件，风格参考 Ant Design Tag / Material Chip。
-
-支持 16 种颜色主题（同 ElaButton 色系），可关闭、可选择、可点击。
-
-视觉规范：
-
-- 彩色 chip = **不透明** ``accentBg`` 底 + 1px accent 描边 + ``accentText`` 彩字
-  （对比度 ≥ 4.5，见 :func:`pyqt6_ela_pro._colors.accent_text`）—— 不再用
-  「accent 半透明叠色 + 原始 accent 彩字」那种字底不同档、跨表面漂移的画法；
-- 选中态 = 实心 accent 底 + ``solidText`` 字（Material filter chip 语义）；
-- hover / press = 状态层叠加，hover 有 150ms 淡入淡出（随全局动效策略）；
-- ``setPill(True)`` 全圆角；``setLeadingIcon()`` 前置图标；关闭按钮命中区 20px
-  并有 hover 反馈 + 120ms 淡出。
-
-用法::
-
-    from pyqt6_ela_pro import ElaChip
-
-    chip = ElaChip("标签", parent=self)
-    chip.setClosable(True)
-    chip.closed.connect(lambda: print("关闭"))
-"""
+"""标签纸片组件，风格参考 Ant Design Tag / Material Chip。"""
 
 from __future__ import annotations
 

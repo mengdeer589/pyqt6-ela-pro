@@ -1,10 +1,4 @@
-"""
-[pyqt6_ela_pro] 动画与图标组件页面
-
-合并了以下来源的组件:
-- pyqt6_ela_pro: 动画、SVG图标组件
-- PyQt6ElaWidgetTools: 图标组件
-"""
+"""[pyqt6_ela_pro] 动画与图标组件页面?"""
 
 import os
 
@@ -44,10 +38,8 @@ from .es_icon_model import EsIconModel
 from .es_icon_delegate import EsIconDelegate
 
 
-#: 本页演示用的几个内联 SVG。**本库不再自带图标集**（曾随包分发 3.66 MB /
-#: 2604 个 Fluent UI 图标），所以下面两节用这几个内联图标演示 loader 与渲染
-#: 函数；宿主请用 ``setPackageDirectory`` + ``loadFromPackage`` / ``loadFromFile``
-#: 换成自己的图标包（第 01 节底部有入口）。
+#: 本页演示用的内联 SVG。本库不再自带图标集，宿主用 setPackageDirectory +
+#: loadFromPackage / loadFromFile 换成自己的图标包。
 _SVG_BODY = {
     "ic_demo_circle": '<circle cx="12" cy="12" r="8"/>',
     "ic_demo_square": '<rect x="5" y="5" width="14" height="14" rx="2"/>',
@@ -370,7 +362,6 @@ class AnimationIconPage(ExamplePage):
 
     def _getSvgLoader(self):
         """本页的 loader —— 先塞几个内联图标，让下面两节有东西可演示。
-
         真实宿主走 ``setPackageDirectory()`` + ``loadFromPackage()`` 加载自己的
         ``.icons`` 包（见第 01 节底部的加载入口）。
         """
@@ -389,9 +380,7 @@ class AnimationIconPage(ExamplePage):
 
     def _onLoadIconPackage(self, path: str, view) -> None:
         """按路径加载宿主的 ``.icons`` 图标包并刷新浏览器。
-
         ``setPackageDirectory`` 是关键：不设的话 ``loadFromPackage`` 会去库内置
-        目录找，而那里现在什么都没有 —— 往 site-packages 里塞文件既脆弱又需要
         管理员权限，所以包目录必须由宿主给。
         """
         from PyQt6ElaWidgetTools import ElaMessageBar, ElaMessageBarType

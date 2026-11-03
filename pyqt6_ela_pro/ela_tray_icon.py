@@ -1,22 +1,4 @@
-"""
-Windows 托盘图标（系统通知区）。
-
-薄封装 ``QSystemTrayIcon``：管图标 / 提示 / 通知 / 右键菜单，**不管主窗口显隐**
-（那是应用级宿主的事，见 ``example/tray_host.py``）。
-
-三条实现约束：
-
-1. **内部必须持 ``QSystemTrayIcon`` 引用**并重写 ``deleteLater()`` 先 ``hide()``
-   再析构 —— 否则组件析构后托盘区会留一个灰图标（点不动也收不掉）；
-2. **``notify()`` 必须守 ``QSystemTrayIcon.supportsMessages()``** —— Win7 等环境
-   可能返回 ``False``，此时降级为不发气泡、改发 ``errorOccurred``，绝不崩；
-3. **托盘由 Explorer 绘制，``QIcon`` 不吃 ``eTheme``** —— 组件不做主题自动适配
-   （深浅两版图标由宿主准备），只在 ``themeModeChanged`` 时顺手 ``show()``
-   复位：Explorer 重启会吞掉托盘图标，这是唯一的低成本自愈点。
-
-右键菜单直接收 ``QMenu``（``ElaMenu`` 是其子类，天然兼容）；托盘菜单由系统绘制，
-**不适用** ``_styles.py`` 里的自绘原语。
-"""
+"""Windows 托盘图标（系统通知区）。"""
 
 from __future__ import annotations
 
@@ -39,13 +21,6 @@ class ElaTrayIcon(QObject):
     :param icon: 初始图标
     :param toolTip: 悬停提示
     :param parent: 父对象
-
-    信号：
-
-    * ``activated(QSystemTrayIcon.ActivationReason)`` —— 单击 / 双击 / 中键
-    * ``messageClicked()`` —— 用户点开了气泡通知
-    * ``visibilityChanged(bool)`` —— 托盘图标显隐变化
-    * ``errorOccurred(str)`` —— 气泡通知不可用等降级情形
     """
 
     class ElaTrayStateType(IntEnum):
@@ -89,7 +64,6 @@ class ElaTrayIcon(QObject):
         self._theme_slot = self._onThemeChanged
         eTheme.themeModeChanged.connect(self._theme_slot)
 
-    # -- 图标 / 提示 -------------------------------------------------------
 
     def setIcon(self, icon: QIcon) -> None:  # noqa: N802 (Qt 命名)
         """设置托盘图标。"""
@@ -107,7 +81,6 @@ class ElaTrayIcon(QObject):
         """获取悬停提示。"""
         return self._tray.toolTip()
 
-    # -- 菜单 --------------------------------------------------------------
 
     def setMenu(self, menu: Optional[QMenu]) -> None:  # noqa: N802 (Qt 命名)
         """设置右键菜单（传 ``ElaMenu`` 可得 Ela 外观；传 ``None`` 摘掉菜单）。"""
@@ -117,7 +90,6 @@ class ElaTrayIcon(QObject):
         """获取当前右键菜单（未设置时为 ``None``）。"""
         return self._tray.contextMenu()
 
-    # -- 三态 --------------------------------------------------------------
 
     def setIcons(  # noqa: N802 (Qt 命名)
         self,
@@ -155,7 +127,6 @@ class ElaTrayIcon(QObject):
         if icon is not None:
             self._tray.setIcon(icon)
 
-    # -- 通知 --------------------------------------------------------------
 
     def notify(
         self,
@@ -165,7 +136,6 @@ class ElaTrayIcon(QObject):
         msecs: int = _DEFAULT_NOTIFY_MS,
     ) -> bool:
         """弹一条系统气泡通知。
-
         Win7 等环境可能不支持气泡（``supportsMessages()`` 为 ``False``），
         此时**不发也不抛**，改发 ``errorOccurred`` 并返回 ``False``。
         """
@@ -180,7 +150,6 @@ class ElaTrayIcon(QObject):
         self._tray.showMessage(title or "", text or "", level, int(msecs))
         return True
 
-    # -- 显隐 --------------------------------------------------------------
 
     def show(self) -> None:
         """显示托盘图标。"""
@@ -207,14 +176,11 @@ class ElaTrayIcon(QObject):
         """系统是否支持托盘（无桌面环境可能为 ``False``）。"""
         return QSystemTrayIcon.isSystemTrayAvailable()
 
-    # -- 内部 --------------------------------------------------------------
 
     def _on_activated(self, reason) -> None:  # noqa: ANN001
         """转发为 int。
-
-        PyQt6 的 ``QSystemTrayIcon.ActivationReason`` 是普通 ``Enum``（不是
-        ``IntEnum``），直接 ``int(reason)`` 抛 TypeError —— 在 Qt 回调里就是
-        0xC0000409 静默终止。
+        ``ActivationReason`` 是普通 ``Enum``，直接 ``int()`` 抛 TypeError；
+        Qt 回调里的异常 = 0xC0000409 静默终止。
         """
         self.activated.emit(int(getattr(reason, "value", reason)))
 

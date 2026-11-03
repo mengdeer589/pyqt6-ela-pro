@@ -108,7 +108,6 @@ class AnnotationComponent:
         self._hovered = False
         self._grab_delta = QPointF()
 
-    # -- 查询 ------------------------------------------------------------
     def isDragging(self) -> bool:
         return bool(self._dragging)
 
@@ -173,7 +172,6 @@ class AnnotationComponent:
             return False
         return self._box.adjusted(-2.0, -2.0, 2.0, 2.0).contains(QPointF(pos))
 
-    # -- 布局 ------------------------------------------------------------
     def layout(self, rect: QRectF) -> None:
         self._visible = False
         self._box = QRectF()
@@ -464,7 +462,6 @@ class AnnotationComponent:
             else:
                 self._arrow_start = edge
 
-    # -- 绘制 ------------------------------------------------------------
     def paint(self, p: QPainter, anim_t: float = 1.0) -> None:
         if not self._visible or self._box.isNull():
             return
@@ -561,7 +558,6 @@ class AnnotationComponent:
             )
             p.drawText(rect, flags, line)
 
-    # -- 交互 ------------------------------------------------------------
     def onMousePress(self, pos: QPointF) -> bool:
         if (
             getattr(self.chart, "_press_button", Qt.MouseButton.LeftButton)

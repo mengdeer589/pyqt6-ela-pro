@@ -131,8 +131,6 @@ class ChatTimelinePage(ExamplePage):
         ):
             main_layout.addLayout(section)
 
-    # -- 预填 --------------------------------------------------------------
-
     def _ensure_sample(self) -> None:
         if self._sample_id is not None:
             return
@@ -181,8 +179,6 @@ class ChatTimelinePage(ExamplePage):
         view.setToolCallResult(message_id, edit_call, "已修改", ok=True)
         view.endMessage(message_id)
         self._sample_id = message_id
-
-    # -- 各节 --------------------------------------------------------------
 
     def _demo_notices(self) -> None:
         """通知：六种语义各插一条（只改界面，不进 message.text）。"""
@@ -302,8 +298,6 @@ class ChatTimelinePage(ExamplePage):
         )
         view.setMessageIdentity(message_id, "coder", "deepseek-v4", "high")
         self._note("用户头显示 coder · deepseek-v4 (high)，@a.py 高亮且复制为纯文本")
-
-    # -- 小工具 ------------------------------------------------------------
 
     def _section(self, title, method, buttons, hint):
         box = QVBoxLayout()

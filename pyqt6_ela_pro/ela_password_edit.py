@@ -1,15 +1,4 @@
-"""
-密码输入框组件，风格参考 ElaWidgetTools 的 ElaPasswordBox。
-
-继承自 ElaLineEdit，支持密码可见切换。
-
-用法::
-
-    from pyqt6_ela_pro import ElaPasswordEdit
-
-    pwd = ElaPasswordEdit(parent=self)
-    pwd.setPlaceholderText("请输入密码")
-"""
+"""密码输入框组件，风格参考 ElaWidgetTools 的 ElaPasswordBox。"""
 
 from __future__ import annotations
 

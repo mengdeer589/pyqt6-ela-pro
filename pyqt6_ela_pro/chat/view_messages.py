@@ -44,9 +44,8 @@ def _with_identity(
 
 def _settle_restored(message: ElaChatMessage) -> ElaChatMessage:
     """恢复出来的消息一律落定：消息状态与未完成工具都不留在途态。
-
-    存储里可能留下生成中导出的 ``streaming`` / ``pending`` 记录，恢复后不再
-    有事件收尾；与 ``journal.settleOpen`` 同口径。
+    存储里可能留下生成中导出的 ``streaming`` / ``pending`` 记录，恢复后没有事件
+    收尾；与 ``journal.settleOpen`` 同口径。
     """
     failed = message.status == ElaChatStatusType.Error or bool(message.error)
     target = (
@@ -85,9 +84,8 @@ class _ViewMessagesMixin:
         self, role: str, text: str = "", messageId: Optional[int] = None
     ) -> int:
         """添加一条消息，返回消息 id。
-
-        ``messageId`` 可由调用方指定（乐观 UI 先行渲染）；**该 id 已被占用时
-        抛 :class:`ValueError`**（静默重号会让旧气泡既留在界面上又不在索引里）。
+        ``messageId`` 可由调用方指定（乐观 UI 先行渲染）；id 已被占用时抛
+        :class:`ValueError`（静默重号会让旧气泡留在界面上却不在索引里）。
         """
         if messageId is not None and messageId in self._bubbles:
             raise ValueError(
@@ -114,9 +112,8 @@ class _ViewMessagesMixin:
     def addMessageFromDict(self, data, messageId: Optional[int] = None) -> int:
         """从 :meth:`ElaChatMessage.toDict` 的输出恢复一条消息，返回消息 id。
 
-        会重建完整分段时间线（思考 / 正文 / 工具 / 步骤用量）与消息级字段。
-        ``messageId`` 为 ``None`` 时沿用 ``data`` 里的 ``id``；id 已占用抛
-        :class:`ValueError`（不静默重号）。
+        重建完整分段时间线与消息级字段。``messageId`` 为 ``None`` 时沿用 ``data``
+        里的 ``id``。
 
         :raises ValueError: id 已被占用，或助手消息的分段无法重建
         """
@@ -162,10 +159,8 @@ class _ViewMessagesMixin:
 
     def _validate_preserve_ids(self, rows, against_existing: bool = True) -> None:
         """校验 ``preserveIds=True`` 的整批 id（重复 / 与现有消息撞号即抛）。
-
-        **只读校验**：调用方必须在写入前调用，否则坏 bundle 会先把当前会话清掉
-        才抛异常。``against_existing=False`` 只查批内重复（``importSession`` 随后
-        就 ``clear()``，与现有消息撞号无害）。
+        只读校验：必须在写入前调用，否则坏 bundle 会先清掉当前会话才抛异常。
+        ``against_existing=False`` 只查批内重复（``importSession`` 随后会 ``clear()``）。
         """
         stored = [_as_int(data.get("id")) for data in rows if isinstance(data, dict)]
         stored = [messageId for messageId in stored if messageId > 0]
@@ -183,12 +178,8 @@ class _ViewMessagesMixin:
 
     def restoreMessages(self, items, preserveIds: bool = False) -> list:
         """批量恢复消息（存储模块的读回入口），返回恢复后的消息 id 列表。
-
-        按给定顺序追加；``preserveIds=False``（默认）时 id 一律重新分配。
-        ``preserveIds=True`` 保留存储 id，本批重号或与现有消息撞号抛
-        :class:`ValueError`，且**先校验后写入**（不留半恢复状态）。
-
-        整体包在 :meth:`beginBatch` / :meth:`endBatch` 之间，大批量走渐进渲染。
+        按给定顺序追加；``preserveIds=False``（默认）时 id 重新分配。
+        ``preserveIds=True`` 保留存储 id，重号或与现有消息撞号抛 :class:`ValueError`，
         """
         rows = list(items or ())
         if preserveIds:
@@ -274,8 +265,8 @@ class _ViewMessagesMixin:
             self._update_snapshot(
                 messageId, lambda m, at=message.created_at: _with_created_at(m, at)
             )
-        # 消息级状态也要还原：只信 parts 的派生字段会把「被停止」「出错」的历史
-        # 消息显示成 Done。有错误文案时不覆盖 —— ``setMessageError`` 已置 Error。
+        # 消息级状态也要还原：只信 parts 的派生字段会把「被停止」「出错」的消息
+        # 显示成 Done。有错误文案时不覆盖 —— ``setMessageError`` 已置 Error。
         if message.status and not message.error:
             status = message.status
             if status == ElaChatStatusType.Streaming:
@@ -290,7 +281,6 @@ class _ViewMessagesMixin:
 
     def exportSession(self, session=None, extra=None) -> dict:
         """导出整会话快照（消息时间线 + 会话元数据 + 视图外观选项）。
-
         ``messages`` 是 ``ElaChatMessage.toDict()`` 列表（权威数据是 ``parts``）；
         ``extra`` 原样带回。输出可直接 ``json.dumps`` 落库；读回见 :meth:`importSession`。
         """
@@ -329,11 +319,11 @@ class _ViewMessagesMixin:
     def importSession(self, bundle, clear: bool = True) -> int:
         """从 :meth:`exportSession` 的 bundle 恢复整会话，返回恢复的消息条数。
 
-        - ``clear=True``（默认）：先校验（批内 id 重复即抛）再清空，保留消息 id；
-          ``clear=False``：追加并重新分配 id。与当前消息撞号不算冲突。
-        - 视图外观选项在写入消息**之前**应用（思考形态决定分段控件建卡形态）。
-        - 非 dict / ``messages`` 非列表抛 :class:`ValueError`，非字典行跳过。
-        - 会话元数据留在 bundle 里由宿主读取；输入草稿与排队队列不在 bundle 内。
+        ``clear=True``（默认）先校验再清空并保留消息 id；``clear=False`` 追加并重新
+        分配 id。视图外观选项在写入消息前应用（思考形态决定分段控件建卡形态）；
+        会话元数据留在 bundle 里由宿主读取。
+
+        :raises ValueError: bundle 非 dict 或 ``messages`` 非列表
         """
         if not isinstance(bundle, dict):
             raise ValueError("importSession: bundle 必须是 dict")
@@ -421,8 +411,8 @@ class _ViewMessagesMixin:
             hasParts = bool(snapshot.parts)
             if snapshot.id != messageId:
                 snapshot = snapshot.withId(messageId)
-        # 判据是「有没有正文可渲染」，不是「text 是不是空串」：带 parts 的历史
-        # 消息正文在 parts 里、text 是空串，只看 text 会让批量加载走同步渲染。
+        # 判据是「有没有正文可渲染」，不是「text 是不是空串」：带 parts 的消息
+        # 正文在 parts 里、text 是空串，只看 text 会让批量加载走同步渲染。
         deferred = (
             self._batch_depth > 0
             and role == ElaChatRoleType.Assistant
@@ -451,7 +441,7 @@ class _ViewMessagesMixin:
             self._remember_message(message)
             self._empty.setVisible(False)
             if self._virtual_list_mode:
-                # 超长历史：不建任何占位，只记录等高数据，由 spacer 列表按视口物化
+                # 超长消息：不建任何占位，只记录等高数据，由 spacer 列表按视口物化
                 self._virtual_heights[message.id] = self._estimate_shell_height(message)
                 self._virtual_prefix_dirty = True
                 if emitAdded:
@@ -561,7 +551,7 @@ class _ViewMessagesMixin:
             len(self._messages) == 1 and self._messages[0].id == messageId
         )
         if role == ElaChatRoleType.User and has_previous:
-            # turn 间隔：用户消息前额外留白（对齐 opencode 的 24px 节奏）
+            # turn 间隔：用户消息前额外留白
             bubble.setTopSpacing(10)
         for area in bubble.nestedScrollAreas():
             self._guard_message_viewer(messageId, area)
@@ -617,7 +607,7 @@ class _ViewMessagesMixin:
         bubble.toolToggled.connect(self._on_tool_toggled)
         self._bubbles[messageId] = bubble
         if insert_index is None:
-            # spacer 虚拟列表里新气泡必须插在 bottom spacer 之前，否则会落到占位下方。
+            # spacer 虚拟列表里新气泡必须插在 bottom spacer 前面，否则会落到占位下方。
             if self._virtual_list_mode and self._virtual_bottom_spacer is not None:
                 insert_index = self._content_layout.indexOf(self._virtual_bottom_spacer)
             if insert_index is None or insert_index < 0:
@@ -896,10 +886,8 @@ class _ViewMessagesMixin:
 
     def _sync_parts(self, messageId: int) -> None:
         """标记助手消息的分段快照待同步（读取时统一结算）。
-
-        ``withParts`` 重算推迟到读快照前，宿主不读时零开销。快照里的 ``text``
-        只含已落定内容，流式期间读为空串（实时预览读 ``bubble(id).text()``）。
-        无 parts、派生字段只在消息级的旧格式消息不参与同步（会被抹掉）。
+        ``withParts`` 重算推迟到读快照前，宿主不读时零开销；快照 ``text`` 只含已落定
+        内容，流式期间读为空串（实时预览读 ``bubble(id).text()``）。无 parts 的遗留
         """
         bubble = self._bubbles.get(messageId)
         if bubble is None or bubble.role() != ElaChatRoleType.Assistant:

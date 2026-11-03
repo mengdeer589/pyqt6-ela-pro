@@ -51,8 +51,8 @@ class _ChartPaintMixin:
     def showLoading(self, type: str = "default", opts: dict = None) -> None:
         """显示加载遮罩（ECharts ``showLoading``）。
 
-        opts：``text`` / ``color`` / ``textColor`` / ``maskColor`` / ``fontSize``
-        / ``showSpinner`` / ``spinnerRadius`` / ``lineWidth``。
+        :param opts: ``text`` / ``color`` / ``textColor`` / ``maskColor`` / ``fontSize``
+            / ``showSpinner`` / ``spinnerRadius`` / ``lineWidth``
         """
         self._ensure_alive()
         self._loading = True
@@ -137,10 +137,10 @@ class _ChartPaintMixin:
     ) -> dict:
         """性能剖析：分项测量各阶段耗时（诊断用，不改变任何状态）。
 
-        :param frames: 重复帧数（取平均，降低单帧噪声）。默认 8。
-        :param forceLayout: 每次都强制重排，绕过布局缓存；``False`` 测命中缓存的稳态。
-        :param perSeries: 是否额外测每条系列的布局 / 绘制耗时。
-        :returns: 各项耗时（毫秒）与规模信息；``seriesTimings`` 为逐系列读数。
+        :param frames: 重复帧数（取平均，降低单帧噪声）
+        :param forceLayout: 强制重排、绕过布局缓存；``False`` 测命中缓存的稳态
+        :param perSeries: 是否额外测每条系列的布局 / 绘制耗时
+        :returns: 耗时（毫秒）与规模信息；``seriesTimings`` 为逐系列读数
         """
         frames = max(1, int(frames))
         # 记录需复原的状态：notMerge 会重置图例选中态并重新起动画，测量后要还原。
@@ -158,7 +158,6 @@ class _ChartPaintMixin:
             # 固定到终态：动画每帧变化会让布局缓存永久失效，测出的是动画中成本。
             self.anim.stop()
             self.anim.setProgress(1.0)
-            # -- 摄入：setOption 全程（含合并 / 快照 / 重建） --
             t0 = _now()
             self.setOption(self._option, notMerge=True)
             ingest_ms = _elapsed_ms(t0)
@@ -168,17 +167,14 @@ class _ChartPaintMixin:
             self._series_state = dict(saved_state)
             for r in self._series:
                 r.visible = self._seriesVisible(r.name)
-            # -- 布局：坐标系 + 系列几何（含采样与坐标映射） --
             t0 = _now()
             for _ in range(frames):
                 self._layout_all(force=forceLayout)
             layout_ms = _elapsed_ms(t0) / frames
-            # -- 绘制：坐标轴 + 系列 + 组件（不含布局） --
             t0 = _now()
             for _ in range(frames):
                 self._render_to_painter()
             paint_ms = _elapsed_ms(t0) / frames
-            # -- 逐系列：定位到具体哪条曲线慢（多系列时的关键读数） --
             series_timings = self._benchmark_series() if perSeries else []
         finally:
             # 复原图例选中态与悬浮提示（``notMerge`` 会清空两者）
@@ -197,9 +193,8 @@ class _ChartPaintMixin:
         return self._benchmark_reduce(ingest_ms, layout_ms, paint_ms, series_timings)
 
     def _benchmark_series(self) -> list:
-        """逐系列测量布局 / 绘制耗时（每条系列单独跑一轮，不取平均）。
-
-        关掉其余系列避免成本串味。``layoutMs`` 仍与总系列数相关（折线布局会扫描
+        """逐系列测量布局 / 绘制耗时（每条单独跑一轮，不取平均）。
+        其余系列关掉避免成本串味。``layoutMs`` 仍与总系列数相关（折线布局会扫描
         全量 series_opts），只宜横向比较同一批读数；``paintMs`` 无此问题。
         """
         out = []
@@ -258,10 +253,8 @@ class _ChartPaintMixin:
 
     def _benchmark_reduce(self, ingest_ms, layout_ms, paint_ms, series_timings) -> dict:
         """汇总 benchmark 结果。
-
-        返回键集合固定（测试钉住）—— 诊断接口靠 key 取值，键变动会让调用方静默
-        拿到 ``None``。``dataPoints`` 是单个可见系列的最大数据量（``totalDataPoints``
-        才是总和），``drawnPoints`` 是实际绘制点数，``seriesTimings`` 按 paintMs 降序。
+        返回键集合固定（测试钉住）——诊断接口靠 key 取值，变动会让调用方静默拿到
+        ``None``。``dataPoints`` 是单个可见系列的最大数据量，``totalDataPoints``
         """
         largest = 0
         total_data = 0
@@ -279,12 +272,10 @@ class _ChartPaintMixin:
             total_data += n
             drawn += _series_geom_len(r)
         return {
-            # -- 耗时（毫秒） --
             "ingestMs": round(ingest_ms, 3),
             "layoutMs": round(layout_ms, 3),
             "paintMs": round(paint_ms, 3),
             "frameMs": round(layout_ms + paint_ms, 3),
-            # -- 规模 --
             "dataPoints": largest,
             "totalDataPoints": total_data,
             "drawnPoints": drawn,
@@ -294,7 +285,6 @@ class _ChartPaintMixin:
             "height": int(self.height()),
             "dpr": self.getDevicePixelRatio(),
             "frameBudget60HzMs": round(1000.0 / 60.0, 3),
-            # -- 逐系列（按每图元绘制成本降序） --
             "seriesTimings": series_timings,
         }
 
@@ -353,10 +343,8 @@ class _ChartPaintMixin:
 
     def invalidateLayout(self) -> None:
         """使布局缓存失效（下次绘制 / 布局时全量重排）。
-
         同时递增 ``_geometry_epoch``（进 ``_series_layer_key``）：渲染器自己的几何
-        （下钻焦点、roam、treemap / sankey 布局）变更一律经本方法通知，否则系列层
-        位图会被原样贴回。
+        变更必须经本方法通知，否则系列层位图会被原样贴回。
         """
         self._layout_key = None
         self._geometry_epoch += 1
@@ -405,10 +393,9 @@ class _ChartPaintMixin:
         return QColor(T("color.bg.base", self))
 
     def _series_layer_key(self):
-        """系列层位图缓存键（``None`` 表示本帧不缓存）。
-
-        只包含影响系列外观的状态：option 版本 / ``_geometry_epoch`` / 尺寸 / 主题 /
-        dataZoom 窗口 / 逐系列可见性 / hover 命中 / 选中态 / 图例悬停。
+        """系列层位图缓存键（``None`` = 本帧不缓存）。
+        含 option 版本 / ``_geometry_epoch`` / 尺寸 / DPR / 主题 / dataZoom 窗口 /
+        可见性 / hover 命中 / 选中态 / 图例悬停等一切影响系列外观的状态。
         """
         if self.anim.isRunning():
             return None  # 动画每帧几何都在变，缓存无意义
@@ -454,10 +441,8 @@ class _ChartPaintMixin:
 
     def _paint_series_cached(self, p: QPainter, t: float) -> None:
         """绘制系列层（命中缓存则整幅位图贴回）。
-
-        系列绘制占单帧成本绝大部分，而悬停每移动一像素就重绘一次；缓存命中时
-        只做一次 ``drawImage``。失效条件全部在 ``_series_layer_key`` 里；坐标轴 /
-        组件 / 图例 / 标题 / tooltip 不缓存。
+        系列绘制占单帧成本绝大部分，而悬停每移动一像素就重绘；失效条件全在
+        ``_series_layer_key``，坐标轴 / 组件 / 图例 / 标题 / tooltip 不缓存。
         """
         key = self._series_layer_key()
         if key is None:
@@ -513,7 +498,7 @@ class _ChartPaintMixin:
             if not r.visible:
                 continue
             try:
-                # 记下本次进度：命中分发可能发生在下一帧 paint 之前
+                # 记下本次进度：命中分发可能发生在下一帧 paint 前
                 r._anim_t = r.animProgress(t)
                 if highlight is not None and not item_highlight:
                     p.setOpacity(1.0 if r.name == highlight else 0.35)
@@ -542,9 +527,8 @@ class _ChartPaintMixin:
 
     def _paint_content(self, p: QPainter) -> None:
         """内容绘制体（坐标轴 → 系列 → 组件 → 图例/标题/提示框/遮罩）。
-
-        从 ``paintEvent`` 抽出，供 ``benchmark`` 画到离屏 QImage。绘制顺序
-        不可调换（画家算法）。
+        从 ``paintEvent`` 抽出，供 ``benchmark`` 画到离屏 QImage；绘制顺序不可
+        调换（画家算法）。
         """
         p.setRenderHint(QPainter.RenderHint.TextAntialiasing)
         t = self.anim.t

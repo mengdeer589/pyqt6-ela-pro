@@ -53,7 +53,7 @@ class ChatVirtualizer:
         self._view._virtual_prefix_dirty = True
 
     def _virtual_height(self, messageId: int) -> int:
-        """消息当前在布局中的高度（气泡实测 / 缓存估算）。"""
+        """消息当前在布局中的高度（气泡实际高度 / 缓存估算）。"""
         bubble = self._view._bubbles.get(messageId)
         if bubble is not None:
             height = bubble.height()
@@ -165,10 +165,9 @@ class ChatVirtualizer:
         return bubble
 
     def _dematerialize_virtual_bubble(self, messageId: int) -> None:
-        """从 spacer 列表移除一条已物化消息（保留实测高度）。
-
-        在途回合 / 待答审批 / 用户手动展开的区块**不回收**：销毁气泡会丢掉
-        未落定分片与交互状态（与 ``_dematerialize_shell`` 同一组守卫）。
+        """从 spacer 列表移除一条已物化消息（保留实际高度）。
+        在途回合 / 待答审批 / 用户手动展开的区块不回收：销毁气泡会丢掉未落定分片
+        与交互状态（与 ``_dematerialize_shell`` 同一组守卫）。
         """
         bubble = self._view._bubbles.get(messageId)
         if bubble is None:
@@ -284,10 +283,9 @@ class ChatVirtualizer:
             for messageId in list(self._view._virtual_bubble_ids):
                 if messageId not in wanted:
                     self._view._dematerialize_virtual_bubble(messageId)
-            # 物化段必须**连续**：spacer 列表没有逐条占位，中间留洞会让后面的
-            # 气泡整体上移（内容错位）。一次滚动步只铺 `_VIRTUAL_MATERIALIZE_BUDGET`
-            # 条（每条约 7ms：建壳 + 查看器 + Markdown 渲染），先把视口区间铺满，
-            # 再向余量窗口两侧交替扩；没铺完的下一帧继续（spacer 撑住高度，不跳）。
+            # 物化段必须连续：spacer 列表没有逐条占位，中间留洞会让后面的气泡上移。
+            # 一次滚动步只铺 `_VIRTUAL_MATERIALIZE_BUDGET` 条（每条约 7ms：建壳 +
+            # 查看器 + 渲染），先铺满视口再向两侧扩；没铺完的下一帧继续。
             materialized = sorted(
                 index
                 for index in (

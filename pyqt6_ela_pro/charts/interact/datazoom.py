@@ -136,7 +136,6 @@ class DataZoomComponent(QObject):
         #: 起手平移所属网格的绘图区（多网格）
         self._pan_plot = None
 
-    # -- 轴窗口 ------------------------------------------------------------
     def _axes(self):
         """受本组件控制的 x 轴 ``[(index, AxisModel)]``（``xAxisIndex`` 缺省=全部）。"""
         coord = self.chart.primaryCoord()
@@ -176,7 +175,6 @@ class DataZoomComponent(QObject):
 
     def captureExtent(self) -> None:
         """重捕「全量范围」（``_rebuild`` 在 ``setSeries`` 之后调用，幂等）。
-
         ``apply`` 的窗口相对**全量范围**计算，不重捕会让数据增长后仍按旧范围
         缩放。类别轴用 ``_all_categories``（``categories`` 可能已被窗口替换）。
         """
@@ -226,7 +224,6 @@ class DataZoomComponent(QObject):
 
     def refreshValueExtent(self) -> bool:
         """系列 layout 修正轴范围后，只重捕**变过**的 value / log 全量范围。
-
         横向柱 / 堆叠 / K 线 / 箱线的真实值域要到系列 ``layout`` 才算得出，
         必须在系列之后补捕，否则 dataZoom 会把轴改回未修正的范围。
         """
@@ -387,13 +384,10 @@ class DataZoomComponent(QObject):
             return self.SLIDER_H + 20.0
         return 0.0
 
-    # -- 布局 / 绘制（slider） ---------------------------------------------
     def applyWindow(self) -> None:
         """布局**前置**钩子：把窗口写回坐标轴（``_layout_all`` 在排系列前调用）。
-
         顺序是硬要求：系列按当前轴窗口采样与映射。放到组件 ``layout()``
         （系列之后）会得到「轴已缩放、曲线仍是旧窗口采样」的错配，而布局
-        缓存键命中后错配会永久留下。
         """
         self.apply()
 
@@ -492,10 +486,8 @@ class DataZoomComponent(QObject):
                 pass
         return f"{pct:.0f}%"
 
-    # -- inside 交互 ---------------------------------------------------------
     def _inside_move_enabled(self) -> bool:
         """``inside`` 的拖拽平移是否可用（ECharts ``moveOnMouseMove``，默认 True）。
-
         实例属性优先：``setDragMode`` 用它把同一个拖拽手势在「平移 / 刷选」
         之间切换。
         """
@@ -547,10 +539,8 @@ class DataZoomComponent(QObject):
             )
         )
 
-    # -- 窗口约束 / 程序化动作 --------------------------------------------
     def _span_limits(self):
         """``minSpan`` / ``maxSpan``：取**所有** dataZoom 条目的约束交集。
-
         本引擎只有一个共享窗口（``self.start`` / ``self.end``），所以
         ``minSpan`` 取最大、``maxSpan`` 取最小；自相矛盾时 maxSpan 胜出。
         """
@@ -592,10 +582,8 @@ class DataZoomComponent(QObject):
 
     def applyAction(self, payload: dict) -> bool:
         """``dispatchAction({"type": "dataZoom", ...})``。
-
         支持 ``start`` / ``end``（百分比）与 ``startValue`` / ``endValue``
         （category 轴为类别名或下标，value 轴为数值）；可选 ``zoomLock``
-        保持窗口跨度；``dataZoomIndex`` 仅支持 0（单窗口引擎）。
         """
         if not isinstance(payload, dict):
             return False
@@ -721,7 +709,6 @@ class DataZoomComponent(QObject):
 
     def onWheel(self, event) -> bool:
         """chart.wheelEvent 钩子：命中（plot 内 / slider 轨道）则缩放并返回 True。
-
         返回 True 时由 chart 层 ``event.accept()`` 显式消费 —— 祖先滚动区
         不会再跟着滚动。
         """
@@ -827,10 +814,8 @@ class DataZoomComponent(QObject):
         self.chart.invalidateLayout()
         self.chart.update()
 
-    # -- 鼠标钩子 ------------------------------------------------------------
     def _brush_active(self) -> bool:
         """brush 是否正在接管拖拽（``setDragMode`` 按模式开关它的 ``enabled``）。
-
         只看「组件存在」会让 ``setDragMode("pan")`` 失效：刷选自己
         ``enabled=False`` 不起手，dataZoom 又一直让位，拖拽两边都不响应。
         """

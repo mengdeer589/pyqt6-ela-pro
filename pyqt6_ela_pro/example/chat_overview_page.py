@@ -1,18 +1,4 @@
-"""
-[pyqt6_ela_pro] 聊天组件总览页
-
-**一屏看完聊天消息能长什么样**：一条**预填**的完整回合，滚动即读完全貌；
-想看动态（推理逐步浮现、工具忙碌环、统计徽标落定）就点「重播流式」。
-
-内容按 opencode 会话 UI 的结构铺：
-
-- 用户消息 + 附件（文件 + 图片）；
-- 助手消息：思考块 → 正文（Markdown / 代码 / 公式）→ 每步工具面板
-  （``工具调用 (N)``，含一张失败卡）→ 步骤用量徽标 → 脚注「内容由 AI 生成」；
-- 底部行：复制 / 重新生成（流式期间整条隐藏，这里已落定所以可见）；
-- 第二节是**外观开关**：推理形态、工具分组、统计模式、免责声明、头像形状、
-  正文宽度、贴底跟随 —— 全是 ``view`` 上的 setter，改完立刻作用于已有消息。
-"""
+"""[pyqt6_ela_pro] 聊天组件总览页?"""
 
 from PyQt6.QtWidgets import QHBoxLayout, QVBoxLayout
 
@@ -81,8 +67,6 @@ class ChatOverviewPage(ExamplePage):
         # 页面构造完就有内容（零延迟跑完同一份脚本）
         self._player.play_now(self._script_full_turn())
 
-    # -- 播放与高度 --------------------------------------------------------
-
     def _player_for(self) -> _ScriptPlayer:
         if self._player is None:
             self._player = _ScriptPlayer(self)
@@ -104,13 +88,10 @@ class ChatOverviewPage(ExamplePage):
             return
         self._chat.setFixedHeight(target)
 
-    # ================================================================ 01 完整回合
     def _script_full_turn(self):
         """一整轮回答的脚本 —— 每一步都是 ``chatView()`` 上的公开 API。
-
         这条链路就是 ``ElaChatStreamBinder`` 内部做的事（把后端事件映射到这些
         调用），所以读懂它就等于读懂了 binder。真实接入时不需要自己写这一串，
-        但**要知道自己调了哪些东西**。
         """
         view = self._chat.chatView()
         steps = []
@@ -262,7 +243,6 @@ class ChatOverviewPage(ExamplePage):
         ]
         return steps
 
-    # ================================================================ 02 外观
     def _section_appearance(self):
         box = QVBoxLayout()
         box.setSpacing(8)
@@ -338,18 +318,9 @@ class ChatOverviewPage(ExamplePage):
         return box
 
     def _demo_appearance(self) -> None:
-        """外观：推理形态 / 工具分组 / 统计模式 / 免责声明 / 复制提示 / 等待骨架 / 头像形状 / 正文限宽。
-
-        对应 API：``setReasoningStyle`` / ``setToolGrouping`` / ``setStatsMode`` /
-        ``setDisclaimer`` + ``setDisclaimerVisible`` / ``setCopyNotificationEnabled`` /
-        ``setWaitingPlaceholderEnabled`` / ``setAvatarShape`` / ``setContentMaxWidth`` /
-        ``setStickToBottom``。
-
-        两条约定：
-
-        - 这几个 setter 都**立即重建**已有消息的对应区块，不丢内容；
-        - 「思考行」与「工具面板标题」用**同一个**纯文本色，不叠强调色 ——
-          叠出来的差异在浅色下明显、在深色下几乎读不出，两头不讨好。
+        """外观：推理形态 / 工具分组 / 统计模式 / 免责声明 / 复制提示 / 等待骨架 / 头像 / 限宽。
+        对应 setter 都立即重建已有消息的对应区块，不丢内容；「思考行」与「工具面板
+        标题」共用同一纯文本色，不叠强调色。
         """
         view = self._chat.chatView()
         view.setReasoningStyle(ElaChatReasoningStyleType.Inline)
@@ -360,8 +331,6 @@ class ChatOverviewPage(ExamplePage):
         view.setAvatarShape("rounded")
         view.setContentMaxWidth(720)
         view.setStickToBottom(True)
-
-    # -- 外观回调 ----------------------------------------------------------
 
     def _dropdown(self, label, tip, choices, callback):
         """下拉：选中即调 ``callback(value)``。
@@ -466,7 +435,6 @@ class ChatOverviewPage(ExamplePage):
 
 def _select(button, prefix, actions, labels, value) -> None:
     """全量同步勾选态 + 按钮文案。
-
     checkable 项没有互斥（再点已选项会取消勾选、点另一项会两项同时勾上），
     每次选择都必须把所有项重刷一遍。
     """

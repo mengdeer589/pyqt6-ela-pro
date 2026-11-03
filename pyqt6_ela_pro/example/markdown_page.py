@@ -1,17 +1,4 @@
-"""
-[pyqt6_ela_pro] ElaMarkdownViewer Markdown 渲染页面
-
-按类别分块展示（每块一个独立查看器）：
-
-1. **文本与排版**：标题锚点 / 行内样式 / 列表任务 / 表格 / 引用提示块 /
-   折叠 / 图片 / 脚注，附工具栏（搜索、缩放、导出 PDF）；
-2. **代码块**：语言标签、行号、超长折叠、悬停复制、``diff`` 行级着色；
-3. **数学公式**：矩阵 / 环境 / ``\\boxed`` / 极限算子 / 宏展开 / 容错；
-4. **Mermaid 图**：flowchart / sequenceDiagram（可选依赖 mermaidx）；
-5. **流式渲染**：以上四块拼接后用 ``appendMarkdown`` 逐 token 输出
-   （空态占位、打字光标、未闭合围栏预览、贴底自动跟随），
-   ``endStream`` 后与静态渲染结果一致。
-"""
+"""[pyqt6_ela_pro] ElaMarkdownViewer Markdown 渲染页面?"""
 
 import os
 import tempfile
@@ -355,7 +342,6 @@ $$
 
 def _ensure_demo_image() -> str:
     """生成超宽演示图片（1600×520），返回所在目录。
-
     放在临时目录而非仓库内，避免示例产物污染工作区；
     图片宽度大于查看器宽度，可直观看到 ``setBaseUrl()`` 后的自动缩放。
     """
@@ -424,20 +410,14 @@ class MarkdownPage(ExamplePage):
         main_layout.addSpacing(24)
         self._demoStreaming(main_layout)
 
-    # -- 通用：状态行 ------------------------------------------------------
-    #
-    # 这里**刻意没有**「创建演示查看器」的 helper：五节各自需要的 setter 只差两三个，
-    # 而每节标题的「</> 代码」按钮展示的是该节方法自身的源码 —— 构造一旦抽进
-    # helper，读者点开代码就只剩信号接线，看不到查看器是怎么建起来的（第 5 节
-    # 流式演示本来就是内联的，现在五节统一）。
+    # 刻意不抽「创建演示查看器」helper：每节的「</> 代码」按钮展示本节方法源码，
+    # 构造抽出去后读者就看不到查看器是怎么建起来的。
 
     def _createDemoStatus(self, text: str):
         """创建演示状态行（由调用方加入布局，保证位于工具条之后）。"""
         status = ElaText(text, self)
         status.setTextPixelSize(13)
         return status
-
-    # -- 演示 1：文本与排版 ------------------------------------------------
 
     def _demoText(self, main_layout):
         main_layout.addLayout(self._createHeaderRow("1. 文本与排版", self._demoText))
@@ -480,8 +460,6 @@ class MarkdownPage(ExamplePage):
         )
         main_layout.addWidget(status)
 
-    # -- 演示 2：代码块 ----------------------------------------------------
-
     def _demoCode(self, main_layout):
         main_layout.addLayout(self._createHeaderRow("2. 代码块", self._demoCode))
         self._addInfoText(
@@ -506,8 +484,6 @@ class MarkdownPage(ExamplePage):
         )
         main_layout.addWidget(status)
 
-    # -- 演示 3：数学公式 --------------------------------------------------
-
     def _demoMath(self, main_layout):
         main_layout.addLayout(self._createHeaderRow("3. 数学公式", self._demoMath))
         self._addInfoText(
@@ -528,8 +504,6 @@ class MarkdownPage(ExamplePage):
             lambda latex: status.setText(f"已复制公式：{latex[:48]}")
         )
         main_layout.addWidget(status)
-
-    # -- 演示 4：Mermaid 图 ------------------------------------------------
 
     def _demoMermaid(self, main_layout):
         main_layout.addLayout(self._createHeaderRow("4. Mermaid 图", self._demoMermaid))
@@ -553,8 +527,6 @@ class MarkdownPage(ExamplePage):
             lambda code: status.setText(f"已复制 Mermaid 源码（{len(code)} 字符）")
         )
         main_layout.addWidget(status)
-
-    # -- 演示 5：流式渲染 --------------------------------------------------
 
     def _demoStreaming(self, main_layout):
         main_layout.addLayout(
@@ -648,7 +620,6 @@ class MarkdownPage(ExamplePage):
         confirm_external: bool = False,
     ):
         """给查看器叠加交互工具条：搜索高亮、缩放、复制全文、导出 PDF。
-
         ``status_label`` 为 ``None`` 时自动创建并加入布局；``confirm_external``
         决定外链是否二次确认后打开。
         """
@@ -697,20 +668,8 @@ class MarkdownPage(ExamplePage):
         zoom_reset.clicked.connect(
             lambda: (viewer.setZoomFactor(1.0), sync_zoom_label())
         )
-        # 原先这里还有「复制全文」和「导出 PDF」两个按钮，**已删除**。
-        # 它们靠 ``QTimer.singleShot(1200, lambda: btn.setText(...))`` 把按钮
-        # 文案改回去 —— **没给 context 对象**，于是那个定时器是「无主定时器」：
-        # 页面销毁后它照样在 T+1200ms 触发，去摸已释放的按钮包装器 →
-        # ``RuntimeError`` 穿过 C++ 边界 → 进程 0xC0000409 **静默终止**
-        # （无 traceback）。
-        #
-        # 症状极难定位：这一页构造慢（要建好几个 markdown viewer），只有当
-        # 「点按钮 + 1200ms」晚于「页面销毁」时才炸，于是表现为**同一份脚本
-        # 偶发崩在不同位置**（实测崩在「截图已存好、准备退出」那一刻）。
-        # ``singleShot(ms, ctx, callable)`` 的 context 重载**也不能靠**：实测传了
-        # context 照样崩（定时器与 receiver 的连接没有随 wrapper 销毁断开）。
-        # 以后要加「点一下改文案、过会儿改回来」的按钮，定时器必须是 ctx 的
-        # **子对象**（``QTimer(ctx)``），或回调里 ``_internal.is_deleted(self)`` 自查。
+        # 不要用无主 QTimer.singleShot 改按钮文案：页面销毁后它仍会触发，异常穿出
+        # C++ 边界 = 0xC0000409。定时器必须是 ctx 的子对象，或回调里 is_deleted 自查。
 
         search_row = QHBoxLayout()
         search_row.addWidget(search)
@@ -780,8 +739,6 @@ class MarkdownPage(ExamplePage):
             dialog.exec()
         elif url.startswith(("http://", "https://")):
             QDesktopServices.openUrl(QUrl(url))
-
-    # -- 流式播放控制 ------------------------------------------------------
 
     @staticmethod
     def _build_stream_chunks(source: str, step: int = 24) -> list[str]:

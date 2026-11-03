@@ -1,12 +1,4 @@
-"""只读 diff / 代码查看器（无 QSS，主题跟随 ``eTheme``）。
-
-- 统一 diff：双行号槽（旧 / 新）+ ``+/-`` 标记 + 行底色 + 可选 Pygments 着色；
-- 未改动长段自动折叠成「⋯ N 行未改动（点击展开）」，点击就地展开；
-- 大 diff 有上限（默认 4000 行），超出只渲染前 N 行并标注；
-- 只读但可选中 / 复制，右键菜单走 ``ElaMenu``。
-
-``split`` 视图暂未实现：工具卡里的 diff 以统一视图为主，审阅面板（P2）再补。
-"""
+"""只读 diff / 代码查看器（无 QSS，主题跟随 ``eTheme``）。"""
 
 from __future__ import annotations
 
@@ -347,8 +339,6 @@ class ElaDiffView(_ThemeAwareMixin, QPlainTextEdit):
         self.setTabStopDistance(QFontMetrics(self.font()).horizontalAdvance(" ") * 4)
         self._apply_theme()
 
-    # -- 尺寸 --------------------------------------------------------------
-
     def _content_height(self) -> int:
         """按行数估算内容高度。"""
         lines = max(1, self.blockCount())
@@ -365,8 +355,6 @@ class ElaDiffView(_ThemeAwareMixin, QPlainTextEdit):
         hint = super().minimumSizeHint()
         height = min(self._content_height(), self.maximumHeight())
         return QSize(hint.width(), max(height, self.minimumHeight()))
-
-    # -- 数据 --------------------------------------------------------------
 
     def setFiles(self, files) -> None:
         """整体替换文件列表（``ElaDiffFile`` 或 ``dict``）。"""
@@ -456,8 +444,6 @@ class ElaDiffView(_ThemeAwareMixin, QPlainTextEdit):
         """按块号取所属文件路径（用于点击 / 测试）。"""
         row = self._row(block_number)
         return row[0] if row else None
-
-    # -- 构建 --------------------------------------------------------------
 
     def _row(self, block_number: int):
         if 0 <= block_number < len(self._rows):
@@ -625,8 +611,6 @@ class ElaDiffView(_ThemeAwareMixin, QPlainTextEdit):
                 result[block] = spans
         return result
 
-    # -- 绘制 --------------------------------------------------------------
-
     def _row_background(self, kind: str) -> Optional[QColor]:
         if kind == DIFF_ADD:
             return self._add_bg
@@ -747,8 +731,6 @@ class ElaDiffView(_ThemeAwareMixin, QPlainTextEdit):
                 "-",
             )
 
-    # -- 交互 --------------------------------------------------------------
-
     def mousePressEvent(self, event) -> None:  # noqa: N802
         if event.button() == Qt.MouseButton.LeftButton:
             cursor = self.cursorForPosition(event.position().toPoint())
@@ -773,8 +755,6 @@ class ElaDiffView(_ThemeAwareMixin, QPlainTextEdit):
         select_all.triggered.connect(self.selectAll)
         execElaMenu(menu, event.globalPos())
         event.accept()
-
-    # -- 主题 --------------------------------------------------------------
 
     def _apply_theme(self) -> None:
         mode = self._theme_mode

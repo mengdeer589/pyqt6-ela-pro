@@ -1,13 +1,4 @@
-"""
-引导遮罩组件，风格参考 ElaWidgetTools 的 ElaSpotlight。
-
-在父控件上叠加半透明遮罩，高亮目标区域，显示提示卡片。
-
-用法::
-
-    spotlight = ElaSpotlight(parent=self)
-    spotlight.showSpotlight(target_btn, "点击此处开始")
-"""
+"""引导遮罩组件，风格参考 ElaWidgetTools 的 ElaSpotlight。"""
 
 from __future__ import annotations
 
@@ -43,11 +34,8 @@ from .widget_base import ElaThemeWidget
 
 class _TipCard(_ThemeAwareMixin, QWidget):
     """提示浮层卡片底（圆角 + 1px 描边）—— 禁 QSS 后自绘。
-
     颜色**绘制期现取**（同 ``ela_ghost_box._theme_color`` 的做法），不做缓存 ——
     派生色一旦存成状态，就多出一份「必须记得在主题钩子里刷新」的隐形契约；
-    刷新点再挂到重定位这类无关操作上，迟早漏。主题感知（订阅 + 重绘）由卡片
-    自己负责，父组件不需要知道子控件有哪些自绘色。
     """
 
     def __init__(self, parent: Optional[QWidget] = None) -> None:

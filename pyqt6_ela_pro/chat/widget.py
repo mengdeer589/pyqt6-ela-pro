@@ -31,10 +31,8 @@ from .view import ElaChatView
 
 class ElaChatWidget(ElaThemeWidget):
     """ChatGPT 风格聊天组件（消息列表 + 可扩展输入区）。
-
-    本层只管输入区与回合编排；消息内容（正文 / 思考 / 工具 / 分段 / 用量 /
-    外观）经 :meth:`chatView` 在 :class:`ElaChatView` 上操作，那里 ``messageId``
-    首位必填。多话题按「一话题一 widget」放大，会话列表归宿主。
+    本层只管输入区与回合编排；消息内容（正文 / 思考 / 工具 / 分段 / 用量 / 外观）
+    经 :meth:`chatView` 在 :class:`ElaChatView` 上操作，``messageId`` 首位必填。
     """
 
     #: 用户提交了消息（参数：文本）
@@ -51,7 +49,7 @@ class ElaChatWidget(ElaThemeWidget):
     messageUpdated = pyqtSignal(int)
     #: 空态建议被点击（参数：建议文本）
     suggestionClicked = pyqtSignal(str)
-    #: 点击「清空上下文」且确实有待清内容时发出（**确认弹框之前**；空会话不弹框也不发）
+    #: 点击「清空上下文」且确实有待清内容时发出（**确认弹框发出前触发**；空会话不弹框也不发）
     clearRequested = pyqtSignal()
     #: 点击「新建话题」按钮（组件不做任何处理，宿主据此开新会话 / 话题）
     newTopicRequested = pyqtSignal()
@@ -190,8 +188,6 @@ class ElaChatWidget(ElaThemeWidget):
 
         self.setAcceptDrops(True)
 
-    # -- 拖放（组件任意位置 → 输入区附件） ---------------------------------
-
     def dragEnterEvent(self, event) -> None:  # noqa: N802 (Qt 命名)
         if self._input.acceptsMime(event.mimeData()):
             event.acceptProposedAction()
@@ -209,8 +205,6 @@ class ElaChatWidget(ElaThemeWidget):
             super().dropEvent(event)
             return
         event.acceptProposedAction()
-
-    # -- 便捷访问 ----------------------------------------------------------
 
     def chatView(self) -> ElaChatView:
         """获取消息列表视图。"""
@@ -241,10 +235,9 @@ class ElaChatWidget(ElaThemeWidget):
     ) -> bool:
         """在输入区上方显示 dock 内容（``replace=True`` 时输入区不可用）。
 
-        :param ownership: 释放策略，默认 ``Borrowed`` —— ``clearDock()`` 只把控件
-            ``setParent(None)`` 交还调用方，**不删除**。要让本组件负责销毁请传
-            :attr:`~pyqt6_ela_pro.ElaWidgetOwnershipType.Owned`。
-        :returns: 是否挂载成功。
+        :param ownership: 释放策略，默认 ``Borrowed``——``clearDock()`` 只把控件
+            ``setParent(None)`` 交还调用方、不删除；要让本组件负责销毁请传 ``Owned``
+        :returns: 是否挂载成功
         """
         return self._input_dock.setWidget(widget, replace=replace, ownership=ownership)
 
@@ -263,13 +256,10 @@ class ElaChatWidget(ElaThemeWidget):
     def _on_input_dock_changed(self, has_content: bool) -> None:
         self._input.setEnabled(not self._input_dock.replacesInput())
 
-    # -- 审批 dock（交互在输入区上方，记录在时间线上） -----------------------
-
     def _on_permission_dock_requested(self, messageId: int, partId: str, card) -> None:
         """把交互卡放进审批 dock（不禁用输入区）。
-
-        已有卡时不顶掉（用户可能正答到一半），改为排队计数，落定后再补位。
-        判据是 dock 实体上有没有卡，宿主直接 ``setCard(None)`` 撤卡不会同步影子字段。
+        已有卡时不顶掉（用户可能正答到一半），改为排队计数，落定后再补位。判据是
+        dock 实体上有没有卡：宿主直接 ``setCard(None)`` 撤卡不会同步影子字段。
         """
         if self._permission_dock_part and self._permission_dock.card() is not None:
             self._permission_dock.setQueued(self._permission_dock.queued() + 1)
@@ -279,7 +269,6 @@ class ElaChatWidget(ElaThemeWidget):
 
     def _on_permission_settled(self, messageId: int, partId: str) -> None:
         """有审批落定 -> 撤下 dock 上的卡，再把下一张待答的顶上来。
-
         补位不只在「落定的正是当前卡」时发生：宿主撤卡后 dock 与影子字段都为空，
         任何一次落定都要重新 promote，否则剩余 pending 卡既看不见也点不到。
         """
@@ -294,7 +283,6 @@ class ElaChatWidget(ElaThemeWidget):
 
     def _promote_next_permission(self) -> None:
         """把时间线上最早那张未答的审批放进 dock（没有就清空 dock）。
-
         必须全时间线取最早：卡被撤下后 part 仍是 pending，按「已落定消息之后」
         过滤会让它永远回不到 dock。
         """
@@ -360,8 +348,6 @@ class ElaChatWidget(ElaThemeWidget):
         """获取助手消息头部显示名 / 模型名。"""
         return self._assistant_title
 
-    # -- 发送与流式 --------------------------------------------------------
-
     def sendUserMessage(
         self,
         text: str,
@@ -374,10 +360,8 @@ class ElaChatWidget(ElaThemeWidget):
         modelVariant: str = "",
     ) -> Optional[int]:
         """添加用户消息并进入生成状态；返回消息 id（空文本返回 ``None``）。
-
-        ``messageId`` 为幂等键：该消息仍存在时直接返回既有 id，不重复建消息、
-        不重复发 ``messageSubmitted``。若已有流式消息，先按 ``Stopped`` 收尾并
-        发 ``stopRequested``，保证同一时刻只有一个活跃流。
+        ``messageId`` 为幂等键：消息仍存在时直接返回既有 id，不重复建消息、不重复发
+        ``messageSubmitted``。已有流式消息时先按 ``Stopped`` 收尾并发 ``stopRequested``，
         """
         text = (text or "").strip()
         if not text:
@@ -389,7 +373,7 @@ class ElaChatWidget(ElaThemeWidget):
         if self._streaming_id is not None:
             # 先就地收尾旧流再通知宿主：宿主可能在 stopRequested 槽里同步
             # 走完 binder.finish(turn)，其末尾会续发排队消息 —— 不压住就会把
-            # 队首消息抢在新消息之前发出（顺序错乱，且队首回合立刻被截断）。
+            # 队首消息抢在新消息前面发出（顺序错乱，且队首回合立刻被截断）。
             self._endActiveStream(ElaChatStatusType.Stopped)
             with self._autoSendPaused():
                 self.stopRequested.emit()
@@ -446,10 +430,8 @@ class ElaChatWidget(ElaThemeWidget):
     @contextmanager
     def _autoSendPaused(self):  # noqa: N802 (与 Qt 命名一致)
         """临时关掉 ``autoSendQueue``（``clear`` / 换流期间）。
-
-        宿主在 ``stopRequested`` 槽里会同步收尾，而 ``endAssistantMessage`` 末尾
-        无条件续发排队消息 —— 不压住就会出现「队首抢在刚点的消息之前发出」或
-        「清空前已把排队消息送进后端」。
+        宿主在 ``stopRequested`` 槽里会同步收尾，而 ``endAssistantMessage`` 末尾无条件
+        续发排队消息 —— 不压住就会出现「队首抢在刚点的消息前面发出」或「清空前已把
         """
         autoSend = self._auto_send_queue
         self._auto_send_queue = False
@@ -457,8 +439,6 @@ class ElaChatWidget(ElaThemeWidget):
             yield
         finally:
             self._auto_send_queue = autoSend
-
-    # -- 排队（follow-up） -------------------------------------------------
 
     def _snapshot_queue(self) -> None:
         """记录一次队列快照（撤销栈上限 20）。"""
@@ -627,8 +607,6 @@ class ElaChatWidget(ElaThemeWidget):
         self._queue.clear()
         self._sync_queue()
 
-    # -- steer（生成中插话）------------------------------------------------
-
     def steerMessage(
         self,
         text: str,
@@ -637,8 +615,8 @@ class ElaChatWidget(ElaThemeWidget):
     ) -> Optional[str]:
         """生成中**插话**：把新指令送进正在跑的这一轮，而不是排队等它跑完。
 
-        投递由 binder 在 step 安全边界调 :meth:`drainSteer` 完成；组件不负责
-        把文本送进后端。
+        投递由 binder 在 step 安全边界调 :meth:`drainSteer` 完成；组件不负责把文本
+        送进后端。
 
         :returns: steer id（空文本返回 ``None``）
         """
@@ -715,9 +693,8 @@ class ElaChatWidget(ElaThemeWidget):
 
     def drainSteer(self) -> Optional[dict]:
         """取出并投递**一条**待送插话；没有则返回 ``None``。
-
-        投递 = 在当前流式消息里留一行回执 + 发 :attr:`steerReady`；组件不发送
-        后端请求。一次只投一条，避免把用户的多句话一次性糊给模型。
+        投递 = 在当前流式消息里留一行回执 + 发 :attr:`steerReady`；组件不发送后端
+        请求。一次只投一条，避免把多句话一次性糊给模型。
         """
         if not self._steer:
             return None
@@ -749,7 +726,6 @@ class ElaChatWidget(ElaThemeWidget):
 
     def requestClear(self) -> None:
         """「清空上下文」入口：先弹 :class:`ElaConfirmDialog` 确认再 :meth:`clear`。
-
         锚点是输入区（贴在窗口底部，锚整窗会把弹框算到屏幕外），``position="top"``
         摆在输入卡片上方。
         """
@@ -764,16 +740,13 @@ class ElaChatWidget(ElaThemeWidget):
         if confirmed:
             self.clear()
 
-    # -- 会话级动作（widget 独有职责，不是 view 的转发）---------------------
     # 这几个方法各自维护 widget 独占状态（排队队列 / generating 标志 / cleared
     # 信号），view 层没有这些概念。
 
     def clear(self) -> None:
         """清空整个会话：中止生成 -> 停流 -> 清队列 -> 清消息 -> 发 ``cleared``。
-
-        顺序要紧：先 ``stopRequested`` 让宿主 cancel 后端，再停流，否则后端还会
-        往已清空的消息里发分片。只清组件侧，后端历史归宿主（接 ``cleared`` 后
-        自行 ``worker.reset()``）。
+        顺序要紧：先 ``stopRequested`` 让宿主 cancel 后端，再停流，否则后端还会往
+        已清空的消息里发分片。只清组件侧，后端会话归宿主（接 ``cleared`` 后自行
         """
         with self._autoSendPaused():
             if self._generating or self._streaming_id is not None:
@@ -795,9 +768,8 @@ class ElaChatWidget(ElaThemeWidget):
         self, message: str, messageId: Optional[int] = None, errorType: str = ""
     ) -> None:
         """给消息设置错误文本与类型；若是当前流式消息则同时结束生成状态。
-
-        错误回合已结束，``generating`` 必须随之落下，否则状态栏一直停在
-        「生成中」、``autoSendQueue`` 也排不出下一条。
+        ``generating`` 必须随之落下，否则状态栏一直停在「生成中」、``autoSendQueue``
+        也排不出下一条。
         """
         target = self._streaming_id if messageId is None else messageId
         if target is None:
@@ -829,10 +801,8 @@ class ElaChatWidget(ElaThemeWidget):
         self, *, agent: str = "", model: str = "", modelVariant: str = ""
     ) -> int:
         """开始一条助手流式消息；返回消息 id。
-
-        防御：若已有消息在流式生成（宿主直接调用且未先结束），先把上一条
-        按 ``Stopped`` 收尾（不发 ``stopRequested``、不触发排队续发），
-        保证同一时刻只有一个活跃流。
+        防御：若已有消息在流式生成（宿主直接调用且未先结束），先把上一条按
+        ``Stopped`` 收尾（不发 ``stopRequested``、不触发排队续发）。
         """
         if self._streaming_id is not None:
             self._endActiveStream(ElaChatStatusType.Stopped)
@@ -848,8 +818,6 @@ class ElaChatWidget(ElaThemeWidget):
         self.setGenerating(True)
         self.generationStarted.emit(messageId)
         return messageId
-
-    # -- 多步骤 API --------------------------------------------------------
 
     def stepCount(self, messageId: Optional[int] = None) -> int:
         """获取指定消息（默认最后一条）的步骤数。"""
@@ -871,10 +839,8 @@ class ElaChatWidget(ElaThemeWidget):
         status: str = ElaChatStatusType.Done,
     ) -> Optional[int]:
         """结束助手消息（默认当前流式消息）；返回消息 id。
-
-        先发 ``generationFinished``，若开启 ``autoSendQueue``（默认）再自动发送
-        队首排队消息。**幂等**：已被 ``stopGeneration`` 收尾过的消息只补状态与
-        排队续发，不重复发收尾信号。
+        先发 ``generationFinished``，若开启 ``autoSendQueue``（默认）再自动发送队首。
+        **幂等**：已被 ``stopGeneration`` 收尾过的消息只补状态与排队续发，不重发信号。
         """
         target = self._streaming_id if messageId is None else messageId
         if target is None:
@@ -909,9 +875,8 @@ class ElaChatWidget(ElaThemeWidget):
 
     def _finishErrorTurn(self, target: int, status: str) -> int:
         """错误回合的收尾：落 generating、发 ``generationFinished``、排空队列。
-
-        错误回合虽已结束，仍必须发收尾信号并排空队列，否则 ``autoSendQueue``
-        发不出下一条、宿主状态栏一直停在「生成中」。
+        不发收尾信号并排空队列，``autoSendQueue`` 就发不出下一条、状态栏一直停在
+        「生成中」。
         """
         if target == self._streaming_id:
             self._streaming_id = None
@@ -923,9 +888,8 @@ class ElaChatWidget(ElaThemeWidget):
 
     def _endActiveStream(self, status: str) -> Optional[int]:
         """结束当前流式消息（不发 ``stopRequested``、不触发排队续发）。
-
-        供 :meth:`sendUserMessage` / :meth:`beginAssistantMessage` 在开始新流前
-        收尾旧流；返回被结束的消息 id（无流式消息返回 ``None``）。
+        供 :meth:`sendUserMessage` / :meth:`beginAssistantMessage` 在开始新流前收尾
+        旧流；返回被结束的消息 id（无流式消息返回 ``None``）。
         """
         target = self._streaming_id
         if target is None:
@@ -943,8 +907,6 @@ class ElaChatWidget(ElaThemeWidget):
             self.clearSteer()
         self._emit_generation_finished(target, status)
         return target
-
-    # -- 输入区扩展（补全） ------------------------------------------------
 
     def setMentionProvider(self, provider) -> None:
         """设置 ``@`` 引用候选提供者（``provider(query) -> list``）。"""
@@ -1012,9 +974,8 @@ class ElaChatWidget(ElaThemeWidget):
 
     def streamingMessageId(self) -> Optional[int]:
         """当前正在流式生成的消息 id；无则 ``None``。
-
-        与 :meth:`isGenerating` 独立：``_generating`` 可能已置 False 而流式消息
-        尚未收尾，宿主需要据此判断是否还要收尾。
+        与 :meth:`isGenerating` 独立：``_generating`` 可能已 False 而流式消息尚未
+        收尾，宿主需要据此判断是否还要收尾。
         """
         return self._streaming_id
 
@@ -1048,8 +1009,6 @@ class ElaChatWidget(ElaThemeWidget):
         """是否正在生成。"""
         return self._generating
 
-    # -- 消息管理 ----------------------------------------------------------
-
     def addMessage(self, role: str, text: str = "") -> int:
         """添加一条普通消息（用户 / 助手 / 系统）；返回消息 id。"""
         messageId = self._view.addMessage(role, text)
@@ -1059,13 +1018,11 @@ class ElaChatWidget(ElaThemeWidget):
             self._view.setMessageTitle(messageId, self._assistant_title)
         return messageId
 
-    # -- 存储接入（读写对称：不接存储就不用碰 chatView） --------------------
-
     def undoMessage(self, messageId: int) -> Optional[ElaChatMessage]:
         """撤回消息：删除该条及其后全部消息，并把原文 / 附件回填输入框。
 
-        **只对用户消息生效**：目标不是用户消息或不存在时返回 ``None`` 且不做
-        任何改动（否则会删掉 AI 回复、再把它的文本回填进输入框）。
+        只对用户消息生效：目标不是用户消息或不存在时返回 ``None`` 且不做改动
+        （否则会删掉 AI 回复、再把它的文本回填进输入框）。
 
         :returns: 被撤回的目标消息快照（不存在 / 非用户消息返回 ``None``）
         """
@@ -1086,7 +1043,7 @@ class ElaChatWidget(ElaThemeWidget):
     def undoLastUserMessage(self) -> Optional[ElaChatMessage]:
         """撤回**最后一条用户消息**：删除该条及其后全部消息，回填输入框。
 
-        自行从时间线末尾往前找最近一条用户消息（跳过其后的助手回答），直接对
+        自行从末尾往前找最近一条用户消息（跳过其后的助手回答），直接对
         ``messages()[-1]`` 调 :meth:`undoMessage` 会被拒绝。
 
         :returns: 被撤回的用户消息快照；没有用户消息时返回 ``None`` 且不做改动
@@ -1122,8 +1079,7 @@ class ElaChatWidget(ElaThemeWidget):
         return userMessage
 
     def retryMessage(self, messageId: int) -> Optional[ElaChatMessage]:
-        """重试准备：清掉该回答的错误（状态落成 ``Stopped``，保留失败记录），
-        保留消息位置。
+        """重试准备：清掉该回答的错误（状态落成 ``Stopped``，保留失败记录与位置）。
 
         与 :meth:`regenerateFrom` 的区别是不删消息：宿主拿到提问快照后调
         ``beginAssistantMessage()`` 新建一条回答，失败的那条作为记录留在时间线上。
@@ -1162,8 +1118,6 @@ class ElaChatWidget(ElaThemeWidget):
         """回合结束后是否自动发送队首排队消息。"""
         return self._auto_send_queue
 
-    # -- 会话标记（多话题：列表归宿主，这里只记「本页属于哪个话题」） --------
-
     def setCurrentSessionId(self, sessionId: str) -> None:
         """设置当前会话（话题）id，便于宿主把本组件对回自己的列表条目。
 
@@ -1178,8 +1132,6 @@ class ElaChatWidget(ElaThemeWidget):
     def currentSessionId(self) -> str:
         """获取当前会话（话题）id（未设置返回空串）。"""
         return self._current_session_id
-
-    # -- 外观与空态 --------------------------------------------------------
 
     def setPlaceholderText(self, text: str) -> None:
         """设置输入框占位文案。"""

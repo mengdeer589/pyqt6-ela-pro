@@ -1,11 +1,4 @@
-"""
-[pyqt6_ela_pro] 弹窗与提示页面
-
-工具提示 / 状态提示 / 通知气泡 / 各类对话框。
-
-抽屉类（``ElaDrawerArea`` / ``ElaDrawer`` / 侧边抽屉）已挪到「容器与
-布局」—— 它们是**容器**（装内容、可折叠），不是提示。
-"""
+"""[pyqt6_ela_pro] 弹窗与提示页面?"""
 
 import traceback
 from PyQt6.QtGui import QColor
@@ -493,7 +486,6 @@ class DrawerTooltipPage(ExamplePage):
         main_layout.addWidget(self._color_swatch)
         main_layout.addSpacing(20)
 
-    # -- ElaColorDialog 回调 ------------------------------------------------
 
     def _onOpenColorDialog(self):
         dlg = ElaColorDialog(self)

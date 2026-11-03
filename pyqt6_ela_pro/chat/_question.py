@@ -87,7 +87,6 @@ def question_colors(mode) -> dict:
 
 def globalKeyAction(key, mods) -> Optional[str]:
     """把卡片级快捷键 ``(key, mods)`` 映射成动作串；不匹配返回 ``None``。
-
     动作串：``"next"``（Ctrl+Enter）/ ``"back"``（Alt+←）/ ``"dismiss"``（Esc）/
     ``"digit:N"``（1–9，按整组候选卡下标）。行内与卡片本体共用这一份。
     """
@@ -111,10 +110,8 @@ def globalKeyAction(key, mods) -> Optional[str]:
 
 class _AutoGrowEditor(ElaPlainTextEdit):
     """按文档高度自增高的编辑器。
-
     必须覆写 ``sizeHint``（上游硬编码 ``(256, 192)``）；在 ``textChanged`` 里改
     几何会重入布局 = 0xC0000409。按键语义走信号，不装事件过滤器（子控件随行
-    销毁，过滤器会在父窗口树析构时踩 0xC0000409）。
     """
 
     #: 按 Enter（非 Shift / Ctrl）：提交这一题
@@ -152,7 +149,6 @@ class _AutoGrowEditor(ElaPlainTextEdit):
 
     def _document_height(self) -> int:
         """排版后的像素高度（含折行）。
-
         别用 ``document().size().height()`` —— 那是逻辑单位（块数）；
         ``blockBoundingRect`` 才是布局后的真实高度。
         """
@@ -175,7 +171,6 @@ class _AutoGrowEditor(ElaPlainTextEdit):
 
 class QuestionSegment(_ThemeAwareMixin, QWidget):
     """进度段（opencode 的 ``question-progress-segment``）。
-
     16×2px 圆角条 + 16px 命中盒，三态：**未答**（弱化）/ **已答**（强调）/
     **当前**（主文本色，最强 —— 对齐 opencode 的 CSS 覆盖顺序）。可点击跳题。
     """
@@ -322,8 +317,6 @@ class QuestionOptionCard(QAbstractButton):
         self._apply_content()
         self._apply_theme()
 
-    # -- 数据 --------------------------------------------------------------
-
     def value(self) -> str:
         """选项 label（自定义行为空串）。"""
         return self._value
@@ -426,7 +419,6 @@ class QuestionOptionCard(QAbstractButton):
 
     def commitEdit(self) -> None:  # noqa: N802
         """提交自定义答案（Enter；卡片在「下一步 / 提交 / 切题」前也会先调它）。
-
         空文本什么都不做；非空文本不要求行处于编辑态 —— Esc 退出编辑但保留了
         文本，此时点「下一步 / 提交」也必须把它算成答案。
         """
@@ -446,8 +438,6 @@ class QuestionOptionCard(QAbstractButton):
         """编辑器按 Ctrl+Enter：转成整卡的「下一步 / 提交」。"""
         self.globalKey.emit("next")
 
-    # -- 交互 --------------------------------------------------------------
-
     def _mark_rect(self) -> QRectF:
         """标记的命中区（直接取子控件几何，标记尺寸变了也不用改这里）。"""
         return QRectF(self._mark.geometry())
@@ -458,7 +448,6 @@ class QuestionOptionCard(QAbstractButton):
 
     def mousePressEvent(self, event) -> None:  # noqa: N802
         """点左侧标记 = 只切勾选；点其余 = 整行激活（自定义行即展开编辑器）。
-
         编辑态下标记仍可点（多选要能「再点一次 = 取消并收起」）；行内其它位置
         把焦点还给编辑器，走 ``super()`` 会让 ``QAbstractButton`` 抢走焦点。
         """
@@ -491,7 +480,6 @@ class QuestionOptionCard(QAbstractButton):
 
     def keyPressEvent(self, event) -> None:  # noqa: N802
         """键盘操作（编辑态一律让给编辑器）。
-
         ``Ctrl+⏎`` / ``Alt+←`` / ``Esc`` / ``1``–``9`` 转成 :attr:`globalKey` 交给
         外层；方向键 / Home / End 在行间移动焦点；``Space`` 切换勾选。
         """
@@ -533,7 +521,6 @@ class QuestionOptionCard(QAbstractButton):
 
     def _on_editor_changed(self) -> None:
         """编辑器内容变化：收起占位文案 + 请布局重新问一次高度。
-
         绝不能在这里直接改控件几何（``setFixedHeight`` 之类）—— 那是
         ``textChanged`` 槽里重入布局，Qt 会 0xC0000409 静默终止。
         """
@@ -544,8 +531,6 @@ class QuestionOptionCard(QAbstractButton):
         # 行高由内容决定，但嵌套布局不会自己重问 sizeHint；延到下一轮事件循环
         self._schedule_height_sync()
         self.contentChanged.emit()
-
-    # -- 外观 --------------------------------------------------------------
 
     def _apply_content(self) -> None:
         if self._is_custom:
@@ -566,7 +551,6 @@ class QuestionOptionCard(QAbstractButton):
 
     def applyTheme(self, mode) -> None:  # noqa: N802
         """换主题（由 ``PermissionCard`` 派发）；只改颜色，不碰内容。
-
         ``_apply_content()`` 会连带写编辑器文本，在「行已销毁但包装器还在」时
         会踩进已释放的编辑器（0xC0000409 静默终止）。
         """
@@ -587,10 +571,8 @@ class QuestionOptionCard(QAbstractButton):
 
     def _apply_editor_theme(self, colors: dict) -> None:
         """给自定义答案输入框上色（只能走 palette）。
-
         ``ElaPlainTextEdit`` 没有 ``setTextColor``，且在主题信号链上抛异常 =
         0xC0000409 静默终止。``QPlainTextEdit`` 不像 ``ElaText`` 那样在
-        ``paintEvent`` 重置 palette，这里设的色能留住。
         """
         if self._editor is None:
             return
@@ -638,7 +620,6 @@ class QuestionOptionCard(QAbstractButton):
 
     def _comfortable_minimum(self) -> int:
         """单行候选行的舒适高度下限（从字体度量算，不写死像素）。
-
         只有标题时自然高偏小，点选目标太窄；两行时内容自己够高，不需要下限。
         字体度量平台相关，写死像素会让卡片比 ``sizeHint`` 矮一截。
         """
@@ -662,7 +643,6 @@ class QuestionOptionCard(QAbstractButton):
 
     def _content_height(self) -> int:
         """按当前文字宽度算自然内容高度（不读取当前控件高度）。
-
         不能用 ``super().sizeHint()`` / 布局当前尺寸：行被钉高后标签会被拉伸，
         再读一次就永远缩不回去。
         """
@@ -684,7 +664,6 @@ class QuestionOptionCard(QAbstractButton):
 
     def sizeHint(self) -> QSize:  # noqa: N802
         """行高 = 按当前文字宽度折行后的自然高（有下限保底）+ 编辑器高度。
-
         ``QAbstractButton`` 不转发 ``heightForWidth``，也不能用布局当前高度反推
         内容高度（行被钉高后标签会被拉伸，再读就缩不回去）。
         """

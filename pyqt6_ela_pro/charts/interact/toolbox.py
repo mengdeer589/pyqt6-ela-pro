@@ -16,10 +16,8 @@ from .._utils import warn_key, warn_once
 
 class ToolboxComponent:
     """右上角图标按钮组（真实 ``ElaIconButton`` 子控件）。
-
     option: ``"toolbox": {"feature": ["saveAsImage", "saveAsSvg", "dataZoom",
     "restore", "zoomIn", "zoomOut"]}``。``layout()`` 每帧幂等 ``move()`` 不重建
-    控件；可注入 ``comp.on_action = fn(name)`` 观察点击。
     """
 
     optionKey = "toolbox"
@@ -86,7 +84,6 @@ class ToolboxComponent:
         #: ``{name: ElaIconButton}``（chart 的子控件）
         self._widgets: dict = {}
 
-    # -- 布局 ---------------------------------------------------------------
     def layout(self, rect: QRectF) -> None:
         """把按钮摆到绘图区右上角（每次布局幂等重放，不重建控件）。"""
         self._buttons = []
@@ -168,7 +165,6 @@ class ToolboxComponent:
             if not is_deleted(button):
                 button.setEnabled(enabled)
 
-    # -- 动作 ---------------------------------------------------------------
     def trigger(self, name: str) -> None:
         """执行指定功能（按钮点击或外部调用）。"""
         if callable(self.on_action):
@@ -222,6 +218,5 @@ class ToolboxComponent:
                     pass
         self.chart.update()
 
-    # -- 绘制 ---------------------------------------------------------------
     def paint(self, p: QPainter, anim_t: float = 1.0) -> None:
         """无绘制：按钮是真实子控件，外观由 ``ElaIconButton`` 负责。"""

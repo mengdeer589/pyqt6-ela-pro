@@ -28,7 +28,6 @@ def _as_str(value, default: str = "") -> str:
 
 def _as_int(value, default: int = 0) -> int:
     """容错取整数（浮点截断、字符串解析、失败取默认值）。
-
     必须显式捕获 ``OverflowError``：``int(float('inf'))`` 抛的是它，而它不是
     ``TypeError`` / ``ValueError`` 的子类。
     """
@@ -127,7 +126,7 @@ class ElaChatStatusType(StrEnum):
 class ElaChatToolStatusType(StrEnum):
     """工具调用状态常量。"""
 
-    #: 已创建、尚未开始执行（不可展开，对齐 opencode）
+    #: 已创建、尚未开始执行（不可展开）
     Pending = "pending"
     #: 调用中
     Running = "running"
@@ -231,8 +230,6 @@ class ElaChatAttachment:
         """返回替换展示名后的新快照。"""
         return replace(self, name=name)
 
-    # -- 持久化 ------------------------------------------------------------
-
     def toDict(self) -> dict:
         """转为纯 JSON 字典。"""
         return {
@@ -307,8 +304,6 @@ class ElaChatToolCall:
             self, metadata=dict(metadata) if isinstance(metadata, dict) else {}
         )
 
-    # -- 持久化 ------------------------------------------------------------
-
     def toDict(self) -> dict:
         """转为纯 JSON 字典。"""
         return {
@@ -323,7 +318,6 @@ class ElaChatToolCall:
     @classmethod
     def fromDict(cls, data) -> "ElaChatToolCall":
         """从字典还原（容错）。
-
         状态不在白名单内也原样保留：存储里的 ``"running"`` 必须保持 running
         （宿主重启后仍可补结果），未知状态宁可原样留着也不要谎报成功。
         """
@@ -345,7 +339,6 @@ class ElaChatToolCall:
 @dataclass(frozen=True)
 class ElaChatStats:
     """消息用量统计快照（单步原始数字，:meth:`merge` 求整轮汇总）。
-
     四路词元互不重叠：``prompt`` 只含**未命中缓存**的输入，``completion``
     （含 ``reasoning``）/ ``cache_read`` / ``cache_write`` 各占一路。
     """
@@ -358,7 +351,7 @@ class ElaChatStats:
     total_tokens: int = 0
     #: 推理词元（completion 的子集，单独拆出来只为展示 / 统计）
     reasoning_tokens: int = 0
-    #: 缓存读词元（命中缓存的输入；旧字段 ``cached_tokens`` 已重构为此名）
+    #: 缓存读词元（命中缓存的输入）
     cache_read_tokens: int = 0
     #: 缓存写词元（写入缓存的输入；多数 OpenAI 兼容端点没有这一路，为 0）
     cache_write_tokens: int = 0
@@ -374,7 +367,6 @@ class ElaChatStats:
     @staticmethod
     def merge(items) -> Optional["ElaChatStats"]:
         """把多个步骤用量合并为整轮汇总（``None`` 与空序列返回 ``None``）。
-
         词元与 ``cost_usd`` 求和，``ttft_ms`` 取首个非零值，``tps`` 按合计输出 /
         合计耗时重算，``duration_ms`` 置 0（整轮耗时由消息级字段承载）。
         """
@@ -446,8 +438,6 @@ class ElaChatStats:
         if cache_write:
             parts.append(f"缓存写 {cache_write} 词元")
         return "  ·  ".join(parts)
-
-    # -- 持久化 ------------------------------------------------------------
 
     def toDict(self) -> dict:
         """转为纯 JSON 字典。"""
@@ -583,7 +573,7 @@ class ElaChatPermissionStatusType(StrEnum):
 class ElaChatOption:
     """一个候选项（标题 + 一行说明）；描述不是可选项，缺了用户只能靠猜。"""
 
-    #: 展示文本（也是回传的标识 —— opencode 的 ``value`` 恒等于 ``label``）
+    #: 展示文本（同时是回传标识 ``value``）
     label: str
     #: 说明文字（解释这个选项意味着什么）
     description: str = ""
@@ -614,15 +604,15 @@ class ElaChatQuestion:
 
     #: 宿主侧的关联键；回传的答案以它为键
     key: str
-    #: 短标签（对应 ``Form.Field.title``；opencode 的 ``header``，≤30 字）
+    #: 短标签（对应 ``Form.Field.title``，≤30 字）
     header: str = ""
-    #: 完整问题正文（对应 ``Form.Field.description``；opencode 的 ``question``）
+    #: 完整问题正文（对应 ``Form.Field.description``）
     question: str = ""
     #: 候选项
     options: Tuple[ElaChatOption, ...] = field(default_factory=tuple)
     #: 是否允许多选（``True`` -> checkbox，可累积；``False`` -> radio 互斥）
     multiple: bool = False
-    #: 是否追加「输入自己的答案」行（opencode 的 ``custom``，那边恒为 True）
+    #: 是否追加「输入自己的答案」行（缺省 True）
     custom: bool = True
 
     @property
@@ -655,7 +645,7 @@ class ElaChatQuestion:
             question=_as_str(data.get("question")),
             options=_as_tuple_of(data.get("options"), ElaChatOption.fromDict),
             multiple=_as_bool(data.get("multiple"), False),
-            # 缺省 True：与 opencode 一致（模型无法关掉「自己写」那一行）
+            # 缺省 True：模型无法关掉「自己写」那一行
             custom=_as_bool(data.get("custom"), True),
         )
 
@@ -663,8 +653,7 @@ class ElaChatQuestion:
 @dataclass(frozen=True)
 class ElaChatPermission:
     """一次工具执行审批请求（``kind == Permission`` 的分段载荷）。
-
-    库只画卡 + 收集回复 + 发信号，绝不阻塞等待（Qt 里挂起会卡死事件循环）。
+    库只画卡 + 收集回复 + 发信号，绝不阻塞（Qt 里挂起会卡死事件循环）。
     ``questions`` 为空 = 批准型，非空 = 问答型（逐题向导）。
     """
 
@@ -700,8 +689,7 @@ class ElaChatPermission:
     def parsedAnswer(self) -> dict:
         """:attr:`answer` 的结构化形式（``{key: str | [str, ...]}``）。
 
-        批准型 / 未答复 / 非法 JSON 一律返回空字典 —— 这个方法只做**解析**，
-        不解释语义。
+        批准型 / 未答复 / 非法 JSON 一律返回空字典——本方法只解析，不解释语义。
         """
         if not self.answer:
             return {}
@@ -775,9 +763,8 @@ class ElaChatPermission:
 @dataclass(frozen=True)
 class ElaChatMention:
     """用户文本里的一个 ``@`` 引用区间（用于消息内高亮）。
-
-    偏移量按 Python ``str`` 下标计、**左闭右开**，与编辑器里的选区一致。
-    越界 / 反序的区间在渲染时直接跳过（宿主数据脏了不该让整条消息消失）。
+    偏移按 Python ``str`` 下标计、**左闭右开**，与编辑器选区一致；越界 / 反序区间
+    在渲染时跳过（宿主数据脏了不该让整条消息消失）。
     """
 
     #: 起始下标（含）
@@ -838,7 +825,7 @@ class ElaChatPart:
     notice_type: str = ""
     #: 通知副值（模型名 / 目录 / 原因等；``kind == Notice``）
     detail: str = ""
-    #: 压缩掉的历史条数（``kind == Compaction``；``0`` = 不知道，不是「压了 0 条」）
+    #: 压缩掉的消息条数（``kind == Compaction``；``0`` = 不知道，不是「压了 0 条」）
     history_count: int = 0
     #: 截止时间（epoch 毫秒；``kind == Notice`` 的 Retry 预留，暂未使用）
     deadline: float = 0.0
@@ -871,8 +858,6 @@ class ElaChatPart:
         """返回替换压缩历史条数后的新快照。"""
         return replace(self, history_count=max(0, _as_int(count)))
 
-    # -- 持久化 ------------------------------------------------------------
-
     def toDict(self) -> dict:
         """转为纯 JSON 字典。"""
         return {
@@ -894,7 +879,6 @@ class ElaChatPart:
     @classmethod
     def fromDict(cls, data) -> Optional["ElaChatPart"]:
         """从字典还原；``None`` / 非字典 / **未知 ``kind``** 返回 ``None``。
-
         未知 ``kind`` 必须丢弃而不是回落成 ``Text``：把新类型的结构标记当正文
         渲染远比少渲染一段糟糕。
         """
@@ -928,10 +912,8 @@ class ElaChatPart:
 @dataclass(frozen=True)
 class ElaChatMessage:
     """不可变消息快照（``messages()`` 返回值，修改请用组件方法）。
-
-    助手消息以 ``parts`` 为唯一内容来源，``text`` / ``reasoning`` /
-    ``tool_calls`` / ``stats`` 由 :meth:`withParts` 派生；流式期间在途分片只
-    存在气泡缓冲里，所以派生字段在回合结束前是空串。
+    助手消息以 ``parts`` 为唯一内容来源，``text`` / ``reasoning`` / ``tool_calls`` /
+    ``stats`` 由 :meth:`withParts` 派生；流式期间在途分片只存在气泡缓冲里。
     """
 
     #: 消息序号（同一会话内自增，从 1 开始）
@@ -946,9 +928,9 @@ class ElaChatMessage:
     created_at: float = 0.0
     #: 显示名（用户 / 助手 / 模型名），空则用角色默认
     title: str = ""
-    #: agent 名（历史消息的「谁在说话」；空则不显示）
+    #: agent 名（回放消息的「谁在说话」；空则不显示）
     agent: str = ""
-    #: 模型名（历史消息的「哪个模型」；空则不显示）
+    #: 模型名（回放消息的「哪个模型」；空则不显示）
     model: str = ""
     #: 模型变体（思考强度 / 档位；空则不显示）
     model_variant: str = ""
@@ -977,8 +959,6 @@ class ElaChatMessage:
     #: 助手消息内容分段（按加入顺序；用户 / 系统消息为空，文本见 ``text``）
     parts: Tuple[ElaChatPart, ...] = field(default_factory=tuple)
 
-    # -- 分段查询 ----------------------------------------------------------
-
     def part(self, partId: str) -> Optional[ElaChatPart]:
         """按 id 查询分段快照（不存在返回 ``None``）。"""
         for item in self.parts:
@@ -1001,9 +981,8 @@ class ElaChatMessage:
 
     def withParts(self, parts) -> "ElaChatMessage":
         """替换内容分段并重算派生字段（text / reasoning / tool_calls / stats）。
-
         ``Synthetic`` / ``Compaction`` / ``Permission`` 段的 ``text`` 不并入
-        ``text`` —— 它们不是模型正文。
+        ``text``——它们不是模型正文。
         """
         parts = tuple(parts or ())
         text = "".join(
@@ -1152,8 +1131,6 @@ class ElaChatMessage:
             return replace(self, error=error or "")
         return replace(self, error=error or "", error_type=str(errorType or ""))
 
-    # -- 持久化 ------------------------------------------------------------
-
     @staticmethod
     def schemaOf(data) -> int:
         """读取字典里的格式版本（非字典 / 无版本返回 0）。"""
@@ -1164,8 +1141,7 @@ class ElaChatMessage:
     def toDict(self) -> dict:
         """转为纯 JSON 字典，可直接 ``json.dumps`` 落库。
 
-        ``parts`` 是助手消息的唯一真相，其余派生字段只是冗余写出来方便不装
-        本库的读取方；读取时一律以 ``parts`` 重算。
+        ``parts`` 是助手消息的唯一真相；其余派生字段只是冗余写出，读取时一律重算。
         """
         return {
             "schema": SCHEMA_VERSION,
@@ -1196,8 +1172,7 @@ class ElaChatMessage:
     def fromDict(cls, data) -> "ElaChatMessage":
         """从字典还原（容错：缺字段取默认、多余字段忽略、类型不对就强转）。
 
-        助手消息的派生字段不信存储里的值，一律用 ``parts`` 经 :meth:`withParts`
-        重算，避免派生字段与分段互相矛盾。
+        助手消息的派生字段不信存储值，一律用 ``parts`` 经 :meth:`withParts` 重算。
         """
         if not isinstance(data, dict):
             return cls(id=0, role=ElaChatRoleType.Assistant)

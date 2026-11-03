@@ -1,21 +1,4 @@
-"""
-[pyqt6_ela_pro] 会话管理页（多话题，架构 B）
-
-**一话题一个 ``ElaChatWidget``**，用 ``ElaTabBar`` 做话题列表、``QStackedWidget``
-切页。选它是因为这个库的模型是「时间线归 ``view``」—— 一个话题的消息、
-草稿、排队、滚动位置全都天然隔离，不需要自己在宿主侧做键值映射。
-
-三件事分清：
-
-1. **切话题不中止生成** —— 每页有独立的 mock 后端与 binder，A 话题还在流式
-   时切到 B，回来 A 仍在继续；
-2. **归档 = 销毁页面 + 存 bundle**（``view.exportSession()``）。必须**先
-   ``binder.abortTurn(cancelBackend=True)``** 再销毁，否则后端回调会打进已释放的控件；
-3. **恢复 = 重建页面 + ``view.importSession(bundle)``**，再回填草稿。
-
-对话界面本身的形态在「概览」工作区，接入方式在「输入区」工作区，
-落库与崩溃恢复在「持久化」工作区。
-"""
+"""[pyqt6_ela_pro] 会话管理页（多话题，架构 B）?"""
 
 from PyQt6.QtCore import QPoint
 from PyQt6.QtWidgets import QHBoxLayout, QStackedWidget, QVBoxLayout, QWidget
@@ -65,7 +48,6 @@ class ChatSessionPage(ExamplePage):
         self._reasoning_style = ElaChatReasoningStyleType.Collapse
         super().__init__(parent)
 
-    # -- 页面搭建 ----------------------------------------------------------
 
     def _addDemoContent(self, main_layout):
         self._addInfoText(
@@ -145,7 +127,6 @@ class ChatSessionPage(ExamplePage):
             return
         self._stack.setFixedHeight(target)
 
-    # -- 话题生命周期 ------------------------------------------------------
 
     def _createTopic(self, title=None, bundle=None, activate=True) -> str:
         """新建话题（可带归档 bundle）；返回话题 id。"""
@@ -207,7 +188,6 @@ class ChatSessionPage(ExamplePage):
         chat.setCurrentSessionId(topicId)
         return topic
 
-    # -- 外观偏好（宿主的全局设置，显式传播到每一页） ----------------------
 
     def _applyAppearance(self, topic: _TopicPage) -> None:
         """把宿主的全局外观偏好应用到某个话题页。"""
@@ -283,7 +263,6 @@ class ChatSessionPage(ExamplePage):
         self._status.setStatus(f"已恢复「{session.title}」（含草稿，消息 id 保持稳定）")
         return True
 
-    # -- 宿主行为（按钮 / 标签栏） -----------------------------------------
 
     def _on_new_topic_clicked(self):
         """新建话题：新页面 + 切过去；上一个话题的生成继续在后台跑。"""
@@ -357,7 +336,6 @@ class ChatSessionPage(ExamplePage):
         else:
             self._createTopic(activate=True, title="话题 1")
 
-    # -- 标签同步 ----------------------------------------------------------
 
     def _currentTopicId(self):
         index = self._tabs.currentIndex() if self._tabs is not None else -1

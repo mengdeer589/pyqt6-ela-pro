@@ -53,7 +53,6 @@ class _BubbleMiscMixin:
 
     def addSteerNotice(self, text: str, partId: Optional[str] = None) -> str:
         """追加一条插话回执，返回分段 id。
-
         **刻意不插一条用户消息** —— 助手消息正在流式输出，中途插一条用户
         气泡视觉上很怪。回执行留在同一条助手消息内，语义是「插话已送达」。
         """

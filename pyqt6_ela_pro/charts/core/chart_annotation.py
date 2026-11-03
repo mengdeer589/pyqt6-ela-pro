@@ -34,7 +34,6 @@ class _ChartAnnotationMixin:
 
     def setAnnotationEditingEnabled(self, enabled: bool) -> None:
         """是否启用内置的标注标签双击行内编辑（默认开）。
-
         关闭后双击只发 ``annotationEditRequested``，宿主可自行弹框并调
         :meth:`setAnnotationText` 提交。
         """
@@ -265,10 +264,8 @@ class _ChartAnnotationMixin:
         rebuild: bool = True,
     ) -> bool:
         """修改标注标签文本（markPoint / markLine 的 ``name`` 或 annotations 的 ``text``）。
-
         系列寻址：``seriesId`` → ``seriesName`` → ``seriesIndex``（都为空时取
         首个含该组件的系列）。``annotations`` 的 ``dataIndex`` 是同层数组下标。
-        返回是否成功。
         """
         wanted = str(componentType or "")
         try:
@@ -377,10 +374,8 @@ class _ChartAnnotationMixin:
         rebuild: bool = False,
     ) -> bool:
         """修改某个数据点的标签文本（写入 ``series.labelTexts[str(index)]``）。
-
         系列寻址：``seriesId`` → ``seriesName`` → ``seriesIndex``（都为空时取
         首个可见系列）。空字符串 = 删除覆盖、恢复默认数值文案。默认只失效系列
-        层位图（百万点图表上不卡顿），``rebuild=True`` 强制全量重建。
         """
         renderer = self._resolve_series(seriesName, seriesIndex, seriesId)
         if renderer is None or not hasattr(renderer, "setLabelText"):

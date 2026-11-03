@@ -1,27 +1,6 @@
-"""
-幽灵下拉框组件。
+"""幽灵下拉框：透明触发器 + 分组选项 + 弹层底部固定区。
 
-透明无边框触发器 + 可分组选项 + 弹层底部固定区域，派生自 ``ElaSearchBox``
-（因此自带弹窗搜索与拼音过滤）：
-
-- **幽灵外观**：触发器完全自绘，无边框、无底色，hover / 展开态只有一层
-  半透明叠加；可选前置图标与占位文本；
-- **分组选项**：``addGroup(label)`` 插入分组标题行（不可选中、不可点击），
-  搜索过滤时标题行随「组内是否还有可见项」自动显隐；
-- **弹层底部固定区**：``addPopupFooterButton`` 追加多个固定按钮，
-  ``setPopupFooterWidget`` 可放任意自定义控件（默认 **Borrowed**：不删除，
-  替换 / 清空 / 组件销毁时只 ``setParent(None)`` 交还）；底栏停靠在列表下方，
-  不随列表滚动移动。
-
-用法::
-
-    box = ElaGhostBox(parent)
-    box.setLeadingIcon(ElaIconType.IconName.Gear)
-    box.addGroup("Anthropic")
-    box.addItems(["Claude 3.7 Sonnet", "Claude 3.5 Haiku"])
-    box.addPopupFooterButton("管理模型", key="manage")
-    box.footerTriggered.connect(on_footer)
-"""
+派生自 ``ElaSearchBox``，自带搜索与拼音过滤。"""
 
 from __future__ import annotations
 
@@ -260,8 +239,6 @@ def _release_custom_widget(widget, ownership, original) -> None:
 
 def _release_footer_custom_on_destroy(widget, ownership, original, _obj=None) -> None:
     """footer 析构前把 Borrowed / Reparented 的自定义控件摘出来。
-
-    Qt 会连带删除子控件；不摘的话「借来的」控件也会被一起删掉。
     用 ``partial`` 把控件信息带进槽：footer 析构时 PyQt 给的是新包装器
     （Python 属性已丢），不能靠 ``obj._custom_widget`` 读。
     """
@@ -410,22 +387,9 @@ class _GhostPopupFooter(QWidget):
 
 
 class ElaGhostBox(ElaSearchBox):
-    """幽灵下拉框（透明无边框 + 分组选项 + 弹层底部固定区）。
-
-    继承 ``ElaSearchBox``，弹窗顶部搜索框、拼音过滤、``items`` 属性等能力
-    全部可用（搜索框可用 ``setSearchVisible(False)`` 关闭）。触发器完全自绘：
-    无边框、无底色，hover / 展开态只有半透明叠加。
-
-    :param parent: 父级 widget。
-    :type parent: QWidget, optional
-
-    Example::
-
-        box = ElaGhostBox(parent)
-        box.addGroup("Anthropic")
-        box.addItems(["Claude 3.7 Sonnet", "Claude 3.5 Haiku"])
-        box.addPopupFooterButton("管理模型", key="manage")
-        box.footerTriggered.connect(lambda key: print("footer:", key))
+    """幽灵下拉框：透明无边框触发器 + 分组选项 + 弹层底部固定区。
+    继承 ``ElaSearchBox``，搜索框 / 拼音过滤 / ``items`` 均可用
+    （``setSearchVisible(False)`` 可关）；触发器自绘，仅 hover / 展开时叠半透明色。
     """
 
     footerTriggered = pyqtSignal(str)
@@ -446,9 +410,8 @@ class ElaGhostBox(ElaSearchBox):
         # 与上游 ElaComboBox V3.0（35→30）的触发框同高，整套组合框族统一 30
         self.setFixedHeight(30)
 
-        # 第三参（parent）**不传 self**：让动画成为「自己动的对象」的子对象，等于让
-        # 目标销毁连带销毁仍在运行的动画，针对它的 finished 发射可能还挂在队列里 ——
-        # 槽随后跑在已释放对象上（shake_window 实测 0xC0000005）。守卫见
+        # 第三参（parent）**不传 self**：那会让目标销毁连带删掉仍在运行的动画，
+        # 槽随后跑在已释放对象上 = 0xC0000005。守卫见
         # tests/regression/test_animation_parenting.py。
         self._expand_animation = QPropertyAnimation(self, b"expandIconRotate")
         self._expand_animation.setEasingCurve(Easing.type_name(Easing.Standard))
@@ -659,9 +622,7 @@ class ElaGhostBox(ElaSearchBox):
         ownership=ElaWidgetOwnershipType.Borrowed,
     ) -> None:
         """设置底栏自定义控件（放在按钮之后；传 ``None`` 移除）。
-
         ``ownership`` 与库内 ``_ownership`` 协议一致：默认 **Borrowed**
-        （移除 / 替换 / 组件销毁时只 ``setParent(None)`` 交还，不删除）；
         ``Owned`` 才 ``deleteLater()``；``Reparented`` 放回原 parent。
         """
         footer = self._ensure_footer()
@@ -722,7 +683,6 @@ class ElaGhostBox(ElaSearchBox):
 
     def _attach_footer_after_view(self) -> bool:
         """view 已进布局时把底栏追加到它后面，返回是否已处理。
-
         只在 C++ 动画结束、view 被 ``addWidget`` 后调用；与 view 的加入落在同一
         趟布局激活里，列表不会被短暂撑高再压回。
         """

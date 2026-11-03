@@ -1,9 +1,4 @@
-"""聊天 JSON 编解码（优先 ``orjson``，缺失时回落标准库 ``json``）。
-
-两套后端产出同为紧凑 UTF-8 文本，但浮点指数记法可能不同 —— 不要拿输出文本做
-跨机器逐字节比对。写入与读取都严格拒非有限浮点（orjson 默认会把 NaN / Infinity
-写成 ``null``，静默丢数据）。
-"""
+"""聊天 JSON 编解码（优先 ``orjson``，缺失时回落标准库 ``json``）。"""
 
 from __future__ import annotations
 

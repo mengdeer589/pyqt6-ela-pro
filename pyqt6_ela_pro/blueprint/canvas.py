@@ -1,35 +1,6 @@
-"""
-蓝图节点图编辑器画布。
+"""蓝图节点图编辑器画布：平移 / 缩放 / 选择 / 连线 / 序列化。
 
-``ElaBlueprintCanvas`` 是节点图编辑器的主控件：
-
-- 平移：中键拖拽 / 空格+左键拖拽 / 右键拖拽空白（右键抬起位移 <4px
-  弹 ``ElaNodeCreationMenu``）；
-- 缩放：滚轮以光标为中心，0.25x–2.5x；
-- 背景：主题感知点阵网格，间距随缩放自适应疏密；
-- 选择：Ctrl+点选多选、空白左键橡皮筋框选（半透明）；
-- 编辑：网格吸附（``set_grid_snap``）、方向键微调选中节点、Ctrl+A 全选 /
-  Ctrl+D 复制、Delete 删除选中节点（连带边）与选中边、右键连线删除；
-- 连线：引脚按下拖出贝塞尔临时线 → 磁吸高亮兼容引脚 → 松开经
-  ``graph.add_edge`` 校验建边；拖到空白松开 → 创建菜单，创建后自动连接；
-- 边：hover 加粗、点击选中、running 路径 flowing 虚线动画；
-- 运行指示：``execution()`` 标记 running / done / error，
-  ``ElaBlueprintNode.set_progress`` 在节点底部画进度条；
-- 序列化：``to_dict`` / ``from_dict``（含节点位置与画布 zoom/offset）。
-
-手势行为（事件路由 / 拖节点 / 平移 / 框选 / 连线）在
-:mod:`pyqt6_ela_pro.blueprint.interaction`；本类只持有手势状态、绘制与公共 API。
-
-节点为真实子控件（``ElaNodeWidget``，挂在内部绘制视口之下）；边、临时线、
-网格、选中发光由视口统一自绘——**默认软件视口**（``QWidget``），设
-``ELABLUEPRINT_GL=on`` 才用 ``QOpenGLWidget``（GPU 加速；它是原生子窗口，
-须在 ``window.show()`` 之前构建画布，否则顶层 HWND 会被重建、窗口闪一下，
-见 ``viewport.py`` 与 ``docs/performance.md``）。
-
-移植自 InstructionX_UIKit.blueprint.canvas（原库为 PyQt6，
-类名 Ela* 前缀；主题令牌经 blueprint._tokens 适配 eTheme；原库无 LICENSE，
-保留出处）。
-"""
+交互与扩展点见 ``docs/blueprint.md``。"""
 
 from __future__ import annotations
 
@@ -89,9 +60,7 @@ def _glow_steps(blur: float) -> tuple[int, float]:
 
 def _selection_glow_pad() -> float:
     """选中发光在节点矩形外的最大外扩（视图像素）。
-
     与 ``_draw_selection_glow`` 同源：最大 grow + 半个笔宽 + 阴影偏移 +
-    抗锯齿余量。**画布层自绘的装饰超出子控件矩形**，节点移动 / 尺寸变化
     的局部重绘必须按这个值外扩，否则旧位置会留下光晕残影。
     """
     spec = shadow_md()
@@ -123,21 +92,8 @@ class ElaBlueprintCanvas(QWidget):
     :param owner: 注册表命名空间标识（缺省 None）；给定时节点创建 /
         创建菜单 / 节点体解析范围均为「该 owner + 全局」
 
-    信号:
-        node_moved(str, QPointF): 节点拖动结束（节点 id + 新场景坐标）。
-        node_rename_requested(str): 右键菜单「重命名」（画布本身不实现，
-            由宿主接住）。
-        node_properties_requested(str): 右键菜单「属性…」（同上）。
-        edge_created(object): 新边建立（``ElaEdge``，含菜单自动连接产生的）。
-        edge_removed(str): 边被移除（边 id）。
-        selection_changed(list): 选中节点对象列表变化。
-
-    交互注记（节点体是可交互的）：``body_builder`` 注入的节点体容器不会被
-    置为鼠标透明 —— 体里的控件（输入框 / 按钮…）正常接收自己的鼠标事件；
-    体空白处按下会冒泡到节点控件，照常选中 / 拖动节点；标题栏、引脚行与
-    体空白处都是拖动区。也就是说「控件吃掉自己的事件、其余区域拖动节点」，
-    不需要也不能靠 ``WA_TransparentForMouseEvents`` 换取拖动能力（置透明
-    等于把体里的控件全部变成装饰）。
+    节点体是可交互的（不能置 ``WA_TransparentForMouseEvents``）：体里的控件
+    吃自己的事件，其余区域冒泡到节点控件用于选中 / 拖动。
     """
 
     node_moved = pyqtSignal(str, QPointF)
@@ -226,9 +182,7 @@ class ElaBlueprintCanvas(QWidget):
         for edge in graph.edges():
             self._on_edge_added(edge)
 
-    # ------------------------------------------------------------------
     # 公共 API
-    # ------------------------------------------------------------------
     def create_node(
         self,
         type_name: str,
@@ -292,10 +246,8 @@ class ElaBlueprintCanvas(QWidget):
         """当前缩放系数。"""
         return self._zoom
 
-    # -- 网格吸附 ---------------------------------------------------------
     def set_grid_snap(self, on: bool) -> None:
         """拖节点时是否吸附到点阵网格（默认关）。
-
         吸附作用在**拖动位移**上（而不是逐个节点取整）：多选拖动保持节点间
         的相对布局，不会因为各自取整而互相挤开。
         """
@@ -307,7 +259,6 @@ class ElaBlueprintCanvas(QWidget):
 
     def set_grid_step(self, step: float) -> None:
         """吸附网格的基础间距（场景单位，默认 24）。
-
         实际生效间距随缩放按 2 的幂自适应（与 ``_draw_grid`` 同源），
         保证吸附后节点落在看得见的网格点上。
         """
@@ -317,14 +268,12 @@ class ElaBlueprintCanvas(QWidget):
         """当前缩放下实际生效的吸附间距（场景单位）。"""
         return self._grid_scene_step()
 
-    # -- 选择 / 复制 / 微调 ------------------------------------------------
     def select_all(self) -> None:
         """选中全部节点（Ctrl+A）。"""
         self.select_nodes(self.graph.nodes())
 
     def duplicate_selection(self) -> list:
         """复制选中节点（Ctrl+D），副本错开 24px 并成为新的选择。
-
         返回副本 id 列表；连同节点属性（含按钮体读的 ``properties``）一起
         复制，但**不**复制节点之间的连线。
         """
@@ -342,7 +291,6 @@ class ElaBlueprintCanvas(QWidget):
 
     def nudge_selection(self, dx: float, dy: float) -> bool:
         """按场景单位平移选中节点（方向键微调），返回是否真的移动。
-
         与拖动走同一套脏区：旧 / 新节点矩形（含选中发光带）+ 相连边的新旧
         包围盒，否则微调一样会留下光晕残影。
         """
@@ -422,7 +370,6 @@ class ElaBlueprintCanvas(QWidget):
         """返回运行指示控制器（画布持有唯一实例）。"""
         return self._execution
 
-    # -- 部件访问 ---------------------------------------------------------
     def node_widget(self, node):
         """按 ``ElaBlueprintNode`` / id 取节点控件，不存在返回 ``None``。"""
         return self._node_widgets.get(_node_id(node))
@@ -434,7 +381,6 @@ class ElaBlueprintCanvas(QWidget):
 
     def pin_scene_pos(self, node, pin_id: str, direction=None) -> QPointF:
         """引脚圆心的场景坐标（找不到时回退节点左上角）。
-
         ``node`` 接受 ``ElaBlueprintNode`` 或 id；``pin_id`` 接受
         ``ElaPin`` 或字符串 id。
         """
@@ -471,7 +417,6 @@ class ElaBlueprintCanvas(QWidget):
         """当前选中的边 id 列表。"""
         return list(self._selected_edges)
 
-    # -- 坐标换算 ---------------------------------------------------------
     def scene_to_view(self, pt: QPointF) -> QPointF:
         """场景坐标 → 视图（控件）坐标。"""
         return pt * self._zoom + self._offset
@@ -480,7 +425,6 @@ class ElaBlueprintCanvas(QWidget):
         """视图（控件）坐标 → 场景坐标。"""
         return (QPointF(pt) - self._offset) / self._zoom
 
-    # -- 序列化 -----------------------------------------------------------
     def to_dict(self) -> dict:
         """序列化整张图与视图状态：``{"graph": ..., "view": {...}}``。"""
         return {
@@ -492,26 +436,9 @@ class ElaBlueprintCanvas(QWidget):
         }
 
     def from_dict(self, data: dict) -> None:
-        """从 ``to_dict`` 结果恢复：重建节点 / 边并还原 zoom 与 offset。
-
-        **节点对象会被重建**：调用方持有的旧 ``ElaBlueprintNode`` 引用失效
-        （节点 id 会保留，请按 id 从 ``graph.nodes()`` 重新取）。
-
-        **整体容错**（与 chat 的序列化契约一致）：这是宿主「加载文件」
-        这类 Qt 槽里最常见的入口，脏数据 / 旧版格式抛出去 = 槽内异常 =
-        0xC0000409 零 traceback 终止。所以坏节点 / 坏边**逐条跳过并记
-        WARNING**，而不是让整张图载入失败：
-
-        1. **边必须走 ``graph.add_edge()``**。直接往 ``graph._edges`` 里塞
-           会跳过 ``add_edge`` 的全量校验（方向 / 类型兼容 / 存在性 /
-           单连接替换 / id 冲突），于是「文件里引脚已经被改名」这类脏数据
-           会还原成一批**指向幽灵引脚的边** —— 它们照样进 ``_edge_widgets``、
-           照样被绘制与命中，只是两端都退化成默认点，表现为「有根看不见
-           的线」，而且删不掉（``delete_selection`` 只按 id 删边）。
-        2. **必须复位执行态**。``graph.clear()`` 只发移除信号，不碰节点的
-           ``status`` / ``elapsed_ms`` / ``error_message``；而 ``to_dict``
-           并不序列化这三项，所以复用同一批节点对象时上一轮的「运行中」
-           徽标会留在刚载入的图上。
+        """从 ``to_dict`` 结果恢复（节点对象会被重建，旧引用失效）。
+        常在宿主「加载文件」的 Qt 槽里调用，因此脏数据逐条跳过并记 WARNING：
+        抛出去 = 槽内异常 = 0xC0000409。边必须走 ``graph.add_edge()``，绕过
         """
         self._settle_view_gesture()
         self._cancel_gestures()
@@ -563,9 +490,7 @@ class ElaBlueprintCanvas(QWidget):
         self._offset = QPointF(_finite(off[0]), _finite(off[1]))
         self._update_view()
 
-    # ------------------------------------------------------------------
     # 图信号 → 界面同步
-    # ------------------------------------------------------------------
     def _on_node_added(self, node: ElaBlueprintNode) -> None:
         widget = ElaNodeWidget(node, self._viewport, owner=self._owner)
         widget.installEventFilter(self)
@@ -632,7 +557,6 @@ class ElaBlueprintCanvas(QWidget):
 
     def _node_layout_changed(self, node_widget: ElaNodeWidget) -> None:
         """节点尺寸变化（属性 / 引脚变化）后重新落位并清掉旧区域。
-
         此时控件几何还是旧尺寸，取它作为旧矩形；画布层的选中发光范围也随
         尺寸变化，旧光晕带不一起重绘就会残留在原处。
         """
@@ -686,9 +610,7 @@ class ElaBlueprintCanvas(QWidget):
                 widget.end_gesture_proxy()
             self._update_view()
 
-    # ------------------------------------------------------------------
     # 选择
-    # ------------------------------------------------------------------
     def clear_selection(self) -> None:
         """清空节点与边的选中态。"""
         for nid in self._selected_nodes:
@@ -751,9 +673,7 @@ class ElaBlueprintCanvas(QWidget):
                 ew.selected = True
         self.update()
 
-    # ------------------------------------------------------------------
     # 事件过滤（节点控件 / 引脚热区）
-    # ------------------------------------------------------------------
     def eventFilter(self, obj, event):
         return self._interaction.handle_event(obj, event)
 
@@ -761,9 +681,7 @@ class ElaBlueprintCanvas(QWidget):
         """把子控件上的事件坐标换算为画布视图坐标。"""
         return self._interaction.view_pos_of_event(obj, event)
 
-    # ------------------------------------------------------------------
     # 画布鼠标事件（空白区）
-    # ------------------------------------------------------------------
     def mousePressEvent(self, event) -> None:
         self._interaction.mouse_press(event)
 
@@ -782,7 +700,6 @@ class ElaBlueprintCanvas(QWidget):
     def keyReleaseEvent(self, event) -> None:
         self._interaction.key_release(event)
 
-    # -- 平移 / 框选 -------------------------------------------------------
     def _cancel_gestures(self) -> None:
         """复位所有「按住类」手势状态（失焦 / 隐藏 / 载入新图时调用）。"""
         self._interaction.cancel()
@@ -812,7 +729,6 @@ class ElaBlueprintCanvas(QWidget):
         self.selection_changed.emit([])
         self.update()
 
-    # -- 边 hover / 命中 ---------------------------------------------------
     def _edge_at(self, scene_pt: QPointF):
         for eid, ew in self._edge_widgets.items():
             if ew.contains(scene_pt, tol=7.0 / self._zoom + 3.0):
@@ -840,7 +756,6 @@ class ElaBlueprintCanvas(QWidget):
         if rects:
             self._update_scene_rects(rects)
 
-    # -- 节点右键菜单 ------------------------------------------------------
     def _open_node_menu(self, widget: ElaNodeWidget, global_pos: QPoint) -> None:
         nid = widget.node.id
         menu = ElaNodeContextMenu(nid, self)
@@ -883,9 +798,7 @@ class ElaBlueprintCanvas(QWidget):
         copy.pos = node.pos + QPointF(24.0, 24.0)
         return copy
 
-    # ------------------------------------------------------------------
     # 流动动画
-    # ------------------------------------------------------------------
     def _ensure_flow_timer(self) -> None:
         # 持续动效：Reduced/Disabled 下不流动。停掉时虚线相位冻结在当前值 ——
         # 边线仍然是流动虚线图案，只是不动，所以不需要摆姿态钩子。
@@ -905,9 +818,7 @@ class ElaBlueprintCanvas(QWidget):
         # 仅重绘流动边的包围盒
         self._update_scene_rects(rects)
 
-    # ------------------------------------------------------------------
     # 绘制（由内部视口承载，见 viewport.py）
-    # ------------------------------------------------------------------
     def paintEvent(self, _event) -> None:
         # 画布本体被视口 1:1 覆盖；此处仅在视口尚未就位时兜底填底。
         p = QPainter(self)
@@ -989,7 +900,6 @@ class ElaBlueprintCanvas(QWidget):
 
     def _update_view_rects(self, view_rects) -> None:
         """按视图坐标矩形逐个请求重绘（每块自带 2px 描边余量）。
-
         逐矩形提交而不是合并成一个大矩形：多选拖动 / 多条流动边分散在画布
         两端时，合并会退化成整幅重绘。
         """
@@ -1008,7 +918,6 @@ class ElaBlueprintCanvas(QWidget):
 
     def _node_repaint_view_rect(self, node) -> QRectF:
         """节点重绘区域：节点矩形 + 选中发光外扩（视图坐标）。
-
         光晕由画布层自绘、超出节点控件矩形：节点移动时只依赖 Qt 对子控件
         移动的自动失效（控件自身旧 / 新矩形）会留下旧位置的光晕残影。
         """
@@ -1051,9 +960,7 @@ class ElaBlueprintCanvas(QWidget):
                 rad = base_radius + grow
                 p.drawRoundedRect(rr, rad, rad)
 
-    # ------------------------------------------------------------------
     # 网格（平铺纹理缓存）
-    # ------------------------------------------------------------------
     def _grid_tile(self, step_px: float) -> QPixmap:
         """网格平铺块（按 间距档位 / 颜色 / DPR 缓存）。
 

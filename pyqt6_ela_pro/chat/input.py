@@ -109,11 +109,8 @@ _INPUT_CARD_SPACING = 4
 
 class _ChatPlainTextEdit(ElaPlainTextEdit):
     """输入编辑器：内容自增高 + 粘贴 / 拖入转附件。
-
-    自增高走 ``sizeHint()``；``textChanged`` 槽里只 ``updateGeometry()``，绝不
-    在槽内改几何（重入布局 = 0xC0000409 静默终止）。文件 / 图片经
-    :meth:`insertFromMimeData` 转附件（粘贴与拖入同一钩子），大段文本发
-    :attr:`largeTextPasted` 交给 :class:`ElaChatInput` 落盘。
+    自增高走 ``sizeHint()``；``textChanged`` 槽只 ``updateGeometry()``，绝不在槽内改
+    几何（重入布局 = 0xC0000409）。文件 / 图片与大段文本的落盘交给 :class:`ElaChatInput`。
     """
 
     #: 剪贴板图片被粘贴 / 图片被拖入（参数：``QImage``）
@@ -137,9 +134,8 @@ class _ChatPlainTextEdit(ElaPlainTextEdit):
 
     def setKeyHandler(self, handler) -> None:  # noqa: N802
         """注入按键处理器（``handler(event) -> bool``，``True`` = 已消费）。
-
-        刻意不用事件过滤器：给会被随行销毁的子控件 ``installEventFilter(parent)``
-        在父窗口树整体析构时会踩 0xC0000409。
+        不用事件过滤器：给随行销毁的子控件 ``installEventFilter(parent)``，在父窗口
+        树整体析构时会踩 0xC0000409。
         """
         self._key_handler = handler
 
@@ -265,7 +261,7 @@ class _InputSurface(ElaThemeWidget):
 
 
 def _shortTokens(value) -> str:
-    """词元数缩写（``187431`` -> ``187.4k``，对齐 opencode 的 compact 记法）。"""
+    """词元数缩写（``187431`` -> ``187.4k``）。"""
     try:
         number = float(value or 0)
     except (TypeError, ValueError, OverflowError):
@@ -281,10 +277,8 @@ def _shortTokens(value) -> str:
 
 class _ContextUsageRing(ElaThemeWidget):
     """上下文窗口占用指示器（工具栏小圆环 + hover 详情）。
-
-    自绘而非 ``ElaProgressRing``：后者的环色硬编码在 C++ 侧，而「占用越高越
-    变色」正是本控件的全部价值。三档配色：< 60% 弱化、60~85% 警示、> 85% 危险。
-    默认常驻（无数据画空底环），可点击，带 hover / press 状态层。
+    自绘而非 ``ElaProgressRing``：后者环色硬编码在 C++ 侧，而变色正是本控件的价值。
+    三档：< 60% 弱化、60~85% 警示、> 85% 危险；默认常驻（无数据画空底环）。
     """
 
     #: 点击圆环（宿主据此弹上下文详情面板等；组件自身不做行为）
@@ -302,8 +296,6 @@ class _ContextUsageRing(ElaThemeWidget):
         self.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self.setAccessibleName("上下文占用")
         # 刻意不在这里 hide()：它是工具栏默认组件，无数据时画空底环
-
-    # -- 数据 --------------------------------------------------------------
 
     def setUsage(self, used: int, window: int, costUsd: float = 0.0) -> None:
         """设置占用（``window <= 0`` 按 0% 显示；控件默认常驻、不再因此隐藏）。"""
@@ -353,8 +345,6 @@ class _ContextUsageRing(ElaThemeWidget):
             lines.append("上下文接近上限，建议压缩历史")
         return "\n".join(lines)
 
-    # -- 交互（当按钮用） --------------------------------------------------
-
     def mousePressEvent(self, event) -> None:  # noqa: N802 (Qt 命名)
         if event.button() == Qt.MouseButton.LeftButton:
             self._pressed = True
@@ -384,8 +374,6 @@ class _ContextUsageRing(ElaThemeWidget):
         self._pressed = False
         self.update()
         super().leaveEvent(event)
-
-    # -- 内部 --------------------------------------------------------------
 
     def _sync(self) -> None:
         # 显隐只由 setContextUsageVisible 控制；输入区贴窗口底部 → tooltip 朝上弹
@@ -420,7 +408,7 @@ class _ContextUsageRing(ElaThemeWidget):
         painter.setPen(QPen(blend(base_color(mode), text_color(mode), 0.16), width))
         painter.setBrush(Qt.BrushStyle.NoBrush)
         painter.drawEllipse(track)
-        # 值环：从 12 点顺时针（对齐 opencode ProgressCircle 的 stroke-dashoffset）
+        # 值环：从 12 点顺时针（drawArc 起点 90°、负角度为正方向）
         percent = self.percent()
         if percent > 0:
             painter.setPen(QPen(self._arc_color(), width))
@@ -507,7 +495,7 @@ class ElaChatInput(ElaThemeWidget):
         self._popup.suggestionActivated.connect(self._on_suggestion_activated)
         layout.addWidget(self._popup)
 
-        # 层 1：输入卡片（附件条 / 编辑框 / 工具栏都在卡片内，对齐 opencode）
+        # 层 1：输入卡片（附件条 / 编辑框 / 工具栏都在卡片内）
         self._surface = _InputSurface(self)
         surface_layout = QVBoxLayout(self._surface)
         surface_layout.setContentsMargins(*_INPUT_CARD_PADDING)
@@ -614,8 +602,6 @@ class ElaChatInput(ElaThemeWidget):
         self._sync_height()
         self._sync_button()
 
-    # -- 补全 --------------------------------------------------------------
-
     def popup(self) -> SuggestionPopup:
         """获取补全浮层控件。"""
         return self._popup
@@ -630,7 +616,6 @@ class ElaChatInput(ElaThemeWidget):
 
     def setCommandSubmitMode(self, mode: str) -> None:
         """设置 ``/`` 命令的提交方式。
-
         ``"send"``（默认）走 ``submitted`` / ``submittedFull``；``"signal"`` 只发
         ``commandSubmitted(text)`` 且不落消息（客户端命令）。
         """
@@ -746,7 +731,6 @@ class ElaChatInput(ElaThemeWidget):
 
     def mentions(self) -> list:
         """当前仍存在于文本中的 ``@`` 引用 id 列表。
-
         必须做词边界匹配：``token in text`` 会把改过的 ``"@Album"`` 仍判成
         ``"@Al "`` 还在。
         """
@@ -789,8 +773,6 @@ class ElaChatInput(ElaThemeWidget):
     def clearMentions(self) -> None:
         """清空引用记录。"""
         self._mentions.clear()
-
-    # -- 历史 / 草稿 -------------------------------------------------------
 
     def setHistory(self, history) -> None:
         """接入提示历史（``ElaChatPromptHistory`` 或 ``None``）。"""
@@ -842,8 +824,6 @@ class ElaChatInput(ElaThemeWidget):
                 self.setAttachments(attachments)
         finally:
             self._history_applying = False
-
-    # -- 下拉选择器 --------------------------------------------------------
 
     def addSelector(
         self,
@@ -899,8 +879,6 @@ class ElaChatInput(ElaThemeWidget):
         selector = self._selectors.get(str(key or ""))
         return selector.current() if selector is not None else ""
 
-    # -- 工具栏 ------------------------------------------------------------
-
     def toolBar(self) -> ElaChatToolBar:
         """获取工具栏（用于添加自定义工具按钮 / 控件）。"""
         return self._toolbar
@@ -929,15 +907,12 @@ class ElaChatInput(ElaThemeWidget):
         """内置「清空上下文」按钮是否可见（``isHidden`` 判据）。"""
         return not self._clear_button.isHidden()
 
-    # -- 上下文占用 --------------------------------------------------------
-
     def setContextUsage(
         self, used: int = 0, window: int = 0, costUsd: float = 0.0
     ) -> None:
         """设置上下文窗口占用（底部工具栏圆环；``window <= 0`` 按 0% 显示）。
 
-        数据完全由宿主提供，库不推断；也不进 ``ElaChatStats``（那个是各步求和，
-        占用是当前值）。没有数据时画空底环。
+        数据完全由宿主提供，库不推断，也不进 ``ElaChatStats``（那是各步求和）。
 
         :param used: 已占用词元
         :param window: 模型上下文窗口词元；``0`` / 非法值按 0% 显示
@@ -1005,8 +980,6 @@ class ElaChatInput(ElaThemeWidget):
         # 组件只管发信号：话题 / 会话由宿主创建（会话列表 UI 属宿主职责）
         self.newTopicRequested.emit()
 
-    # -- 附件 --------------------------------------------------------------
-
     def attachmentStrip(self) -> AttachmentStrip:
         """获取附件条控件。"""
         return self._attachments
@@ -1017,9 +990,8 @@ class ElaChatInput(ElaThemeWidget):
 
     def attachmentPaths(self) -> list:
         """待发附件的本地路径列表（按添加顺序，便于直接读文件）。
-
-        仅含带路径的文件附件；剪贴板图片等无路径项被排除（其内容仍在
-        :meth:`attachments` 快照中，可通过 ``isImage`` / ``name`` 识别）。
+        仅含带路径的文件附件；剪贴板图片等无路径项被排除，其内容仍在
+        :meth:`attachments` 快照中。
         """
         return [item.path for item in self._attachments.attachments() if item.path]
 
@@ -1074,14 +1046,12 @@ class ElaChatInput(ElaThemeWidget):
 
     def _on_large_text_pasted(self, text: str) -> None:
         """大段粘贴转附件：写临时文件并进附件条（失败回退为直接插入）。
-
-        与 ``_add_files`` 同一条管线 → ``filesAdded`` 照常发出；同内容同 digest
+        与 ``_add_files`` 同一管线 → ``filesAdded`` 照常发出；同内容同 digest
         恒同路径，附件条按路径自然去重。
         """
         path = self._write_paste_file(text)
         if path is None:
-            # 写盘失败（权限 / 磁盘满）：**不能静默丢内容** —— 回退成
-            # 旧行为（文本直接进编辑框）并告警一次
+            # 写盘失败（权限 / 磁盘满）：不能静默丢内容，回退为直接插入并告警一次
             self._edit.insertPlainText(text)
             warnings.warn(
                 "大段粘贴转附件失败（临时文件不可写），已回退为直接插入文本",
@@ -1095,7 +1065,7 @@ class ElaChatInput(ElaThemeWidget):
     def _write_paste_file(text: str) -> Optional[str]:
         """把粘贴文本写成临时文件，返回路径；失败返回 ``None``。
 
-        文件名带内容摘要（同内容同路径 → 天然幂等）；文件生命周期与会话无关。
+        文件名带内容摘要（同内容同路径 → 天然幂等）。
         """
         try:
             digest = hashlib.sha1(text.encode("utf-8")).hexdigest()[:8]
@@ -1127,8 +1097,6 @@ class ElaChatInput(ElaThemeWidget):
         buffer.close()
         return hashlib.sha1(bytes(data)).hexdigest()
 
-    # -- 文本 --------------------------------------------------------------
-
     def text(self) -> str:
         """获取输入文本。"""
         return self._edit.toPlainText()
@@ -1157,8 +1125,6 @@ class ElaChatInput(ElaThemeWidget):
     def inputSurface(self) -> QWidget:
         """获取输入卡片容器（附件条 / 编辑框 / 工具栏都在它内部）。"""
         return self._surface
-
-    # -- 发送 / 停止 -------------------------------------------------------
 
     def setQueueEnabled(self, on: bool) -> None:
         """设置生成中是否允许提交（交由宿主排队）。"""
@@ -1300,8 +1266,6 @@ class ElaChatInput(ElaThemeWidget):
         """获取最小行数。"""
         return self._min_lines
 
-    # -- 高度自适应 --------------------------------------------------------
-
     def _line_height(self) -> int:
         """行高（编辑框字体固定，取构造时的常规字体行距）。"""
         return QFontMetrics(self._normal_font).lineSpacing()
@@ -1326,18 +1290,12 @@ class ElaChatInput(ElaThemeWidget):
         super().resizeEvent(event)
         self._sync_height()
 
-    # -- 拖放（拖到卡片 / 工具栏：文件与图片都收） --------------------------
-
     def acceptsMime(self, mime) -> bool:
         """mime 里是否有本组件能收下的内容（本地文件 / 图片）。"""
         return bool(localFiles(mime) or mimeImage(mime) is not None)
 
     def attachMime(self, mime) -> bool:
-        """把 mime 里的文件 / 图片收进附件；实际收下了才返回 ``True``。
-
-        文件走 :meth:`addAttachments` + ``filesAdded``，图片走
-        :meth:`_on_image_pasted`（与粘贴图片同一处去重）。
-        """
+        """把 mime 里的文件 / 图片收进附件（与粘贴图片同一处去重）；实际收下了才返回 ``True``。"""
         files = localFiles(mime)
         if files:
             return self._add_files(files)
@@ -1363,8 +1321,6 @@ class ElaChatInput(ElaThemeWidget):
             super().dropEvent(event)
             return
         event.acceptProposedAction()
-
-    # -- 键盘 --------------------------------------------------------------
 
     def _on_preedit_changed(self, text: str) -> None:
         """记录输入法组合文本（``inputMethod().isVisible()`` 焦点在框内即恒真，不能用作判据）。"""

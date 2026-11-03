@@ -1,20 +1,4 @@
-"""头像：图片 / 首字母 / 图标三级回退 + 在线状态圆点。
-
-搬运自 ``Fluent-Qt/src/components/status_info/Avatar.*``。
-
-改道三处
---------
-1. **状态圆点自己画，不用 ``ElaInfoBadge``。** Fluent 那边圆环是 Avatar 画的、圆点是
-   子控件画的，因为环的**颜色取决于头像周围那层表面**（父链上的
-   ``fluentSurfaceColor``）。本库用 ``ElaInfoBadge`` 做不到「环 = 周围表面色」，
-   而没有环的状态点在深色头像上会跟背景糊在一起。所以整体自绘，属性名改成本库的
-   ``pyqt5SurfaceColor``。
-2. **名字→底色的哈希必须自己算。** Fluent 用 ``qHash(name, 0u)``（固定种子，跨进程稳定）。
-   Python 内置 ``hash(str)`` **按进程随机化**（``PYTHONHASHSEED``），直接用会让同一个
-   名字每次启动换一个颜色 —— 这里改用 ``zlib.crc32``（确定性、跨进程一致）。
-3. **``Square`` 是 4px 圆角方**，不是硬矩形（与 Fluent 一致）。1px 描边环复用同一个
-   clip path，一次成形。
-"""
+"""头像：图片 / 首字母 / 图标三级回退 + 在线状态圆点。"""
 
 from __future__ import annotations
 
@@ -77,11 +61,9 @@ _DISABLED_BG_ALPHA = 120
 #: 禁用态图片额外降到 55% 不透明度（文字不用这个 —— 走 ``textDisabled`` 色即可）。
 _DISABLED_IMAGE_ALPHA = 0.55
 
-#: 父链上用来声明「我这一层是什么表面」的动态属性名。
-#:
-#: **为什么需要**：状态圆点的 2px 环必须画成「圆点周围那层表面」的颜色，而不是画布色。
-#: 一个浮在深色卡片上的头像，若环取画布色（浅色模式是浅灰）就会出现一圈亮边。
-#: 宿主在自己的容器控件上 ``setProperty("pyqt5SurfaceColor", <QColor>)`` 即可纠正。
+#: 父链上声明「这一层是什么表面」的动态属性名：状态圆点的 2px 环必须用周围表面色，
+#: 否则浮在深色卡片上的头像会出现一圈亮边。宿主在容器上
+#: ``setProperty("pyqt5SurfaceColor", <QColor>)`` 修正。
 SURFACE_PROPERTY = "pyqt5SurfaceColor"
 
 
@@ -136,13 +118,8 @@ _FALLBACK_ICON = ElaIconType.IconName.CircleUser
 
 def _graphemes(text: str, limit: int) -> list:
     """取前 ``limit`` 个**字素簇**（不是 UTF-16 码元）。
-
-    必须按字素簇切：一个 emoji 是多个码元、组合音标会与前字母合成一个可视图元，
-    按码元切会把它们劈成两半（首字母位置出现半个 emoji）。
-
-    **段是 ``text[prev:next]`` 而不是 ``text[:next]``** —— 后者取的是不断变长的前缀，
-    拼出来是「J」+「JO」= ``JJO``（实测踩过：``john`` 出三个字母、``XYZABC`` 出
-    ``XXY``，而首字母位只放得下两个）。
+    必须按字素簇切：emoji 是多个码元、组合音标会与前字母合成一个可视图元，按码元
+    切会出现半个 emoji。**每段取 ``text[prev:next]`` 而非 ``text[:next]``** ——
     """
     from PyQt6.QtCore import QTextBoundaryFinder
 
@@ -182,10 +159,8 @@ def deriveInitials(name: str, rtl: bool = False) -> str:  # noqa: N802
 
 def stableHash(text: str) -> int:  # noqa: N802
     """**跨进程稳定**的字符串哈希。
-
     **不要用内置 ``hash(str)``**：CPython 对 str 的哈希按进程随机化（PYTHONHASHSEED），
     同一个名字两次启动会落到调色板的不同位置 —— 头像颜色会「每次启动都变」。
-    ``zlib.crc32`` 是纯函数、无种子、跨版本一致。
     """
     return zlib.crc32(str(text).encode("utf-8"))
 
@@ -200,14 +175,9 @@ def contrastingText(background: QColor) -> QColor:  # noqa: N802
 
 
 class ElaAvatar(ElaThemeWidget):
-    """头像。
+    """头像：图片 → 首字母 → 人形图标三级回退，可带在线状态圆点。
 
-    ::
-
-        av = ElaAvatar(parent)
-        av.setName("John Smith")     # 自动出 "JS"
-        av.setImage(pixmap)          # 有图就用图（cover 裁剪，不是拉伸）
-        av.setPresence(ElaAvatarPresenceType.Available)
+    有 ``setImage`` 用图（cover 裁剪），否则 ``setName`` 自动派生首字母。
     """
 
     nameChanged = pyqtSignal(str)
@@ -232,7 +202,6 @@ class ElaAvatar(ElaThemeWidget):
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
         self._applyExtent()
 
-    # -- 内容 ---------------------------------------------------------------
 
     def name(self) -> str:
         return self._name
@@ -252,10 +221,8 @@ class ElaAvatar(ElaThemeWidget):
 
     def setInitials(self, initials: str) -> None:  # noqa: N802
         """显式设首字母，**截到 2 个字素簇**并转大写。
-
         截断在这里做（而不是只在绘制时）—— 宿主读回 ``initials()`` 拿到的就该是
         最终值，否则会出现「设了 4 个字母、界面只显示 2 个、但 ``initials()``
-        仍返回 4 个」这种对不上的状态。
         """
         value = "".join(
             _graphemes("" if initials is None else str(initials), 2)
@@ -282,8 +249,7 @@ class ElaAvatar(ElaThemeWidget):
     def setImage(self, pixmap: Optional[QPixmap]) -> None:  # noqa: N802
         """设图片（**cover 等比填满裁剪**，不是拉伸 —— 16:9 塞进方形会被压扁）。
 
-        去重按 ``cacheKey()`` + 设备像素比，**不按 ``==``**：``QPixmap.__eq__`` 不是值
-        比较（同 AGENTS.md 里 ``QColor`` 那条）。
+        去重按 ``cacheKey()`` + 设备像素比，**不按 ``==``**（``__eq__`` 不是值比较）。
         """
         new = None if pixmap is None or QPixmap(pixmap).isNull() else QPixmap(pixmap)
         old = self._image
@@ -299,7 +265,6 @@ class ElaAvatar(ElaThemeWidget):
         self.imageChanged.emit(new)
         self.update()
 
-    # -- 外观 ---------------------------------------------------------------
 
     def shape(self) -> ElaAvatarShapeType:
         return self._shape
@@ -364,7 +329,6 @@ class ElaAvatar(ElaThemeWidget):
 
     def effectiveBackgroundColor(self) -> QColor:  # noqa: N802
         """实际绘制的底色，回退链：显式 → 名字哈希调色板 → 强调色 → 抬起表面。
-
         有名字时**先走哈希调色板**：一排头像全是同一个强调色会像一排色块，看不出是
         不同的人。哈希是确定性的（见 :func:`stableHash`），同一个人每次启动同色。
         """
@@ -388,7 +352,6 @@ class ElaAvatar(ElaThemeWidget):
     def minimumSizeHint(self) -> QSize:  # noqa: N802
         return self.sizeHint()
 
-    # -- 绘制 ---------------------------------------------------------------
 
     def _clipPath(self) -> QPainterPath:  # noqa: N802
         path = QPainterPath()
@@ -424,9 +387,7 @@ class ElaAvatar(ElaThemeWidget):
     def _surroundingSurface(self) -> QColor:
         """环要画的颜色 = **圆点周围那层表面**。
 
-        沿父链找 ``pyqt5SurfaceColor`` 动态属性；找不到就退回画布色。这是个**已知
-        会出错的默认**：浮在任意表面上的头像若宿主没声明属性，环会取画布色而显出一圈
-        亮边（Fluent 侧同样的问题，属性名是 ``fluentSurfaceColor``）。
+        沿父链找 ``pyqt5SurfaceColor``，找不到退回画布色（已知会显出一圈亮边）。
         """
         node = self.parentWidget()
         while node is not None:
@@ -526,9 +487,8 @@ class ElaAvatar(ElaThemeWidget):
             dot = host_px - _PRESENCE_RING * 2
             painter.setPen(Qt.PenStyle.NoPen)
             painter.setBrush(self._surroundingSurface())
-            # 走 QRectF 而不是 QRect：``QRect.adjusted`` 的四个参数是 **int**，
-            # 传 0.5 这种半像素内缩直接 TypeError —— 而这行在 paintEvent 里，
-            # TypeError = 整个进程 0xC0000409 静默崩（无 traceback）。实测踩过。
+            # 走 QRectF：``QRect.adjusted`` 只收 int，传 0.5 抛 TypeError；
+            # paintEvent 里的 Python 异常 = 进程 0xC0000409 静默崩（无 traceback）。
             painter.drawEllipse(
                 QRectF(geometry).adjusted(
                     _STROKE_INSET, _STROKE_INSET, -_STROKE_INSET, -_STROKE_INSET

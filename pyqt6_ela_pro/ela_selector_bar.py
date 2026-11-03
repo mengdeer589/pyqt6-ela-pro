@@ -1,36 +1,6 @@
-"""分段控件（SelectorBar）：一排互斥选项 + 会「移动 + 绽开」的高亮指示器。
+"""分段控件（SelectorBar）：一排互斥选项 + 会移动 / 绽开的高亮指示器。
 
-搬运自 ``Fluent-Qt/src/components/navigation/SelectorBar.*``。
-
-指示器动画是本组件的全部价值，也是唯一需要动脑的部分
-----------------------------------------------------
-**三个关键帧的「压扁-移动-绽开」**::
-
-    进度 0.00  →  旧位置的 16px 细条
-    进度 0.55  →  新位置的 16px 细条     ← 只有 55% 的时间花在「移动」上
-    进度 1.00  →  新位置的 20px 指示器   ← 剩下 45% 花在「绽开」上
-
-机制是 ``QVariantAnimation`` **直接插值 ``QRect``**（``QRect`` 是注册过的 QVariant
-类型，Qt 会逐分量 lerp），所以 x/y/w/h 各自独立动画，不需要任何 skew 变换。
-**``QPropertyAnimation(geometry)`` 做不到这个** —— 它绑在具体控件上，而指示器不是一
-个控件（它是画在 ``paintEvent`` 里的一块矩形）。
-
-**为什么移动占 55%**：等速的话指示器会「先飘过去再鼓起来」，看着像两个动作拼在一起而
-不是一次连贯的滑入。让移动占前 55%、抵达瞬间就开始变宽，观感上是一个动作。
-
-**静止时 relayout 不打断在飞的动画**（只在动画不在跑时才对齐新几何）—— 否则用户改窗口
-大小会把指示器「拽回去」再重播一遍。
-
-动效
-----
-指示器是**过渡**（``Transition``）不是持续动效，所以 ``Reduced`` 下被压到 ≤50ms、
-``Disabled`` 下同步落终值，走 ``_motion.start_transition``。收尾**只**通过它的
-``on_complete`` 参数注册，不要再自己连 ``anim.finished``（叠连接 = 收尾跑两遍）。
-
-**没有多选。** ``selectedIndex`` 是单个 int。``-1``（什么都不选）是合法状态：插入项时若
-当前无选中会**自动选中**插入点附近的第一项（什么都不选的分段控件看起来像坏了），而
-``clearSelection()`` 随时能回到无选中。
-"""
+指示器动画的关键帧与参数见 ``docs/core.md``。"""
 
 from __future__ import annotations
 
@@ -136,15 +106,7 @@ class ElaHitType(IntEnum):
 
 
 class ElaSelectorBar(ElaThemeWidget):
-    """分段控件。
-
-    ::
-
-        bar = ElaSelectorBar(parent)
-        bar.addItems(["最近", "全部", "已归档"])
-        bar.setSelectedIndex(0)
-        bar.itemActivated.connect(lambda i, item: print(i, item.text))
-    """
+    """分段控件：标签项 + 滑动的选中指示器（支持溢出与 RTL）。"""
 
     itemCountChanged = pyqtSignal(int)
     itemsChanged = pyqtSignal()
@@ -185,17 +147,13 @@ class ElaSelectorBar(ElaThemeWidget):
         self.setMouseTracking(True)
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
 
-    # -- 项 -----------------------------------------------------------------
-
     def itemCount(self) -> int:  # noqa: N802
         return len(self._items)
 
     def items(self) -> List[SelectorBarItem]:
         """全部项的**副本**列表。
-
-        **返回副本而不是活对象**：``selected`` 是派生镜像、内部状态由 setter 维护，
-        让宿主能直接改内部项等于给了一条「绕过全部校验与信号」的后门。要改就用
-        ``setItemText`` / ``setItemEnabled`` 等。``itemAt()`` 同理。
+        返回副本而非活对象：``selected`` 是派生镜像、内部状态由 setter 维护，直接暴露
+        内部项等于给出「绕过校验与信号」的后门；要改请用 ``setItemText`` 等。
         """
         return [
             SelectorBarItem(
@@ -234,16 +192,9 @@ class ElaSelectorBar(ElaThemeWidget):
             self.addItem(value)
 
     def insertItem(self, index: int, item: SelectorBarItem) -> int:  # noqa: N802
-        """在 ``index`` 前插入（越界会被夹到合法范围），返回实际插入位置。
-
-        **插入时若当前无选中，会自动选中插入点附近的第一项**（与 Fluent 一致）——
-        一个什么都不选的分段控件看起来像坏了。宿主不想要就紧接着调
-        ``clearSelection()``。
-
-        **``item`` 存的是副本**。``items()`` / ``itemAt()`` 的出参都是副本
-        （``selected`` 是派生镜像、内部状态由 setter 维护），而入口这一路
-        原本直接持有了调用方的对象 —— 宿主 ``item.text = ...`` 就等于绕过
-        了全部校验与信号，与出参那条约定自相矛盾。
+        """在 ``index`` 前插入（越界夹到合法范围），返回实际插入位置。
+        当前无选中时会自动选中插入点附近的第一项（否则看起来像坏了），不需要就调
+        ``clearSelection()``。``item`` **存副本**：否则宿主改对象就绕过了校验与信号。
         """
         if not isinstance(item, SelectorBarItem):
             raise TypeError(f"item 必须是 SelectorBarItem，收到 {type(item).__name__}")
@@ -320,11 +271,9 @@ class ElaSelectorBar(ElaThemeWidget):
             return False
         self._items[index].enabled = bool(enabled)
         if not enabled and self._selected_index == index:
-            # **不要先把 ``_selected_index`` 置 -1**：``_repairSelection`` 末段有
-            # ``if target == self._selected_index: return``，预置成 -1 之后，
-            # 「一个可选项都不剩」的情形下 target 也是 -1-> 直接 return，
-            # 于是 ``items()`` 的 ``selected`` 镜像永远留着上一项的 True，
-            # 与 ``selectedIndex() == -1`` 互相矛盾（实测：逐项禁用到最后一项）。
+            # **不要先把 ``_selected_index`` 置 -1**：``_repairSelection`` 末段
+            # ``if target == self._selected_index: return`` 会让「一个可选项都不剩」
+            # 直接返回，``items()`` 的镜像仍留着上一项，与 ``-1`` 矛盾。
             self._repairSelection(
                 index + 1 if index + 1 < len(self._items) else index - 1
             )
@@ -344,8 +293,6 @@ class ElaSelectorBar(ElaThemeWidget):
         self._invalidateLayout()
         self.update()
         return True
-
-    # -- 选中 ---------------------------------------------------------------
 
     def selectedIndex(self) -> int:  # noqa: N802
         """当前选中下标，``-1`` = 无选中（**合法状态**）。"""
@@ -404,8 +351,6 @@ class ElaSelectorBar(ElaThemeWidget):
             self.clearSelection()
         return True
 
-    # -- 溢出 ---------------------------------------------------------------
-
     def overflowBehavior(self) -> ElaSelectorBarOverflowType:  # noqa: N802
         return self._overflow_behavior
 
@@ -452,8 +397,6 @@ class ElaSelectorBar(ElaThemeWidget):
         self._ensureLayout()
         self.update()
 
-    # -- 几何自省 -----------------------------------------------------------
-
     def itemGeometry(self, index: int) -> QRect:  # noqa: N802
         self._ensureLayout()
         if not self._validIndex(index):
@@ -471,8 +414,6 @@ class ElaSelectorBar(ElaThemeWidget):
 
     def isIndicatorAnimating(self) -> bool:  # noqa: N802
         return self._indicator_anim.state() == QVariantAnimation.State.Running
-
-    # -- 字体 / 尺寸 ---------------------------------------------------------
 
     def itemPixelSize(self) -> int:  # noqa: N802
         return self._item_font_px
@@ -495,8 +436,6 @@ class ElaSelectorBar(ElaThemeWidget):
 
     def minimumSizeHint(self) -> QSize:  # noqa: N802
         return QSize(_Metrics.overflowButtonWidth * 3, _Metrics.rowHeight)
-
-    # -- 布局 ---------------------------------------------------------------
 
     def _validIndex(self, index) -> bool:  # noqa: N802
         return isinstance(index, int) and 0 <= index < len(self._items)
@@ -621,10 +560,8 @@ class ElaSelectorBar(ElaThemeWidget):
 
     def _mirrorLayout(self) -> None:  # noqa: N802
         """RTL：把全部矩形水平镜像。
-
-        布局**一律按 LTR 算**再镜像（而不是在算的时候到处判方向）—— 只有一处要改，
-        且加了 RTL 支持后忘了改某处矩形的后果是「某一处没镜像」而不是「整体算错」。
-        文字对齐不在镜像范围内（``drawText`` 按逻辑方向渲染，不用管）。
+        布局一律按 LTR 算再镜像（只改一处，漏改的后果是「某处没镜像」而非整体算错）；
+        文字对齐不在此范围（``drawText`` 按逻辑方向渲染）。
         """
         width = self.width()
 
@@ -648,13 +585,9 @@ class ElaSelectorBar(ElaThemeWidget):
         return float(_Metrics.overflowButtonWidth)
 
     def _ensureSelectionVisible(self, index: int) -> None:  # noqa: N802
-        """选中项必须滚进可见窗口 —— 不然指示器会指向一个看不见的项。
-
-        **做法是「目标不可见就把窗口起点挪到它」**，而不是「按当前窗口大小倒推起点」。
-        倒推看着更精细，实测会错：窗口大小依赖**重排后**的宽度，而此刻手里只有重排
-        **前**的陈旧值 —— 先在宽 520 下算出「起点 = 目标 - 窗口容量 + 1」，再到窄 300
-        下重排，容量变小、目标被挤出窗口，指示器就指着看不见的项（实测：选中第 24 项
-        却只显示 ``[20,21,22]``）。
+        """选中项必须滚进可见窗口，否则指示器会指向看不见的项。
+        做法是「目标不可见就把窗口起点挪到它」，不能按当前窗口大小倒推：窗口宽度在
+        重排后才确定，用陈旧值倒推会把目标挤出可见区。
         """
         candidates = self._candidates()
         if index not in candidates:
@@ -664,8 +597,6 @@ class ElaSelectorBar(ElaThemeWidget):
         self._first_visible = max(0, min(len(candidates) - 1, candidates.index(index)))
         self._layout_dirty = True
         self._ensureLayout()
-
-    # -- 指示器 -------------------------------------------------------------
 
     def _indicatorTargetRect(self, index: int) -> QRect:  # noqa: N802
         """第 ``index`` 项上指示器的最终位置（底部居中、20px 宽的胶囊）。"""
@@ -715,9 +646,8 @@ class ElaSelectorBar(ElaThemeWidget):
         self._indicator_anim.setStartValue(collapsedFrom)
         self._indicator_anim.setKeyValueAt(_Metrics.travelRatio, collapsedTo)
         self._indicator_anim.setEndValue(toRect)
-        # ``valueChanged`` 在 ``__init__`` 里连一次即可 —— 这里每切一次就叠一个
-        # 接收者（实测切 4 次变4 个），槽虽然幂等但每帧调用次数线性增长。
-        # 收尾只通过 on_complete 注册，不要再自己连 ``finished``（叠连接 = 跑两遍）。
+        # ``valueChanged`` 在 ``__init__`` 里连一次即可 —— 每次切换再连会叠接收者，
+        # 槽虽幂等但每帧调用次数线性增长。收尾只走 on_complete，别自己连 ``finished``。
         start_transition(
             self._indicator_anim, Duration.Fast, on_complete=self._onIndicatorSettled
         )
@@ -776,7 +706,6 @@ class ElaSelectorBar(ElaThemeWidget):
             self._layout_dirty = True
             self._ensureLayout()
 
-    # -- 命中测试 -----------------------------------------------------------
     def _hitTest(self, pos) -> tuple:
         """返回 ``(ElaHitType, index)``。不可交互的命中一律归一化成 ``(ElaHitType.None_, -1)``。"""
         self._ensureLayout()
@@ -795,8 +724,6 @@ class ElaSelectorBar(ElaThemeWidget):
                     return ElaHitType.Item, index
                 return ElaHitType.None_, -1
         return ElaHitType.None_, -1
-
-    # -- 事件 ---------------------------------------------------------------
 
     def mousePressEvent(self, event: QMouseEvent) -> None:  # noqa: N802
         self._pressed, self._pressed_index = self._hitTest(event.position().toPoint())
@@ -873,11 +800,8 @@ class ElaSelectorBar(ElaThemeWidget):
 
     def focusInEvent(self, event) -> None:  # noqa: N802
         """拿到焦点时把选中补到一个可选项上。
-
-        **必须走 ``setSelectedIndex``**：原先直接写 ``_selected_index``，
-        于是三处状态互相矛盾 —— ``selectedIndex()`` 报了新下标、
-        ``items()`` 的 ``selected`` 镜像全False、指示器几何是空的，而且
-        **不发 ``selectedIndexChanged``**，宿主完全不知道选中变了。
+        **必须走 ``setSelectedIndex``**：直接写 ``_selected_index`` 会让读值、``items()``
+        镜像与指示器几何互相矛盾，且不发 ``selectedIndexChanged``。
         """
         super().focusInEvent(event)
         if not self._selectableIndex(self._selected_index):
@@ -898,8 +822,6 @@ class ElaSelectorBar(ElaThemeWidget):
         # 发的是**副本**：信号参数也是出口，宿主不该有机会改内部状态（与 items() 同理）。
         self.itemActivated.emit(index, self.itemAt(index))
         self.setSelectedIndex(index)
-
-    # -- 绘制 ---------------------------------------------------------------
 
     def _itemTextColor(self, index: int) -> QColor:  # noqa: N802
         if not self.isEnabled() or not self._selectableIndex(index):

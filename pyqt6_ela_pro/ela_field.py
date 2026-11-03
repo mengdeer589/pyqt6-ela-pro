@@ -1,32 +1,6 @@
 """表单字段外壳：标题 + 必填标记 + 编辑器槽 + 辅助文字 + 校验状态行。
 
-搬运自 ``Fluent-Qt/src/components/layout/Field.*``（注意它在 Fluent 的 ``layout/``
-目录下，**不是** ``input/``）。这是一个**纯组合壳**：从不碰编辑器的文本、不做任何校验，
-只负责把「这个字段现在的状态」表达出来。
-
-四行竖排（间距一律 4px）::
-
-    ┌ 标题  *                                    ← 标题行
-    ├ [编辑器]                                     ← 编辑器槽（ContentSlot 托管）
-    ├ 辅助文字（弱化色，**永远不被校验状态改色**）
-    └ ⚠ 校验信息（图标 + 状态色文字）              ← 状态行
-
-三条从 Fluent 搬来但**必须知道原因**的规则
-----------------------------------------
-1. **状态图标要求「有文字」且「状态非 None」两者同时成立**。只设状态不给文字时状态行
-   整行隐藏 —— 一个没有文案的红三角没有信息量，只是个噪音像素。
-2. **辅助文字与状态行是两条独立的行**，可以同时出现；辅助文字**永远**是弱化色。
-   把辅助文字跟着状态染色是常见错误：字段同时有「说明」和「错误」时，说明被染红会让
-   用户以为说明本身是错的。
-3. **``*`` 必填标记永远是错误色**，与 ``status()`` 无关 —— 它表达的是「这栏必填」，
-   不是「这栏当前有错」。
-
-禁 QSS
-------
-Fluent 用 ``setStyleSheet("color: rgba(...)")`` 上色，本库全局禁 QSS，走
-``_styles.ColorText``（**每个都必须显式 ``setTextPixelSize``**，否则落到 ElaText 的
-默认 28px）。
-"""
+纯组合壳，不碰编辑器文本、不做校验。"""
 
 from __future__ import annotations
 
@@ -58,10 +32,9 @@ _DETAIL_PX = 12
 #: 图标才不会顶着行高把整行撑高。
 _ICON_HOST = 16
 
-#: 图标与文字的垂直对齐。Fluent 用 ``AlignBaseline``（让 ``*`` 坐在文字基线上），
-#: 本库用 ``AlignTop``：``ColorText`` 的 ``sizeHint`` 高度受平台字体度量影响很大
-#: （实测 windows 43px / offscreen 36px，见 AGENTS.md），基线对齐在两套度量下分别偏移
-#: 不同的量，钉不住。顶对齐在两套度量下都是「图标与首行文字顶齐」，稳定。
+#: 图标与文字顶对齐。``ColorText`` 的 ``sizeHint`` 高度受平台字体度量影响很大
+#: （windows 43px / offscreen 36px），基线对齐在两套度量下偏移量不同、钉不住；
+#: 顶对齐在两边都是「图标与首行文字顶齐」。
 _ICON_ALIGN = Qt.AlignmentFlag.AlignTop
 
 
@@ -93,10 +66,8 @@ _ROLE_BY_STATUS = {
 
 class _StatusIcon(QWidget):
     """状态图标：一个 16×16 的透明控件，内画 12px 的 ElaAwesome 字形。
-
     刻意不用 ``ElaIconButton``（那是有悬浮/按下底色的按钮，语义不对）、也不用
     ``QLabel``（QLabel 画不了字形）。字形绘制走 ``_styles.drawElaIcon`` ——
-    上游 ``eTheme`` 没有这个原语，是库内自绘原语（见 ``_styles``）。
     """
 
     def __init__(self, parent: Optional[QWidget] = None) -> None:
@@ -131,17 +102,9 @@ class _StatusIcon(QWidget):
 
 
 class ElaField(ElaThemeWidget):
-    """表单字段外壳。典型用法::
+    """表单字段外壳：标题 + 必填标记 + 编辑器槽 + 辅助文字 + 校验状态行。
 
-    field = ElaField(parent)
-    field.setLabel("用户名")
-    field.setRequired(True)
-    field.setHelperText("2-16 个字符")
-    field.setEditor(ElaLineEdit(parent))          # 或 setEditor(w, ElaWidgetOwnershipType.Owned)
-
-    # 校验失败时：
-    field.setStatus(ElaFieldStatusType.Error)
-    field.setStatusText("该用户名已被占用")
+    编辑器默认 ``Borrowed``（字段不管生命周期），可传 ``Owned`` 由字段删除。
     """
 
     statusChanged = pyqtSignal(object)
@@ -214,8 +177,6 @@ class ElaField(ElaThemeWidget):
 
         self._applyTheme()
 
-    # -- 标题 ---------------------------------------------------------------
-
     def label(self) -> str:
         return self._label
 
@@ -240,8 +201,6 @@ class ElaField(ElaThemeWidget):
         self.requiredChanged.emit(required)
         self._applyTheme()
 
-    # -- 辅助文字 -----------------------------------------------------------
-
     def helperText(self) -> str:
         return self._helper_text
 
@@ -254,8 +213,6 @@ class ElaField(ElaThemeWidget):
         self._helper.setVisible(bool(value))
         self.helperTextChanged.emit(value)
         self._applyTheme()
-
-    # -- 校验状态 -----------------------------------------------------------
 
     def status(self) -> ElaFieldStatusType:
         return self._status
@@ -291,8 +248,6 @@ class ElaField(ElaThemeWidget):
     def hasStatusRow(self) -> bool:
         """状态行是否可见（= 有文案）。"""
         return bool(self._status_text)
-
-    # -- 编辑器槽（走共享所有权协议） ------------------------------------------
 
     def editor(self) -> Optional[QWidget]:
         """当前编辑器（已被外部销毁时返回 ``None``）。"""
@@ -347,11 +302,8 @@ class ElaField(ElaThemeWidget):
         self._caption.setBuddy(None)
         self.editorChanged.emit(None)
 
-    # -- 内部 ---------------------------------------------------------------
-
     def _onEditorChanged(self, widget) -> None:
         """``ContentSlot`` 发的 ``widgetChanged``。
-
         **收到 ``None``（编辑器被外部销毁）时绝不动布局** —— ``destroyed`` 是在
         ``~QWidget`` 内部发出的，此刻重入 QLayout 就是 0xC0000005。
         """
@@ -373,10 +325,8 @@ class ElaField(ElaThemeWidget):
 
     def _onThemeChanged(self, mode) -> None:  # noqa: N802 (基类钩子)
         """主题切换：重刷三处颜色。
-
         ``ColorText`` 的颜色是**快照**，``ElaText`` 在 C++ 构造里连了
         ``themeModeChanged`` 会把 palette 刷回 BasicText，所以这里必须重设
-        ``setTextColor``（不重设的话切完主题标题 / 说明就变成主题默认色了）。
         """
         super()._onThemeChanged(mode)
         self._applyTheme()

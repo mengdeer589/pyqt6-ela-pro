@@ -24,11 +24,8 @@ from ._shared import (
 
 class HeatmapSeriesRenderer(SeriesRenderer):
     """热力图。
-
     Grid 直角：x/y 轴均为 category，数据项 [x, y, value]，按 band 填格。日历：
     ``coordinateSystem: "calendar"``，数据项 [日期, value]，无数据日铺浅色底格。
-    色带默认 ``color.primary.subtle`` → ``color.primary``，有 ``visualMap`` 时按其
-    min/max 与 ``inRange.colors`` 映射。
     """
 
     def __init__(self, chart, opt):
@@ -39,7 +36,6 @@ class HeatmapSeriesRenderer(SeriesRenderer):
         self._cell_gap = 1.0
         self._cell_radius = 2.0
 
-    # -- 数据 -------------------------------------------------------------
     def _parse_items(self):
         """→ [(x, y, value, text, style)]（日历模式 y 为 None，x 为日期）。"""
         out = []
@@ -71,7 +67,6 @@ class HeatmapSeriesRenderer(SeriesRenderer):
 
     def _colors_and_range(self, items):
         """→ (colors, vmin, vmax)：visualMap 优先，否则默认色带 + 数据范围。
-
         必须读组件实例的活值：``calculable`` 拖动改的是实例 min/max，读 option
         静态值会让拖动完全不改配色。
         """
@@ -184,7 +179,6 @@ class HeatmapSeriesRenderer(SeriesRenderer):
             data_index += 1
         return cells
 
-    # -- 布局 -------------------------------------------------------------
     def layout(self, rect: QRectF) -> None:
         self._cells = []
         coord = self.chart.coordFor(self.opt)
@@ -228,7 +222,6 @@ class HeatmapSeriesRenderer(SeriesRenderer):
                 }
             )
 
-    # -- 绘制 -------------------------------------------------------------
     def paint(self, p: QPainter, anim_t: float) -> None:
         if not self._cells:
             return
@@ -306,7 +299,6 @@ class HeatmapSeriesRenderer(SeriesRenderer):
         color.setAlpha(int(255 * max(0.15, anim_t) * alpha))
         return color
 
-    # -- 交互 -------------------------------------------------------------
     def hitTest(self, pos: QPointF):
         for cell in self._cells:
             if cell["rect"].adjusted(-1, -1, 1, 1).contains(pos):

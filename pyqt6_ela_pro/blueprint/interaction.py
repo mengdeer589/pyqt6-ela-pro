@@ -1,9 +1,4 @@
-"""蓝图画布的鼠标 / 键盘手势控制器。
-
-``ElaBlueprintCanvas`` 只保留「状态 + 绘制 + 公共 API」；事件分发、拖节点、
-平移、框选、连线这些**行为**集中在这里。手势状态仍挂在画布上（绘制与
-序列化要读同一份数据），控制器不做第二份缓存。
-"""
+"""蓝图画布的鼠标 / 键盘手势控制器。"""
 
 from __future__ import annotations
 
@@ -34,7 +29,6 @@ class CanvasInteraction:
     def __init__(self, canvas: "ElaBlueprintCanvas") -> None:
         self._canvas = canvas
 
-    # -- 事件路由 ----------------------------------------------------------
     def handle_event(self, obj, event) -> bool:
         """子控件事件过滤器（节点 / 引脚热区）。"""
         c = self._canvas
@@ -140,7 +134,6 @@ class CanvasInteraction:
         """把子控件上的事件坐标换算为画布视图坐标。"""
         return QPointF(obj.mapTo(self._canvas, event.position().toPoint()))
 
-    # -- 节点拖动 ----------------------------------------------------------
     def node_press(self, widget: ElaNodeWidget, view_pos: QPointF, modifiers) -> None:
         c = self._canvas
         # 焦点交给绘制视口（键盘事件由它转发给画布）：点节点后方向键 /
@@ -223,7 +216,6 @@ class CanvasInteraction:
         c._drag_moved = False
         c._settle_view_gesture()
 
-    # -- 连线 --------------------------------------------------------------
     def begin_wire(self, handle: ElaPinHandle) -> None:
         c = self._canvas
         pin = handle.pin
@@ -374,7 +366,6 @@ class CanvasInteraction:
                 pass
             break
 
-    # -- 空白区鼠标 --------------------------------------------------------
     def mouse_press(self, event) -> None:
         c = self._canvas
         pos = QPointF(event.position().toPoint())
@@ -496,7 +487,6 @@ class CanvasInteraction:
         c._zoom_settle.start()
         event.accept()
 
-    # -- 缩放 / 平移 / 框选 / 复位 ---------------------------------------
     def end_zoom_gesture(self) -> None:
         c = self._canvas
         c._zooming = False

@@ -70,7 +70,6 @@ F = TypeVar("F", bound=Callable[..., Any])
 
 def is_deleted(obj: Any) -> bool:
     """对象是否已销毁（**``None`` 也算已销毁**）。
-
     不能直接用 ``sip.isdeleted(obj)``：``None`` 与非 sip 包装的普通 Python 对象
     都会抛 ``TypeError``。库内所有存活判断统一走本函数；非包装对象按「存活」处理。
     """
@@ -88,7 +87,6 @@ _lazy_pinyin_probed = False
 
 def load_lazy_pinyin():
     """返回 ``pypinyin.lazy_pinyin`` 实现（**首次调用才导入**）。
-
     ``pypinyin`` 导入即加载约 50 MiB 拼音字典，不能在任何 ``import`` 期付掉；
     未安装时返回 ``None``（调用方降级为不参与拼音匹配 / 排序）。
     """
@@ -108,26 +106,9 @@ _cjk_ui_font_probed = False
 
 
 def system_cjk_font_family():
-    """中文系统下可用的 CJK UI 字体族（其它系统 / 字体缺失返回 ``None``，进程级缓存）。
-
-    Win7 上非 CJK 主字体渲染 CJK 内容走逐字形 fallback shaping（~3ms/行），且
-    只要走过一次就进程级毒化其后一切文本绘制（10~250×，见「下游项目反馈bug.md」
-    §2/§3），默认字体收成**单族** CJK 字体是库侧可控的**方向之一**。只认准
-    「中文系统 + Microsoft YaHei」—— 唯一实测验证过的组合；其它 CJK 语言与
-    字体不做推断。
-
-    **第二个方向：主字体是 CJK、但文本含它 cmap 里没有的符号**（LLM 输出常带
-    ↔ / ⇒ / □ / √ 等）同样走逐字形 fallback 并进程级毒化。雅黑对这些符号的
-    覆盖并不完整（U+2610/2611 勾选框、U+25B8/25BE 折叠箭头都不在），所以
-    **库自产并写进 QTextDocument 的标记必须选雅黑已有的字形** —— 任务列表用
-    U+25A1/U+25A0（□/■），折叠标记用 ``+``/``−``。任意用户内容仍可能带缺字
-    符号：查看器默认用 :func:`applyMissingGlyphFonts` 给缺字片段套**单族**符号
-    字体（不改文本、复制保真，可经 ``setMissingGlyphFallbackEnabled`` 关闭）；
-    终端等其它 QTextDocument 也可复用该工具（见 bug #20）。
-
-    ``QFontDatabase.families()`` 慢且进程内不变，结果必须进程级缓存；调用点
-    都在 QApplication 之后（控件构造路径），**禁止**在 import 期调用（无
-    QGuiApplication 时查询字体会进程级 abort）。
+    """中文系统下可用的 CJK UI 字体族（其它系统 / 字体缺失返回 ``None``）。
+    只认「中文系统 + Microsoft YaHei」；调用点必须在 QApplication 之后，
+    结果进程级缓存。字体回退 / cmap 毒化的细节见 ``docs/core.md``。
     """
     global _cjk_ui_font_family, _cjk_ui_font_probed
     if not _cjk_ui_font_probed:
@@ -171,9 +152,7 @@ def _glyphRawFont(family: str) -> Optional[QRawFont]:
 def glyphCovers(family: str, char: str) -> bool:
     """``family`` 的 cmap 是否真含 ``char``（按 (族, 字符) 进程级缓存）。
 
-    用 ``QRawFont.supportsCharacter`` 而不是 ``QFontMetrics.inFont``：后者在
-    有字体回退时对缺字形字符也返回 ``True``（实测雅黑 + U+2610），判不出
-    fallback。
+    用 ``QRawFont.supportsCharacter``；``QFontMetrics.inFont`` 对回退字体也返回真。
     """
     key = (family, char)
     cached = _glyph_coverage.get(key)
@@ -209,16 +188,11 @@ def missingGlyphFont(char: str) -> Optional[str]:
 def applyMissingGlyphFonts(
     document: QTextDocument, primaryFamily: str, start: int = 0
 ) -> int:
-    """给 ``document`` 里主字体缺字形的字符套单族符号字体（**不改文本**）。
+    """给 ``document`` 里主字体缺字形的字符套单族符号字体（不改文本）。
 
-    用于 Win7 中文系统：主字体（雅黑）缺符号字形时会走逐字形 fallback 并
-    进程级毒化。这里只给缺字字符的 ``QTextCharFormat`` 指定一个确实覆盖它的
-    单族字体（:data:`MISSING_GLYPH_FONT_CANDIDATES`），文本 / 复制 / 导出
-    全部保真；没有候选覆盖的字符保持原样。
-
-    :param start: 只处理该文档位置之后的内容（增量渲染用；边界片段整段重扫，
-        重复套同一字体的幂等操作）。传 0 处理全文。
-    :return: 处理到的文档末尾位置（可作为下一次 ``start``）。
+    只改缺字片段的 ``QTextCharFormat`` 字体族，复制 / 导出保真；没有候选覆盖的
+    字符保持原样。
+    :param start: 只处理该位置之后的内容（增量渲染），返回处理到的末尾位置。
     """
     if document is None or not primaryFamily:
         return 0
@@ -235,7 +209,7 @@ def applyMissingGlyphFonts(
         while not iterator.atEnd():
             fragment = iterator.fragment()
             if fragment.isValid():
-                # 片段完全在 start 之前就跳过。边界片段**整段**扫：按 UTF-16
+                # 片段完全早于 start 就跳过。边界片段**整段**扫：按 UTF-16
                 # 位置切 Python 串在非 BMP 字符上会错位，而重复套字体是幂等的。
                 if fragment.position() + fragment.length() <= start:
                     iterator += 1
@@ -297,27 +271,12 @@ class _ThemeAwareProtocol(Protocol):
 
 
 def single_shot_on(ctx: QObject, msec: int, slot) -> QTimer:
-    """在 ``ctx`` 上挂一个**子** :class:`QTimer` 做延时调用。
+    """在 ``ctx`` 上挂一个子 ``QTimer`` 做延时调用。
 
-    **不要用 ``QTimer.singleShot(ms, callable)``**：那个重载建的是没有接收方的
-    ``QSingleShotTimer``，它不随任何控件销毁 —— 回调里摸控件就会在控件已释放
-    时炸（``RuntimeError`` 穿出 Qt 回调 = 进程 ``0xC0000409`` 零 traceback
-    终止）。实测 ``ela_tag_multi_box`` 的
-    ``QTimer.singleShot(0, lambda: _pre_init_popup(self))`` 在「构造后立刻
-    ``sip.delete``」下确定性崩。
+    不要用 ``QTimer.singleShot(ms, callable)``：它没有接收方，控件销毁后回调
+    会在 Qt 回调链上炸（0xC0000409）。``ctx`` 的寿命必须覆盖整个延时窗口。
 
-    PyQt6 根本没有带 context 的 ``singleShot`` 重载（只有
-    ``singleShot(ms, slot)`` / ``singleShot(ms, timerType, slot)``），所以
-    「定时器本身是 ``ctx`` 的子对象」是唯一的保障 —— ``ctx`` 析构时 Qt 连带
-    销毁它并丢掉待触发的 timeout。
-
-    ``ctx`` 应当选**寿命覆盖整个延时窗口**的那个对象：延时到期前会被重建的
-    控件（会被 ``deleteLater``）不能当 context，否则回调永远等不到。
-
-    :param ctx: context 对象（定时器挂在它下面，优先传 QWidget / QObject）
-    :param msec: 延迟毫秒
-    :param slot: 槽
-    :returns: 该定时器（需要取消时自行 ``stop()``）
+    :returns: 该定时器（取消时自行 ``stop()``）
     """
     timer = QTimer(ctx)
     timer.setSingleShot(True)
@@ -364,9 +323,7 @@ def safe_call(func: Optional[Callable[..., Any]], *args, **kwargs) -> Any:
 def to_logical_pos(x: int, y: int) -> QPoint:
     """物理像素坐标 → Qt 逻辑坐标（按包含该点的屏幕 DPR 换算）。
 
-    Win32 的 ``GetCursorPos`` / ``GetWindowRect`` 等返回物理像素，而
-    ``QApplication.widgetAt`` 等 Qt 公开 API 在启用高 DPI 缩放
-    （``AA_EnableHighDpiScaling``）后使用逻辑坐标，直接混用会命中错误控件。
+    Win32 返回物理像素，Qt API 使用逻辑坐标，直接混用会命中错误控件。
     """
     try:
         app = QApplication.instance()
@@ -389,16 +346,8 @@ def to_logical_pos(x: int, y: int) -> QPoint:
 
 def execElaMenu(menu, global_pos) -> None:
     """弹出 ``ElaMenu``（阻塞到关闭）并在关闭后回收。
-
-    兜住两处 ``ElaMenu`` 的坑（实测）：
-
-    1. **非主屏上偶发不按 ``sizeHint`` 撑开**，只显示第一项。显式
-       ``setMinimumSize(sizeHint())`` 可解，主屏无副作用；
-    2. **``popup()`` 是异步的**，紧跟 ``deleteLater()`` 会在菜单显示前把它删掉 ——
-       所以用阻塞的 ``exec_()``，返回后再回收（不留在控件树上累积）。
-
-    :param menu: ``ElaMenu`` 实例
-    :param global_pos: 弹出位置（全局坐标）
+    非主屏上偶发不按 ``sizeHint`` 撑开，先 ``setMinimumSize(sizeHint())``；
+    ``popup()`` 是异步的，必须用阻塞的 ``exec()``，返回后再 ``deleteLater()``。
     """
     try:
         menu.setMinimumSize(menu.sizeHint())
@@ -408,21 +357,9 @@ def execElaMenu(menu, global_pos) -> None:
 
 
 def hideComboboxPopup(combo) -> bool:  # noqa: N802 (与 Qt 命名一致)
-    """无父控件时用 **Qt 原生**实现关弹层，返回 ``True``（调用方据此跳过 super）。
-
-    上游 ``ElaComboBox::hidePopup`` / ``ElaMultiSelectComboBox::hidePopup`` 的
-    收起动画在结束回调里无条件 ``QApplication::sendEvent(parentWidget(), ...)``，
-    而 ``parentWidget()`` 在无父控件时是 ``nullptr`` —— 回调跑到那一步进程静默
-    终止（0xC0000409 一类，无 traceback）。所以本库所有组合框子类的
-    ``hidePopup`` 都要先过这道闸门：
-
-    .. code-block:: python
-
-        def hidePopup(self):
-            ...
-            if hideComboboxPopup(self):
-                return          # 已用 Qt 原生实现关掉
-            super().hidePopup()
+    """无父控件时用 Qt 原生实现关弹层，返回 ``True``（调用方跳过 super）。
+    上游 ``hidePopup`` 的收起动画会无条件 ``sendEvent(parentWidget())``；
+    无父控件时是 ``nullptr``，进程静默终止（0xC0000409）。组合框子类都要先过这道闸。
     """
     if combo.parentWidget() is not None:
         return False
@@ -431,10 +368,9 @@ def hideComboboxPopup(combo) -> bool:  # noqa: N802 (与 Qt 命名一致)
 
 
 def _disconnect_theme_on_destroy(obj) -> None:
-    """``destroyed`` 的清理槽（**必须是模块级普通函数**）。
+    """``destroyed`` 清理槽（必须是模块级普通函数）。
 
-    PyQt 不调用「绑定到自身」的 ``destroyed`` 槽（实测：``sip.delete()`` 下绑方法
-    触发 0 次，模块级函数 / lambda 各 1 次），详见 AGENTS.md。
+    PyQt 不调用绑定到自身的 ``destroyed`` 槽。
     """
     slot = getattr(obj, "_theme_slot", None)
     if slot is not None:
@@ -447,17 +383,9 @@ def _disconnect_theme_on_destroy(obj) -> None:
 
 
 def connect_theme_signal(obj, slot: Optional[Callable[[Any], None]] = None) -> None:
-    """把 ``eTheme.themeModeChanged`` 接到 ``obj`` 的主题槽并负责断开。
-
-    供**不能继承** :class:`_ThemeAwareMixin` 的控件使用（动态定义的类、多继承基类
-    不可控的第三方控件）。两条防线与 mixin 完全一致：
-
-    1. 槽经 :func:`_make_theme_slot` 包一层（存进 ``obj._theme_slot``），并把
-       **模块级** :func:`_disconnect_theme_on_destroy` 挂到 ``obj.destroyed``；
-    2. 槽自身在 ``sip.isdeleted(obj)`` 时自愈断开，**不依赖 ``destroyed`` 送达**。
-
-    :param slot: 默认为 ``obj._onThemeChanged``。签名必须能接一个模式参数
-        （``def _onThemeChanged(self, mode)`` 或 ``(self, _mode=None)``）。
+    """把 ``eTheme.themeModeChanged`` 接到 ``obj`` 并负责断开。
+    槽经 ``_theme_slot`` 包一层，模块级函数挂 ``destroyed``；槽自身在包装器
+    已销毁时自愈断开。``slot`` 默认 ``obj._onThemeChanged``。
     """
     if slot is None:
         slot = obj._onThemeChanged
@@ -471,12 +399,8 @@ def connect_theme_signal(obj, slot: Optional[Callable[[Any], None]] = None) -> N
 
 def disconnect_theme(obj) -> None:
     """主动断开 :func:`connect_theme_signal` 建立的连接（幂等）。
-
-    **必须断 ``_theme_slot`` 而不是 ``_onThemeChanged``** —— ``disconnect`` 要拿到
-    连上去的**同一个可调用对象**（lambda / ``functools.partial`` 必然断不掉；bound
-    method 在 PyQt6 下宽容，但统一按这条写）。断失败会静默吞掉异常，连接从未真正
-    断开（原实现正是这个 bug：断开失败 + 把 ``_theme_slot`` 置 ``None`` 丢掉引用，
-    之后再 ``_init_theme_aware()`` 会**叠上第二条连接**，一次主题切换触发两次）。
+    必须断 ``_theme_slot`` 而不是 ``_onThemeChanged``：``disconnect`` 要求同一个
+    可调用对象，否则会静默失败并叠上第二条连接。
     """
     if not getattr(obj, "_theme_connected", False):
         return
@@ -487,12 +411,9 @@ def disconnect_theme(obj) -> None:
 
 
 def _make_theme_slot(obj, slot: Optional[Callable[[Any], None]] = None):
-    """造一个「带存活检查 + 自愈断开」的主题槽。
+    """造一个带存活检查 + 自愈断开的主题槽。
 
-    ``eTheme`` 是进程级单例，``themeModeChanged`` 会一直连着所有创建过的控件；
-    控件销毁后包装器可能还活着，信号再发一次就打进已释放的 C++ 对象 =
-    0xC0000409 静默终止。所以槽第一件事是 ``sip.isdeleted()``，命中就顺手断开 ——
-    **不依赖 ``destroyed`` 一定送达**（那正是本模块的第二条防线）。
+    ``eTheme`` 是进程级单例；控件销毁后信号仍可能送达，槽先 ``is_deleted()`` 自愈。
     """
     if slot is None:
         slot = obj._onThemeChanged
@@ -512,7 +433,6 @@ def _make_theme_slot(obj, slot: Optional[Callable[[Any], None]] = None):
 
 class _ThemeAwareMixin:
     """Mixin that auto-connects theme signals and cleans up on destroy.
-
     Subclasses must define _onThemeChanged(self, mode) and call
     super().__init__(parent) or self._init_theme_aware().
     """
@@ -549,11 +469,8 @@ def _prepare_combobox_popup(
     combo_box, top_extra: int = 0, bottom_extra: int = 0
 ) -> None:
     """在 ``super().showPopup()`` **之前**调用，把弹层附件高度交给 C++。
-
     C++ 的 showPopup 会按 ``_elaPopupTopExtraHeight`` / ``_elaPopupBottomExtraHeight``
     计算容器高度与 view 的动画终值，保证动画结束 ``addWidget(view())`` 时几何不再
-    跳变。同时在这里复位上一次因屏幕空间不足而设置的固定高度（放在 showPopup 之后
-    会打断正在跑的高度动画）。
     """
     combo_box.setProperty("_elaPopupTopExtraHeight", int(top_extra))
     combo_box.setProperty("_elaPopupBottomExtraHeight", int(bottom_extra))

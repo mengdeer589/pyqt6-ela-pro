@@ -18,27 +18,10 @@ from ._internal import _ThemeAwareMixin
 
 
 class ElaTagLineEdit(_ThemeAwareMixin, ElaLineEdit):
-    """具名输入框。
-
-    带有标题标签的输入框，标题显示在输入框**左侧**（占位式内边距，
-    不是 ``placeholderText`` —— 输入后标题仍然留着）。
-    支持主题适配，包含空闲、聚焦、错误三种状态。
+    """具名输入框（标题画在左侧内边距，不是 ``placeholderText``）。
 
     :param parent: 父控件
-    :param title: 标题文字（默认空串 —— 没设标题的输入框不该在框里喊 "Untitled"）
-
-    **参数顺序跟全库一致：``parent`` 在前。** 曾经写成
-    ``(title="Untitled", parent=None)`` —— 全库唯一的例外，后果是
-    ``ElaTagLineEdit(self)`` 会把父控件当成标题传给
-    ``QFontMetrics.horizontalAdvance()`` 抛 ``TypeError``；而
-    ``ElaTagLineEdit("用户名")`` 更糟：**不报错**，造出一个没有父控件的
-    顶层窗口（控件会在桌面上飘着，析构时机也不对）。
-
-    Example::
-
-        edit = ElaTagLineEdit(parent=parent, title="用户名")
-        edit.setText("admin")
-        edit.notifyInvalidInput()   # 错误态；clearError() 撤销
+    :param title: 标题文字；空串则不画
     """
 
     #: 标题文字与输入文字之间的可见间距
@@ -58,7 +41,7 @@ class ElaTagLineEdit(_ThemeAwareMixin, ElaLineEdit):
         self._title_font_size = 13
         self._is_error = False
 
-        # 与上游 ElaLineEdit（35）同高
+        # 固定高度 35px
         self.setFixedHeight(35)
         self._updateMargins()
 
@@ -92,7 +75,7 @@ class ElaTagLineEdit(_ThemeAwareMixin, ElaLineEdit):
 
     def _updateMargins(self) -> None:
         if not self._title_text:
-            # 没有标题就不能留「标题宽度」的空位：曾经无标题也会左缩进 23px
+            # 无标题时不留标题宽度空位
             self.setTextMargins(0, 0, 10, 0)
             return
         self.setTextMargins(self._titleTextWidth() + self._TITLE_GAP, 0, 10, 0)
@@ -103,12 +86,7 @@ class ElaTagLineEdit(_ThemeAwareMixin, ElaLineEdit):
         return font
 
     def _titleTextWidth(self) -> int:
-        """标题按**标题字号**量宽（不是输入框字号）。
-
-        旧实现用 ``QFontMetrics(self.font())`` 量、再用 ``_title_font_size`` 画：
-        ``setTitleFontSize(12)`` 时字号 13 的度量多算一截，加上左右各 10px 的
-        死 padding，标题与输入文字之间会空出 28px。
-        """
+        """标题按标题字号量宽，不用输入框字号。"""
         return QFontMetrics(self._titleFont()).horizontalAdvance(self._title_text)
 
     def _onTextChanged(self, _text: str) -> None:

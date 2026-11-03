@@ -50,10 +50,8 @@ from .collapsible import _CollapsibleBlock
 
 class ToolCallCard(_CollapsibleBlock):
     """工具层单卡片（对齐 opencode 语义）。
-
     默认折叠（由 :func:`toolDefaultOpen` 决定，宿主可注入策略）；``Pending`` 状态
     锁定不可展开（shell / 显式放开除外）；运行中不显示参数摘要（分片半截会误导，
-    且让整行宽度跳变），完成后出现；内容区首次展开时才构建。
     """
 
     def __init__(
@@ -134,8 +132,6 @@ class ToolCallCard(_CollapsibleBlock):
         if self.isOpened() and not self._body_built:
             self._build_body()
 
-    # -- 数据 --------------------------------------------------------------
-
     def toolCall(self, callId: Optional[str] = None) -> ElaChatToolCall:
         """获取当前工具调用快照（``callId`` 供容器统一路由，卡内忽略）。"""
         return self._call
@@ -150,7 +146,6 @@ class ToolCallCard(_CollapsibleBlock):
 
     def setMessageId(self, messageId: int) -> None:
         """设置所属消息 id（供渲染器上下文用，建卡后可补设）。
-
         初始展开的卡在**拿到消息 id 之后**才建正文：渲染器上下文需要它，
         构造期抢跑的话快照里的 ``messageId`` 永远是 0。
         """
@@ -210,8 +205,6 @@ class ToolCallCard(_CollapsibleBlock):
         """统一结果更新入口（``callId`` 由容器路由，卡内忽略）。"""
         self.setResult(result, ok=ok)
 
-    # -- 展开与内容 --------------------------------------------------------
-
     def _on_toggled(self, checked: bool) -> None:
         if not checked or not self._expandable:
             # 不可展开（pending 锁定）：不能建 body，否则渲染器工厂会被提前跑掉并钉住快照。
@@ -264,7 +257,6 @@ class ToolCallCard(_CollapsibleBlock):
 
     def _build_renderer_body(self) -> bool:
         """尝试用宿主注册的渲染器填充内容区；返回是否接管成功。
-
         任何异常都落回默认纯文本 body：工厂跑在 Qt 回调链里，异常冒出去就是
         0xC0000409 静默终止整个进程。
         """
@@ -294,7 +286,6 @@ class ToolCallCard(_CollapsibleBlock):
 
     def _notify_renderer(self) -> None:
         """把结果 / 状态推给渲染器（widget 无该方法则跳过）。
-
         三重守卫缺一不可：``self`` 可能已被 ``removeMessage`` 销毁，widget 也可能
         已被宿主自行 ``deleteLater``。
         """
@@ -465,8 +456,6 @@ class ContextToolGroupCard(_CollapsibleBlock):
         self._sync_header()
         self._apply_theme()
 
-    # -- 数据 --------------------------------------------------------------
-
     def addToolCall(self, call: ElaChatToolCall) -> None:
         """追加上下文工具调用。"""
         self._calls.append(call)
@@ -584,10 +573,8 @@ class ContextToolGroupCard(_CollapsibleBlock):
 
 class ToolGroupPanel(_CollapsibleBlock):
     """工具调用外层折叠面板（对齐 agent_chat 的「工具调用 (N)」层级）。
-
     与思考折叠块完全一致的内联样式：无卡片底色、标题为纯文本色（不叠强调色），
     两者只靠「>」箭头与文案区分。内容区承载 :class:`ToolCallCard` /
-    :class:`ContextToolGroupCard`。
     """
 
     def __init__(self, parent: Optional[QWidget] = None) -> None:
@@ -608,8 +595,6 @@ class ToolGroupPanel(_CollapsibleBlock):
         # 标题 + 浅灰摘要共用一个 label：富文本片段只用于颜色，外部文本全部转义。
         self._title_label.setTextFormat(Qt.TextFormat.RichText)
         self.hide()
-
-    # -- 内容 --------------------------------------------------------------
 
     def toolLayout(self) -> QVBoxLayout:
         """获取工具卡片布局（向其添加卡片）。"""

@@ -1,6 +1,4 @@
-"""
-SVG 图标渲染代理。
-"""
+"""SVG 图标渲染代理。"""
 
 from PyQt6.QtCore import QModelIndex, QSize, Qt
 from PyQt6.QtWidgets import QStyledItemDelegate, QStyleOptionViewItem, QStyle

@@ -1,38 +1,6 @@
-"""划词助手组件（``pyqt6_ela_pro.selection_assistant``）。
+"""划词助手组件：监视全局划词手势，取词后在落点弹出动作条。
 
-:class:`ElaSelectionAssistant` 在后台监视全局鼠标：用户在任意应用完成
-划词手势（拖选松开或双击选词）后，模拟 ``Ctrl+C`` 读取选中文本，在落点
-附近弹出动作条；**动作条菜单项完全由宿主定义**（``setActions``），组件
-不内置任何动作，点击动作只发出信号。
-
-典型用法::
-
-    from PyQt6ElaWidgetTools import ElaIconType
-    from pyqt6_ela_pro import ElaMenuItem, ElaSelectionAssistant
-
-    assistant = ElaSelectionAssistant(parent)
-    assistant.setActions([
-        ElaMenuItem("copy", "复制", ElaIconType.IconName.Copy),
-        ElaMenuItem("search", "搜索", ElaIconType.IconName.MagnifyingGlass),
-    ])
-    assistant.actionTriggered.connect(on_action)   # (actionId, text, pos)
-
-    def on_action(actionId, text, pos):
-        if actionId == "copy":
-            QApplication.clipboard().setText(text)
-
-    # 拖选取词要向前台注入 Ctrl+C，默认闸门不放行；用内置启发式收窄误伤面
-    assistant.setCaptureFilter(ElaSelectionAssistant.builtinDragFilter())
-    assistant.setEnabled(True)
-
-组件不依赖 pywin32（纯 ctypes）；非 Windows 或监视启动失败时发出
-``errorOccurred`` 并保持禁用。**不安装任何键盘钩子**，不会拦截用户自己
-按下 / 松开的 Ctrl+C / Ctrl+V。取词通过剪贴板探针完成，默认恢复原剪贴板
-（只还原文本；基准含图片等非文本内容时改为跳过恢复，原因见
-``assistant.capture().lastRestoreSkipReason()``）。
-
-命名规范与库内一致（``camelCase``）。
-"""
+动作项由 ``setActions`` 定义，组件只发信号；用法见 ``docs/selection-assistant.md``。"""
 
 from __future__ import annotations
 
@@ -73,13 +41,8 @@ def _is_deleted(obj) -> bool:  # noqa: ANN001
 
 def _cleanup_on_destroy(assistant, _object=None) -> None:  # noqa: ANN001
     """助手析构时收尾：停监视器 + 回收无父的动作条浮窗。
-
-    **必须是普通函数，不能是绑定方法** —— PyQt6 不会调用「绑定到发出信号的那个
-    对象自己」的 ``destroyed`` 槽（实测：``a.destroyed.connect(a.slot)`` 里
-    ``a.slot`` 永远不被调用，而换成 lambda / ``functools.partial`` 立刻生效）。
-    写成 ``self.destroyed.connect(self._on_destroyed)`` 的话这段清理等于从未
-    执行过：懒创建的 monitor 靠父子关系侥幸一起死了，但**无父的 popup 会永久
-    留在屏幕上**，且宿主再也没法拿到它去关。
+    **必须是普通函数，不能是绑定方法**：PyQt6 不会调用绑定到发出信号的
+    对象自身的 ``destroyed`` 槽。写成 ``self.destroyed.connect(self._on_destroyed)``
     """
     monitor = getattr(assistant, "_monitor", None)
     if monitor is not None and not _is_deleted(monitor):
@@ -103,20 +66,13 @@ class ElaSelectionAssistant(QObject):
     """全局划词助手：监视划词 → 取词 → 弹出动作条 → 发信号。
 
     :param parent: 父对象
-    :param monitor: 鼠标监视后端（默认懒创建 :class:`ElaMouseMonitor`；
-        测试可注入假实现）
-    :param capture: 取词后端（默认 :class:`ElaClipboardCapture`；
-        测试可注入假实现）
+    :param monitor: 鼠标监视后端（默认懒创建，测试可注入假实现）
+    :param capture: 取词后端（默认 :class:`ElaClipboardCapture`，同上）
 
-    **取词会向前台窗口注入 Ctrl+C**（无法从别的通道读选区）。拖选与
-    「拖窗口 / 拖滚动条 / 拖文件」在鼠标层面无法区分，注入到终端里就是
-    中断信号（实测：终端里拖一下 scrollbar 会把正在跑的命令 SIGINT 掉）。
-    因此未设置 :meth:`setCaptureFilter` 时**拖选默认不取词**，只保留
-    双击选词；需要拖选取词请用内置启发式过滤器::
-
-        assistant.setCaptureFilter(ElaSelectionAssistant.builtinDragFilter())
-
-    被拦截时发 :attr:`captureBlocked`。
+    取词会向前台窗口注入 Ctrl+C（没有别的通道读选区）；拖选与拖窗口 /
+    滚动条 / 文件在鼠标层面无法区分，注入到终端里就是 SIGINT，因此未设
+    :meth:`setCaptureFilter` 时拖选默认不取词（只保留双击选词），被拦截时
+    发 :attr:`captureBlocked`。
     """
 
     #: 启用状态变化
@@ -176,18 +132,14 @@ class ElaSelectionAssistant(QObject):
         # （见 _cleanup_on_destroy 的说明）
         self.destroyed.connect(functools.partial(_cleanup_on_destroy, self))
 
-    # -- 状态 --------------------------------------------------------------
-
     def isEnabled(self) -> bool:
         """是否已启用（鼠标监视是否在运行）。"""
         return self._enabled
 
     def setEnabled(self, on: bool) -> bool:
         """启用 / 停用划词助手；返回操作后的启用状态。
-
         停用会顺带**取消在途取词** —— 取词是异步的（延迟 + 轮询，共
         100~350ms），若不取消，用户在这段时间内关掉助手，已经发出的
-        ``Ctrl+C`` 仍会在几十毫秒后带回结果并把动作条弹出来。
         """
         on = bool(on)
         if on == self._enabled:
@@ -203,8 +155,6 @@ class ElaSelectionAssistant(QObject):
         self._enabled = on
         self.enabledChanged.emit(on)
         return self._enabled
-
-    # -- 配置 --------------------------------------------------------------
 
     def setActions(self, actions: Iterable[Union[ElaMenuItem, dict]]) -> None:
         """整体替换动作条菜单项（由宿主定义；支持 ``ElaMenuItem`` 或同名字典）。
@@ -244,26 +194,14 @@ class ElaSelectionAssistant(QObject):
 
     def setCaptureFilter(self, predicate) -> None:
         """设置取词过滤器：``predicate(down, up) -> bool``，返回 ``False`` 时
-        本次手势**不取词**（不注入 Ctrl+C）。两个参数都是按下 / 抬起点的
+        本次手势**不取词**（不注入 Ctrl+C）；两个参数都是按下 / 抬起点的
         **物理像素**坐标。
 
         过滤器异常按**拦截**处理（宁可少取一次词，也不向未知应用注入
-        Ctrl+C），并发一条 ``RuntimeWarning`` + ``captureBlocked("filter-error")``。
+        Ctrl+C），并发 ``RuntimeWarning`` + ``captureBlocked("filter-error")``。
 
-        典型用途：跳过「拖窗口 / 拖滚动条 / 拖文件」这类非划词拖拽。
-        不想自己写就用内置启发式::
-
-            assistant.setCaptureFilter(ElaSelectionAssistant.builtinDragFilter())
-
-        或按应用收紧::
-
-            import os
-            assistant.setCaptureFilter(
-                lambda down, up: foreground_pid() == os.getpid()
-            )
-
-        传 ``None`` 清空过滤器（此时拖选是否取词由
-        :meth:`requireFilterForDrag` 决定）。
+        典型用途是跳过拖窗口 / 拖滚动条 / 拖文件；不想自己写就用
+        :meth:`builtinDragFilter`。传 ``None`` 清空过滤器。
         """
         self._capture_filter = predicate
 
@@ -273,14 +211,8 @@ class ElaSelectionAssistant(QObject):
 
     def setRequireFilterForDrag(self, required: bool) -> None:
         """拖选取词是否必须先设过滤器（默认 ``True`` = 必须）。
-
-        **默认要求是有意的**：拖选与「拖窗口 / 拖滚动条 / 拖文件」在鼠标
-        层面无法区分，而拖选取词要**向前台窗口注入 Ctrl+C** —— 在终端 /
-        控制台里注入的 Ctrl+C 就是中断信号（实测：终端里拖一下 scrollbar
-        就会把正在跑的命令 SIGINT 掉）。双击选词不受本开关影响。
-
-        想要「开箱即用的拖选取词」用 ``setRequireFilterForDrag(False)``，
-        更推荐 ``setCaptureFilter(builtinDragFilter())`` 把误伤面收窄。
+        拖选与拖窗口 / 滚动条 / 文件在鼠标层面无法区分，而拖选取词要向前台
+        窗口注入 Ctrl+C —— 在终端 / 控制台里就是中断信号。双击选词不受本
         """
         self._require_filter_for_drag = bool(required)
 
@@ -293,22 +225,11 @@ class ElaSelectionAssistant(QObject):
         """内置的启发式拖选过滤器（``predicate(down, up) -> bool``）。
 
         刻意只做**不依赖具体应用**的保守判断，宁可放过（少弹一次动作条）
-        也不误伤用户的正常操作：
+        也不误伤正常操作：同一窗口内（``window_pid_at`` 相同且非 0）、位移
+        不超过 ``maxDragPx`` 像素、按下点不在目标窗口边框 ``borderPx`` 内。
 
-        1. 按下点与抬起点落在**同一个窗口**内（``window_pid_at`` 相同且非 0）
-           —— 跨窗口的拖拽多半是拖文件 / 拖到别的应用；
-        2. 位移不超过 ``maxDragPx`` 像素（超长的拖更像拖滑块 / 拖滚动条 /
-           拖窗口）；
-        3. 按下点不在目标窗口的边框 ``borderPx`` 范围内（那是调窗口大小）。
-
-        仍会有漏网场景（例如在可滚动区域里横向拖动、拖动带列表的侧栏），
-        所以宿主最好**再叠加自己的规则**（例如限定前台进程，见
-        :meth:`setCaptureFilter` 的示例）。装饰器形态便于组合::
-
-            base = ElaSelectionAssistant.builtinDragFilter()
-            def only_my_app(down, up):
-                return foreground_pid() == os.getpid() and base(down, up)
-            assistant.setCaptureFilter(only_my_app)
+        仍会漏掉滚动区横向拖动等场景，建议再叠加宿主自己的规则（例如限定
+        前台进程）。
         """
 
         def _filter(down, up) -> bool:
@@ -339,15 +260,12 @@ class ElaSelectionAssistant(QObject):
 
         return _filter
 
-    # -- 显示 --------------------------------------------------------------
-
     def popup(self) -> ElaSelectionPopup:
         """获取动作条浮窗（紧凑模式 / 偏移等外观配置在这里做）。"""
         return self._popup
 
     def capture(self):  # noqa: ANN201
         """获取取词后端（剪贴板恢复 / 各类延迟等参数在这里配）。
-
         注入自定义后端时直接对它配置即可 —— 助手不再用 ``isinstance``
         判断具体类型（那样对注入的后端会**静默失效**）。
         """
@@ -378,8 +296,6 @@ class ElaSelectionAssistant(QObject):
         """最近一次捕获 / 手动显示时的文本。"""
         return self._text
 
-    # -- 内部：监视器 ------------------------------------------------------
-
     def _connect_monitor(self) -> None:
         # 走 safe_connect：PyQt6 中槽抛异常会直接 abort（0xC0000409），
         # 而这些槽会触发 capture() -> Win32 SendInput，宿主异常不能拖垮整个应用。
@@ -409,8 +325,6 @@ class ElaSelectionAssistant(QObject):
             return False
         return True
 
-    # -- 内部：划词手势 ----------------------------------------------------
-
     def _on_left_pressed(self, point) -> None:
         self._down = point
         self._press_in_popup = False
@@ -438,7 +352,7 @@ class ElaSelectionAssistant(QObject):
 
         if dragged:
             # 拖拽不算「点击」：不记录，且打断双击序列 —— 否则拖选后在同一
-            # 点马上点一下会被误判成双击，多注入一次 Ctrl+C（实测踩过）。
+            # 点马上点一下会被误判成双击，多注入一次 Ctrl+C。
             self._last_click_at = 0.0
             self._last_click_pos = None
             if self._allow_capture(down, up, "drag"):
@@ -499,8 +413,6 @@ class ElaSelectionAssistant(QObject):
     def _start_capture(self, point) -> None:
         self._capture_point = to_logical_pos(*point)
         self._capture.capture()
-
-    # -- 内部：取词与动作 --------------------------------------------------
 
     def _on_captured(self, text: str) -> None:
         # 取词是异步的（延迟 + 轮询）：结果到达时可能已经被关掉 / 换掉了，

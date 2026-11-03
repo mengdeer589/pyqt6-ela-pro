@@ -38,7 +38,6 @@ _AXIS_ARRAY_KEYS = frozenset({"xAxis", "yAxis", "singleAxis"})
 
 def _match_option_index(new_item, old_list: list, index: int) -> int:
     """组件 / 系列数组项匹配（ECharts 语义）：``id`` → ``name`` → 序号。
-
     显式给了 ``id`` 且没匹配上时必须返回 -1，不能回退到序号 —— 否则会
     静默覆盖旧系列（ECharts ``mappingByIndex``：带 id 的新项只能填洞或追加）。
     """
@@ -64,7 +63,6 @@ def _match_option_index(new_item, old_list: list, index: int) -> int:
 
 def _merge_option_array(old_list: list, new_list: list) -> list:
     """ECharts 风格组件数组合并（``series`` / ``dataZoom`` / ``graphic`` / ``annotations``）。
-
     新项按 ``id`` → ``name`` → 序号匹配旧项并深合并，未匹配的追加；旧项保留
     （合并模式下传空数组不删项，需 ``notMerge=True`` 或 ``clear()``）。
     """
@@ -106,7 +104,6 @@ def _axis_option_list(value) -> list:
 
 def _merge_axis_option(old, new):
     """坐标轴合并：单对象与数组互相等价，一律按下标逐项合并。
-
     单对象 = 「只给第 0 条」；只认 list → list 会把多轴塌成一条。返回形状
     跟旧值（dict 回 dict、数组回数组），``getOption()`` 形状不漂移。
     """
@@ -215,7 +212,6 @@ def _snapshot_series_data(r):
 
 def _normalize_series_entry(entry):
     """把 series 项**直接**的 ``data`` 大数值数组包成紧凑存储（就地）。
-
     只认 series 自己的 ``data``（不碰 ``xAxis.data`` 等按 list 语义读取的
     键），也不递归；``toBuffer`` 对结构型数据返回 None，故语义零变化。
     """

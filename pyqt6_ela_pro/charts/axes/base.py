@@ -38,10 +38,8 @@ _LABEL_VALIGNS = ("top", "middle", "bottom")
 
 class Coord:
     """坐标系协议基类。
-
     子类必须实现 ``layout`` / ``mapPoint`` / ``paintAxes`` /
     ``paintTooltipMarker``；``setSeries`` / ``invertX`` / ``invertPoint`` /
-    ``containPoint`` 可选。
     """
 
     #: 坐标系种类名（"grid" / "polar" / "singleAxis" / "calendar"），
@@ -53,7 +51,6 @@ class Coord:
         self.option = dict(option or {})
         self.rect = QRectF()
 
-    # -- 协议 ------------------------------------------------------------
     def layout(self, rect: QRectF) -> None:
         """按可用矩形完成几何布局。"""
         self.rect = QRectF(rect)
@@ -72,7 +69,6 @@ class Coord:
         """绘制指示线（``kind``：line / shadow / cross / none）。"""
         raise NotImplementedError
 
-    # -- 可选 ------------------------------------------------------------
     def setSeries(self, series_opts: list) -> None:
         """接收原始系列 option 列表（布局前调用，用于数值范围统计）。"""
 
@@ -169,7 +165,6 @@ class AxisModel:
             return True
         return bool(raw)
 
-    # -- 时间轴 ----------------------------------------------------------
     @staticmethod
     def toNumber(value):
         """日期 / ISO 字符串 / 数字 → 毫秒时间戳（失败 None）；数字按毫秒处理。"""
@@ -364,7 +359,6 @@ class AxisModel:
             return dt.strftime("%Y-%m-%d")
         return dt.strftime("%Y-%m-%d %H:%M")
 
-    # -- 范围 ------------------------------------------------------------
     def setExtent(
         self,
         data_min: float = None,
@@ -484,7 +478,6 @@ class AxisModel:
 
     def _set_log_extent(self, data_min, data_max, segments: int = 5) -> None:
         """log 轴范围：正值过滤 + 按数量级生成刻度。
-
         非正值在 :meth:`GridCoord.setSeries` 已跳过，这里再兜一层，避免
         ``setExtent(-1, 0)`` 把轴打塌。
         """
@@ -526,7 +519,6 @@ class AxisModel:
             return list(self.categories)
         return list(self._ticks)
 
-    # -- 映射（一维：start→end 像素区间） ----------------------------------
     def localIndex(self, value) -> int:
         """category 轴数据值 → 窗口内下标（dataZoom 窗口外返回越界下标）。"""
         if self.type != "category":
@@ -537,7 +529,6 @@ class AxisModel:
 
     def map(self, value, start: float, end: float, *, local: bool = False) -> float:
         """数据值 → [start, end] 区间内的像素坐标。
-
         category 轴不 clamp（窗口外类别由系列 clipRect 裁掉）；``local=True``
         表示 value 已是窗口内下标。
         """
@@ -720,7 +711,6 @@ class AxisModel:
 
     def windowOffset(self) -> int:
         """dataZoom 类别窗口在全量类别中的起始下标（无窗口时 0）。
-
         必须记忆化：实现是 ``_all_categories.index(categories[0])`` 线性扫描，
         而它被 ``localIndex`` 逐点调用。缓存随 ``categories`` 赋值作废。
         """
@@ -757,7 +747,6 @@ class AxisModel:
             return self.vmin * (self.vmax / self.vmin) ** frac
         return self.vmin + frac * (self.vmax - self.vmin)
 
-    # -- 外观 ------------------------------------------------------------
     def axisLabelOption(self) -> dict:
         opt = self.opt.get("axisLabel")
         return opt if isinstance(opt, dict) else {}
@@ -814,7 +803,6 @@ class AxisModel:
 
     def formatTickLabel(self, value, index=None) -> str:
         """``axisLabel.formatter``（字符串模板 ``{value}`` 或 callable）→ 文本。
-
         callable 的第二个参数是**刻度下标**（与 ECharts 的
         ``formatter(value, index)`` 对齐，一参 callable 仍兼容）。
         """

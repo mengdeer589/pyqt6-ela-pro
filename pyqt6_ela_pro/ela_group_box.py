@@ -1,17 +1,4 @@
-"""
-ElaGroupBox - 主题感知分组框组件。
-
-全 QPainter 自绘，圆角边框，居中标题，自动适配深浅色主题。
-参考 ElaWidgetTools C++ 版 ElaGroupBox 设计。
-
-用法::
-
-    from pyqt6_ela_pro import ElaGroupBox
-
-    group = ElaGroupBox("基本信息", parent=self)
-    layout = QVBoxLayout(group)
-    layout.addWidget(QLineEdit(self))
-"""
+"""ElaGroupBox - 主题感知分组框组件。"""
 
 from __future__ import annotations
 

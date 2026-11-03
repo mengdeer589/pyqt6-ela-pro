@@ -1,15 +1,6 @@
-"""
-共享颜色面板，供 ElaButton / ElaChip 等组件使用。
+"""共享颜色面板（按钮 / chip 等组件的色系与派生色）。
 
-每个命名颜色定义 ``accent`` / ``accentHover`` / ``accentActive`` / ``accentBg`` /
-``accentBgHover`` / ``textColor``。``get_color_scheme`` 额外派生实心按钮专用色
-``solid`` / ``solidHover`` / ``solidActive`` / ``solidText``，保证文字对比度 ≥ 4.5:1。
-
-``primary`` / ``blue`` **不读静态表**：accent / hover / press 取 ``eTheme`` 的实时
-强调色（``PrimaryNormal`` / ``PrimaryHover`` / ``PrimaryPress``），这样
-:func:`~pyqt6_ela_pro._theme.setAccentColor` 换色后按钮跟着变，深浅两档也与 Ela
-自带控件逐值一致。其余色系仍是库内固定色板。
-"""
+``primary`` / ``blue`` 的 accent 取 ``eTheme`` 实时值，其余为固定色板。"""
 
 from __future__ import annotations
 
@@ -338,11 +329,8 @@ _COLOR_ALIAS: dict[str, str] = {
     "primary": "blue",
 }
 
-#: **跟随 ``eTheme`` 实时强调色**的色系（``primary`` 是 ``blue`` 的别名）。
-#:
-#: 其余色系是库自带的固定色板；只有主色必须与 Ela 自带控件一致 —— 否则
-#: ``setAccentColor()`` 换色后按钮还是出厂蓝，深色主题下也会与
-#: ``PrimaryNormal`` 有可见色差（出厂值就不完全相同）。
+#: 跟随 ``eTheme`` 实时强调色的色系（``primary`` 是 ``blue`` 的别名）。
+#: 其余色系为固定色板；主色必须与 Ela 控件一致，否则换强调色后按钮仍是出厂蓝。
 _LIVE_ACCENT_COLORS = frozenset({"blue"})
 
 #: 主色色板缓存：键 = 模式 + 三个强调色槽的 hex。换色后自然换键。
@@ -461,7 +449,6 @@ def _readable_accent(
 
 def _live_accent_scheme(mode: ElaThemeType.ThemeMode) -> dict[str, QColor]:
     """主色色板：``accent`` / hover / press 全部取 ``eTheme`` **实时**值。
-
     ``accentBg`` 由强调色按出厂比例 tint 出来（亮色往白、暗色往黑），
     ``solid*`` 仍是 ``_solid_palette`` 派生（压暗保证白字 ≥ 4.5）。
     """
@@ -556,7 +543,6 @@ def accent_text(
 
 def text_on_color(background: QColor) -> QColor:
     """叠在 ``background`` 上的可读文字色（白 / 黑二选一，取对比度更高者）。
-
     用于**动态底色**（长按 / 进度按钮的填充会盖住文字）：固定前景色必然在
     其中一侧失效（浅色主题上的白字、深色主题上的黑字）。
     """
@@ -577,7 +563,6 @@ STATE_PRESS_ALPHA = 31
 
 def state_tint(mode: ElaThemeType.ThemeMode, *, pressed: bool = False) -> QColor:
     """通用状态层色：hover ≈ 8% / press ≈ 12%（**暗色叠白 / 亮色叠黑**）。
-
     透明底控件（``ElaButton`` 的 text / outlined 变体、下拉按钮族）共用；
     只负责颜色，形状与圆角由调用方画（``_styles.paintRoundedCard``）。
     """

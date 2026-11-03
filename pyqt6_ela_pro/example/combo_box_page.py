@@ -1,13 +1,4 @@
-"""
-[pyqt6_ela_pro] 下拉框组件页面
-
-展示所有 9 个下拉框组件:
-- PyQt6ElaWidgetTools 自带: ElaComboBox, ElaMultiSelectComboBox
-- pyqt6_ela_pro 封装: ElaSearchBox, ElaSearchMultiBox,
-                     ElaTagBox, ElaTagMultiBox,
-                     ElaTagSearchBox, ElaTagSearchMultiBox,
-                     ElaGhostBox
-"""
+"""[pyqt6_ela_pro] 下拉框组件页面?"""
 
 from PyQt6.QtWidgets import QHBoxLayout
 

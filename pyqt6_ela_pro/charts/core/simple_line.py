@@ -24,7 +24,6 @@ from .renderer import SeriesRenderer
 
 class SimpleLineSeriesRenderer(SeriesRenderer):
     """内置简易 line 渲染器（接口自测 / 兜底实现）。
-
     刻意保持简单（直线段 + 圆点，无 smooth / areaStyle / step）且**不自动注册**：
     包入口会注册完整版 ``line``，需要最小渲染器自测时才手动注册。
     """

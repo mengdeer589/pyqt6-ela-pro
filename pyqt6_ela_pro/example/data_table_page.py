@@ -1,11 +1,4 @@
-"""表格
-
-绑定数据源的高性能表格：基础用法 / 异步加载 / 单元格样式 / 表头排序，
-以及直接看 Parquet 文件的 ElaParquetTable。
-
-与「视图与列表」的分界是**数据从哪来**：这一页的表格绑 model，
-那边是手工塞 item 的结构性视图（树 / 表 / 列表 / 选项卡）。
-"""
+"""表格?"""
 
 import random
 from PyQt6.QtWidgets import QFileDialog, QHBoxLayout

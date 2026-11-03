@@ -19,7 +19,6 @@ from .._tokens import (
 
 class ChartAnimation(QObject):
     """0→1 进度动画（QVariantAnimation，缓出），渲染器按 ``anim_t`` 插值。
-
     ``setProgress(v)`` 支持无事件循环环境手动推进；``finished`` 在进度到达
     1.0 后发射一次。
     """
@@ -61,10 +60,8 @@ class ChartAnimation(QObject):
 
     def startResolved(self, full_ms: int, easing=None) -> bool:
         """按全局动效策略启动过渡，返回是否真的播放。
-
         刻意不用 :func:`pyqt6_ela_pro._motion.start_transition`：本类没有 Qt 属性
         目标，收尾靠 ``_apply`` 里的阈值判断，而那个 helper 挂的是
-        ``QAbstractAnimation.finished``。这里只借它解析策略，落到 ``complete()``。
         """
         duration_ms, snap = motion.plan(full_ms, ElaMotionKindType.Transition)
         self.setDuration(duration_ms)

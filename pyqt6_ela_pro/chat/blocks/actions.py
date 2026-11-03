@@ -34,8 +34,6 @@ class MessageActions(ElaChatToolBar):
         self._mouse_transparent = False
         self.toolTriggered.connect(self._dispatch)
 
-    # -- 鼠标穿透（hover 隐藏时阻止误点） ----------------------------------
-
     def setMouseTransparent(self, on: bool) -> None:
         """设置操作栏（含全部子按钮）是否鼠标穿透；隐藏态下避免误点不可见按钮，程序化 ``click()`` 不受影响。"""
         self._mouse_transparent = bool(on)

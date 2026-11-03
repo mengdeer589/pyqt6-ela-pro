@@ -46,8 +46,6 @@ class ElaChatWorkingRow(_ThemeAwareMixin, QWidget):
         self.hide()
         self._apply_theme()
 
-    # -- 内容 --------------------------------------------------------------
-
     def setText(self, text: str) -> None:
         """设置活动文案（空串 = 隐藏）。"""
         self._text = str(text or "")
@@ -81,8 +79,6 @@ class ElaChatWorkingRow(_ThemeAwareMixin, QWidget):
     def hideEvent(self, event) -> None:  # noqa: N802 (Qt 命名)
         self._dot.setActive(False)
         super().hideEvent(event)
-
-    # -- 主题 --------------------------------------------------------------
 
     def _apply_theme(self) -> None:
         mode = self._theme_mode

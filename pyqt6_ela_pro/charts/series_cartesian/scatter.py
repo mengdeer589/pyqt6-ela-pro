@@ -70,18 +70,14 @@ def _draw_emphasis_markers(
 
 class ScatterSeriesRenderer(SeriesRenderer):
     """散点图。
-
-    ``mode``：``"markers"``（默认）/ ``"lines"`` / ``"lines+markers"``。
     ``symbolSize``：数值 → 固定直径 px；缺省且数据带第三维时按第三维在本系列内
     映射到 6~24px，否则 8px。数据项：数值 / [x, y] / [x, y, size] / {"value": [...]}。
-    支持 grid / polar / singleAxis 坐标系。
     """
 
     def __init__(self, chart, opt):
         super().__init__(chart, opt)
         self._dots = []  # [dict(pt=QPointF, r=float, value, index, x)]
 
-    # -- 布局 -------------------------------------------------------------
     def _third_dim(self, item):
         v = item.get("value") if isinstance(item, dict) else item
         if isinstance(v, (list, tuple)) and len(v) >= 3:
@@ -237,7 +233,6 @@ class ScatterSeriesRenderer(SeriesRenderer):
                 r = 4.0
             append({"pt": pt, "r": r, "value": y, "index": i, "x": x})
 
-    # -- 绘制 -------------------------------------------------------------
     #: 散点抽稀的下限（点数低于它不做抽稀：小数据要全画）
     _LOD_MIN_POINTS = 4000
     #: 抽稀后每像素列保留的点数（2 点已看不出稀疏；窗口重建成本与点数成正比）
@@ -487,7 +482,6 @@ class ScatterSeriesRenderer(SeriesRenderer):
                 self._label_rects.append((index, rect, text))
         p.restore()
 
-    # -- 交互 -------------------------------------------------------------
     def hitTest(self, pos: QPointF):
         best = None
         best_d = 1e9

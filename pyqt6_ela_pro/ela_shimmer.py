@@ -1,20 +1,4 @@
-"""骨架屏 / 微光加载占位（对齐 Fluent 的 ``Shimmer``）。
-
-搬运自 ``Fluent-Qt/src/components/status_info/Shimmer.cpp``，两处**有意改道**：
-
-1. **``setActive(False)`` 不隐藏控件，只画静态基态。** Fluent 的 ``paintEvent``
-   在 ``!m_active`` 时直接 return —— 加上「``Reduced`` 下持续动效一律停掉」，无障碍
-   用户看到的是**一个纯空白框**。而 Shimmer 的全部价值就在那句 pattern「**基态必画
-   + 扫光叠加**」：基态本身就是一个可用的静态骨架。停掉扫光不等于不画。
-2. **停止时相位归零**（``on_stop``）。Fluent 是纯 ``QBasicTimer``、停了停在哪个相位
-   就冻在哪个相位，扫光可能冻在正中。本库走 ``start_idle_loop``，按桶 B 的规矩必须
-   显式摆好静态态，否则「停掉」会留下半条扫光。
-
-配色沿用 Fluent 的推导式（画布明度决定深浅两套，**高亮都是白色、只有 alpha 不同**），
-但画布取控件自身 palette 的 ``Window``（``ElaThemeWidget`` 默认 ``BasicPress``，
-与消息区 / 滚动页底色一致），取不到时回落 ``_theme.surface(mode)`` —— 不再硬编码
-``#F3F3F3``/``#202020``。
-"""
+"""骨架屏 / 微光加载占位（对齐 Fluent 的 ``Shimmer``）。"""
 
 from __future__ import annotations
 
@@ -102,7 +86,6 @@ class ElaShimmerTemplateType(IntEnum):
 @dataclass
 class ShimmerElement:
     """一块骨架。
-
     ``rect`` 相对控件左上角（尺寸变化时整体重排）；``radius=-1`` 用默认值
     （``RoundedRect``→4px，``Line``→半高药丸）。
     """
@@ -130,7 +113,6 @@ def shimmerPalette(
     canvas: Optional[QColor] = None, enabled: bool = True
 ) -> ShimmerPalette:
     """从画布推出一套骨架配色。
-
     **深浅两套的高亮都是白色，只有 alpha 不同**（深色 68 / 浅色 218）。这不是笔误：
     扫光叠在骨架底色上，深色下底色本来就亮，再给高 alpha 就直接糊成一片白。
     """
@@ -188,7 +170,6 @@ def paintShimmer(  # noqa: N802
     animated: bool = True,
 ) -> None:
     """静态绘制入口（委托类 / 自绘控件可直接调，不必造子控件）。
-
     三步顺序不可换：**基态 → 扫光 → 描边**。描边压在扫光之上，否则扫光会把 1px 边
     冲淡（每帧边线亮度都在跳，看着像闪烁噪点）。
     """
@@ -254,9 +235,7 @@ def _normalizeProgress(progress: float) -> float:
     return value + 1.0 if value < 0 else value
 
 
-# ---------------------------------------------------------------------------
 # 模板
-# ---------------------------------------------------------------------------
 
 
 def _templateBounds(area: QRectF) -> QRectF:  # noqa: N802
@@ -267,7 +246,6 @@ def _templateBounds(area: QRectF) -> QRectF:  # noqa: N802
 
 def textBlockElements(area: QRectF, lineCount: int = 3) -> List[ShimmerElement]:  # noqa: N802
     """多行文本块：等间距的横向药丸，最后一行短一截。
-
     宽度比例按行号取 **0.92 / 0.76 / 0.62** 递减（偶数行号用宽的），这是「一段真实
     文本」的形状 —— 全等宽会看着像栅格而不像文字。
     """
@@ -353,17 +331,9 @@ def _buildTemplate(template: ElaShimmerTemplateType, area: QRectF) -> List[Shimm
 
 
 class ElaShimmer(ElaThemeWidget):
-    """骨架屏 / 微光占位。
+    """骨架屏 / 微光占位：``setTemplate`` 选形状，或静态 ``paintShimmer`` 自绘。
 
-    典型用法（列表项加载中）::
-
-        sh = ElaShimmer(parent)
-        sh.setTemplate(ElaShimmerTemplateType.AvatarTextRow)
-        sh.resize(240, 56)
-
-    或用静态入口自绘（列表 delegate / 表格单元格里铺多块）::
-
-        paintShimmer(painter, textBlockElements(cellRect, 3), palette, phase)
+    静态入口用于列表 delegate / 表格单元格里一次铺多块。
     """
 
     activeChanged = pyqtSignal(bool)
@@ -388,7 +358,6 @@ class ElaShimmer(ElaThemeWidget):
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
         self._updateAnimationState()
 
-    # -- 状态 ---------------------------------------------------------------
 
     def isActive(self) -> bool:  # noqa: N802
         """是否播扫光。``False`` = 画静态骨架（**不隐藏控件**）。"""
@@ -396,7 +365,6 @@ class ElaShimmer(ElaThemeWidget):
 
     def setActive(self, active: bool) -> None:  # noqa: N802
         """开关扫光。
-
         **注意与 Fluent 的差异**：关掉只是不画扫光，基态照画 —— 宿主想用真实内容
         顶替时该直接 ``hide()`` 或把这块换掉，而不是指望它变透明。
         """
@@ -424,7 +392,6 @@ class ElaShimmer(ElaThemeWidget):
     def isAnimationRunning(self) -> bool:  # noqa: N802
         return idle_loop_running(self._timer)
 
-    # -- 相位（可手动驱动） ---------------------------------------------------
 
     def shimmerProgress(self) -> float:
         """当前相位 ``[0, 1)``。宿主想自己做时间轴（播放/暂停/接续）时读它。"""
@@ -445,7 +412,6 @@ class ElaShimmer(ElaThemeWidget):
 
     def setCycleDuration(self, durationMs: int) -> None:  # noqa: N802
         """设周期，下限 150ms。
-
         下限存在的理由：低于 150ms 扫光变成频闪，``Reduced`` 模式恰好把过渡压到
         这个量级 —— 一个骨架屏每 150ms 闪一次白条是纯粹的伤害。
         """
@@ -455,7 +421,6 @@ class ElaShimmer(ElaThemeWidget):
         self._cycle_duration = value
         self.cycleDurationChanged.emit(value)
 
-    # -- 排版 ---------------------------------------------------------------
 
     def shimmerTemplate(self) -> ElaShimmerTemplateType:
         return self._template
@@ -502,15 +467,11 @@ class ElaShimmer(ElaThemeWidget):
     def minimumSizeHint(self) -> QSize:  # noqa: N802
         return QSize(32, 24)
 
-    # -- 内部 ---------------------------------------------------------------
 
     def _ensureLayout(self) -> None:
         """按当前控件尺寸重排模板元素（尺寸没变就不动）。
-
         **必须懒算而不是只在 ``resizeEvent`` 里算**：``resize()`` 只是**投递**一个
         resize 事件，事件要到事件循环转起来才派发 —— 于是「刚 ``resize()`` 就读
-        ``elements()``」会拿到上一次（构造时的默认尺寸）算出的、甚至空的结果。
-        懒算让 ``elements()`` / ``paintEvent`` 两条路都拿到与当前尺寸一致的结果。
         """
         if self._template is ElaShimmerTemplateType.Custom:
             return
@@ -548,7 +509,6 @@ class ElaShimmer(ElaThemeWidget):
 
     def _settleStatic(self) -> None:
         """停掉时落到干净静态态。
-
         相位归零 ⇒ 扫光完整地在左边界之外（``sweepX = left - sweepWidth`` 处渐变
         全透明）⇒ 画出来与「完全不画扫光」逐像素一致。**不归零就会冻在半条白带上**。
         """
@@ -557,10 +517,8 @@ class ElaShimmer(ElaThemeWidget):
 
     def _updateAnimationState(self) -> None:
         """四个条件同时成立才跑（对齐 Fluent）：本身激活 / 策略允许 / 控件可用 / 可见。
-
         四个条件合成一个 ``local_enabled`` —— 对 ``start_idle_loop`` 来说它们没有区别，
         都是「不该跑循环」。停止时 ``on_stop`` 一定会被调到（库内无条件传了钩子），
-        所以这里**不需要**再自己兜一次相位归零。
         """
         local = (
             self._active
@@ -592,10 +550,8 @@ class ElaShimmer(ElaThemeWidget):
 
     def _canvas_color(self) -> QColor:
         """骨架所在表面色：优先取控件 palette 的 ``Window``，缺失时用主题表面。
-
         ``ElaThemeWidget`` 的默认表面就是 ``BasicPress``（消息区 / 滚动页底色），
         比固定用 ``surface(None)``（``WindowBase``）更贴合实际画布 —— 亮色下
-        ``WindowBase`` 会算出一档偏深的骨架。
         """
         color = self.palette().color(QPalette.ColorRole.Window)
         if color.isValid() and color.alpha() > 0:

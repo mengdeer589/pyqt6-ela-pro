@@ -1,6 +1,4 @@
-"""
-SVG 图标数据模型。
-"""
+"""SVG 图标数据模型。"""
 
 from PyQt6.QtCore import QModelIndex, QAbstractListModel, Qt
 

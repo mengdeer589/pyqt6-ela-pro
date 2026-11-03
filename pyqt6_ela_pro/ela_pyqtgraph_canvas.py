@@ -1,17 +1,4 @@
-"""
-ElaPlotWidget - 主题感知 pyqtgraph 绘图控件。
-
-基于 pyqtgraph.GraphicsLayoutWidget 封装，自动适配 Ela 深浅色主题。
-当 pyqtgraph 未安装时，导入和引用不会报错，仅实例化时抛出 ImportError。
-
-用法::
-
-    from pyqt6_ela_pro import ElaPlotWidget
-
-    pw = ElaPlotWidget(parent=self)
-    plot = pw.plot()
-    plot.plot([1, 2, 3], [4, 5, 6])
-"""
+"""ElaPlotWidget - 主题感知 pyqtgraph 绘图控件。"""
 
 from __future__ import annotations
 
@@ -76,10 +63,8 @@ if pg is not None:
 
         def setStyleParams(self, **kwargs) -> None:
             """额外的 pyqtgraph 全局配置（转发 ``setConfigOptions``）。
-
             **进程级副作用**：改的是 pyqtgraph 的全局配置，影响宿主**所有**
             pyqtgraph 图。名字刻意不叫 ``setStyle``（那会遮蔽
-            ``QWidget.setStyle(QStyle)``）。
             """
             pg.setConfigOptions(**kwargs)
 

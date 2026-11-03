@@ -36,7 +36,6 @@ class ElaChatSuggestion:
 
 class SuggestionPopup(ElaScrollPageArea):
     """补全浮层：``ElaScrollPageArea`` 卡面 + ``ElaListView`` 列表。
-
     取色与字号交给 ``ElaListView`` 自带的 ``ElaListViewStyle``，本组件不设 QSS
     （``color:`` 无效，且 ``setStyleSheet`` 会整体替换它的透明底规则）。
     """
@@ -74,8 +73,6 @@ class SuggestionPopup(ElaScrollPageArea):
         layout.addWidget(self._view)
         self.hide()
 
-    # -- 查询 --------------------------------------------------------------
-
     def items(self) -> list:
         """当前候选项列表。"""
         return list(self._items)
@@ -102,8 +99,6 @@ class SuggestionPopup(ElaScrollPageArea):
         else:
             current = (current + _as_int(delta)) % len(self._items)
         self.setCurrentIndex(current)
-
-    # -- 开合与激活 --------------------------------------------------------
 
     def open(self, items: list) -> None:
         """灌入候选项并显示。"""

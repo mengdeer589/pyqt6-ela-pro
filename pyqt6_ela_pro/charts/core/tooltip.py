@@ -43,11 +43,8 @@ def _default_tooltip_title(raw) -> str:
 
 class Tooltip:
     """提示框组件（ECharts ``tooltip``）。
-
     ``trigger`` 取 ``"item"``（默认）/ ``"axis"`` / ``"none"``；``formatter`` 是
     callable(params) 或 ``{a}/{b}/{c}`` 模板，可返回 ``[标题, 内容]``；
-    ``valueFormatter`` 作用于默认内容里的数值。``axisPointer.type`` 取
-    ``line`` / ``shadow`` / ``cross`` / ``none``，外观键回退顶层 ``textStyle``。
     """
 
     def __init__(self, chart: "ElaChartWidget", opt: dict = None):
@@ -73,7 +70,6 @@ class Tooltip:
         else:
             self.opt = {"show": True, "trigger": "item"}
 
-    # -- option 取值 -------------------------------------------------------
     def textStyle(self) -> dict:
         """浮层文字样式（组件级优先，未设置的键回退顶层 ``textStyle``）。"""
         return merged_text_style(self.chart, self.opt.get("textStyle"))
@@ -144,7 +140,6 @@ class Tooltip:
 
     def buildLines(self, hit: dict, color, fallback_name: str = "") -> list:
         """命中结果 → 浮层行 ``[(color, name, value_str), ...]``。
-
         标题行走 ``(None, "", 标题)``（无圆点）；``hit["rows"]`` 提供多行内容
         （雷达逐维度行），``formatter`` 输出仍然优先。
         """
@@ -224,7 +219,6 @@ class Tooltip:
     def active(self) -> bool:
         return self._active and bool(self._lines)
 
-    # -- 状态 -------------------------------------------------------------
     def showAt(
         self,
         pos: QPointF,
@@ -239,10 +233,8 @@ class Tooltip:
         x_axis_index: int = 0,
     ) -> None:
         """显示浮层。
-
         ``lines``: ``[(color, name, value_str), ...]``；``markers``: axis 模式下
         每条系列命中点；``axis_pointer``: 是否画指示线（item 触发不画）。
-        ``pointer_axis``: 指示线 / 轴气泡朝向（``"x"`` 默认；横向柱传 ``"y"``）。
         """
         self._active = True
         self._pos = QPointF(pos)
@@ -264,7 +256,6 @@ class Tooltip:
         self._pointer_axis = "x"
         self._coord = None
 
-    # -- 绘制 -------------------------------------------------------------
     def paint(self, p: QPainter) -> None:
         if not self.shown or not self.active:
             return

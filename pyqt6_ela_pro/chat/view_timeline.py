@@ -23,8 +23,6 @@ from .timeline_detail import (
 class _ViewTimelineMixin:
     """方法组 mixin：状态由 ``ElaChatView.__init__`` 建立。"""
 
-    # -- 密度 / 披露 -------------------------------------------------------
-
     def setTimelineDetail(self, detail) -> None:
         """设置时间线密度（hidden / collapsed / expanded），立即作用到已建气泡。"""
         self._timeline_detail = coerceTimelineDetail(detail)
@@ -52,8 +50,6 @@ class _ViewTimelineMixin:
     def partExpanded(self, partId: str) -> Optional[bool]:
         """读取分段的披露状态（未设置返回 ``None``）。"""
         return self._disclosure.get(str(partId or ""))
-
-    # -- 通知 --------------------------------------------------------------
 
     def addNotice(
         self,
@@ -83,8 +79,6 @@ class _ViewTimelineMixin:
         self._update_snapshot(messageId, lambda m: m.withParts((*m.parts, part)))
         return partId
 
-    # -- 自动重试 ----------------------------------------------------------
-
     def setRetry(
         self,
         messageId: int,
@@ -112,8 +106,6 @@ class _ViewTimelineMixin:
     def retryState(self, messageId: int) -> Optional[tuple]:
         """获取 ``(attempt, message, nextAt)`` 或 ``None``。"""
         return self._retry.get(messageId)
-
-    # -- 活动行 ------------------------------------------------------------
 
     def setActivity(self, text: str) -> None:
         """设置时间线底部的运行态文案（空串隐藏）。"""
@@ -150,8 +142,6 @@ class _ViewTimelineMixin:
         if self._activity_text:
             row.show()
 
-    # -- 待发送用户消息 ----------------------------------------------------
-
     def addPendingUserMessage(
         self,
         text: str,
@@ -183,8 +173,6 @@ class _ViewTimelineMixin:
             return True
         self.removeMessage(messageId)
         return True
-
-    # -- 消息身份 / mention ------------------------------------------------
 
     def setMessageIdentity(
         self,

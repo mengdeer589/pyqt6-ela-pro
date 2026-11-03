@@ -1,35 +1,6 @@
-"""剪贴板取词（``pyqt6_ela_pro.selection_assistant``）。
+"""剪贴板取词：模拟 Ctrl+C 并轮询剪贴板变化，全程异步。
 
-通过模拟 ``Ctrl+C`` + 剪贴板文本变化读取当前选区文本，全程异步（QTimer），
-不阻塞 UI：
-
-1. 延迟 ``captureDelayMs``（先让事件循环处理完挂起的剪贴板更新，同时等源
-   应用处理完 mouse-up）；
-2. 记录基准文本与基准剪贴板**是否含非文本格式**（**不写剪贴板**，避免污染 /
-   丢失用户剪贴板——Qt/Windows 下写入空探针会导致后续写入丢失）；
-3. 发送 Ctrl+C（**这一步真的向前台窗口注入按键**；闸门见
-   :func:`~pyqt6_ela_pro.selection_assistant._native.send_copy`：修饰键按下
-   或距上次注入过近时不注入，本步骤按「无选区」收尾），以 ``pollMs`` 轮询：
-   文本非空且不同于基准 → 取词成功；
-4. 超时（``clipboardTimeoutMs``）视为没有选区，剪贴板从未被改动；
-5. 成功后按 ``restoreClipboard``（默认开启）延迟 ``restoreDelayMs`` 恢复
-   基准文本（基准为空时 ``clear()``）。
-
-**恢复的三道校验**（任一不过就跳过恢复并发 ``restoreSkipped``，原因见
-``lastRestoreSkipReason()``）：
-
-1. 文本与「我们放进去的那份」不同 → 用户在延时窗口里复制了别的内容；
-2. 剪贴板**序列号**变了（哪怕文本相同 —— 用户又复制了一遍同样的内容）；
-   序列号取不到时本道跳过，回退纯文本比较；
-3. 基准剪贴板含**无法还原**的内容（图片 / 文件 / HTML / 表格）→ 宁可把
-   注入进来的文本留着，也绝不 ``clear()`` 掉用户复制的东西。
-
-信号：``captured(text)`` / ``failed()`` / ``restoreSkipped()``。
-恢复只还原文本，非文本格式（图片等）不保留。若选中文本与用户原剪贴板内容
-完全相同且序列号不可用，无法与「未复制」区分，将视为无选区（已知限制）。
-
-命名规范与库内一致（``camelCase``）。
-"""
+剪贴板恢复的三道校验见 ``docs/selection-assistant.md``。"""
 
 from __future__ import annotations
 
@@ -58,10 +29,8 @@ SKIP_NON_TEXT_BASELINE = "non-text-baseline"
 
 def _has_non_text_format(clipboard) -> bool:
     """剪贴板里是否有**取词链路无法还原**的内容（图片 / 文件 / HTML / 表格）。
-
     取词只读 ``clipboard().text()``，恢复也只写回纯文本。基准里若本来是
     图片或文件列表，恢复就只能 ``clear()`` —— 用户复制的东西直接消失，
-    Ctrl+V 什么都粘不出来（静默数据丢失）。提前识别，让恢复整条跳过。
     """
     try:
         mime = clipboard.mimeData()
@@ -121,8 +90,6 @@ class ElaClipboardCapture(QObject):
         self._restore_timer.setSingleShot(True)
         self._restore_timer.timeout.connect(self._restore_clipboard)
 
-    # -- 配置 --------------------------------------------------------------
-
     def setRestoreClipboard(self, on: bool) -> None:
         """设置取词成功后是否恢复原剪贴板（默认开启）。"""
         self._restore = bool(on)
@@ -164,8 +131,6 @@ class ElaClipboardCapture(QObject):
         """成功取词后恢复剪贴板的延迟毫秒数。"""
         return self._restore_delay_ms
 
-    # -- 流程 --------------------------------------------------------------
-
     def isCapturing(self) -> bool:
         """是否正在取词。"""
         return self._active
@@ -191,10 +156,8 @@ class ElaClipboardCapture(QObject):
 
     def cancel(self) -> None:
         """取消进行中的取词。
-
         剪贴板本身从未被改动（注入发生在 ``_on_send_copy``，而它只在
         ``_active`` 时执行），所以这里**不需要**恢复；但 ``_capture_seq`` /
-        ``_skip_reason`` 要复位，否则会带着上一次的状态进入下一次取词。
         """
         if not self._active:
             return
@@ -204,8 +167,6 @@ class ElaClipboardCapture(QObject):
         self._restore_timer.stop()
         self._capture_seq = 0
         self._skip_reason = ""
-
-    # -- 内部 --------------------------------------------------------------
 
     def _on_send_copy(self) -> None:
         if not self._active:
@@ -272,12 +233,9 @@ class ElaClipboardCapture(QObject):
             return
         seq = clipboard_sequence_number()
         if seq and seq != self._capture_seq:
-            # 序列号变了 = 有人在这段延时窗口里动过剪贴板。文本相同也
-            # 不还原（用户可能又复制了一遍同样的内容）。
-            # **注意不要拿 ``self._capture_seq`` 做真值门**：它是
-            # ``_finish`` 里取的快照，而 ``_finish`` 之后测试 / 宿主还会
-            # 再 ``setText`` 一次来模拟「剪贴板里是我们放的那份」—— 那一步
-            # 本身就把序列号推进了，只判「两边都非 0」会把正常还原也拦掉。
+            # 序列号变了 = 延时窗口内剪贴板被动过，文本相同也不还原。
+            # 不要拿 ``self._capture_seq`` 做真值门：它是 ``_finish`` 里的快照，
+            # 之后宿主再 setText 也会推进序列号，会拦掉正常还原。
             self._skip_restore(SKIP_CLIPBOARD_CHANGED)
             return
         if self._baseline_non_text:
@@ -298,10 +256,8 @@ class ElaClipboardCapture(QObject):
 
     def lastRestoreSkipReason(self) -> str:
         """最近一次跳过恢复的原因；成功恢复或无跳过时为空串。
-
         取值 :data:`SKIP_USER_COPIED` / :data:`SKIP_CLIPBOARD_CHANGED` /
         :data:`SKIP_NON_TEXT_BASELINE`。给宿主做差异化提示用（例如
-        「你复制的内容含图片，已保持现状」）。
         """
         return self._skip_reason
 

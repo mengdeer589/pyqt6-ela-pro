@@ -1,6 +1,4 @@
-"""
-[pyqt6_ela_pro] 示例页面基类
-"""
+"""[pyqt6_ela_pro] 示例页面基类"""
 
 import os
 import inspect
@@ -60,7 +58,7 @@ class ExamplePage(ElaThemeWidget):
         self._demo_built = False
         self._setupUI()
         # 侧边栏收缩/展开是上游 4 条并发的 255ms 属性动画：每帧都会 resize 本页 → 内容
-        # 每帧重排/重绘（实测单帧 8.6ms，慢机掉帧）。库里的 setResizeReflowDeferred 在
+        # 每帧重排/重绘（单帧 8.6ms，慢机掉帧）。库里的 setResizeReflowDeferred 在
         # 连续 resize 期间把本页钉住，静止 120ms 后一次性放开（单帧 → 0.0ms）。
         setResizeReflowDeferred(self)
 
@@ -136,13 +134,8 @@ class ExamplePage(ElaThemeWidget):
             if btn.text() == "确定":
                 btn.hide()
                 break
-        # 用 ElaPlainTextEdit 而不是裸 QPlainTextEdit，两个问题一次解决：
-        #   - 右键菜单：它覆写了 contextMenuEvent（ElaPlainTextEdit.cpp:100-140），
-        #     里面就是 ElaMenu + addElaIconAction（复制 / 全选），不再是原生菜单；
-        #   - 滚动条：构造时上下都换成了 ElaScrollBar（:22-23），跟随主题。
-        # 代价是背景**由主题决定**（ElaPlainTextEditStyle.cpp:41 用 BasicBaseAlpha
-        # 画，盖不住容器的 setSolidBackground、也不吃 Palette.Base —— 实测设了仍是
-        # 系统色 #a8a8a8）→ 高亮配色因此分亮 / 暗两套（见 _STYLE_DARK/_STYLE_LIGHT）。
+        # 用 ElaPlainTextEdit：右键菜单与滚动条都换成 Ela 控件，跟随主题；
+        # 但背景由主题决定、盖不住，所以高亮配色分亮 / 暗两套（见 _STYLE_DARK/_STYLE_LIGHT）。
         edit = ElaPlainTextEdit()
         edit.setReadOnly(True)
         edit.setLineWrapMode(QPlainTextEdit.LineWrapMode.NoWrap)
@@ -183,14 +176,13 @@ class ExamplePage(ElaThemeWidget):
         dlg._paramLay.setContentsMargins(15, 25, 15, 2)
         dlg.setParamWidget(container)
         # 关掉 autoFit 再定尺寸：它会在 showEvent 里把宽度夹到 620px、高度按内容
-        # 撑（代码框 sizeHint 很矮），resize() 写了也白写 —— 这正是原先「弹框太小」的根因。
+        # 撑（代码框 sizeHint 很矮），resize() 写了也白写 —— 这是「弹框太小」的根因。
         dlg.setAutoFit(False)
         dlg.resize(*self._code_dialog_size())
         return dlg
 
     def _code_dialog_size(self):
         """代码对话框尺寸：跟随宿主窗口按比例放大，再夹到窗口与屏幕可用区内。
-
         ``ElaContentDialog`` 的遮罩只覆盖宿主窗口、弹框居中其上，所以尺寸不能超过
         窗口（会压到桌面上）；屏幕再小也只能取可用区。
         """
@@ -317,15 +309,9 @@ _TOKEN_RE = _re.compile(
     r"""|(?P<other>.)"""
 )
 
-#: 代码高亮配色：kind -> (前景色, 粗体, 斜体)
-#:
-#: **必须两套**，因为代码区的底色是**主题给的、我们改不了**：
-#: ``ElaPlainTextEdit`` 的 ``ElaPlainTextEditStyle`` 直接用 ``BasicBaseAlpha`` 画背景
-#: （``ElaPlainTextEditStyle.cpp:41``），既盖不住容器的 ``setSolidBackground``、
-#: 也不吃 ``Palette.Base``（实测设了仍是系统色 ``#a8a8a8``）—— 亮色 ``#fafafa`` /
-#: 暗色 ``#2d2d2d``。一套中调色不可能在两种底色上都够 4.5:1（注释绿最典型：
-#: ``#6A9955`` 暗底 4.13、亮底 3.19，两边都不达标），所以按主题各选一套并按
-#: WCAG 4.5:1 校验过。
+#: 代码高亮配色：kind -> (前景色, 粗体, 斜体)。
+#: 代码区底色由主题决定、改不了，一套中调色无法在亮 / 暗下都达标，
+#: 因此按主题各一套，并按 WCAG 4.5:1 校验。
 _STYLE_DARK = {
     "comment": ("#8CC06E", False, True),
     "decorator": ("#DCDCAA", False, False),

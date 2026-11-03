@@ -1,17 +1,4 @@
-"""划词动作条浮窗（``pyqt6_ela_pro.selection_assistant``）。
-
-:class:`ElaSelectionPopup` 是划词助手弹出的横向动作条：
-
-- 无边框 / 置顶 / 不接受焦点（``WA_ShowWithoutActivating``），不抢源应用
-  焦点、不塌陷选区；
-- 按 :class:`~pyqt6_ela_pro.menu_item.ElaMenuItem`
-  列表渲染按钮（紧凑模式仅图标，否则图标 + 文字），主题感知；
-- :meth:`popupAt` 以落点为锚（默认右下方偏移），越界自动翻转并收敛到
-  屏幕工作区；
-- 点击按钮后自动隐藏并发出 ``actionTriggered(actionId)``。
-
-命名规范与库内一致（``camelCase``）。
-"""
+"""划词动作条浮窗（``pyqt6_ela_pro.selection_assistant``）。"""
 
 from __future__ import annotations
 
@@ -77,8 +64,6 @@ class ElaSelectionPopup(ElaThemeWidget):
         self._layout.setSpacing(2)
         self.hide()
 
-    # -- 配置 --------------------------------------------------------------
-
     def setActions(self, actions: List[ElaMenuItem]) -> None:
         """整体替换动作列表（仅渲染 ``enabled`` 的动作）。"""
         self._actions = list(actions or [])
@@ -116,8 +101,6 @@ class ElaSelectionPopup(ElaThemeWidget):
         """是否存在可显示的动作。"""
         return bool(self._buttons)
 
-    # -- 显示 --------------------------------------------------------------
-
     def popupAt(self, pos: QPoint) -> None:
         """在指定全局坐标附近弹出（越界翻转并收敛到屏幕工作区）。"""
         if not self.hasActions():
@@ -140,8 +123,6 @@ class ElaSelectionPopup(ElaThemeWidget):
         self.move(x, y)
         self.show()
         self.raise_()
-
-    # -- 内部 --------------------------------------------------------------
 
     def _rebuild(self) -> None:
         while self._layout.count():

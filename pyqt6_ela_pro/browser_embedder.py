@@ -1,18 +1,6 @@
-"""
-浏览器嵌入组件 (Windows + PyQt6)
+"""浏览器嵌入组件（Windows + PyQt6）：启动浏览器进程并通过 CDP 操控。
 
-继承自 ElaWindowEmbedder，添加浏览器启动和管理功能。
-
-使用示例:
-    from pyqt6_ela_pro.browser_embedder import ElaBrowserEmbedder
-    browser = ElaBrowserEmbedder(
-        webview_path=Path("chrome.exe"),
-        port=9023,
-        debug_port=9222,
-        parent=self
-    )
-    browser.embed("http://example.com", window_title="MyBrowser")
-"""
+启动参数、生命周期与 CDP API 见 ``docs/webengine.md``。"""
 
 from __future__ import annotations
 
@@ -136,12 +124,9 @@ class _BrowserController(QObject):
         target_id: str = "",
         parent: Optional[QObject] = None,
     ):
-        # **parent 必填**：controller 与 WebSocket 原来都没有 parent，唯一的
-        # 引用链是 ``embedder._controller -> controller._ws``。embedder 一旦走
-        # C++ 析构路径被删（child 控件被父窗口连带销毁就是这条），``_cleanup_browser()``
-        # 不会被调用，controller 与 WebSocket 存活下来继续收 CDP 消息 ->
-        # ``_log_func``（宿主 embedder 的直接 Python 引用）抛 RuntimeError。
-        # 挂上 parent 后 Qt 会连带断开并销毁，整条链断掉。
+        # parent 必填：否则 embedder 走 C++ 析构路径时 controller / WebSocket 会
+        # 存活并继续收 CDP 消息，向已删除的宿主引用抛 RuntimeError。挂 parent 后
+        # Qt 会连带断开并销毁。
         super().__init__(parent)
         self._debugger_url = debugger_url
         self._timeout = timeout
@@ -165,10 +150,8 @@ class _BrowserController(QObject):
 
     def connect(self) -> None:
         """启动 WebSocket 连接（非阻塞）"""
-        # **QWebSocket 的签名是 (origin, version, parent)** ——
-        # ``QWebSocket(self)`` 会把 controller 当 origin 字符串塞进去 ->
-        # ``TypeError: argument 1 has unexpected type '_BrowserController'``。
-        # 用关键字参数才是「挂 parent」的意思。
+        # QWebSocket 的签名是 (origin, version, parent)；``QWebSocket(self)`` 会把
+        # controller 当 origin 塞进去并抛 TypeError，必须用关键字 ``parent=``。
         self._ws = QWebSocket(parent=self)
         self._ws.error.connect(self._on_error)
         self._ws.textMessageReceived.connect(self._on_text_message)
@@ -223,20 +206,9 @@ class _BrowserController(QObject):
             self._connect_timer.stop()
 
     def _on_text_message(self, message: str) -> None:
-        """``QWebSocket.textMessageReceived`` 槽 —— **整段必须兜底**。
-
-        这是**外部输入**入口：``--remote-debugging-port`` 绑127.0.0.1，
-        任何本地进程都能连上发任意 JSON，所以「格式合法」不等于「类型合法」。
-        两处原缺口：
-
-        ① ``msg_id`` 未做类型校验就当 dict key 用（``_callbacks`` /
-           ``_result_timers`` 都是 dict）-> ``{"id": []}`` 抛
-           ``TypeError: unhashable type: 'list'``，**穿出 Qt 槽** =
-           进程 0xC0000409 零 traceback 终止（实测复现）；
-        ② ``self._log(...)`` 没护 —— 它是宿主 embedder 的**直接 Python
-           引用**（不是信号），embedder 被删后抛
-           ``RuntimeError: wrapped C/C++ object ... has been deleted``。
-           对照：``_on_error`` 明确写了 ``except RuntimeError: return``。
+        """``QWebSocket.textMessageReceived`` 槽，整段必须兜底。
+        CDP 端口对本机所有进程开放，``msg_id`` 未校验就做 dict key 会抛
+        TypeError；异常穿出 Qt 槽 = 0xC0000409。
         """
         try:
             self._dispatch_text_message(message)
@@ -405,9 +377,7 @@ class _BrowserController(QObject):
 
     def _close_target_page(self, params: dict) -> None:
         """关闭由本页面（window.open / target=_blank）打开的弹窗。
-
         共享浏览器进程下 ``Target.*`` 事件可能混入其它实例的页面，因此只处理
-        ``openerId`` 明确指向本页面的 target；``openerId`` 缺失时同样不关
         （宁可漏放一个弹窗，也不能误关别的实例的窗口）。
         """
         target = params.get("targetInfo", {})
@@ -529,10 +499,8 @@ class _MSG(ctypes.Structure):
 
 class _ImeForwardFilter(QAbstractNativeEventFilter):
     """Qt 原生事件过滤器：光标在嵌入浏览器上时转发 IME 并切换焦点。
-
     只在**交互类消息**（键盘 / IME / 鼠标按键 / 激活 / 滚轮）上参与：纯鼠标
     移动等高频消息既不触发焦点切换（否则鼠标划过浏览器就会改写键盘焦点），
-    也不需要进 Python，避免给整个应用的消息循环加开销。
     """
 
     # 参与焦点判断的消息
@@ -579,10 +547,8 @@ class _ImeForwardFilter(QAbstractNativeEventFilter):
     @staticmethod
     def _chrome_hwnd_usable(hwnd: Optional[int]) -> bool:
         """缓存的 hwnd 是否仍可用：**仍登记为嵌入中，且句柄未被系统回收**。
-
         hwnd 会被系统复用：浏览器窗口关闭后若光标没动，``_last_cursor_pos``
         命中就会直接返回旧 hwnd，而 ``PostMessageW`` 会把输入法消息投给
-        「碰巧复用了这个句柄的任意窗口」。
         """
         if hwnd is None or hwnd not in _active_chrome_hwnds:
             return False
@@ -702,10 +668,8 @@ def _ensure_ime_filter() -> None:
 
 class _BrowserSession:
     """共享 Chrome Browser 进程单例，支持多 --app 窗口共享一个进程。
-
     多个 ``--app`` 窗口共用同一个浏览器进程 / 调试端口，因此窗口认领必须
     **按启动顺序串行化**（同一时刻只允许一个「已启动、未认领」的窗口在途），
-    否则各实例轮询时可能抢到别的实例刚创建出来的窗口。
     """
 
     _instance: Optional[Any] = None  # type: ignore[name-defined]
@@ -769,7 +733,6 @@ class _BrowserSession:
             _BrowserSession._instance = None
             _BrowserSession._refcount = 0
 
-    # ---- 启动串行化（窗口 ↔ 实例一一对应） ----
 
     def request_launch(self, token: Any, launch: Callable[[], None]) -> None:
         """排队启动窗口：前一个实例认领（或超时 / 释放）后才轮到下一个。"""
@@ -840,7 +803,6 @@ class _BrowserSession:
 
     def _snapshot_foreign_hwnds(self) -> None:
         """快照启动前已存在的 Chrome 窗口，避免认领用户自己的浏览器窗口。
-
         （浏览器进程可能因 ``--user-data-dir`` 路由而提前退出，此时拿不到
         可靠的 pid，只能靠这份快照排除。）
         """
@@ -950,20 +912,9 @@ class _BrowserSession:
 
 
 def _release_browser_on_destroy(embedder) -> None:
-    """``destroyed`` 收尾：释放共享浏览器会话的引用并拆掉 Win32 钩子。
-
-    原先清理只挂在 ``closeEvent`` 与Python 的 ``deleteLater()`` 覆写上，而两者
-    在**标准用法下都是死的**：``QWidget::close()`` 对非窗口 widget 直接 return
-    true、**不发 QCloseEvent**，而示例用的正是
-    ``ElaBrowserEmbedder(..., parent=self)``（child）；父控件析构走
-    ``deleteChildren()`` → 直接 ``~QWidget``，**不会**回调Python 覆写。
-
-    后果：``_BrowserSession._refcount`` 永不减→ **浏览器进程永不休**；
-    ``_active_chrome_hwnds`` 留下死 hwnd → IME 过滤器**永久不再绕行**
-    （全应用每条交互类原生消息都进 Python）；OLE drop target 永不 revoke。
-
-    ``weakref.proxy`` 是必须的：``destroyed`` 发出时 C++ 对象正在析构，
-    这里只能碰纯 Python 属性与 Win32 API。
+    """``destroyed`` 收尾：释放共享浏览器会话并拆掉 Win32 钩子。
+    标准用法下 ``closeEvent`` / ``deleteLater`` 都不触发（child widget 走
+    ``deleteChildren()``），必须挂 ``destroyed``；此时只能碰纯 Python 属性与 Win32。
     """
     try:
         release = getattr(embedder, "release", None)
@@ -978,29 +929,9 @@ def _release_browser_on_destroy(embedder) -> None:
 
 
 class ElaBrowserEmbedder(ElaWindowEmbedder):
-    """浏览器嵌入组件
-
-    继承自 ElaWindowEmbedder，添加浏览器启动和管理功能。
-
-    信号（继承自 ElaWindowEmbedder）:
-        windowEmbedded(int): 窗口嵌入成功
-        windowReleased(int): 窗口释放成功
-        windowNotFound(str): 等待窗口时未找到
-        embedError(str): 嵌入出错
-        embedTimeout(): 等待窗口嵌入超时
-
-    新增信号:
-        loadStarted(): 页面开始加载
-        loadFinished(): 页面加载完成
-
-    使用示例:
-        browser = ElaBrowserEmbedder(
-            webview_path=Path("chrome.exe"),
-            port=9023,
-            debug_port=9222,
-            parent=self
-        )
-        browser.embed("http://example.com", window_title="MyBrowser")
+    """浏览器嵌入组件（继承 ``ElaWindowEmbedder``，增加启动与管理）。
+    关键信号：``windowEmbedded`` / ``windowReleased`` / ``embedError``（继承）、
+    ``loadStarted`` / ``loadFinished``。启动参数与示例见 ``docs/webengine.md``。
     """
 
     loadStarted = pyqtSignal()
@@ -1268,7 +1199,6 @@ class ElaBrowserEmbedder(ElaWindowEmbedder):
             self._controller.close()
             self._controller = None
 
-    # ---- 公共 API（CDP 操控） ----
 
     def reload(self, callback: Optional[Callable[[Any], None]] = None) -> None:
         """刷新当前页面（非阻塞）"""
@@ -1300,7 +1230,6 @@ class ElaBrowserEmbedder(ElaWindowEmbedder):
             return self._controller.runJS(script, callback=callback)
         return None
 
-    # ---- 异步 CDP 连接 ----
 
     def _start_cdp_connection(self) -> None:
         """启动 CDP 连接流程（非阻塞）"""
@@ -1338,10 +1267,8 @@ class ElaBrowserEmbedder(ElaWindowEmbedder):
 
     def _pick_debugger_url(self, data: list) -> Optional[str]:
         """从 ``/json`` 结果中挑出属于本实例的 page target。
-
         匹配顺序：① URL 归一化后相等；② 排除已被其它实例认领的 target 后
         恰好只剩一个候选。多窗口共享浏览器进程时**不再**退回“第一个 page
-        target”，否则会把 controller 附到别的实例的页面上。
         """
         pages = [t for t in data if isinstance(t, dict) and t.get("type") == "page"]
         if not pages:
@@ -1519,11 +1446,9 @@ class ElaBrowserEmbedder(ElaWindowEmbedder):
                 ElaWindowEmbedder.release(self)
 
             if not self._tryEmbedOnce(hwnd):
-                # 窗口在轮询与嵌入之间消失 / 容器创建失败：``_tryEmbedOnce``
-                # 只记 logger.warning、不发信号、也不重启轮询 —— 不在这里补
-                # 一刀的话，宿主监听 embedCompleted/embedError/embedTimeout
-                # 会**永久等待**（基类 embedByHwnd 对同一返回值会转入等待轮询
-                # 并以 embedTimeout 收尾）
+                # 窗口在轮询与嵌入之间消失 / 容器创建失败：``_tryEmbedOnce`` 只记
+                # 日志不发信号，不在这里补发的话宿主监听 embedCompleted /
+                # embedError 会永久等待。
                 msg = f"嵌入浏览器窗口失败: {hwnd}"
                 self._log(msg, 40)
                 self.embedError.emit(msg)
@@ -1738,18 +1663,8 @@ class ElaBrowserEmbedder(ElaWindowEmbedder):
 
     def release(self, destroy: bool = True) -> None:
         """释放浏览器窗口并终止浏览器进程。
-
-        ``destroy`` 用于与基类 :class:`ElaWindowEmbedder` 签名保持一致 ——
-        基类 ``_tryEmbedOnce`` 会调用 ``self.release(destroy=True)``，若本方法
-        不接受该关键字就会抛 ``TypeError`` 并被外层 ``except Exception`` 吞掉，
-        结果是 HWND 已经被 ``SetParent`` 挂到 Qt 父窗口上却没人还原（孤儿窗口）。
-
-        **两步会话级副作用必须无条件执行**，本方法因此拆成三段：
-        ``finish_launch``（放行共享启动队列）在最前且自带兜底，
-        ``session.release()``（``_refcount`` 递减 / 终止进程）收在
-        ``_finish_release`` 里且同样自带兜底。中间那 5 个局部清理步骤逐一
-        兜底 —— 漏掉前者会让**之后所有实例永久排队、永远不启动**，漏掉后者
-        会让**浏览器进程永不休**（实测：任一局部清理抛异常即可复现两条）。
+        ``finish_launch`` 与 ``session.release()`` 必须无条件执行，否则后续实例
+        永久排队 / 浏览器进程永不休；中间清理步骤逐步兜底。
         """
         session = self._session
 
@@ -1822,8 +1737,6 @@ class ElaBrowserEmbedder(ElaWindowEmbedder):
 
     def _finish_release(self, session) -> None:
         """``release()`` 的收尾：拆控制器 + 归还会话引用，**无条件执行**。
-
-        基类 ``release`` 与 ``_cleanup_browser`` 各自都会碰已销毁的 Qt 对象
         （CDP 断连 / 宿主先销毁），必须互不连累 —— 否则 ``_refcount`` 不减，
         浏览器进程永不休。
         """
@@ -1841,7 +1754,6 @@ class ElaBrowserEmbedder(ElaWindowEmbedder):
 
     def enable_cookie_jar(self) -> None:
         """启用内部 cookie jar，记录所有 cookie。
-
         需在调用 embed() 之前调用。启用后可通过 get_cookie_header()
         或 get_cookies() 获取收集到的 cookie。
         """

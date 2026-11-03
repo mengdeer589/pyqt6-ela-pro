@@ -1,26 +1,4 @@
-"""
-确认弹框组件：贴锚点弹出的轻量确认条。
-
-表面（阴影 + 圆角底 + 1px 描边）由 ``QPainter`` 自绘，内容用 Ela 原生拼装
-（``ColorText`` 标题 / 正文 + ``ElaButton`` 取消 / 确定），与库内其它组件共享
-同一套字阶、按钮与主题令牌。支持深浅色主题自适应。
-
-用法::
-
-    from pyqt6_ela_pro import ElaConfirmDialog
-
-    # 模态调用
-    if ElaConfirmDialog.show(self, "提示", "确定要删除吗？"):
-        # 用户点击了确认
-
-    # 信号方式
-    dlg = ElaConfirmDialog(self)
-    dlg.setTitle("提示")
-    dlg.setContent("确定要退出吗？")
-    dlg.confirmed.connect(lambda: print("确认"))
-    dlg.cancelled.connect(lambda: print("取消"))
-    dlg.show()
-"""
+"""确认弹框组件：贴锚点弹出的轻量确认条。"""
 
 from __future__ import annotations
 
@@ -196,10 +174,8 @@ class ElaConfirmDialog(_ThemeAwareMixin, QDialog):
 
     def sizeHint(self) -> QSize:
         """窗口大小 = 固定宽度 + 布局按内容算出的高度。
-
         没有它，类调用 ``show()`` 会停在最小尺寸、正文被裁掉一大半（用户看不到
         自己在确认什么）。正文超过 ``_CONTENT_MAX_H`` 的部分仍裁切（无边框弹框
-        没有滚动条）。
         """
         layout = self.layout()
         width = _BOX_WIDTH + 2 * self._shadow_margin
@@ -232,10 +208,8 @@ class ElaConfirmDialog(_ThemeAwareMixin, QDialog):
         position: str = "bottom",
     ) -> bool:
         """模态显示确认对话框（类调用）或普通显示（实例调用）。
-
         类调用 ``ElaConfirmDialog.show(parent, title, message, position)`` 返回
         ``True`` = 点了确认；实例调用 ``dlg.show()`` 返回 ``False``（两种调用统一
-        成布尔语义，便于 ``if dlg.show():``）。
         """
         if isinstance(self, ElaConfirmDialog):
             super().show()
@@ -333,7 +307,6 @@ class ElaConfirmDialog(_ThemeAwareMixin, QDialog):
 
     def reject(self) -> None:
         """取消（按钮 / ``Escape`` / 程序化关闭都走这里）。
-
         ``cancelled`` 与 ``confirmed`` 对称且无条件发 —— 原先只在 ``_onCancel``
         里发，Escape 关掉弹框时宿主收不到信号。
         """

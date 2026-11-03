@@ -1,16 +1,4 @@
-"""
-蓝图节点控件（绑定 ``ElaBlueprintNode``）。
-
-节点外观全部以「逻辑坐标」自绘，画布缩放时控件几何 = 逻辑矩形 × zoom，
-``paintEvent`` 内 ``painter.scale`` 同步缩放（高 DPI / 任意缩放清晰）；
-引脚热区 ``ElaPinHandle`` 是真实子控件（透明），画布据其全局坐标画线、
-并以其接收鼠标按下。运行状态视觉：running = 标题栏旋转圈 + accent 脉冲
-描边；done = success 描边 + 耗时徽标；error = danger 描边 + 错误图标。
-
-移植自 InstructionX_UIKit.blueprint.node_widget（原库为 PyQt6，
-类名 Ela* 前缀；主题令牌经 blueprint._tokens 适配 eTheme；
-旋转圈为内置精简 SpinnerArc；原库无 LICENSE，保留出处）。
-"""
+"""蓝图节点控件（绑定 ``ElaBlueprintNode``）。"""
 
 from __future__ import annotations
 
@@ -65,10 +53,8 @@ def _finite(value) -> bool:
 
 def _to_int(value, default: int = 0) -> int:
     """把外部数值安全转 int：不可转 / 非有限一律给 ``default``。
-
     ``int(float("inf"))`` 抛的 ``OverflowError`` 继承 ``ArithmeticError``，
     **不是** ``ValueError`` 的子类 —— 只写 ``except (TypeError, ValueError)``
-    的地方它会直接穿出去。凡是「外部数据 → int」都走这里。
     """
     try:
         out = int(value)
@@ -84,11 +70,8 @@ def _transparent(widget: QWidget) -> None:
 
 def _resolve_color(value, fallback_key: str) -> QColor:
     """把令牌键 / 颜色字面量 / None 解析为 QColor（实时取色，主题感知）。
-
-    非法值**降级成 ``fallback_key``**，不抛也不返回无效色。理由与
-    ``registry.pin_color`` 同源：原先的 ``value.startswith("rgb")`` 分支
-    会把 ``rgb(1,2,3)`` 原样交给 ``QColor``，而 ``QColor`` 不解析 CSS
-    函数记法（``isValid()`` 为 ``False``），于是 accent 栏**静默变黑**。
+    非法值降级成 ``fallback_key``，不抛也不返回无效色 —— ``QColor`` 不解析
+    ``rgb(...)`` 函数记法，原样交给它会得到无效色并静默绘制成黑色。
     """
     if not value:
         return QColor(str(T(f"color.{fallback_key}")))
@@ -128,17 +111,9 @@ def _contrast_ratio(a: QColor, b: QColor) -> float:
 
 
 def _text_on(color: QColor) -> QColor:
-    """按**实际对比度**在主题的「正文色 / 强调前景色」之间选更可读的一档。
-
-    两个候选 token 的语义随主题翻转：亮色主题 ``text.primary``=黑、
-    ``on.primary``=白；深色主题恰好相反（``text.primary``=白、
-    ``on.primary``≈黑）。所以这里不按亮度分档写死哪一支 —— 直接比较
-    两候选与底色 ``color`` 的 WCAG 对比度取大者，深浅主题同时正确。
-
-    前一版按 YIQ 150 分档挑 token，在深色主题下整支取反：亮色 accent
-    （``#d2a668`` / ``#4cc2ff``）拿到白字，对比度只有 ~1.6–2.0:1，
-    标题基本糊在色带上（浅色主题的琥珀 ``#c08a3e`` 配白字同样只有
-    ~2.4:1，其实黑字有 ~7:1）。
+    """按**实际对比度**在「正文色 / 强调前景色」之间选更可读的一档。
+    两个 token 的语义随主题翻转（亮色主题 ``text.primary``=黑、
+    ``on.primary``=白，深色相反），所以不能按亮度写死分支；直接比较两者
     """
     c1 = QColor(str(T("color.text.primary")))
     c2 = QColor(str(T("color.on.primary")))
@@ -147,7 +122,6 @@ def _text_on(color: QColor) -> QColor:
 
 def format_elapsed(ms) -> str:
     """把毫秒格式化为耗时徽标文本：``"12 ms"`` / ``"1.2 s"``。
-
     非有限值（``inf`` / ``nan``）按「未统计」返回空串 —— 直接格式化会得到
     ``"inf ms"`` 这种怪徽标（显示层问题，不崩）。
     """
@@ -163,7 +137,6 @@ def format_elapsed(ms) -> str:
 
 class ElaPinHandle(QWidget):
     """引脚热区控件（透明小方块，居中于引脚圆点）。
-
     画布对它安装事件过滤器以捕获按下拖线；``pin`` 为 ``ElaPin`` 数据对象，
     ``node_widget`` 回指所属节点控件。
     """
@@ -193,11 +166,6 @@ class ElaNodeWidget(QFrame):
     :param parent: 父控件（通常为 ``ElaBlueprintCanvas``）
     :param owner: 注册表命名空间标识（缺省 None）；用于按「该 owner + 全局」
         解析 ``ElaNodeSpec.body_builder``
-
-    供画布使用的接口：
-    ``pin_widget(pin_id)`` / ``set_selected(bool)`` / ``apply_view(scene_pos, scale)`` /
-    ``badge_rect()`` / ``elapsed_text()`` / ``cache_pixmap()`` / ``uses_proxy()`` /
-    ``begin_gesture_proxy()`` / ``end_gesture_proxy()`` / ``refresh_theme()``。
     """
 
     #: 新引脚热区建成时发出，参数为控件列表（画布据此补装事件过滤器）
@@ -261,9 +229,7 @@ class ElaNodeWidget(QFrame):
         self._relayout()
         self._on_status_changed(node.status)
 
-    # ------------------------------------------------------------------
     # 布局（逻辑坐标）
-    # ------------------------------------------------------------------
     def _title_font(self) -> QFont:
         f = QFont(self.font())
         f.setPixelSize(int(T("font.sm")))
@@ -417,10 +383,8 @@ class ElaNodeWidget(QFrame):
 
     def sync_pins(self) -> list:
         """按 ``node.inputs + node.outputs`` 校准引脚热区，返回新建的热区列表。
-
         节点在构造之后 ``add_input`` / ``add_output`` 时，新引脚此前没有对应的
         ``ElaPinHandle``（构造时的快照不含它），画布既拿不到热区也无法从它拖出
-        连线。画布据返回列表补装事件过滤器。
         """
         wanted = {
             (pin.direction, pin.id): pin for pin in self.node.inputs + self.node.outputs
@@ -444,16 +408,11 @@ class ElaNodeWidget(QFrame):
             self.pinsSynced.emit(created)
         return created
 
-    # ------------------------------------------------------------------
     # 视图放置（由画布调用）
-    # ------------------------------------------------------------------
     def apply_view(self, scene_pos: QPointF, scale: float) -> None:
         """按场景坐标与缩放系数放置控件（几何 = 逻辑矩形 × scale）。
-
         ``int()`` 的四个实参**逐个兜底**：``int(inf)`` 抛 ``OverflowError``、
         ``int(nan)`` 抛 ``ValueError``，而这条路径由 ``paintEvent`` 之外的
-        画布布局调用，任一异常穿出去都会让控件停在半更新状态。数据入口
-        （``ElaBlueprintNode.from_dict``）已拒收非有限值，这里是最后一道。
         """
         self._scale = max(0.05, float(scale)) if _finite(scale) else 1.0
         if self._body is not None and self._body_shown != self._body_visible():
@@ -467,9 +426,7 @@ class ElaNodeWidget(QFrame):
         self._arrange_children()
         self.update()
 
-    # ------------------------------------------------------------------
     # GL 代理绘制（位图缓存）
-    # ------------------------------------------------------------------
     def uses_proxy(self) -> bool:
         """当前是否由 GL 视口以位图缓存代理绘制。"""
         return bool(self._proxy_state or self._gesture_proxy)
@@ -553,9 +510,7 @@ class ElaNodeWidget(QFrame):
             return
         super().update(*args)
 
-    # ------------------------------------------------------------------
     # 选中 / 状态
-    # ------------------------------------------------------------------
     def set_selected(self, on: bool) -> None:
         """设置选中态：primary 2px 描边（本控件内）+ 外发光（画布层自绘）。"""
         on = bool(on)
@@ -606,9 +561,7 @@ class ElaNodeWidget(QFrame):
         """标题栏强调色（令牌键 / hex 实时解析，缺省灰）。"""
         return _resolve_color(self.node.accent, "text.tertiary")
 
-    # ------------------------------------------------------------------
     # 状态切换
-    # ------------------------------------------------------------------
     def _on_status_changed(self, status: str) -> None:
         running = status == "running"
         # 手势代理期间旋转圈冻结进位图，状态切换不得重新显示
@@ -661,9 +614,7 @@ class ElaNodeWidget(QFrame):
         """主题切换：外观全部实时取色，直接触发重绘。"""
         self.update()
 
-    # ------------------------------------------------------------------
     # 绘制
-    # ------------------------------------------------------------------
     def paintEvent(self, _event) -> None:
         if self.uses_proxy():
             return  # GL 视口代理绘制：自身仅作交互容器
@@ -844,9 +795,7 @@ class ElaNodeWidget(QFrame):
                 pin.name,
             )
 
-    # ------------------------------------------------------------------
     # 事件
-    # ------------------------------------------------------------------
     def refresh_theme(self) -> None:
         """主题切换时重排并重绘（画布 / 测试可直接调用）。"""
         self._invalidate_cache()

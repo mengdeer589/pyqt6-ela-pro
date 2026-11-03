@@ -1,24 +1,6 @@
-"""
-Mermaid 渲染支持（可选依赖 `mermaidx <https://pypi.org/project/mermaidx/>`_）。
+"""Mermaid 渲染支持（可选依赖 ``mermaidx``，进程内 QuickJS + resvg）。
 
-mermaidx 在进程内用 QuickJS 运行**真实的 mermaid.js v11**（无浏览器 / 无 Node），
-再用 resvg 光栅化为 PNG；本模块把它包装成 Qt 友好的异步渲染器：
-
-- ``QThreadPool`` 后台渲染（CPU 密集，避免阻塞 UI 线程）；
-- 结果经 ``rendered`` 信号回到 GUI 线程（跨线程 emit 自动排队）；
-- ``(code, theme)`` 维度的 LRU 缓存 + in-flight 去重，流式重渲染不重复出图；
-- 采用 mermaid ``base`` 主题 + :data:`MERMAID_THEME_VARIABLES` 内置美化配色
-  （GitHub 风格，跟随查看器亮/暗主题），可用
-  :meth:`ElaMermaidRenderer.setThemeVariables` 覆盖；
-- 未安装 mermaidx 时 ``available()`` 为 ``False``，调用方回退为代码块；
-- 支持 ``setRenderer(callable)`` 注入自定义渲染器（测试或替换后端）。
-
-用法::
-
-    renderer = ElaMermaidRenderer(parent)
-    known, image = renderer.lookup(code, "dark")
-    renderer.request(code, "dark", lambda img: ...)   # 结果回调（GUI 线程）
-"""
+异步渲染、LRU 缓存与主题处理见 ``docs/markdown.md``。"""
 
 from __future__ import annotations
 
@@ -206,9 +188,7 @@ def mermaidx_error() -> Optional[str]:
 
 def _clamp_zoom_to_budget(zoom: float, view_w: float, view_h: float) -> Optional[float]:
     """把 ``zoom`` 压到「输出仍在预算内」的最小值；压不动则返回 ``None``。
-
     ``zoom`` 越小输出越小，所以按面积开方缩放即可；下限是 ``_MIN_ZOOM`` ——
-    再小会糊得看不清，那时宁可报「渲染不出来」（调用方降级成代码卡片），
     也不要默默给一张糊掉的图。
     """
     if not (math.isfinite(zoom) and math.isfinite(view_w) and math.isfinite(view_h)):
@@ -238,15 +218,10 @@ def _render_with_mermaidx(
 ) -> Optional[QImage]:
     """用 mermaidx 渲染 Mermaid 源码为 QImage（2x 超采样，按需自适应）。
 
-    采用 mermaid ``base`` 主题 + :data:`MERMAID_THEME_VARIABLES` 美化配色
-    （可经 ``themeVariables`` 覆盖）；mermaidx 自带 PNG 管线会强制使用
-    内置 DejaVu 字体（不含 CJK，中文变方块），因此优先取 SVG 后用
-    ``resvg_py`` 光栅化（默认加载系统字体，可回退中文字体）；直调失败时
-    退回 mermaidx 的 PNG 输出。两者都失败时抛出异常（由调用方记录到
-    :meth:`ElaMermaidRenderer.lastError`，便于排查）。
+    mermaidx 的 PNG 管线强制 DejaVu 字体（中文变方块），优先取 SVG 后用 resvg
+    光栅化；两者都失败时抛异常，由调用方记录到 ``lastError``。
 
-    :param max_px: 目标显示宽度；给出时按图宽自适应倍率（宽图降采样，
-        避免超大图在固定 2x 下耗费光栅化时间与内存）
+    :param max_px: 目标显示宽度；给出时按图宽自适应倍率，宽图降采样。
     """
     import mermaidx
 
@@ -292,10 +267,8 @@ class _RenderTask(QRunnable):
 
     def __init__(self, renderer: "ElaMermaidRenderer", code: str, theme: str):
         super().__init__()
-        # **弱引用**：渲染器通常是viewer 的子对象（``ElaMermaidRenderer(parent=self)``），
-        # 宿主一销毁它就跟着 ``deleteChildren()`` 走。持强引用只会让 Python
-        # 包装器活过 C++ 对象，于是 ``emit`` 打在已释放对象上抛 RuntimeError
-        # —— 而这正好发生在 ``QRunnable::run()`` 里（工作线程）。
+        # 弱引用：渲染器通常是 viewer 的子对象，宿主销毁即 deleteChildren；强引用
+        # 会让包装器活过 C++ 对象，emit 打在已释放对象上抛 RuntimeError。
         self._renderer = weakref.ref(renderer)
         self._code = code
         self._theme = theme
@@ -340,11 +313,8 @@ class _PrewarmTask(QRunnable):
             pass
 
 
-#: 光栅化输出的尺寸/像素预算。``zoom`` 夹在 [_MIN_ZOOM, _MAX_ZOOM]，
-#: 但那管不住**总量**：SVG 的viewBox 由 mermaid 按图规模算，一个 5000 节点的
-#: ``graph TD`` 可以到十万量级，zoom=0.5 时 resvg 就要分配
-#: 50000x50000x4B ~= 10 GB。模型输出不可信 —— 一段 mermaid 不该能吃光内存。
-#: 与 ``math_lite`` 的 ``_MAX_DIM`` / ``_MAX_PIXELS`` 同一套理由。
+#: 光栅化尺寸 / 像素预算。zoom 夹在范围内也管不住总量：5000 节点图的 viewBox
+#: 可达十万量级，zoom=0.5 时 resvg 就要分配 ~10GB；模型输出不可信，必须封顶。
 _MAX_RASTER_DIM = 20000
 _MAX_RASTER_PIXELS = 64_000_000  # ARGB32 = 4B/px -> 256 MiB 上限
 
@@ -386,10 +356,8 @@ class ElaMermaidRenderer(QObject):
         self._cache_cap = max(0, int(cache_cap))
         self._inflight: set = set()
         self._callbacks: dict = {}
-        #: 渲染代次：``clearCache``（换渲染器 / 换 themeVariables）时自增，用来作废
-        #: **在途**任务的回填。没有它，旧任务回来后会写缓存、还会 ``pop`` 掉同一
-        #: key 上**新**请求的回调 —— 新请求拿到旧渲染器的图，而它自己的真图因为
-        #: 回调已被消费而永远送不到。
+        #: 渲染代次：``clearCache`` 时自增，用来作废在途任务的回填；否则旧任务会
+        #: 写缓存并 pop 掉同一 key 上新请求的回调。
         self._generation = 0
         self._override: Optional[Callable] = None
         self._last_error: Optional[str] = None
@@ -405,21 +373,13 @@ class ElaMermaidRenderer(QObject):
         if themeVariables:
             for name, values in themeVariables.items():
                 self._theme_variables.setdefault(name, {}).update(values)
-        # **不要 parent=self**：``~QThreadPool`` 会等所有 runnable 跑完才返回。
-        # 池是渲染器的 QObject 子对象时，销毁渲染器（= 宿主关窗口）会在 GUI
-        # 线程同步阻塞到当前渲染结束 —— mermaidx 是进程内QuickJS 跑真实
-        # mermaid.js，大图渲染是秒级到十秒级，不是「卡一下」。
-        # 改成独立对象 + ``_cleanup`` 显式收，走「有上限的等待」而不是无限等。
-        #
-        # 已知取舍：宿主走 C++ 父链销毁（``deleteChildren`` 把渲染器带走）时，
-        # Python 包装器被回收的瞬间 ``~QThreadPool`` 仍会等到在途渲染结束才
-        # 返回（弱引用只保证收尾不碰死对象，缩短不了那一次渲染）。要彻底避免
-        # 得把池提升为进程级；常规路径用 ``deleteLater()`` 已是有界等待。
+        # 不要 parent=self：``~QThreadPool`` 会等所有 runnable 跑完，作为子对象时
+        # 会在 GUI 线程阻塞到当前渲染结束；改为独立对象 + ``_cleanup`` 有界等待。
+        # 宿主走 C++ 父链销毁时仍会等那一次渲染，常规 deleteLater 已是有界路径。
         self._pool = QThreadPool()
         self._pool.setMaxThreadCount(2)
         self._renderedInternal.connect(self._on_rendered)
 
-    # -- 主题 --------------------------------------------------------------
 
     def setThemeVariables(self, theme: str, variables: Optional[dict] = None) -> None:
         """覆盖指定主题（``"light"`` / ``"dark"``）的 mermaid ``themeVariables``，
@@ -437,7 +397,6 @@ class ElaMermaidRenderer(QObject):
         """获取指定主题当前生效的 themeVariables 副本。"""
         return dict(self._theme_variables.get(theme, {}))
 
-    # -- 配置 --------------------------------------------------------------
 
     def setRenderer(self, renderer: Optional[Callable]) -> None:
         """设置自定义渲染函数 ``(code, theme) -> QImage | None``，``None`` 回到内置后端。"""
@@ -461,14 +420,11 @@ class ElaMermaidRenderer(QObject):
         """最近一次渲染失败原因（成功或尚未渲染时为 ``None``）。"""
         return self._last_error
 
-    # -- 性能相关 ----------------------------------------------------------
 
     def setMaxImageWidth(self, width: Optional[float]) -> None:
         """设置目标显示宽度（像素）。
-
         内置后端据此自适应光栅化倍率：窄图仍 2x 超采样，宽图自动降采样，
         避免超大图在固定 2x 下耗费时间与内存。``None`` 恢复固定 2x。
-        自定义渲染函数（:meth:`setRenderer`）不受影响。
         """
         self._max_image_width = float(width) if width and width > 0 else None
 
@@ -508,7 +464,6 @@ class ElaMermaidRenderer(QObject):
             )
         return None
 
-    # -- 缓存 / 请求 --------------------------------------------------------
 
     def lookup(self, code: str, theme: str):
         """查缓存，返回 ``(known, image)``；``known=True`` 且 ``image=None`` = 此前渲染失败。"""
@@ -577,20 +532,14 @@ class ElaMermaidRenderer(QObject):
                 except Exception:
                     pass
             self._callbacks.pop(key, None)
-        # 在途的 key 一并清掉：否则某个 mermaid 图卡住后，该 (code, theme) 的
-        # 每次 request 都只往 _callbacks 追加然后 return，列表无界增长。
-        # 作废靠代次判定，不靠这个集合 —— 否则旧任务回来时会顺手 discard 掉新任务
-        # 刚登记的同一个 key。
+        # 在途 key 一并清掉：否则卡住的图会让每次 request 都往 _callbacks 追加，
+        # 列表无界增长。作废靠代次判定，不靠这个集合。
         self._inflight.clear()
 
     def deleteLater(self) -> None:  # noqa: N802 (Qt 命名)
         """销毁前有界地收线程池。
 
-        池刻意**不是**渲染器的子对象（``~QThreadPool`` 会等所有 runnable 跑完
-        才返回，当子对象时销毁渲染器会在 GUI 线程无限期阻塞到当前渲染结束），
-        所以销毁路径必须自己收，且**必须有上限** —— 同样是 mermaidx 在跑
-        真实 mermaid.js，不能让关窗口变成无限等待。超出上限就放线程自己结束
-        （runnable 侧已经改成弱引用，收尾会自行短路）。
+        池不是渲染器的子对象（否则 GUI 线程会无限期阻塞），所以必须自己收且有上限。
         """
         pool = getattr(self, "_pool", None)
         if pool is not None:
@@ -601,7 +550,6 @@ class ElaMermaidRenderer(QObject):
                 pass
         super().deleteLater()
 
-    # -- 内部 --------------------------------------------------------------
 
     def currentGeneration(self) -> int:  # noqa: N802 (与 Qt 命名一致)
         """当前渲染代次（``_RenderTask`` 发起时记录，回来时比对）。"""

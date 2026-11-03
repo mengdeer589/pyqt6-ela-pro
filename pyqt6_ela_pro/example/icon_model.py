@@ -1,9 +1,4 @@
-"""图标浏览器示例的数据模型（PyQt6 版）。
-
-与 PyQt5 版的两处绑定差异：PyQt6 没有 ``QVariant``（``data()`` 直接返回 Python
-对象，取不到就是 ``None``）；图标枚举在 ``ElaIconType.IconName`` 里（不再平铺在
-``ElaIconType`` 上）。
-"""
+"""图标浏览器示例的数据模型（PyQt6 版）。?"""
 
 from __future__ import annotations
 

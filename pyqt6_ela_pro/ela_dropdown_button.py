@@ -1,18 +1,4 @@
-"""
-下拉按钮组件，风格参考 ElaWidgetTools 的 ElaDropDownButton。
-
-点击展开下拉菜单。
-
-用法::
-
-    from pyqt6_ela_pro import ElaDropDownButton
-
-    btn = ElaDropDownButton(text="操作", icon=ElaIconType.IconName.Gear, parent=self)
-
-    menu = ElaMenu(btn)
-    menu.addAction("选项一")
-    btn.setMenu(menu)
-"""
+"""下拉按钮组件，风格参考 ElaWidgetTools 的 ElaDropDownButton。"""
 
 from __future__ import annotations
 
@@ -152,7 +138,7 @@ class ElaDropDownButton(ElaThemeWidget):
             self.update()
             # **必须判存活**：宿主动态重建菜单时会先删旧菜单，而 ``bool(已删除
             # 包装器)`` 仍是 True —— 不判存活就对死对象调 ``popup()`` 抛
-            # RuntimeError，穿出 Qt 回调 = 0xC0000409 崩溃（实测）
+            # RuntimeError，穿出 Qt 回调 = 0xC0000409 崩溃
             if (
                 self._menu is not None
                 and not is_deleted(self._menu)

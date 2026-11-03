@@ -103,7 +103,6 @@ def defaultPalette() -> list:
 
 def parseDataPoint(item, index: int = 0):
     """解析系列数据项 → ``(x, y)``。
-
     支持：``number``（x=index）、``[x, y]``、``{"value": ...}``；
     无法解析返回 ``(index, None)``。
     """
@@ -153,10 +152,8 @@ def _needs_grid_coord(series_opts) -> bool:
 
 def _opt_float(value, default):
     """把 option 里的取值安全转成 float，失败回退 ``default``。
-
     ``default=None`` 表示「转换失败返回 None」而不是回退数值（用于区分「没给
     坐标」与「坐标是 0」）。``OverflowError`` 必须列进 except：它继承
-    ``ArithmeticError``，``int(float("inf"))`` 抛的正是它。
     """
     try:
         result = float(value)

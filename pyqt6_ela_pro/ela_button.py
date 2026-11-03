@@ -1,18 +1,4 @@
-"""
-统一按钮组件，风格参考 Ant Design Button。
-
-支持 6 种变体 (outlined/dashed/solid/filled/text/link)、
-16 种色彩主题以及深色/浅色主题自适应。
-
-用法::
-
-    from pyqt6_ela_pro import ElaButton
-    from PyQt6ElaWidgetTools import ElaIconType
-
-    btn = ElaButton("提交", variant="solid", color="primary", parent=self)
-    btn = ElaButton("编辑", variant="outlined", icon=ElaIconType.IconName.Pencil, parent=self)
-    btn = ElaButton("删除", variant="solid", danger=True, parent=self)
-"""
+"""统一按钮组件，风格参考 Ant Design Button。"""
 
 from __future__ import annotations
 
@@ -103,11 +89,8 @@ def paintProgressFill(  # noqa: N802 (与 paintRoundedCard 等绘制原语同风
     painter: QPainter, path: QPainterPath, progress: float, color: QColor
 ) -> None:
     """在按钮面上画横向进度填充（裁剪到 ``path``）。
-
     :class:`ElaLongPressButton` / :class:`ElaProgressButton` 在
     :meth:`ElaButton._paint_face_overlay` 里调用。``progress <= 0`` 不画；
-    ``>= 1`` 整面填充。填充**不降透明度**（要的是主题色本身），文字可读性靠
-    :meth:`ElaButton._progress_text_color` 把压在填充上的文字换成对比色。
     """
     p = max(0.0, min(1.0, float(progress)))
     if p <= 0.0:
@@ -137,10 +120,8 @@ def paintProgressFill(  # noqa: N802 (与 paintRoundedCard 等绘制原语同风
 
 class ElaButton(_ThemeAwareMixin, QPushButton):
     """统一风格按钮组件。
-
     支持 6 种变体、16 种色彩主题、3 种尺寸，自动适配深浅色主题。取值范围见
     :data:`ElaButtonVariant` / :data:`ElaButtonColor` / :data:`ElaButtonSize`；
-    尺寸与上游 ``ElaPushButton`` 对齐（见 :data:`_SIZE_MAP`）。
     """
 
     def __init__(
@@ -163,9 +144,8 @@ class ElaButton(_ThemeAwareMixin, QPushButton):
         self._padding_h = 16
         self._size_height = 30
         #: ElaAwesome 图标（``ElaIconType.IconName`` 或其整数值，入口即归一）。
-        #: 绘制路径上的 ``getElaIcon`` 只接受枚举成员 —— 传 int 会在
-        #: ``paintEvent`` 里抛 TypeError，穿出 Qt 回调 = 0xC0000409 崩溃，
-        #: 所以归一必须在 setter / 构造期完成（见 ``_styles.coerceElaIcon``）。
+        #: 绘制路径只接受枚举成员：int 会在 ``paintEvent`` 里抛 TypeError，穿出
+        #: Qt 回调 = 0xC0000409；归一必须在 setter / 构造期完成（``coerceElaIcon``）。
         self._icon_name: Optional[ElaIconType.IconName] = (
             None if icon is None else coerceElaIcon(icon)
         )
@@ -308,7 +288,6 @@ class ElaButton(_ThemeAwareMixin, QPushButton):
 
     def sizeHint(self) -> QSize:
         """按文字 / 图标与内边距计算合适宽度（不再依赖样式默认值）。
-
         宽度是**控件**宽度：可见按钮面还要内缩 ``_FACE_INSET``（与上游
         ``ElaPushButton`` V3.0 的面内缩一致），所以面宽 = 控件宽 − 2×inset。
         """
@@ -324,10 +303,8 @@ class ElaButton(_ThemeAwareMixin, QPushButton):
 
     def _svg_pixmap_for_paint(self, color: QColor):
         """按当前文字色渲染 SVG 图标；取不到时返回 ``None``（只画文字）。
-
         绘制路径上**绝不能**让异常穿出去（``paintEvent`` 在 Qt 回调链里，
         未捕获异常 = 0xC0000409 静默终止）。所以三道全兜住：图标名找不到
-        （``getSvgData`` 会抛 ``KeyError``）、SVG 语法错、渲染出空图。
         """
         source = self._svg_source
         if not source:
@@ -347,10 +324,9 @@ class ElaButton(_ThemeAwareMixin, QPushButton):
         return "danger" if self._danger else self._color_name
 
     def _paint_face_overlay(self, painter: QPainter, path: QPainterPath) -> None:
-        """在按钮面（背景 / 描边之后，focus ring 与文字之前）叠加内容。
-
-        长按进度、外部驱动的进度填充都挂在这里。默认不画；实现在绘制链上，
-        异常会穿出 Qt 回调（0xC0000409），**实现方必须自己兜住**。
+        """在按钮面上叠内容层：位于背景 / 描边之上、focus ring 与文字之下。
+        长按进度、外部驱动的进度填充都挂在这里。默认不画；异常会穿出 Qt 回调
+        （0xC0000409），**实现方必须自己兜住**。
         """
 
     def _progress_fill_color(self) -> QColor:
@@ -429,7 +405,6 @@ class ElaButton(_ThemeAwareMixin, QPushButton):
         self, scheme: dict[str, QColor], hovered: bool, pressed: bool
     ) -> tuple:
         """某状态下的 ``(底, 描边, 文字)``；描边为 ``None`` 表示不画。
-
         彩色变体的文字一律走 ``accentText``（浅底上的可读档，对比度 ≥ 4.5），
         ``accent`` 只用于填充 / 描边。
         """
@@ -579,7 +554,6 @@ class ElaButton(_ThemeAwareMixin, QPushButton):
                 br,
             )
 
-            # -- Resolve background / border / text color --
             # 彩色文字一律走 accentText（可读档）；hover 用 _hover_t 在两套状态
             # 色之间插值（150ms 淡入淡出，Reduced/Disabled 下同步落终值）。
             if disabled:
@@ -617,14 +591,12 @@ class ElaButton(_ThemeAwareMixin, QPushButton):
             painter.setPen(border_pen if border_pen is not None else Qt.PenStyle.NoPen)
             painter.drawPath(path)
 
-            # -- Face overlay（长按 / 进度填充）--
             # 钩子在 Qt 绘制链上：异常穿出去 = 0xC0000409（无 traceback），兜住。
             try:
                 self._paint_face_overlay(painter, path)
             except Exception:  # noqa: BLE001 —— paintEvent 里不能把异常带出去
                 pass
 
-            # -- Focus ring（键盘可见性）--
             if self._focus_ring:
                 ring_color = (
                     theme_accent(self._theme_mode)
@@ -646,7 +618,6 @@ class ElaButton(_ThemeAwareMixin, QPushButton):
                     br + 2.0,
                 )
 
-            # -- Draw icon / spinner + text --
             self._paint_content(painter, text_color, fw, fh)
 
             # 进度填充压在文字上：在被覆盖的区域用**对比色重画一遍**。这样单个

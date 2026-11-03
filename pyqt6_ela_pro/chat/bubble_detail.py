@@ -54,8 +54,6 @@ class _BubbleDetailMixin:
         else:
             self._disclosure.pop(str(partId), None)
 
-    # -- 内部 --------------------------------------------------------------
-
     def _part_section_name(self, part) -> Optional[str]:
         kind = getattr(part, "kind", "")
         if kind == ElaChatPartKindType.Reasoning:

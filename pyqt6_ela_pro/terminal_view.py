@@ -1,30 +1,6 @@
-"""
-终端输出展示组件（只读）。
+"""终端输出展示组件（只读）：接收原始文本 / ANSI，按模型重建渲染。
 
-组件不执行任何命令，只是输出汇聚点：宿主把 ``subprocess`` / ``QProcess`` /
-日志文件 / 工具调用拿到的原始文本（可含 ANSI）往 :meth:`ElaTerminalView.append`
-里喂即可。
-
-设计约定：``_lines``（``TerminalLine`` 列表）是唯一真相，``QTextDocument`` 只是
-派生渲染 —— 过滤 = 按模型重建、导出 = 拼模型、上限 = 淘汰模型头部；解析器只出
-颜色索引不碰具体色，切换调色板不需重新解析；``append`` 按帧合并，避免逐片重排
-的 O(n²)。
-
-支持 SGR（16 色 / 256 色 / truecolor / 粗体 / 暗淡 / 斜体 / 下划线 / 删除线 /
-反显）、``CSI K`` 擦行、``CSI 2J`` 清屏、``CSI C|D|G`` 光标移动；``\\n`` 换行、
-``\\r`` 整行重绘、``\\b`` 左移、``\\t`` 按 8 列制表位展开；BEL / OSC / DCS /
-字符集选择等一律丢弃。
-
-``\\r`` 之后的第一次写入视为**整行重绘**（而非真实终端的逐格覆盖）：进度条 /
-spinner / ``pip`` / ``git clone`` / ``docker pull`` 都是完整行重画，结果一致，
-且反复重画不会把一行撑成上百个 span。
-
-用法::
-
-    view = ElaTerminalView(parent)
-    view.setMaxLines(5000)
-    view.append("\\x1b[32m√\\x1b[0m 编译完成\\n")
-"""
+``_lines`` 是唯一真相，``QTextDocument`` 只是派生视图；细节见 ``docs/terminal.md``。"""
 
 from __future__ import annotations
 
@@ -107,16 +83,8 @@ _MAX_LINES_CAP = 1_000_000
 
 def _clamped_int(value, low: int, high: int, default: int) -> int:
     """把可能非有限的数值夹到 ``[low, high]`` 再取整。
-
-    **必须先夹后转。** ``int(float('inf'))`` 抛的是 ``OverflowError`` ——
-    它继承 ``ArithmeticError`` 而**不是** ``ValueError``，所以
-    ``except ValueError`` 抓不到。而这些 setter 的 docstring 承诺
-    「自动夹到 8-32」/「``0`` 表示不限」，写成
-    ``max(low, min(high, int(x)))`` 时异常**先抛出、夹取根本没机会跑** ——
-    照文档传个 ``inf`` 就失败。
-
-    ``nan`` 落到 ``default``（调用方给「保持原值」或「不限」）；无法转成
-    浮点（如传了个 ``str``）同样落``default``。
+    必须先夹后转：``int(inf)`` 抛 ``OverflowError``（不是 ``ValueError``），
+    ``max(low, min(high, int(x)))`` 会让异常先抛出。``nan`` / 不可转换值落 ``default``。
     """
     try:
         number = float(value)
@@ -174,11 +142,8 @@ _DEFAULT_CSI_STEP = 1
 
 def _default_font_families() -> list[str]:
     """终端默认字体族（中文系统用**单族** CJK UI 字体，其它系统用 Consolas）。
-
     Consolas 渲染 CJK 走逐字形 fallback：Win7 上 ~3ms/行且进程级毒化其后一切
     文本绘制（10~250×，见「下游项目反馈bug.md」§2/§3）；多族列表（等宽 + CJK
-    后备）本身也是慢路径，只能收成单族。Latin 部分非等宽、日志对齐略降是已知
-    代价，宿主可 ``setFontFamilies`` 覆盖。
     """
     cjk_family = system_cjk_font_family()
     if cjk_family:
@@ -367,7 +332,6 @@ def registerTerminalTheme(name: str, light: dict, dark: dict) -> None:
 
 def unregisterTerminalTheme(name: str) -> None:
     """注销一套终端调色板。
-
     内置三套、或正在作为默认的那套不可注销（抛 ``ValueError``）；名称未注册抛
     ``KeyError``。
     """
@@ -385,7 +349,6 @@ def unregisterTerminalTheme(name: str) -> None:
 
 class AnsiColor(NamedTuple):
     """一个 ANSI 颜色值（尚未解析成具体颜色）。
-
     ``kind`` 取 ``"basic"``（0-15）/ ``"indexed"``（0-255）/ ``"rgb"``；``value``
     在前两者是色号，``"rgb"`` 时是 ``0xRRGGBB``。
     """
@@ -439,17 +402,7 @@ class TerminalLine:
 class AnsiParser:
     """增量 ANSI 解析器（纯字符串处理，不依赖 Qt，可脱离 GUI 单测）。
 
-    用法::
-
-        parser = AnsiParser()
-        for chunk in stream:
-            for line in parser.feed(chunk):
-                handle(line)
-        for line in parser.flush():      # 收尾：处理无尾换行的最后一行
-            handle(line)
-
-    跨分片安全：进程输出按 ``read()`` 分片，一个转义序列必然被切开。未闭合的
-    ``ESC[`` 残留在内部缓冲里等下一片；残留超过 64 字符直接丢弃（防脏数据撑爆）。
+    按块喂入，未闭合的 ``ESC[`` 残留在内部缓冲等下一片；残留超过 64 字符丢弃。
     """
 
     #: 需要按字符逐个处理的控制字符
@@ -464,7 +417,6 @@ class AnsiParser:
         self._pending_cr = False
         self._clear_all = False
 
-    # -- 公开 API ---------------------------------------------------------
 
     def feed(self, chunk: str) -> list:
         """喂入一段原始文本（可含任意半截转义序列），返回**本次收口**的完整行列表；
@@ -529,7 +481,6 @@ class AnsiParser:
         """当前生效的 SGR 样式。"""
         return self._style
 
-    # -- 转义序列切分 -----------------------------------------------------
 
     def _split_incomplete(self, data: str) -> tuple:
         """把尾部未闭合的转义序列切出来留给下一片，返回 ``(待处理数据, 残留序列)``；
@@ -584,7 +535,6 @@ class AnsiParser:
             return index
         return None
 
-    # -- 序列消费 ---------------------------------------------------------
 
     def _read_escape(self, data: str, start: int, out: list) -> int:
         """解析 ``data[start]`` 处的转义序列，返回已消费的字符数。"""
@@ -609,7 +559,6 @@ class AnsiParser:
         # 吃掉就会把后面的 CSI 整段当普通文本渲染出来。
         return 1
 
-    # -- 语义处理 ---------------------------------------------------------
 
     def _handle_csi(self, params: str, final: str, out: list) -> None:
         if final == "m":
@@ -623,13 +572,8 @@ class AnsiParser:
             self._pending_cr = False
             self._erase_in_display(_first_param(params))
         elif final == "C":
-            # **Cursor movement must clear the \\r "full-line redraw"
-            # marker** -- after moving the cursor, writing is "overwrite
-            # cell by cell from that column", not "redraw the whole line".
-            # C/D/G used to leave the marker set, so
-            # "PROGRESS 50%" + \r + ESC[2C + "DONE" degraded to ["DONE"]:
-            # the offset of 2 was ignored entirely and the preceding content
-            # got wiped. (\\b already cleared it.)
+            # 光标移动必须清掉 \r 的「整行重绘」标记：移动后是逐格覆盖，不是整行重写。
+            # C/D/G 若保留标记，"PROGRESS 50%" + \r + ESC[2C + "DONE" 会被整行擦掉。
             self._pending_cr = False
             self._cursor += max(_DEFAULT_CSI_STEP, _first_param(params, 1))
         elif final == "D":
@@ -717,7 +661,6 @@ class AnsiParser:
 
     def _erase_in_display(self, mode: int) -> None:
         """``CSI J``。
-
         滚动缓冲模型下「光标到末尾」= 当前行之后本来就没有内容，``0`` / ``1``
         视作空操作；``2`` / ``3`` 才是真正的整屏清空。
         """
@@ -729,13 +672,8 @@ class AnsiParser:
 
     def _control(self, char: str, out: list) -> None:
         if char == "\r":
-            # 只标记「下一笔是整行重绘」，**不擦内容** —— 紧跟的 \n 是 CRLF，
-            # 应保留内容正常收行。
-            #
-            # 但**光标必须在这里就归零**：\r 是光标移动（CR = carriage return），
-            # 擦除是「下一笔写入」时才发生的事。原先归零只发生在 _write 的
-            # 整行重绘分支里，于是「\r 之后先挪光标再写」这条路走不到那个
-            # 分支，光标还停在原处 —— 光标偏移被整个忽略。
+            # 只标记「下一笔是整行重绘」，不擦内容（紧跟的 \n 是 CRLF，应保留内容收行）。
+            # 但光标必须在这里归零：\r 是光标移动，擦除发生在下一笔写入时。
             self._pending_cr = True
             self._cursor = _ZERO
         elif char == "\n":
@@ -783,7 +721,6 @@ class AnsiParser:
 
     def _merge_span(self, text: str, style: TerminalStyle) -> None:
         """追加 span；与末尾同样式则合并，避免高碎片数。
-
         没有这一步，一行 200 段同色的输出就会变成 200 个 span —— 过滤、导出、
         渲染全要按 span 遍历，内存也翻倍。
         """
@@ -1047,25 +984,14 @@ class _Gutter(QWidget):
 
 
 class ElaTerminalView(ElaThemeWidget):
-    """终端输出展示组件（只读）。
+    """终端输出展示组件（只读）：ANSI 色彩、行号槽、自动跟随、过滤、导出。
 
-    支持 ANSI 色彩、行号槽、自动滚动跟随、搜索过滤与高亮、右键菜单、导出到
-    文件、保留行数上限。**组件不执行任何命令**，输出由宿主 ``append`` 喂入。
-    中文系统默认对主字体缺字形的字符套单族符号字体（只改字体族、不改文本；
-    ``setMissingGlyphFallbackEnabled(False)`` 可关，bug #20）。**主字体是比例字体**：
-    做进度条别混用缺字形字符（如 ``░``）与主字体覆盖的 ``█`` —— 前者会走符号字体
-    兜底、字宽不同，条会随填充变短；用同一字符配颜色，或背景色空格。
+    组件不执行命令，输出由宿主 ``append`` 喂入；缺字形兜底与进度条字符约束见
+    ``docs/terminal.md``。信号：``linesAppended`` / ``cleared`` /
+    ``filterChanged`` / ``matchPositionChanged``。
 
     :param maxLines: 保留行数上限，``0`` 表示不限
     :param paletteName: 调色板名称（见 :func:`terminalThemes`）
-    :param parent: 父控件
-
-    信号：
-
-    * ``linesAppended(int)`` —— 新收口 N 行（已计入数据模型，未必已渲染）
-    * ``cleared()`` —— 内容被清空
-    * ``filterChanged(str, int)`` —— 过滤词变化（附带当前命中处数）
-    * ``matchPositionChanged(int)`` —— 跳转到第 N 处命中（1 起；无命中不发）
     """
 
     linesAppended = pyqtSignal(int)
@@ -1105,9 +1031,8 @@ class ElaTerminalView(ElaThemeWidget):
         self._palette: dict = {}
         self._format_cache: dict = {}
         self._highlight = QColor()
-        # 宿主持久覆盖的高亮色（None = 用背景派生的默认黄）。原先 ``_highlight``
-        # 一个字段同时充当「用户覆盖」和「派生缓存」，于是 ``_refresh_palette``
-        # 每次换肤都把用户设过的色冲掉。
+        # 宿主持久覆盖的高亮色（None = 用背景派生的默认黄）。与 ``_highlight``
+        # 分开，``_refresh_palette`` 换肤时不会冲掉用户覆盖。
         self._highlight_override: Optional[QColor] = None
         self._gutter_font = QFont(_DEFAULT_FONT_FAMILY)
         self._doc_lines = 0
@@ -1280,13 +1205,9 @@ class ElaTerminalView(ElaThemeWidget):
         if self._parser.takeClear():
             self.clear()
         if not lines:
-            # 没有收口的整行，但**可能仍有「当前行」要画**：终端停在
-            # ``Password:`` 这种等输入的状态时，解析器缓冲里已经躺着内容。
-            # 原先这里直接 return，连 flush 定时器都不启动，于是那行既不
-            # 显示也不计数（``visibleLineCount()`` 是 0）。
-            #
-            # 不做「文本没变就跳过」的优化：``append("\x1b[0m")`` 这种只改
-            # 样式不带文本的片，文本没变但**必须**重画。
+            # 没有收口整行，但「当前行」仍可能要画：解析器缓冲里已有内容
+            # （如 ``Password:``）。不在此启动 flush 的话，那行既不显示也不计数。
+            # 文本没变也要重画：``append("\x1b[0m")`` 只改样式不带文本。
             if self._parser.pendingLine() is None:
                 return
             # 过滤态也走 flush：它只同步尾块（完整行的增量在过滤态下没有
@@ -1341,10 +1262,8 @@ class ElaTerminalView(ElaThemeWidget):
 
     def toPlainText(self) -> str:  # noqa: N802 (Qt 命名)
         """导出全部内容为纯文本（不含转义序列，不受过滤影响）。
-
         含**尚未收口的那一行**（``append("Password: ")`` 之后没有换行符，
         真实终端就把它显示在光标处）—— 不含的话口令提示这类内容既看不见
-        也导不出去。
         """
         texts = [line.text for line in self._lines]
         tail = self._parser.pendingLine()
@@ -1398,9 +1317,7 @@ class ElaTerminalView(ElaThemeWidget):
 
     def setMaxLines(self, count: int) -> None:  # noqa: N802 (Qt 命名)
         """设置保留行数上限，``0`` 表示不限。调小会立即淘汰并重建。
-
         非有限值（``inf`` / ``nan``）落到 ``_MAX_LINES_CAP``（效果上等同
-        不限）—— 原先的 ``max(0, int(count))`` 会在 ``int(inf)`` 处抛
         ``OverflowError``，让「0 表示不限」这条约定对 ``inf`` 失效。
         """
         count = _clamped_int(count, 0, _MAX_LINES_CAP, _MAX_LINES_CAP)
@@ -1549,7 +1466,7 @@ class ElaTerminalView(ElaThemeWidget):
             self._edit.moveCursor(QTextCursor.MoveOperation.End)
             self._edit.ensureCursorVisible()
             # ``ensureCursorVisible`` 只保证「光标那行完整可见」，文档末尾恰好
-            # 抵住视口底边时它会差 1px（原先末尾总多一个空块把这个细节盖住了）。
+            # 抵住视口底边时它会差 1px（末尾不再多一个空块）。
             # 「贴底」的契约是 ``value == maximum``，显式落到最大值。
             bar = self._edit.verticalScrollBar()
             if bar.value() < bar.maximum():
@@ -1585,11 +1502,8 @@ class ElaTerminalView(ElaThemeWidget):
 
     def setFontSize(self, size: int) -> None:  # noqa: N802 (Qt 命名)
         """设置等宽字号（像素），自动夹到 8-32。
-
         ``inf`` / ``-inf`` 照常夹到上/下限（这才兑现本文档承诺的「自动夹到
-        8-32」）；``nan`` 无法参与比较，按「保持原值」处理 —— 原先写成
         ``max(8, min(32, int(size)))`` 时 ``int(inf)`` 的 ``OverflowError``
-        会**先于**夹取抛出，承诺根本没机会生效。
         """
         size = _clamped_int(size, _MIN_FONT_SIZE, _MAX_FONT_SIZE, self._font_size)
         if size == self._font_size:
@@ -1624,7 +1538,6 @@ class ElaTerminalView(ElaThemeWidget):
 
     def setMissingGlyphFallbackEnabled(self, on: bool = True) -> None:
         """主字体缺字形时给字符套单族符号字体（中文系统默认开）。
-
         只改 ``QTextCharFormat`` 的字体族，**不改文本**（复制 / 导出保真）。
         开启 / 关闭会重建文档：关闭时恢复主字体，开启时补上兜底。
         """
@@ -1839,9 +1752,8 @@ class ElaTerminalView(ElaThemeWidget):
         if self._filter:
             lines = []
         else:
-            # 没有完整行**不代表无事可做**：「当前行」（未被 \n 收口的那一行）
-            # 就靠这条路径上屏。原先这里写的是 ``not self._pending_render``
-            # 直接 return，于是尾行永远画不出来。
+            # 没有完整行不代表无事可做：「当前行」（未被 \n 收口的那一行）就靠
+            # 这条路径上屏；若只按 ``not self._pending_render`` 直接 return，尾行永远画不出来。
             lines = (
                 self._lines[-self._pending_render :] if self._pending_render else []
             )
@@ -1850,7 +1762,7 @@ class ElaTerminalView(ElaThemeWidget):
         tail_key = self._tail_snapshot(tail)
         # 尾行「屏上那份」是否还是最新的：比较**内容快照**，不是有无 ——
         # \r 重画时尾行一直在、内容每帧都变，只比有无会把重画全部跳过
-        # （进度条 / spinner 冻在第一帧，实测文档停在 ' 10%' 而模型已到 ' 90%'）。
+        # （进度条 / spinner 冻在第一帧）。
         if not lines and tail_key == self._doc_tail_key:
             return
         self._auto_scrolling = True
@@ -1918,9 +1830,7 @@ class ElaTerminalView(ElaThemeWidget):
 
     def _rebuild_when_visible(self) -> None:
         """可见时立即重建（保持滚动位置）；隐藏时只标记，等 ``showEvent`` 补做。
-
         换肤 / 换配色族改的都是**渲染期**颜色，文档文本不变；隐藏时整篇重渲染在宿主
-        规模下是秒级开销（实测 3×3800 行 viewer + 10k 行终端全隐藏时切一次主题
         2.3s → 53ms）。过滤词变了**不走这里**（那会改内容，必须立即重建）。
         """
         if self.isVisible():

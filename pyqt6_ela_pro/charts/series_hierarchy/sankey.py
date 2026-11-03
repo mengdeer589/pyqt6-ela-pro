@@ -21,7 +21,6 @@ from ._shared import _label_font, _series_palette_color, _text_color
 
 class SankeySeriesRenderer(SeriesRenderer):
     """桑基图（节点矩形 + 贝塞尔流带）。
-
     支持 ``data`` / ``nodes`` / ``links`` / ``nodeWidth`` / ``nodeGap`` /
     ``layoutIterations`` / ``label`` / ``lineStyle``。
     """
@@ -32,7 +31,6 @@ class SankeySeriesRenderer(SeriesRenderer):
         self._bands = []  # [dict(path=QPainterPath,color,source,target,value)]
         self._name_index = {}
 
-    # -- 数据解析 ----------------------------------------------------------
     def _parse(self):
         raw_nodes = self.opt.get("data")
         if not isinstance(raw_nodes, list) or not raw_nodes:
@@ -67,7 +65,6 @@ class SankeySeriesRenderer(SeriesRenderer):
             return i if 0 <= i < len(self._name_index) else None
         return self._name_index.get(str(ref))
 
-    # -- 布局 --------------------------------------------------------------
     def layout(self, rect: QRectF) -> None:
         self._nodes = []
         self._bands = []

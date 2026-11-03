@@ -26,11 +26,8 @@ from ._shared import _dist, _label_font, _parse_named_values, _parse_pct, _text_
 
 class GaugeSeriesRenderer(SeriesRenderer):
     """仪表盘。
-
     支持 ``data`` / ``min`` / ``max`` / ``startAngle`` / ``endAngle`` /
     ``radius`` / ``progress`` / ``axisLine`` / ``pointer`` / ``anchor`` /
-    ``detail`` / ``title``。ECharts 角度约定：0° 在 3 点方向、逆时针为正，
-    默认 225 / -45（开口在底部）。
     """
 
     def __init__(self, chart, opt):

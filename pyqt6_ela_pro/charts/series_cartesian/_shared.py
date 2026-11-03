@@ -22,8 +22,6 @@ def _lerp(a, b, t):
     return a + (b - a) * t
 
 
-# -- 数据点标签的 rotate / align -------------------------------------------
-
 _LABEL_ALIGNS = ("left", "center", "right")
 
 
@@ -298,7 +296,6 @@ def _finite(v) -> bool:
 
 def _numeric_xy(data):
     """数值化 ``[(x, y), ...]`` → numpy 数组；不可数值化返回 ``(None, None)``。
-
     纯数值序列（x 取下标）与 ``[x, y]`` 对序列走 numpy，其余形态由调用方回退
     Python 循环（逐项 ``parseDataPoint`` 是 bar / candlestick / boxplot 的布局热点）。
     """
@@ -345,7 +342,6 @@ _GRID_EXTENT_CACHE_LIMIT = 32
 
 def _seq_len(value) -> int:
     """序列长度，非序列 / 无长度返回 0。
-
     别写 ``len(v or ())``：裸 ndarray 的真值判断会抛 ValueError，而异常会被
     绘制层的 warn_once 吞掉 —— 表现为 bar / candlestick / boxplot 一根都不画。
     """
@@ -361,7 +357,6 @@ def _grid_value_extent(
     chart, axis_kind: str = "y", axis_index: int = 0, grid_index: int = None
 ):
     """grid 数值轴真实范围（类型感知）：stack 柱按堆叠和。返回 (dmin, dmax) 或 None。
-
     逐系列 ``layout`` 都会调它，结果带缓存（见 ``_GRID_EXTENT_CACHE``）；
     ``axis_kind`` / ``axis_index`` 只筛选哪些系列参与（副轴不能污染主轴范围）。
     """
@@ -389,7 +384,6 @@ def _grid_value_extent(
 
 def _grid_value_extent_uncached(chart, opts, axis_kind: str = "y") -> tuple:
     """``_grid_value_extent`` 的实际计算（无缓存）。
-
     ``axis_kind`` 决定读哪一维：``"x"`` 读 ``[x, y]`` 的第一维 / 横向柱标量，
     ``"y"`` 读第二维 / 标量；堆叠和只在 y 轴累计。
     """

@@ -1,17 +1,4 @@
-"""
-ElaFigureCanvas - 主题感知 Matplotlib 画布组件。
-
-基于 FigureCanvasQTAgg 封装，自动适配 Ela 深浅色主题。
-当 matplotlib 未安装时，导入和引用不会报错，仅实例化时抛出 ImportError。
-
-用法::
-
-    from pyqt6_ela_pro import ElaFigureCanvas
-
-    canvas = ElaFigureCanvas(parent=self)
-    ax = canvas.figure.subplots()
-    ax.plot([1, 2, 3], [4, 5, 6])
-"""
+"""ElaFigureCanvas - 主题感知 Matplotlib 画布组件。"""
 
 from __future__ import annotations
 
@@ -103,10 +90,8 @@ if _FigureCanvas is not None:
 
         def setStyleParams(self, rcparams: dict) -> None:
             """应用额外的 matplotlib rcParams 样式参数。
-
             **进程级副作用**：直接写全局 ``mpl.rcParams``，影响宿主**所有**
             matplotlib 图（与构造期的 CJK 注入 / 换肤同一口径）。
-            名字刻意不叫 ``setStyle``（那会遮蔽 ``QWidget.setStyle(QStyle)``）。
             """
             if mpl:
                 mpl.rcParams.update(rcparams)

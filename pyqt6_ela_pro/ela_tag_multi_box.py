@@ -31,20 +31,10 @@ from ._internal import (
 
 
 class ElaTagMultiBox(_TagBoxThemeMixin, _TagBoxAnimMixin, ElaMultiSelectComboBox):
-    """具名多选下拉框。
-
-    带有标题标签的多选下拉框，标题在左侧，值在右侧。
-    继承自 PyQt6ElaWidgetTools.ElaMultiSelectComboBox。
+    """具名多选下拉框（标题在左，值在右）。
 
     :param title: 标题文字
     :param parent: 父控件
-
-    Example::
-
-        combo = ElaTagMultiBox(title="语言", parent=parent)
-        combo.addItem("Python")
-        combo.addItem("C++")
-        combo.addItem("JavaScript")
     """
 
     def __init__(

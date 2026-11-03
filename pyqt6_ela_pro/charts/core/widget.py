@@ -46,11 +46,8 @@ class ElaChartWidget(
     QWidget,
 ):
     """类 ECharts 图表控件（Ela 主题 + 图表配色主题感知，纯 QPainter 自绘）。
-
     ``setOption`` 默认按 ECharts 语义合并；``resize`` / ``dispatchAction`` /
     ``on``&``off`` 等实例 API 与 ECharts 对齐。布局带缓存，动画期每帧重排。
-    配色用 ``setChartTheme`` 切换（``ela`` / ``echarts`` / ``matlab`` / ``plotly``
-    / ``ggplot2`` / ``seaborn`` / ``tableau``，或 ``registerChartTheme`` 自定义）。
     """
 
     #: 图例切换系列显隐：(系列名, 是否可见)
@@ -204,13 +201,10 @@ class ElaChartWidget(
         self._disconnect_theme()
         super().deleteLater()
 
-    # ------------------------------------------------------------ 配色主题
     def setChartTheme(self, name) -> bool:
         """切换图表配色主题（内置 / 已注册），立即失效缓存并重绘。
-
         ``None`` / ``""`` 恢复全局默认主题；未知名称返回 ``False`` 且不改动。
         主题只提供默认色：option 里的显式颜色（``color`` / ``series.color`` /
-        ``itemStyle`` 等）仍然优先。
         """
         if name is None or name == "":
             self._chart_theme = defaultChartTheme()
@@ -233,11 +227,9 @@ class ElaChartWidget(
         self._series_pixmap_key = None
         self.update()
 
-    # ---------------------------------------------------------------- API
     #: ECharts 事件名 → Qt 信号（``on``/``off`` 的转发源）
     _chartEvent = pyqtSignal(str, dict)
 
-    # -- dispatchAction 分派实现 ------------------------------------------
     def _dispatch_legend(self, action: str, payload: dict) -> bool:
         names = payload.get("name")
         if isinstance(names, (list, tuple, set)):
@@ -455,10 +447,8 @@ class ElaChartWidget(
                 return i
         return -1
 
-    # -- 导出 / 图片 -------------------------------------------------------
     def getDataURL(self, opts: dict = None) -> str:
         """导出为 data URL（ECharts ``getDataURL``）。
-
         opts：``type``（``"png"`` / ``"jpeg"``）/ ``pixelRatio`` /
         ``backgroundColor``；``excludeComponents`` 暂不支持（忽略）。
         """
@@ -518,7 +508,6 @@ class ElaChartWidget(
         """当前 option 的内部引用（无拷贝；仅包内部热路径使用）。"""
         return self._option
 
-    # -- 图例 / 系列显隐（内部；对外走 dispatchAction / legend.selected） --
     def _setSeriesVisible(self, name, visible: bool) -> None:
         name = str(name)
         self._series_state[name] = bool(visible)
@@ -608,7 +597,6 @@ class ElaChartWidget(
             if isinstance(entry, dict) and isinstance(entry.get("selected"), dict):
                 entry["selected"][name] = bool(visible)
 
-    # ------------------------------------------------------------ 交互开关
     #: 可开关的交互功能（与组件 optionKey 对齐；tooltip / legend 由核心实现）
     INTERACTION_FEATURES = (
         "tooltip",
@@ -700,7 +688,6 @@ class ElaChartWidget(
 
     def setWheelZoomEnabled(self, enabled: bool) -> None:
         """内置滚轮缩放开关（默认开，直角坐标图开箱即用）。
-
         option 里配了 ``dataZoom`` 就完全听用户的（本开关不删用户组件）；没配时
         自动挂 ``inside`` 组件（滚轮缩放 + 拖动平移），拖拽模式可把它让给刷选。
         """
@@ -810,7 +797,6 @@ class ElaChartWidget(
 
     def setDragMode(self, mode: str) -> None:
         """切换拖拽模式（Plotly ``dragmode`` 语义）。
-
         ``pan`` 平移 / ``zoom`` 框选即缩放（默认）/ ``select`` 矩形框选 /
         ``lasso`` 套索选择。dataZoom 平移与 brush 拖拽互斥，按模式开关。
         """
@@ -866,8 +852,6 @@ class ElaChartWidget(
         """brush 组件句柄（宿主可读 ``selected_items`` / 接 ``selected`` 信号）。"""
         return self._component("brush")
 
-    # ------------------------------------------------------------ 标注编辑
-
     def setDoubleClickReset(self, enabled: bool) -> None:
         """双击是否复位视图（默认 **开**，对齐 Plotly ``doubleClick: 'reset'``）。"""
         self._double_click_reset = bool(enabled)
@@ -912,7 +896,6 @@ class ElaChartWidget(
 
     def _interactive_components(self) -> list:
         """过滤后的组件列表（交互被关闭的组件不接收鼠标 / 滚轮事件）。
-
         ``annotations`` 排在最前：它们画在其它组件之上，命中也要优先，否则
         压在 markPoint / graphic 上的标注会拖不动。
         """
@@ -930,7 +913,6 @@ class ElaChartWidget(
 
     def addComponent(self, comp) -> None:
         """挂接宿主自定义组件，跨 ``setOption`` 存活（``_rebuild`` 不会重建 / dispose 它）。
-
         要跟着 option 重建的组件请用 :func:`registerComponent`。组件按鸭子类型
         实现 ``optionKey`` / ``layout`` / ``paint`` / ``hitTest`` 等钩子。
         """
@@ -967,7 +949,6 @@ class ElaChartWidget(
 
     def _dispose_components(self, include_host: bool = False) -> None:
         """丢弃旧组件前调用其 ``dispose()``（没实现就跳过）。
-
         ``include_host=False``（``_rebuild`` 路径）跳过宿主经 ``addComponent``
         注入的组件；``include_host=True``（``dispose`` 路径）全收。
         """
@@ -983,13 +964,10 @@ class ElaChartWidget(
             except Exception:
                 pass
 
-    # ------------------------------------------------------------- 内部构建
-
     def _onBrushSelected(self, items) -> None:
         """brush 组件选区变化 → ``brushChanged`` 信号。"""
         self.brushChanged.emit(list(items or []))
 
-    # ------------------------------------------------------------- Qt 事件
     def mousePressEvent(self, event) -> None:
         self._interaction.mouse_press(event)
 
@@ -1014,14 +992,12 @@ class ElaChartWidget(
             self._hide_annotation_editor()
         self._invalidate_theme_caches()
 
-    # -- 鼠标：legend 点击 / tooltip 跟随 / 组件钩子 ------------------------
     def _interactive_renderers(self) -> list:
         """可见系列（渲染器可覆写 onMousePress/Move/Release/onWheel 获得交互）。"""
         return [r for r in self._series if r.visible]
 
     def _call_hook(self, owner, hook_name: str, *args) -> bool:
         """调组件 / 渲染器的鼠标钩子，异常隔离并去重上报。
-
         钩子跑在 Qt 事件回调链上，未捕获异常会穿过 C++ 边界导致进程
         0xC0000409 终止（零 traceback），所以所有钩子都必须走这里。
         """
@@ -1045,7 +1021,6 @@ class ElaChartWidget(
 
     def _dispatch_hook(self, hook_name: str, *args) -> bool:
         """按「组件优先、系列其次」的顺序分发钩子，任一消费则返回 True。
-
         消费者记在 ``_last_hook_owner``：``consumesClick=True`` 的组件（标注）
         在按下→原地松开时不能被当成数据点击。
         """

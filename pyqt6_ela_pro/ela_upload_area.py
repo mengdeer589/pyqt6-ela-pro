@@ -1,13 +1,4 @@
-"""
-上传区域组件，风格参考 ElaWidgetTools 的 ElaUploadArea。
-
-支持拖拽文件和点击选择文件。
-
-用法::
-
-    area = ElaUploadArea(parent=self)
-    area.filesSelected.connect(lambda paths: print(f"选择了: {paths}"))
-"""
+"""上传区域组件，风格参考 ElaWidgetTools 的 ElaUploadArea。"""
 
 from __future__ import annotations
 
@@ -98,10 +89,8 @@ class ElaUploadArea(ElaThemeWidget):
 
     def acceptedSuffixes(self) -> list[str]:
         """可接受的后缀列表（**副本**）。
-
         返回内部列表等于开了一条绕过 :meth:`setAcceptedSuffixes` 的后门 ——
         ``_validateFile`` 直接读 ``_normalized_suffixes()``，宿主 append 一下
-        就能让任意后缀通过校验。
         """
         return list(self._accepted_suffixes)
 
@@ -152,7 +141,6 @@ class ElaUploadArea(ElaThemeWidget):
 
     def _normalized_suffixes(self) -> list[str]:
         """后缀统一成不带点的形式（``QFileInfo.suffix()`` 不含点）。
-
         ``setAcceptedSuffixes`` 文档与测试都用 ``[".txt"]`` 写法，而
         ``QFileInfo.suffix()`` 返回 ``"txt"``，直接比较会让所有真实文件被拒。
         """

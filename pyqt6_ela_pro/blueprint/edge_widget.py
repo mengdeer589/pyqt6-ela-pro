@@ -1,18 +1,4 @@
-"""
-连线绘制。
-
-本模块不创建 QWidget——边与临时线由画布在 ``paintEvent`` 中统一绘制，
-这里提供「边部件」对象封装几何与视觉状态，便于命中检测与测试断言：
-
-- ``bezier_path(p1, p2)``：蓝图风格贝塞尔曲线（曲率随水平距离变化）；
-- ``ElaEdgeWidget``：一条已建立连线的几何 / 绘制 / 命中（hover 加粗、
-  点击选中、running 路径 flowing 虚线动画）；
-- ``ElaTempWire``：引脚拖拽中的临时线（磁吸到兼容引脚时高亮）。
-
-移植自 InstructionX_UIKit.blueprint.edge_widget（原库为 PyQt6，
-类名 Ela* 前缀；主题令牌经 blueprint._tokens 适配 eTheme；原库无 LICENSE，
-保留出处）。
-"""
+"""连线绘制。"""
 
 from __future__ import annotations
 
@@ -36,7 +22,6 @@ LABEL_RADIUS = 4.0
 
 def bezier_path(p1: QPointF, p2: QPointF) -> QPainterPath:
     """生成两点间的蓝图风格三次贝塞尔曲线路径。
-
     控制点沿水平方向外推，外推距离随水平间距增大
     （``clamp(abs(dx) * 0.5, 40, 240)``），垂直堆叠时也有自然弧度。
     """
@@ -81,10 +66,8 @@ def _cached_pen(
     mutable: bool = False,
 ) -> QPen:
     """按 (颜色, 宽度, 线型, dash) 缓存 QPen。
-
     ``mutable=True`` 时返回**副本**。缓存里存的是共享实例，直接改它（例如
     ``setDashOffset``）会让所有共用该键的边互相污染 —— 最后绘制的边留下的
-    偏移会传给下一个 painter。
     """
     style_v = getattr(style, "value", style)
     key = (color.rgba(), width, style_v, tuple(dash) if dash is not None else None)
@@ -132,7 +115,6 @@ class ElaEdgeWidget(QObject):
         # 基础颜色（边的引脚类型创建后不变，惰性取一次）
         self._base_color = None
 
-    # -- 几何 ------------------------------------------------------------
     def source_pos(self) -> QPointF:
         """输出端引脚的场景坐标（取不到时回退节点左上角）。"""
         return self.canvas.pin_scene_pos(
@@ -304,7 +286,6 @@ class ElaEdgeWidget(QObject):
         """失效缓存的边基础色（主题切换后由画布调用，下次绘制实时取色）。"""
         self._base_color = None
 
-    # -- 状态 ------------------------------------------------------------
     def set_flowing(self, on: bool) -> None:
         """设置 / 取消流动虚线动画（由 ExecutionController.set_path 驱动）。"""
         on = bool(on)
@@ -321,7 +302,6 @@ class ElaEdgeWidget(QObject):
         """推进流动虚线相位（画布定时器调用）。"""
         self._dash_offset -= step
 
-    # -- 绘制 ------------------------------------------------------------
     def draw(self, p: QPainter, label: bool = True) -> None:
         """在已做场景变换的画笔上绘制本条边（``label=False`` 时只画线）。"""
         path = self.path()

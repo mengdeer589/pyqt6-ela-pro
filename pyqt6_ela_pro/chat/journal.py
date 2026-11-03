@@ -51,7 +51,6 @@ class _Ev:
 
 class ElaChatTurnJournal:
     """把一个回合记录成追加写事件流，可重放回完整消息（崩溃恢复用）。
-
     与消息快照的分工：快照是回合结束后的完整状态，本日志是回合进行中的增量流。
     两者都产出 :class:`ElaChatMessage`，读取端无需知道日志存在。
     """
@@ -82,7 +81,6 @@ class ElaChatTurnJournal:
         #: 已连接的 ``(signal, slot)`` 列表（连 / 断必须同一批绑定方法）。
         self._worker_connections: Optional[list] = None
 
-        # -- 重放状态（从事件构建 parts） --
         self._parts: list = []
         #: 未落定分段的增量缓冲 ``{partId: [chunk, ...]}``（见 ``_flushBuffer``）
         self._buffers: dict = {}
@@ -93,7 +91,6 @@ class ElaChatTurnJournal:
         self._attachments: list = []
         self._ended = False
 
-        # -- 记录状态 --
         self._open = False
         self._rec_text: Optional[str] = None
         self._rec_reasoning: Optional[str] = None
@@ -134,8 +131,6 @@ class ElaChatTurnJournal:
         self._round_start = 0.0
         self._llm_round = 0
         self._reasoning_start = 0.0
-
-    # ------------------------------------------------------------------ 记录
 
     def begin(self, messageId: Optional[int] = None) -> "ElaChatTurnJournal":
         """开始记录一个回合（``messageId`` 省略则沿用构造时的值）。
@@ -186,7 +181,6 @@ class ElaChatTurnJournal:
 
     def beginStep(self) -> "ElaChatTurnJournal":
         """进入下一步骤。
-
         先收口当前正文段与思考段，再推进步骤。使用 :meth:`connectWorker` 时
         步骤跟随 ``llmStarted`` 自动推进，宿主不要再手动调用（会多切一步）。
         """
@@ -315,8 +309,6 @@ class ElaChatTurnJournal:
         self._push(_Ev.Duration, ms=_float(durationMs, 0.0))
         return self
 
-    # -- 上下文压缩 ---------------------------------------------------------
-
     def beginCompaction(self, reason: str = "auto") -> "ElaChatTurnJournal":
         """记录一次压缩开始（段 id 内部生成，调用方不用管）。
 
@@ -361,7 +353,6 @@ class ElaChatTurnJournal:
         self, status: str = ElaChatStatusType.Done, error: str = ""
     ) -> "ElaChatTurnJournal":
         """结束记录（``status`` 见 :class:`ElaChatStatusType`）。
-
         先收口仍打开的正文 / 思考段；没有显式 :meth:`setDuration` 时按
         ``begin → end`` 的墙钟补一次消息级耗时。
         """
@@ -382,7 +373,6 @@ class ElaChatTurnJournal:
 
     def _push(self, kind: str, **fields) -> None:
         """记一条事件，**并同步应用到自己的重放状态**。
-
         记录与重放走同一条路径，所以正在记录的 journal 本身就可直接读
         ``message()``。浮点在记录端就洗干净：``dumps()`` 用 ``allow_nan=False``。
         """
@@ -392,15 +382,12 @@ class ElaChatTurnJournal:
         self._events.append(event)
         self._apply(event)
 
-    # ------------------------------------------------------------------ 导出
-
     def events(self) -> list:
         """全部事件（元素是普通 dict 的浅拷贝，可直接 JSON 化）。"""
         return [dict(item) for item in self._events]
 
     def dumps(self) -> str:
         """把整份事件流序列化成「一行一条事件」的文本。
-
         返回**全部**事件；追加落盘请用 :meth:`dumpsNewLines`（原样 append
         整份会在每次调用时重复写入历史，恢复时事件被重放多次）。
         """
@@ -445,10 +432,8 @@ class ElaChatTurnJournal:
     @classmethod
     def fromLines(cls, lines, settleOpen: bool = True) -> "ElaChatTurnJournal":
         """由日志文本重放，跳过残行与未知事件。
-
         每个元素可以是一行，也可以是含多行的整段文本（``fromLines([fh.read()])``）。
         ``settleOpen`` 默认 True：日志必然来自已不存在的进程，在途分段要在这里
-        落定，否则恢复出来的界面会留永久转圈。
         """
         events = []
         if isinstance(lines, str):
@@ -470,8 +455,6 @@ class ElaChatTurnJournal:
         if settleOpen and not journal._ended:
             journal._settle(ElaChatStatusType.Stopped)
         return journal
-
-    # ------------------------------------------------------------------ 重放
 
     def replay(self, events) -> "ElaChatTurnJournal":
         """把事件序列应用到本对象（增量重放，可多次调用）。
@@ -507,15 +490,12 @@ class ElaChatTurnJournal:
 
     def replayInto(self, view, messageId: Optional[int] = None) -> int:
         """把日志重放出的消息装进 ``view``（:class:`ElaChatView`），返回消息 id。
-
         等价于 ``view.addMessageFromDict(self.message().toDict(), messageId)``，
         只是省掉一次序列化往返。
         """
         if messageId is None:
             messageId = self._message_id or None
         return view.addMessageFromDict(self.message().toDict(), messageId=messageId)
-
-    # -- 事件分发 ----------------------------------------------------------
 
     def _apply(self, event: dict) -> None:
         """把一个事件应用到重放状态（未知类型静默跳过）。"""
@@ -612,8 +592,6 @@ class ElaChatTurnJournal:
                     _float(event.get("ms"), 0.0)
                 ),
             )
-
-    # -- 分片缓冲（避免逐分片整串拼接） ------------------------------------
 
     def _flushBuffer(self, partId: str) -> None:  # noqa: N802 (与 Qt 命名一致)
         """把某个分段的缓冲并回 ``part.text``。"""
@@ -732,8 +710,6 @@ class ElaChatTurnJournal:
         self._settle(status)
         self._ended = True
 
-    # -- 结算 --------------------------------------------------------------
-
     def _openStatus(self) -> str:
         """新分段在「回合进行中」时的状态。"""
         return (
@@ -777,8 +753,6 @@ class ElaChatTurnJournal:
             settled.append(part.withStatus(ElaChatStatusType.Done))
         self._parts = settled
 
-    # -- 内部查找 ----------------------------------------------------------
-
     def _append(self, part: ElaChatPart) -> None:
         self._parts.append(part)
 
@@ -796,14 +770,10 @@ class ElaChatTurnJournal:
                 self._parts[index] = newPart
                 return
 
-    # -------------------------------------------------- 与 worker 信号对接
-
     def connectWorker(self, worker) -> "ElaChatTurnJournal":
         """连上 :class:`~pyqt6_ela_pro.chat.worker.ElaChatAsyncWorker` 的信号。
-
         与 binder 连同一批信号，两者可并存。后端提供 ``llmStarted`` 时自动跟随
         它切步（第 1 轮不切），此时宿主不要再手动调 :meth:`beginStep`。
-        幂等：重复绑定同一后端直接返回；换绑其他后端先解旧的。
         """
         if worker is self._worker:
             return self
@@ -914,8 +884,6 @@ class ElaChatTurnJournal:
             stats = replace(stats, duration_ms=duration)
         self.stats(stats)
 
-
-# ------------------------------------------------------------------ 事件表
 
 _HANDLERS = {
     _Ev.Begin: ElaChatTurnJournal._ev_begin,

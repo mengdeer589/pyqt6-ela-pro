@@ -23,11 +23,8 @@ from ..colormaps import colormapColors
 
 class VisualMapComponent:
     """连续视觉映射：值 → 颜色，右下 / 底部渐变条 + 两端数值标签。
-
     option: ``"visualMap": {"min": 0, "max": 100,
     "inRange": {"colors": ["#EBEFF5", "#3F5E8C"]}, "orient": "vertical"}``。
-    ``mapColor(v)`` 供系列经 ``chart.components`` 查找调用；``seriesIndex`` /
-    ``seriesId`` 可把实例绑定到单个系列，都不给即通用件。
     """
 
     optionKey = "visualMap"
@@ -57,7 +54,6 @@ class VisualMapComponent:
         #: 色带代表的全量范围（``calculable`` 把手在此区间滑动；min/max 是当前映射范围）
         self._extent = (self.min, self.max)
 
-    # -- 绑定 ---------------------------------------------------------------
     def bindsTo(self, series_index: int, series_id: str = "") -> bool:
         """本 visualMap 是否服务于给定系列（显式绑定优先，其次通用件）。"""
         idx = self.opt.get("seriesIndex")
@@ -77,7 +73,6 @@ class VisualMapComponent:
             return False
         return not (sid is not None and str(sid))
 
-    # -- 公共 API ----------------------------------------------------------
     def colors(self) -> list:
         """生效色带（inRange.colors 覆盖；image 的 cmap；缺省用主题色带）。"""
         in_range = self.opt.get("inRange") or {}
@@ -236,7 +231,6 @@ class VisualMapComponent:
             frac = (pos.x() - bar.left()) / max(1e-9, bar.width())
         return lo + _clamp(frac, 0.0, 1.0) * (hi - lo)
 
-    # -- 拖拽把手（calculable） -------------------------------------------
     def onMousePress(self, pos: QPointF) -> bool:
         if not self.calculable or self._bar.isNull():
             return False
@@ -359,7 +353,6 @@ class VisualMapComponent:
             int(a.blue() + (b.blue() - a.blue()) * t),
         )
 
-    # -- 布局 / 绘制 ---------------------------------------------------------
     def _layout_pieces(self, rect: QRectF) -> None:
         pieces = self.pieces()
         self._piece_rects = []

@@ -1,9 +1,4 @@
-"""外部 ``usage`` → :class:`ElaChatStats` 的归一化（``pyqt6_ela_pro.chat`` 内部模块）。
-
-四路词元互不重叠：``prompt`` 只含未命中缓存的输入。OpenAI / DeepSeek 的
-``prompt_tokens`` 含缓存命中，需扣掉，否则四路和与花费会双计。本模块是外部
-usage 的唯一转换入口（binder 与 journal 共用）。
-"""
+"""外部 ``usage`` → :class:`ElaChatStats` 的归一化（``pyqt6_ela_pro.chat`` 内部模块）。"""
 
 from __future__ import annotations
 
@@ -23,10 +18,8 @@ def _positive(*values) -> int:
 
 def stats_from_usage(usage, ttftMs: float = 0.0, tps: float = 0.0) -> ElaChatStats:
     """把后端 ``usage`` 归一成互不重叠的四路用量。
-
     OpenAI / DeepSeek 形态（有 ``prompt_tokens``）先扣掉缓存命中；Anthropic 形态
     （只有 ``input_tokens``）本身不含缓存。传 ``ElaChatStats`` 原样返回，只补缺失的
-    ``ttft`` / ``tps``。
     """
     if isinstance(usage, ElaChatStats):
         stats = usage

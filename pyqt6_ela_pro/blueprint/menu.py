@@ -1,18 +1,4 @@
-"""
-蓝图菜单：节点创建菜单与节点右键菜单模板（Ela 组件重构版）。
-
-- ``ElaNodeCreationMenu``：**ElaLineEdit** 搜索框 + **ElaListView** 分类
-  分组列表，Popup 弹出、主题感知（窗口底色 / 边框 / 图标色实时取自
-  ``eTheme``），回车创建第一项；支持按「待连接引脚」过滤（拖到空白
-  松开的 UE5 行为）；
-- ``ElaNodeContextMenu``：基于 **ElaMenu** 的节点右键菜单模板（图标动作
-  + 主题自动感知），各动作只发信号，开发者自由挂接实现；
-  ``add_custom_action`` 可追加自定义动作。
-
-移植自 InstructionX_UIKit.blueprint.menu（原库为 PyQt6，类名 Ela*
-前缀；原 QDialog+QLineEdit+QListWidget+QSS 已重构为 Ela 组件；
-原库无 LICENSE，保留出处）。
-"""
+"""蓝图菜单：节点创建菜单与节点右键菜单模板（Ela 组件重构版）。"""
 
 from __future__ import annotations
 
@@ -87,26 +73,11 @@ def _item_icon(category: str) -> None:
 class ElaNodeCreationMenu(QDialog):
     """节点创建菜单（Popup 弹出，搜索 + 分类分组列表）。
 
-    信号:
-        type_chosen(str): 用户选定了某节点类型（参数为 ``type_name``）。
-
-    用法::
-
-        menu = ElaNodeCreationMenu(canvas)
-        menu.type_chosen.connect(lambda t: canvas.create_node(t, scene_pos))
-        menu.popup_at(QCursor.pos())
-
-    拖线到空白松开的场景可传 ``compatible`` 过滤：
-
-        # 只列出拥有「Input 且兼容 image」引脚的节点类型
-        menu.popup_at(pos, compatible=(ElaPinDirectionType.Input, "image"))
-
     :param parent: 父控件
     :param owner: 命名空间标识（缺省 None 列全部类型）；给定时只列出
         「该 owner + 全局命名空间」的节点类型
 
-    生命周期：每次弹出新建实例，选定条目或关闭后自毁
-    （``WA_DeleteOnClose``）。
+    每次弹出新建实例，选定条目或关闭后自毁（``WA_DeleteOnClose``）。
     """
 
     #: 选定节点类型信号，参数为 type_name
@@ -123,7 +94,7 @@ class ElaNodeCreationMenu(QDialog):
         self._compatible = None
         self._owner = owner
         # _rebuild 才赋值；keyPressEvent 的 returnPressed 分支会读它，
-        # 首帧之前按 Enter 会 AttributeError（抛进 Qt 回调 = 进程 abort）。
+        # 首帧尚未 _rebuild 时按 Enter 会 AttributeError（抛进 Qt 回调 = 进程 abort）。
         self._first_item = None
         # 双击 / 回车可能让 clicked 与 activated 同时到达；首个 _pick 生效
         self._picked = None
@@ -164,7 +135,6 @@ class ElaNodeCreationMenu(QDialog):
 
     def paintEvent(self, event) -> None:  # noqa: N802 (Qt 命名)
         """自绘圆角外框（弹层底色 + 1px 边）—— 禁 QSS 后由这里接管。
-
         窗口带 ``WA_TranslucentBackground``，只有圆角盒内被填充，四角
         真正透明（窗口本身是方的，不铺满看不出圆角）。
         """
@@ -187,7 +157,6 @@ class ElaNodeCreationMenu(QDialog):
         )
         self._search_icon_action.setIcon(icon)
 
-    # -- 弹出 ------------------------------------------------------------
     def popup_at(self, global_pos: QPoint, compatible=None) -> None:
         """在全局坐标弹出菜单，搜索框聚焦。
 
@@ -202,7 +171,6 @@ class ElaNodeCreationMenu(QDialog):
         self.raise_()
         self.search_edit.setFocus()
 
-    # -- 列表 ------------------------------------------------------------
     def _spec_visible(self, spec) -> bool:
         """按 compatible 过滤：spec 至少有一个方向 / 类型兼容的引脚。"""
         if self._compatible is None:
@@ -278,7 +246,6 @@ class ElaNodeCreationMenu(QDialog):
 
     def _pick(self, type_name) -> None:
         """选定类型：关闭并发射信号（close + WA_DeleteOnClose 自毁）。
-
         幂等：``clicked`` 与 ``activated`` 可能对同一次交互都到达
         （双击 / 某些平台样式），首个生效，之后忽略 —— 否则建两个节点。
         """
@@ -291,18 +258,8 @@ class ElaNodeCreationMenu(QDialog):
 
 class ElaNodeContextMenu(ElaMenu):
     """节点右键菜单模板（ElaMenu 图标动作，各动作只发信号，开发者可挂回调）。
-
-    内置动作与信号（参数均为节点 id）：
-    ``rename_requested`` 重命名 / ``duplicate_requested`` 复制 /
-    ``disconnect_requested`` 断开所有连线 / ``delete_requested`` 删除 /
-    ``properties_requested`` 属性。
-
-    画布为「复制 / 断开 / 删除」挂了默认实现；「重命名 / 属性」完全交给
-    开发者（例如打开属性面板）。追加自定义动作::
-
-        menu = ElaNodeContextMenu(node.id, canvas)
-        menu.add_custom_action("导出子图", lambda nid: print("导出", nid))
-        menu.exec(QCursor.pos())
+    信号参数均为节点 id；画布只挂「复制 / 断开 / 删除」的默认实现，
+    「重命名 / 属性」完全交给宿主。追加自定义动作用 ``add_custom_action()``。
     """
 
     rename_requested = pyqtSignal(str)
@@ -340,9 +297,8 @@ class ElaNodeContextMenu(ElaMenu):
 
 class ElaEdgeContextMenu(ElaMenu):
     """连线右键菜单（内置「删除连线」；可追加自定义动作）。
-
     信号:
-        delete_requested(str): 请求删除该连线（参数为边 id），画布已接默认实现。
+    delete_requested(str): 请求删除该连线（参数为边 id），画布已接默认实现。
     """
 
     delete_requested = pyqtSignal(str)

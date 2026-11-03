@@ -30,7 +30,6 @@ from ._shared import (
 
 class RadarSeriesRenderer(SeriesRenderer):
     """雷达图（自绘蛛网坐标：圈环 + 轴线 + 维度标签）。
-
     支持 ``indicator`` / ``data`` / ``shape`` / ``areaStyle`` / ``splitNumber`` /
     ``axisName`` / ``splitLine`` / ``axisLine``，以及顶层 ``radar`` 组件。
     """

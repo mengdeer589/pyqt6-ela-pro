@@ -32,11 +32,8 @@ DEMO_MAP = {
 
 class MapSeriesRenderer(SeriesRenderer):
     """简化地图系列（type="map"）。
-
     ``map="demo"``（或缺省）用内置示意地图；自定义地图经
     ``option["geo"]["regions"] = {"名称": [[x, y], ...]}`` 传入多边形顶点。
-    区域着色优先 visualMap 的 ``mapColor``，其次 ``itemStyle.color``，否则按
-    primary.subtle → primary 插值。``roam`` 控制滚轮缩放 + 拖拽平移。
     """
 
     def __init__(self, chart, opt):
@@ -65,7 +62,6 @@ class MapSeriesRenderer(SeriesRenderer):
             out.setdefault(name, i)
         return out
 
-    # -- 数据 ------------------------------------------------------------
     def _regions(self) -> dict:
         """当前生效的 {名称: [[x, y], ...]} 多边形字典。"""
         name = str(self.opt.get("map") or "demo")
@@ -108,7 +104,6 @@ class MapSeriesRenderer(SeriesRenderer):
                 out[str(nm)] = v
         return out
 
-    # -- 协议 ------------------------------------------------------------
     def layout(self, rect: QRectF) -> None:
         self._rect = QRectF(rect)
         self._polys = []
@@ -140,7 +135,6 @@ class MapSeriesRenderer(SeriesRenderer):
             )
             self._polys.append((name, poly, index_map.get(name)))
 
-    # -- 交互：缩放 / 平移（roam） ----------------------------------------
     def onWheel(self, event) -> bool:
         if not self._roam[0]:
             return False

@@ -92,7 +92,6 @@ class _ViewAppearanceMixin:
 
     def setToolDefaultOpen(self, policy) -> None:
         """注入「哪些工具卡默认展开」的策略 ``policy(toolName, arguments, ok) -> bool``。
-
         对全部消息生效，但只影响之后新建的卡片（不弹开用户手动折叠的卡）；
         传 ``None`` 恢复库默认。
         """
@@ -169,7 +168,6 @@ class _ViewAppearanceMixin:
 
     def setContentMaxWidth(self, width: int) -> None:
         """设置助手消息内容最大宽度（像素，``0`` 表示不限，默认不限）。
-
         限的是整列（``_column`` 同时装正文、附件条与底部行），否则宽窗口下
         底部行会伸出去。
         """

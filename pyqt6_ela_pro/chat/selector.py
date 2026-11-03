@@ -48,8 +48,6 @@ class ElaChatSelector(ElaDropDownButton):
         self.setToolTip(self._title)
         self.setItems(items or [], current)
 
-    # -- 数据 --------------------------------------------------------------
-
     def setItems(self, items, current: Optional[str] = None) -> None:
         """整体替换选项并重建菜单。"""
         self._items = [
@@ -96,8 +94,6 @@ class ElaChatSelector(ElaDropDownButton):
     def title(self) -> str:
         """选择器标题（tooltip）。"""
         return self._title
-
-    # -- 内部 --------------------------------------------------------------
 
     def _rebuild_menu(self) -> None:
         old = self._menu

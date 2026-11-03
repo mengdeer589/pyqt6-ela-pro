@@ -35,7 +35,6 @@ if TYPE_CHECKING:
 
 class SeriesRenderer:
     """系列渲染器协议基类。
-
     子类实现 ``layout(rect)`` / ``paint(p, anim_t)`` / ``hitTest(pos)``；
     坐标映射经 ``self.chart.coordFor(self.opt)`` 取得 Coord。
     """
@@ -64,7 +63,6 @@ class SeriesRenderer:
         self._stats_ref = None
         self._stats_cache = None
 
-    # -- 协议 ------------------------------------------------------------
     def layout(self, rect: QRectF) -> None:
         """计算几何（坐标映射经 coord）。"""
 
@@ -74,16 +72,13 @@ class SeriesRenderer:
 
     def hitTest(self, pos: QPointF):
         """命中检测 → ``{"name","value","series",...}`` 或 None。
-
         默认实现在动画期一律返回 None：``anim_t`` 是绘制期变量，而子类几何来自
         ``layout()``（终态），用终态几何命中会指错图元。需要动画期命中的子类
-        可在自己的 ``hitTest`` 里用 ``self._anim_t`` 复算几何。
         """
         if self._anim_t < 1.0:
             return None
         return None
 
-    # -- 辅助 ------------------------------------------------------------
     @property
     def silent(self) -> bool:
         """ECharts ``series.silent``：True 时不响应鼠标命中（tooltip / click）。"""
@@ -97,7 +92,6 @@ class SeriesRenderer:
 
     def requestSeriesRepaint(self) -> None:
         """请求下一帧重绘系列层（持续动效每帧推进外观时用）。
-
         只 ``chart.update()`` 不够：系列层位图缓存键不含相位，会贴回同一张位图。
         几何没变，所以不能用 ``invalidateLayout()``（会连带全量重排）。
         """
@@ -107,10 +101,7 @@ class SeriesRenderer:
 
     def data(self) -> list:
         """系列原始 data（``list`` / ``ElaNumericBuffer``；缺省返回空 list）。
-
         对外语义与 list 一致（可 len / 下标 / 迭代 / 比较），内部热路径请用
-        :meth:`dataView`。裸 ndarray 会就地包成 ``ElaNumericBuffer`` 再返回：
-        ndarray 的 ``__eq__`` 不返回 bool，在 Qt 回调里比较会抛异常导致
         0xC0000409；包装件走 list 比较。
         """
         d = self.opt.get("data")
@@ -135,7 +126,6 @@ class SeriesRenderer:
 
     def valueStats(self) -> dict:
         """有限 y 值的统计（min / max / 下标 / sum / count），按数据身份缓存。
-
         markLine / markPoint 的 average / max / min 走这里；逐点物化整份数据
         在缩放时每步都要重付，所以缓存。
         """
@@ -183,7 +173,6 @@ class SeriesRenderer:
         """图例条目 ``[(name, QColor)]``（默认 = 系列名；饼 / 漏斗按数据项）。"""
         return [(self.name, self.color())]
 
-    # -- itemStyle / label / emphasis（ECharts 通用键） --------------------
     def itemStyle(self) -> dict:
         """系列级 ``itemStyle``（非 dict 时返回空 dict）。"""
         style = self.opt.get("itemStyle")
@@ -200,7 +189,6 @@ class SeriesRenderer:
 
     def uniformItemStyle(self):
         """系列级统一 ``itemStyle``；``None`` = 存在逐项 itemStyle。
-
         紧凑数值容器直接判为均匀（元素类型在包装时已校验）；``list`` 必须全量扫，
         抽样会漏掉少量带 ``itemStyle`` 的 dict 项。
         """
@@ -240,7 +228,6 @@ class SeriesRenderer:
 
     def uniformItemStyleResolved(self) -> dict:
         """一次性解析「全系列统一」的外观，供绘制循环循环外取用。
-
         返回 ``{"color", "opacity", "borderColor", "borderWidth", "borderRadius"}``；
         仅当 ``uniformItemStyle()`` 判定为均匀时可用（否则 ``None``）。
         """
@@ -320,8 +307,6 @@ class SeriesRenderer:
             width = 0.0
         return color, width
 
-    # -- visualMap 着色（map / heatmap / scatter 共用组件查找） -------------
-
     def visualMapComponent(self):
         """绑定到本系列的 ``visualMap`` 组件（显式绑定优先 → 通用件）；没有返回 None。
 
@@ -345,7 +330,6 @@ class SeriesRenderer:
             return comp
         return generic
 
-    # -- emphasis / blur 状态（ECharts 通用键） ---------------------------
     def emphasisOption(self) -> dict:
         """系列级 ``emphasis``（非 dict 时返回空 dict）。"""
         opt = self.opt.get("emphasis")
@@ -426,7 +410,6 @@ class SeriesRenderer:
 
     def blursOtherItems(self) -> bool:
         """hover 是否淡化同系列其它项（ECharts 只在 ``focus='self'`` 时 blur）。
-
         ``none``（默认）与 ``series`` 都不淡化：默认淡化会让每次鼠标移动重画
         全部图元，也不是 ECharts 语义。
         """
@@ -548,7 +531,6 @@ class SeriesRenderer:
 
     def labelText(self, index, value, name=None) -> str:
         """按 ``label.formatter`` 生成标签文本（缺省显示数值）。
-
         优先级：系列 ``labelTexts`` 覆盖（双击编辑写入）→ 数据项 ``label.text``
         / ``label.formatter`` → 系列 ``label.formatter``。
         """
@@ -616,7 +598,6 @@ class SeriesRenderer:
 
     def labelHitTest(self, pos: QPointF):
         """数据点标签命中：返回 ``(dataIndex, rect, text)``，未命中 None。
-
         命中框由各渲染器在 ``paint`` 时写入 ``_label_rects``；
         ``label.editable: false`` 可关闭单个系列的编辑。
         """
@@ -642,10 +623,8 @@ class SeriesRenderer:
 
     def _sampling_params(self):
         """``sampling`` option 解析（折线 / 散点等大系列共用）。
-
         ``sampling`` 可为 False / 算法名（``minmax`` / ``m4`` / ``lttb`` /
         ``minmaxLTTB``）/ dict（``algorithm`` / ``threshold`` / ``pointsPerPixel``）；
-        返回 ``(enabled, threshold, pointsPerPixel, algorithm)``。
         """
         sopt = self.opt.get("sampling", True)
         enabled = bool(sopt)

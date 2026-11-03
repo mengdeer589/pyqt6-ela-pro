@@ -23,7 +23,6 @@ from ._shared import _smooth_path
 
 class ThemeRiverSeriesRenderer(SeriesRenderer):
     """主题河：时间 × 系列的流带图。
-
     数据：``[[时间, 值, 系列名], ...]``（时间为字符串，ISO 日期可排序）。流带
     平滑、居中基线（各时刻总宽关于绘图区中线对称），自带底部时间轴标签。
     """
@@ -35,7 +34,6 @@ class ThemeRiverSeriesRenderer(SeriesRenderer):
         self._matrix = {}  # (name, t_idx) -> value
         self._area = QRectF()
 
-    # -- 数据 -------------------------------------------------------------
     def _parse(self):
         times = []
         names = []
@@ -56,7 +54,6 @@ class ThemeRiverSeriesRenderer(SeriesRenderer):
         times.sort()
         return times, names, matrix
 
-    # -- 布局 -------------------------------------------------------------
     def layout(self, rect: QRectF) -> None:
         self._streams = []
         self._times = []
@@ -90,7 +87,6 @@ class ThemeRiverSeriesRenderer(SeriesRenderer):
                 bot.append(QPointF(xs[i], y1))
             self._streams.append({"name": name, "top": top, "bot": bot, "color_idx": k})
 
-    # -- 绘制 -------------------------------------------------------------
     def paint(self, p: QPainter, anim_t: float) -> None:
         if not self._streams:
             return
@@ -185,7 +181,6 @@ class ThemeRiverSeriesRenderer(SeriesRenderer):
                 )
         p.restore()
 
-    # -- 交互 -------------------------------------------------------------
     def hitTest(self, pos: QPointF):
         if not self._streams or not self._times:
             return None

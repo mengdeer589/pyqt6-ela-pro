@@ -1,9 +1,4 @@
-"""[pyqt6_ela_pro] Fluent 风格与补充组件示例页。
-
-这一页专门补齐此前 example 从未实例化的组件：``ElaAvatar`` / ``ElaField`` /
-``ElaSelectorBar`` / ``ElaShimmer``（pyqt6_ela_pro），以及上游的
-``ElaPromotionView`` / ``ElaRibbonBar``。
-"""
+"""[pyqt6_ela_pro] Fluent 风格与补充组件示例页。?"""
 
 from PyQt6.QtWidgets import QHBoxLayout
 from PyQt6ElaWidgetTools import (

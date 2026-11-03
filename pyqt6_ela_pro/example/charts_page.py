@@ -1,22 +1,4 @@
-"""
-[pyqt6_ela_pro] ElaChartWidget 图表工作台
-
-顶部工具栏用 ``ElaPivot`` 切换七个工作区，每个工作区独立滚动、**首次切换时
-才构建**（首屏只建概览，29 张画廊图不会拖慢启动）：
-
-- **概览**：四张旗舰图（折线 / 柱状 / 环形饼 / 日历热力）+ 能力速览。
-- **系列画廊**：22 种系列按能力分七节，3 列紧凑网格，每节可随机数据 / 开关交互。
-- **交互**：tooltip / legend / dataZoom / visualMap（连续 + 分段）/ mark* / toolbox /
-  timeline / brush / 跨图联动。
-- **大数据**：30 万点 + 采样 / LOD / 缩放重采样。
-- **高级**：多轴 / log、多网格、多标题 / 多图例、字体与标签外观、折线细节。
-- **主题**：7 套配色方案（Ela / ECharts / MATLAB / Plotly / ggplot2 / seaborn /
-  Tableau）实时切换 + 自定义主题注册。
-
-每节标题的「</> 代码」按钮展示该节 demo 方法的源码（API 调用写在方法体内）；
-右上角「随机数据 / 交互 / 动效」按**当前工作区**生效。图表都是活的：滚轮缩放、
-拖拽、图例点击、刷选、导出 SVG 都可用。
-"""
+"""[pyqt6_ela_pro] ElaChartWidget 图表工作台?"""
 
 import math
 import random
@@ -89,7 +71,6 @@ def _wavy_values(
     seed: int = 0,
 ) -> list:
     """周期起伏 + 噪声的平滑序列（折线 / 面积示例；几百到几千点都是 O(n)）。
-
     ``period`` 是起伏周期（点数）：小图里的高密度曲线用更长周期，否则会挤成
     一条实心带子（7 天周期在 400px 宽、2000 点的格子里每周期只有 1.4px）。
     """
@@ -2066,8 +2047,8 @@ class ChartsPage(ExamplePage):
         """切换鼠标交互（提示框 / 图例 / 缩放 / 刷选 / 时间轴 / 工具箱）。
 
         走 ``chart.setInteractive`` 总开关：数据与绘制不变，仅鼠标交互失效。
-        **状态源是图表本身**（不是按钮文案）—— 曾经按文案取反，某个示例初始文案
-        写反了，第一次点击就把交互关掉、文案还不变（表现成「交互坏了」）。
+        **状态源是图表本身**（不是按钮文案）—— 按文案取反时，初始文案写反会让
+        第一次点击把交互关掉、文案还不变（表现成「交互坏了」）。
         **打开 = 全开**：总开关置 True 会清空逐功能覆盖，所以交互组件那节的
         逐功能勾选框要同步回勾上，否则界面与真实状态不符。
         """
@@ -2075,7 +2056,7 @@ class ChartsPage(ExamplePage):
         chart.setInteractive(not on)
         btn.setText("交互: 关" if on else "交互: 开")
         # 同一工作区里点某张图的按钮时，顶部总开关也要跟着同步（它读的是
-        # charts[0] 的状态；原先只在切工作区时刷新）。
+        # charts[0] 的状态；只在切工作区时刷新会不同步）。
         charts = self._active_charts()
         if charts and chart is charts[0]:
             self._interact_btn.setText("交互: 关" if on else "交互: 开")

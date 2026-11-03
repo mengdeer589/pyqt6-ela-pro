@@ -19,7 +19,6 @@ from ._shared import _axis_label, _datum_list, _fix_value_axis, _lerp
 
 class BoxplotSeriesRenderer(SeriesRenderer):
     """箱线图。数据项：[min, Q1, 中位, Q3, max]（或 {"value": [...]}）。
-
     ``barWidth``：箱体宽 px（缺省 band 的 50%，上限 28）；``itemStyle`` 的
     ``color`` / ``borderColor`` / ``borderWidth`` 控制箱体填充与描边。
     """

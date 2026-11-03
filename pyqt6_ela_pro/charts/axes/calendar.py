@@ -17,10 +17,8 @@ from .base import Coord
 
 class CalendarCoord(Coord):
     """日历坐标系：GitHub 式 周×星期 网格（ECharts ``calendar``）。
-
     ``calendar.range`` 收年份 / 月份 / 单日期 / ``[start, end]``，缺省当前年；
     ``orient`` 决定行列是否转置。``mapPoint(date)`` → 单元格中心，
-    ``cellRect(date)`` / ``dateAt(pos)`` 互查。
     """
 
     kind = "calendar"
@@ -51,7 +49,6 @@ class CalendarCoord(Coord):
         self._grid = QRectF()
         self._weeks = 1
 
-    # -- 选项 -------------------------------------------------------------
     @staticmethod
     def _parse_first_day(value) -> int:
         """``dayLabel.firstDay`` → 行号偏移（周日=6，周一=0）。默认周日在上。"""
@@ -145,7 +142,6 @@ class CalendarCoord(Coord):
             return date(first.year, 12, 31)
         return date(first.year, first.month + 1, 1) - timedelta(days=1)
 
-    # -- 日期工具 ---------------------------------------------------------
     @staticmethod
     def _parse_date(v):
         """ "YYYY-MM-DD" / date / (y, m, d) → datetime.date（失败 None）。"""
@@ -195,7 +191,6 @@ class CalendarCoord(Coord):
             return weekday_row, week_index
         return week_index, weekday_row
 
-    # -- 协议 -------------------------------------------------------------
     def layout(self, rect: QRectF) -> None:
         super().layout(rect)
         label_top = 16.0  # 月份 / 星期标签带

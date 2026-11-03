@@ -170,7 +170,6 @@ class _BubbleReasoningMixin:
 
     def reasoningBlock(self) -> ReasoningBlock:
         """获取当前折叠式思考块（``collapse`` 形态）。
-
         流式回合内没有段时按需创建；非流式且不存在思考段时抛 ``RuntimeError``
         —— 读取操作不凭空追加分段。
         """
@@ -191,7 +190,6 @@ class _BubbleReasoningMixin:
 
     def inlineReasoningViewer(self) -> ElaMarkdownViewer:
         """获取当前内联思考查看器（需先 ``setReasoningStyle(Inline)``）。
-
         与 :meth:`reasoningBlock` 同一契约：读取不建分段，形态不对或非流式且
         没有思考段时抛 ``RuntimeError``。
         """
@@ -269,7 +267,6 @@ class _BubbleReasoningMixin:
 
     def beginReasoning(self, partId: Optional[str] = None) -> None:
         """开始思考（折叠块展示「思考中」；内联形态附状态行）。
-
         同一步骤内重复开始会复用已有思考块继续追加；``partId`` 由
         :meth:`setParts` 传入时强制新建分段（恢复时保留原分段 id）。
         """

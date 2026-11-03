@@ -25,7 +25,6 @@ from ._shared import _assign_branch_colors, _build_hierarchy, _label_font, _pars
 
 class SunburstSeriesRenderer(SeriesRenderer):
     """旭日图（层级环形扇区，中心向外）。
-
     支持 ``data``（层级，value 缺省累计子级）/ ``radius`` / ``label``；
     ``anim_t`` 控制角扫掠展开，点击可下钻。
     """

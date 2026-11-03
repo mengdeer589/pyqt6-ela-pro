@@ -1,12 +1,4 @@
-"""pyqt6_ela_pro.charts：类 ECharts 原生图表引擎（纯 QPainter + Ela 主题）。
-
-包级导出 ``ElaChartWidget`` / ``registerSeries`` / ``registerComponent`` /
-``chartToken`` / ``chartThemes`` / ``registerChartTheme`` 等；实例 API 与 ECharts
-对齐（``camelCase``），详见 README 与 ``docs/charts.md``。
-
-``series[].data`` 的大数值数组按引用摄入（``ElaNumericBuffer``）：可直接传
-numpy（零拷贝），但传入后不得原地修改；``getOption()`` 仍返回普通 list。
-"""
+"""pyqt6_ela_pro.charts：类 ECharts 原生图表引擎（纯 QPainter + Ela 主题）。"""
 
 from .core import (
     COMPONENT_REGISTRY,

@@ -71,11 +71,9 @@ class _TagBoxThemeMixin:
 
 
 class _TagBoxAnimMixin:
-    """具名组合框动画与属性共享基类。
+    """标签框动画与属性共享基类。
 
-    提供 expandMarkWidth / expandIconRotate 属性、
-    动画初始化、setTitle / title 方法及主题切换支持。
-    子类必须在 __init__ 中调用 self._tag_box_init(title)。
+    子类必须在 ``__init__`` 里调用 ``self._tag_box_init(title)``。
     """
 
     _title_text: str
@@ -98,15 +96,13 @@ class _TagBoxAnimMixin:
         self._rotate_animation = QPropertyAnimation(self, b"expandIconRotate")
         self._rotate_animation.setEasingCurve(Easing.type_name(Easing.Standard))
 
-        # 与上游 ElaComboBox V3.0（35→30）的触发框同高，整套组合框族统一 30
+        # 组合框族统一高度 30px
         self.setFixedHeight(30)  # type: ignore[attr-defined]
         self._theme_mode = eTheme.getThemeMode()
 
-        # 连标准钩子名而不是自定义槽：本 mixin 在 MRO 最前，解析到的就是
-        # ``_onThemeChanged``，于是搜索框系列的 ``_ThemeAwareMixin`` 先连的那条
-        # 与这里连的是同一个 —— ``connect_theme_signal`` 的幂等守卫才正确。
-        # （曾经传的是 ``_on_tag_theme_changed``，那条连接被守卫静默吞掉，
-        #   ``_theme_mode`` 永不更新 → 深色主题下底色/边框仍是浅色。）
+        # 必须连标准钩子名 ``_onThemeChanged``：本 mixin 在 MRO 最前，搜索框系列
+        # ``_ThemeAwareMixin`` 先连的也是它，``connect_theme_signal`` 的幂等守卫
+        # 才认得出是同一条连接；换自定义槽名会被守卫静默吞掉。
         connect_theme_signal(self)
 
     @pyqtProperty(float)
@@ -180,10 +176,7 @@ class _TagBoxAnimMixin:
         self._run_animations(0.0, 0.0)
 
     def _theme_cleanup(self) -> None:
-        """断开主题单例信号（``connect_theme_signal`` 建立的连接，幂等）。
-
-        原名 ``_tag_box_delete_later`` 是误导 —— 它从不删除任何东西。
-        """
+        """断开 ``connect_theme_signal`` 建立的连接（幂等）。"""
         disconnect_theme(self)
 
     def deleteLater(self) -> None:  # type: ignore[attr-defined]
@@ -212,9 +205,7 @@ def _get_target_mark_width(widget) -> float:
 
 # ── paint 辅助函数 ──────────────────────────────────────────────
 
-#: 触发框可见面与控件边缘的内缩（px）。与上游 ``ElaComboBox`` V3.0 的
-#: ``comboBoxRect.adjust(1, 1, -1, -1)`` 同值（V3.0 起 combo 从
-#: ``_shadowBorderWidth`` 收到 1px，见 ``ElaComboBoxStyle.cpp``）。
+#: 触发框可见面与控件边缘的内缩（px）
 _TAG_FACE_INSET = 1
 
 #: 标题起点（与标题/值文本共用的左侧基线）
@@ -276,7 +267,6 @@ def _draw_tag_title(
     font,
 ) -> QRect:
     """绘制标题文本，返回标题区域 QRect。
-
     宽度按**标题字号**量（不是 widget 字号），无标题时只保留左侧基线 ——
     否则值文本会被推到 ``left + 19`` 的空位上。
     """

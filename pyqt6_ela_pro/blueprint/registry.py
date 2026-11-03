@@ -1,24 +1,4 @@
-"""
-蓝图注册表（扩展性核心）。
-
-- ``ElaNodeSpec``：节点类型描述（引脚、分类、强调色、自定义体构建器、描述）；
-- ``ElaNodeRegistry``：单例注册表，``register`` / ``create`` / ``specs`` /
-  ``categories`` / ``search``；
-- ``register_node_type``：一行代码注册节点类型的便捷函数；
-- ``PIN_COLORS`` / ``register_pin_type`` / ``pin_color``：引脚类型配色。
-
-``body_builder`` 是最重要的扩展点：签名为
-``Callable[[ElaBlueprintNode, QWidget], None]``，第二个参数是节点体容器
-（透明背景、自带垂直布局 ``container.layout()``）。
-
-命名空间（owner）隔离：注册 / 查询 / 创建可携带 ``owner`` 划定命名空间，
-同名类型在不同 owner 下互不影响；``owner=None`` 为全局命名空间。
-指定 owner 的查询 / 创建范围为「该 owner + 全局」。
-
-移植自 InstructionX_UIKit.blueprint.registry（原库为 PyQt6，
-类名 Ela* 前缀；主题令牌经 blueprint._tokens 适配 eTheme；原库无 LICENSE，
-保留出处）。
-"""
+"""蓝图注册表（扩展性核心）。"""
 
 from dataclasses import dataclass, field
 import logging
@@ -42,9 +22,7 @@ __all__ = [
 ]
 
 
-# ---------------------------------------------------------------------------
 # 引脚类型配色
-# ---------------------------------------------------------------------------
 
 #: 引脚类型 → 颜色。值可以是令牌键（如 ``"success"`` 即 ``color.success``）
 #: 或 ``#hex`` 颜色字符串。``exec`` 为执行流引脚（浅灰白）。
@@ -64,13 +42,10 @@ def register_pin_type(name: str, color: str) -> None:
 
     :param name: 类型名（``ElaPin.data_type`` 使用的键，如 ``"audio"``）
     :param color: 令牌键（``"success"`` 等）或 hex
-    :raises ValueError: 颜色既不是合法 ``QColor`` 字面量也不是已知令牌
-        （``name`` 不能覆盖内置的 ``"any"``，否则兜底链就断了）
+    :raises ValueError: 颜色非法，或试图覆盖内置兜底 ``"any"``
 
-    **必须注册期校验**：``pin_color()`` 只在绘制期被调用（``node_widget``
-    ``_draw_pins``、``edge_widget`` ``_color`` / ``draw``，全在 ``paintEvent``
-    链上），而 ``T()`` 对未知键抛 ``KeyError`` —— 不校验就等于把「宿主填错
-    了一个词」变成**绘制时静默终止进程**。
+    **必须注册期校验**：``pin_color()`` 只在 ``paintEvent`` 链上被调用，
+    非法值到那里就成了绘制时静默终止进程。
     """
     key = str(name)
     if key == "any":
@@ -84,15 +59,8 @@ def register_pin_type(name: str, color: str) -> None:
 
 def _resolve_pin_color(name: str, value: str) -> str:
     """把一个引脚配色值解析成 hex 字符串；非法就地抛 ``ValueError``。
-
-    两种合法形态：``T()`` 认识的令牌键，或 ``QColor`` 认识的颜色字面量
-    （``#rrggbb`` / SVG 具名色如 ``"red"``）。
-
-    **注意 ``rgb(1,2,3)`` 不合法**：``QColor`` 只吃 ``#rrggbb`` 与具名色，
-    不解析 CSS 函数记法（实测 ``QColor("rgb(1,2,3)").isValid()`` 为
-    ``False``）。原先这里有句 ``value.startswith("rgb")`` 就原样放行，
-    结果是下游 ``QColor(...)`` 拿到**无效色静默变黑** —— 引脚看上去「没
-    上色」而零报错。
+    合法形态：``T()`` 认识的令牌键，或 ``QColor`` 认识的颜色字面量
+    （``#rrggbb`` / 具名色）。``QColor`` 不解析 ``rgb(1,2,3)``，放行会得到
     """
     try:
         return str(T(f"color.{value}"))
@@ -127,9 +95,7 @@ def pin_color(data_type: str) -> str:
         return _resolve_pin_color(data_type, PIN_COLORS["any"])
 
 
-# ---------------------------------------------------------------------------
 # 节点类型描述
-# ---------------------------------------------------------------------------
 
 
 def pin(
@@ -139,7 +105,6 @@ def pin(
     multi: bool = False,
 ) -> dict:
     """声明一个引脚（``register_node_type`` 的 ``inputs`` / ``outputs`` 条目）。
-
     比手写 ``{"id": ..., "name": ..., ...}`` 简短得多；``inputs=pin(...)``
     且只有一个引脚时可以直接传单个（``ElaNodeSpec`` 会归一成列表）。
     """
@@ -163,10 +128,8 @@ def _as_pin_list(pins) -> list:
 @dataclass
 class ElaNodeSpec:
     """节点类型描述（注册表条目）。
-
     ``inputs`` / ``outputs`` 是引脚字典列表（用 ``pin(...)`` 声明）；
     ``accent`` 是标题栏强调色（令牌键或 hex，``None`` 用默认灰）；
-    ``body_builder`` 为 ``None`` 时按 properties 键值对展示节点体。
     """
 
     type_name: str
@@ -185,14 +148,11 @@ class ElaNodeSpec:
         self.outputs = _as_pin_list(self.outputs)
 
 
-# ---------------------------------------------------------------------------
 # 注册表（单例）
-# ---------------------------------------------------------------------------
 
 
 class ElaNodeRegistry:
     """节点类型注册表（单例），内部以 ``(owner, type_name)`` 为键。
-
     ``owner=None`` 为全局命名空间；各插件 / 模块可传自己的 owner 注册
     同名类型而互不覆盖。指定 owner 的查询 / 创建范围为「该 owner + 全局」。
     """
@@ -210,14 +170,10 @@ class ElaNodeRegistry:
             cls._instance = cls()
         return cls._instance
 
-    # -- 注册 ------------------------------------------------------------
     def register(self, spec: ElaNodeSpec, owner: str = None) -> ElaNodeSpec:
         """注册节点类型（同命名空间内同 ``type_name`` 覆盖），返回 ``spec``。
-
         注册期校验引脚定义（``inputs`` / ``outputs`` 的每项必须是带非空
-        ``id`` 的字典）：缺 id 的定义会在 ``create()`` 里抛 ``KeyError``，
         而 ``create`` 常在菜单 / 拖线回调（Qt 槽）里被调用 —— 槽内异常 =
-        0xC0000409 零 traceback 终止。注册是唯一能给出清晰报错的时机。
         """
         if not spec.type_name:
             raise ValueError("ElaNodeSpec.type_name 不能为空")
@@ -251,11 +207,8 @@ class ElaNodeRegistry:
 
     def unregister(self, type_name: str, owner: str = None) -> bool:
         """注销节点类型；不存在返回 ``False``。
-
         **给了 ``owner`` 就只删那个命名空间里的那条**，删不到就返回 ``False`` ——
         绝不退到全局那条：查询时「owner + 全局」是**读取**的宽松（找不到全局能
-        顶上），删除上这么宽松就等于「插件注销自己命名空间」把别人的全局类型删了，
-        之后 ``create()`` 直接 KeyError。
         """
         key = (owner, type_name)
         return self._specs.pop(key, None) is not None
@@ -284,7 +237,6 @@ class ElaNodeRegistry:
             )
         return hits[0] if hits else None
 
-    # -- 查询 ------------------------------------------------------------
     def _scoped_specs(self, owner: str = None) -> list:
         """按 owner 取范围内的 spec（None 全空间，否则该 owner + 全局）。"""
         if owner is None:
@@ -320,10 +272,8 @@ class ElaNodeRegistry:
                 result.append(spec)
         return result
 
-    # -- 创建 ------------------------------------------------------------
     def create(self, type_name: str, owner: str = None) -> ElaBlueprintNode:
         """按类型创建 ``ElaBlueprintNode``：引脚 / 标题 / 强调色按 spec 就位。
-
         未注册的类型抛 ``KeyError``。``body_builder`` 不在此调用——它由
         ``ElaNodeWidget`` 在构建节点体时执行（UI 层职责）。
         """
@@ -362,16 +312,7 @@ def register_node_type(
 ) -> ElaNodeSpec:
     """便捷函数：一行注册节点类型（等价 ``ElaNodeRegistry.instance().register``）。
 
-    ``inputs`` / ``outputs`` 既接受列表，也接受**单个** ``pin(...)``：
-
-    .. code-block:: python
-
-        register_node_type(
-            "encoder", "编码器", "模型",
-            inputs=pin("batch", "批次", "tensor"),
-            outputs=pin("hidden", "Hidden", "tensor"),
-            accent="warning",
-        )
+    ``inputs`` / ``outputs`` 既接受列表，也接受单个 ``pin(...)``。
     """
     spec = ElaNodeSpec(
         type_name=type_name,

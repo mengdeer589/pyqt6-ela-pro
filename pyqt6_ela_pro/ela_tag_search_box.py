@@ -24,16 +24,8 @@ from ._internal import hideComboboxPopup
 class ElaTagSearchBox(_TagBoxThemeMixin, _TagBoxAnimMixin, ElaSearchBox):
     """具名可搜索下拉框。
 
-    带有标题标签的可搜索下拉框，支持汉字原文、全拼与拼音首字母搜索。
-    继承自 ElaSearchBox，使用胶囊样式。
-
     :param title: 标题文字
     :param parent: 父控件
-
-    Example::
-
-        combo = ElaTagSearchBox(title="语言", parent=parent)
-        combo.addItems(["Python", "C++", "JavaScript", "上海", "北京"])
     """
 
     def __init__(

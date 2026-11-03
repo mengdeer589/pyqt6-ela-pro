@@ -1,9 +1,4 @@
-"""流式事件 → 聊天组件映射器：把分轮流式事件翻译成 :class:`ElaChatWidget` 的分步 API。
-
-回合边界：``beginTurn`` 之前 / ``finish`` 之后到达的分片、工具、用量与错误一律忽略。
-回合 token：``startTurn`` 返回后端的回合 token，``finish`` 必须带上同一个 ——
-迟到的 ``turnFinished``（后端 ``cancel()`` 异步）会被丢弃并返回 ``None``。
-"""
+"""流式事件 → 聊天组件映射器：把分轮流式事件翻译成 :class:`ElaChatWidget` 的分步 API。"""
 
 from __future__ import annotations
 
@@ -24,7 +19,6 @@ logger = logging.getLogger(__name__)
 
 def _guarded(callback: Callable) -> Callable:
     """把回调包成「抛异常也不会穿过 C++ 边界」的形状（支持带参信号）。
-
     Qt 回调里未捕获的异常直接 0xC0000409 静默终止，且槽异常不会传回 ``emit()``；
     唯一防线是在连接时就把槽包起来。
     """
@@ -113,14 +107,10 @@ class ElaChatStreamBinder:
         if worker is not None:
             self.connectWorker(worker)
 
-    # -- 后端接线 ----------------------------------------------------------
-
     def connectWorker(self, worker) -> None:
         """绑定后端并自动接线机械信号（等价于宿主手写 6 条 connect）。
-
         连接 ``llmStarted`` / ``chunkReceived`` / ``toolStarted`` / ``toolEnded`` /
         ``statsReady`` / ``emptyTurn``；UI 决策的 ``ready`` / ``failed`` /
-        ``errorOccurred`` / ``turnFinished`` 仍由宿主自行连接。幂等，换绑先解旧的。
         """
         if worker is self._worker:
             return
@@ -196,10 +186,6 @@ class ElaChatStreamBinder:
             return True
         shutdown()
         return bool(wait(int(timeoutMs)))
-
-    # -- 回合与轮次 --------------------------------------------------------
-
-    # -- 运行态活动行 ------------------------------------------------------
 
     def setAutoActivity(self, on: bool = True) -> None:
         """开关「自动维护时间线活动行」（默认开）。"""
@@ -303,7 +289,6 @@ class ElaChatStreamBinder:
 
     def beginTurn(self, turn: Optional[int] = None) -> int:
         """开始一个回合（宿主提交提问 / 重新生成时调用），返回回合 token。
-
         ``turn`` 是后端 token；宿主自己 ``ask`` 后不走 :meth:`startTurn` 时把它
         传进来。都不传时本地自增一个，返回值同样要交给 :meth:`finish`。
         """
@@ -329,7 +314,6 @@ class ElaChatStreamBinder:
 
     def beginRound(self) -> None:
         """开始一轮 LLM 调用（第 2 轮起自动开启新步骤）。
-
         回合外的迟到事件一律忽略。**这里是 steer（插话）的投递点** ——
         ``beginStep`` 之前是「上一步工具都跑完了」的安全边界，一次只投一条。
         """
@@ -357,7 +341,6 @@ class ElaChatStreamBinder:
 
     def isOpen(self) -> bool:
         """是否处于回合中（``beginTurn`` 之后、``finish`` 之前）且有目标消息。
-
         判据是显式的 ``_turn_open`` 标志，不是 ``_turn_start != 0.0``：``clock``
         可注入，返回 0.0 的假时钟会让整回合被静默丢弃。
         """
@@ -366,8 +349,6 @@ class ElaChatStreamBinder:
     def roundIndex(self) -> int:
         """当前回合内的 LLM 轮次序号（从 1 开始）。"""
         return self._round
-
-    # -- 内容分片 ----------------------------------------------------------
 
     def reasoning(self, text: str) -> None:
         """追加推理分片（同一轮复用同一思考段；回合外忽略）。"""
@@ -382,7 +363,6 @@ class ElaChatStreamBinder:
 
     def answer(self, text: str) -> None:
         """追加正文分片（自动结束当前推理段；回合外忽略）。
-
         纯空白分片不算正文：不置 ``_had_text``、不结束思考段；开段与否由气泡
         按首个非空白分片决定，中段空白照常保留。
         """
@@ -397,10 +377,8 @@ class ElaChatStreamBinder:
 
     def stream(self, chunk) -> None:
         """分派流式分片（兼容 ``AgentOutput`` / ``ElaChatMockChunk``）。
-
         依次读取 ``reasoning_content`` / ``answer_content`` 属性，非空则转给
         :meth:`reasoning` / :meth:`answer`；可直接接到
-        ``worker.chunkReceived.connect(binder.stream)``。
         """
         reasoning = getattr(chunk, "reasoning_content", "") or ""
         answer = getattr(chunk, "answer_content", "") or ""
@@ -408,8 +386,6 @@ class ElaChatStreamBinder:
             self.reasoning(reasoning)
         if answer:
             self.answer(answer)
-
-    # -- 工具调用 ----------------------------------------------------------
 
     def toolStart(self, callId: str, name: str, arguments="") -> None:
         """工具调用开始（``arguments`` 支持 dict 或 JSON 字符串；回合外忽略）。"""
@@ -442,7 +418,6 @@ class ElaChatStreamBinder:
 
     def toolCallStarted(self, toolCall: dict) -> None:
         """工具调用开始（OpenAI 风格 ``tool_call`` dict，可直接连信号）。
-
         取 ``id`` 与 ``function.name`` / ``function.arguments`` 转给
         :meth:`toolStart`。
         """
@@ -464,8 +439,6 @@ class ElaChatStreamBinder:
             return
         self.toolEnd(toolCall.get("id") or "", result)
 
-    # -- 用量与错误 --------------------------------------------------------
-
     def stats(self, usage, ttftMs: float = 0.0, tps: float = 0.0) -> None:
         """写入当前步骤用量（兼容 OpenAI ``usage`` 或 :class:`ElaChatStats`）。
 
@@ -483,7 +456,6 @@ class ElaChatStreamBinder:
 
     def error(self, errorType: str, message: str) -> None:
         """写入错误（结束当前推理段并置错误卡片；回合外忽略）。
-
         ``errorType`` 原样传给 view，不拼进文案 —— 错误卡靠它判断该不该给「重试」，
         类型信息拼进自然语言就再也取不回来了。
         """
@@ -499,8 +471,6 @@ class ElaChatStreamBinder:
         if not self.isOpen():
             return
         self._finish_reason = str(finishReason or "")
-
-    # -- 结束 --------------------------------------------------------------
 
     def cancel(self) -> None:
         """停止生成：收尾当前思考段，并让 :meth:`finish` 默认按 ``Stopped`` 收尾。
@@ -583,8 +553,6 @@ class ElaChatStreamBinder:
             return summary
         finally:
             self._chat.setAutoSendQueue(autoSend)
-
-    # -- 内部 --------------------------------------------------------------
 
     def _endReasoning(self) -> None:
         if not self._reasoning_open:

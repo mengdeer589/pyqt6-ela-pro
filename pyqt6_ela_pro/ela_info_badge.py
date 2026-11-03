@@ -1,22 +1,4 @@
-"""
-角标组件，风格参考 ElaWidgetTools 的 ElaInfoBadge。
-
-支持 Dot（圆点）、Value（数值）、Icon（图标）三种模式，
-5 种严重级别颜色，可附加到任意目标控件的右上角。
-
-用法::
-
-    from pyqt6_ela_pro import ElaInfoBadge
-
-    badge = ElaInfoBadge(parent=self)
-    badge.attachTo(some_button)
-
-    badge_val = ElaInfoBadge(value=5, parent=self)
-    badge_val.attachTo(some_button)
-
-    badge_icon = ElaInfoBadge(icon=ElaIconType.IconName.Gear, parent=self)
-    badge_icon.attachTo(some_button)
-"""
+"""角标组件，风格参考 ElaWidgetTools 的 ElaInfoBadge。"""
 
 from __future__ import annotations
 
@@ -36,10 +18,8 @@ from .widget_base import ElaThemeWidget
 
 class ElaInfoBadge(ElaThemeWidget):
     """角标组件。
-
     可附加到任意控件的右上角，支持 Dot / Value / Icon 三种显示模式，
     以及 Attention / Informational / Success / Caution / Critical 五种严重级别。
-    ``value`` / ``icon`` 构造参数决定初始进入哪种模式。
     """
 
     class ElaBadgeModeType(IntEnum):

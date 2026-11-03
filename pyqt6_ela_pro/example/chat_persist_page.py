@@ -1,26 +1,4 @@
-"""
-[pyqt6_ela_pro] 持久化与性能页
-
-这一页把「回合记成事件流重放」与「大消息量的三条开关」**变成能跑的演示** ——
-此前它们只在 API 指南里有代码，读者看不到实际效果。
-
-三节：
-
-1. **回合日志（``ElaChatTurnJournal``）** —— 把一轮回答记成**追加写事件流**，
-   一行一条 JSON。三条设计：① ``_push`` 记事件的同时 ``_apply`` 它（记录与
-   重放共用一条路径，``message()`` 随时给「已收到的部分」）；② 浮点在**记录端**
-   就洗掉；③ ``loadsLine`` 对截断 / 非法 JSON 返回 ``None``，``fromLines`` 跳过
-   未知事件。本页把同一轮回答分别「实时跑一遍」与「从日志重放一遍」并排显示，
-   可以直接看出两者是否一致。
-2. **会话导出 / 导入** —— ``view.exportSession()`` / ``importSession()`` /
-   ``addMessageFromDict()`` / ``restoreMessages(preserveIds=True)``。
-   ``preserveIds=True`` 会**先全量校验再写入**，一条不落（撞 id 直接抛
-   ``ValueError``，不静默重号）。
-3. **大消息量三条开关** —— 交互 resize 延迟重排、历史加载 ``beginBatch``、
-   视口外消息挂起重型查看器。
-
-「会话」（多话题 UI）在另一个工作区。
-"""
+"""[pyqt6_ela_pro] 持久化与性能页?"""
 
 from PyQt6.QtWidgets import QHBoxLayout, QVBoxLayout
 
@@ -84,7 +62,6 @@ class ChatPersistPage(ExamplePage):
 
         self._run_round()
 
-    # -- 对照区 ------------------------------------------------------------
 
     def _column(self, title, key):
         box = QVBoxLayout()
@@ -96,7 +73,6 @@ class ChatPersistPage(ExamplePage):
 
     def _say(self, key, text):
         """更新某一节的说明行。
-
         前缀取自 ``self._titles``（固定标题），**不能拿当前文本切前缀** ——
         说明文字里没有冒号时切出来还是整段，于是每次追加都把上一条又带一遍。
         """
@@ -121,13 +97,10 @@ class ChatPersistPage(ExamplePage):
             return
         self._chat.setFixedHeight(target)
 
-    # ================================================================ 一轮
     def _run_round(self):
         """跑一轮**带日志**的回答：左边实时显示，右边留待重放。
-
         走 widget 层入口（``sendUserMessage`` + ``beginAssistantMessage``），
         别直接 ``view.beginMessage`` —— 否则 widget 不知道当前流式消息是哪条，
-        底部行 / 贴底 / 生成态都不工作。
         """
         self._chat.sendUserMessage(_PROMPT)
         messageId = self._chat.beginAssistantMessage()
@@ -184,7 +157,6 @@ class ChatPersistPage(ExamplePage):
         self._journal.end()
         self._say("live", f"{len(self._journal.events())} 条事件已记录")
 
-    # ================================================================ 01 日志
     def _section_journal(self):
         box = QVBoxLayout()
         box.setSpacing(6)
@@ -214,18 +186,9 @@ class ChatPersistPage(ExamplePage):
         return box
 
     def _demo_journal(self) -> None:
-        """``ElaChatTurnJournal``：把一轮回答记成**追加写事件流**。
-
-        - **记录与重放共用一条路径**：``_push`` 记下事件的同时就 ``_apply`` 它，
-          所以 ``message()`` 随时能给出「已收到的部分」，而不是等回合结束；
-        - 浮点在**记录端**洗掉（``_float``）—— 事后清洗就来不及，
-          ``NaN`` / ``inf`` 会破坏 ``allow_nan=False`` 的 JSON 输出；
-        - ``loadsLine`` 对截断 / 非法 JSON 返回 ``None``，``fromLines`` 跳过
-          未知事件、``settleOpen=True`` 结算残留（未完成工具 → ``Aborted``，
-          出错回合 → ``Error``）。
-
-        失败工具的 ``part.status`` 保持 ``Done``，失败只由
-        ``tool_call.status`` 承载 —— journal 必须照抄这条。
+        """``ElaChatTurnJournal``：把一轮回答记成追加写事件流。
+        记录与重放共用一条路径，``message()`` 随时给出已收到部分；浮点在记录端洗掉；
+        ``loadsLine`` 对截断 / 非法 JSON 返回 ``None``，``fromLines`` 跳过未知事件。
         """
         journal = ElaChatTurnJournal(messageId=self._chat.beginAssistantMessage())
         journal.text("增量分片")
@@ -241,7 +204,7 @@ class ChatPersistPage(ExamplePage):
         view = self._chat.chatView()
         lines = self._journal.dumps().splitlines()  # dumps() 是一个字符串，一行一条
         journal = ElaChatTurnJournal.fromLines(lines)
-        # **先清空**：journal 里记的是**当时的 messageId**，直接重放会和
+        # **先清空**：journal 里记的是**记录时的 messageId**，直接重放会和
         # 现有的那条撞 id（addMessageFromDict 抛 ValueError）。这正好也是
         # 崩溃恢复的真实场景 —— 进程重启后本来就没有旧消息。
         view.clear()
@@ -286,7 +249,6 @@ class ChatPersistPage(ExamplePage):
             return
         self._say("journal", f"{len(self._journal.events())} 条事件（dumps 一行一条）")
 
-    # ================================================================ 02 会话
     def _section_session(self):
         box = QVBoxLayout()
         box.setSpacing(6)
@@ -315,19 +277,8 @@ class ChatPersistPage(ExamplePage):
 
     def _demo_session(self) -> None:
         """整会话导出 / 导入，以及按条恢复。
-
-        - ``exportSession(session, extra)`` / ``importSession(bundle, clear=)``：
-          bundle = 会话元数据 + ``messages`` + ``view`` 外观段（**头像来源与
-          主题不导出**）。``clear=True`` 清空后按**原 id** 恢复，
-          ``clear=False`` 追加且重新分配 id；
-        - ``restoreMessages(items, preserveIds=True)`` —— **先全量校验再写入**，
-          一条不落：撞 id 直接抛 ``ValueError``，不静默重号（静默重号会让迟到的
-          事件命中另一条消息，是极难查的串号 bug）；
-        - ``addMessageFromDict(data, messageId=)`` 单条恢复，沿用存储 id。
-
-        助手消息的派生字段（``text`` / ``reasoning`` / ``tool_calls`` /
-        ``stats``）**不信存储值**，一律由 ``withParts()`` 重算 —— 否则版本升级
-        改了派生规则，旧数据会显示成旧格式。
+        ``exportSession`` / ``importSession`` 的 bundle 含元数据、消息与外观段；
+        ``restoreMessages`` 先全量校验再写入，撞 id 抛 ValueError；助手派生字段
         """
         view = self._chat.chatView()
         bundle = view.exportSession(ElaChatSessionInfo(id="s1", title="话题"))
@@ -379,7 +330,6 @@ class ChatPersistPage(ExamplePage):
         except ValueError as exc:
             self._say("session", f"撞 id 了，直接抛错而不是静默重号：{exc}")
 
-    # ================================================================ 03 性能
     def _section_perf(self):
         box = QVBoxLayout()
         box.setSpacing(6)
@@ -466,7 +416,6 @@ class ChatPersistPage(ExamplePage):
             "视口外消息挂起重型查看器，挂起时 bubble.markdownViewer() 返回 None",
         )
 
-    # ================================================================ 04 视图状态
     def _section_view_state(self):
         box = QVBoxLayout()
         box.setSpacing(6)
@@ -534,7 +483,6 @@ class ChatPersistPage(ExamplePage):
             f"disclosure={len(disclosure)} 项, draft={draft.get('text')!r}",
         )
 
-    # ---------------------------------------------------------------- 工具
     def _fire(self, label, callback):
         def run():
             self._active_note = label

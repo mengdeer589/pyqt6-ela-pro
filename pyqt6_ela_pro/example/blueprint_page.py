@@ -1,25 +1,4 @@
-"""
-[pyqt6_ela_pro] ElaBlueprintCanvas 节点图编辑器页面
-
-以**多模态 LLM 平台全景**为例（纯 UI，不执行任何训练）：50 节点 / 70 连线，
-10 列树形布局（节点按上下游分支自由展开，不是等距网格）—— 数据源 → 预处理 → 编码器 → 多模态主干 → 输出头 → 损失 →
-All-Reduce / 累积 / 优化 → 运维 → 交付。每节都能点 ``</> 代码`` 看该节用到的
-公开 API，标题行的「播放」按钮按脚本演示本节能力：
-
-1. 多模态平台全景：``register_node_type`` / ``register_pin_type`` /
-   ``create_node`` / ``node.connect`` / ``fit_view``（播放会逐个重建整张图）；
-2. 训练过程模拟：``execution().set_path / start / finish / fail`` +
-   ``ElaBlueprintNode.set_progress``（节点底部进度条）+ 流动边 + 指标面板；
-3. 分布式训练编排：第二张「扇出 → 扇入」DAG（分片 / rank / All-Reduce /
-   梯度累积 / 余弦调度 / EMA / 导出），连线标签 ``connect(..., label=...)``；
-4. 自定义节点体与编辑交互：``body_builder`` 里的 ``ElaComboBox`` /
-   ``ElaSpinBox``、网格吸附 ``set_grid_snap``、复制 / 全选 / 方向键微调、
-   右键连线删除、``set_edge_label``；
-5. 保存与恢复：``canvas.to_dict`` / ``canvas.from_dict``（播放走内存快照）。
-
-节点体里的控件是可交互的（信号写回 ``node.properties``）；拖动节点走标题栏、
-引脚行或体空白处。
-"""
+"""[pyqt6_ela_pro] ElaBlueprintCanvas 节点图编辑器页面?"""
 
 import json
 import os
@@ -165,7 +144,6 @@ class BlueprintPage(ExamplePage):
         except Exception:  # noqa: BLE001 —— 见 docstring
             traceback.print_exc()
 
-    # ================================================================ 01 流水线
     def _demoPipeline(self, main_layout):
         """01. 50 节点多模态 LLM 平台图（数据 → 模型 → 损失 → 训练 → 交付）。"""
         main_layout.addLayout(
@@ -539,7 +517,6 @@ class BlueprintPage(ExamplePage):
         self._canvas.fit_view()
         main_layout.addWidget(self._canvas)
 
-    # ================================================================ 02 训练
     def _demoTraining(self, main_layout):
         """02. 训练过程模拟：运行态 / 节点进度 / 流动边 / 指标。"""
         main_layout.addLayout(
@@ -642,7 +619,6 @@ class BlueprintPage(ExamplePage):
 
         self._build_training_steps = build_steps
 
-    # ================================================================ 03 分布式
     def _demoDistributed(self, main_layout):
         """03. 分布式训练编排：分片 → 多 rank → All-Reduce → 累积 / 优化 / EMA。"""
         main_layout.addLayout(
@@ -827,7 +803,6 @@ class BlueprintPage(ExamplePage):
         self._dist_note.setTextPixelSize(12)
         main_layout.addWidget(self._dist_note)
 
-    # ================================================================ 04 编辑
     def _demoNodeBody(self, main_layout):
         """04. 自定义节点体 + 编辑交互（吸附 / 复制 / 微调 / 连线菜单）。"""
         main_layout.addLayout(
@@ -932,7 +907,6 @@ class BlueprintPage(ExamplePage):
         label_row.addStretch()
         main_layout.addLayout(label_row)
 
-    # ================================================================ 05 持久化
     def _demoPersistence(self, main_layout):
         """05. 保存与恢复：canvas.to_dict / canvas.from_dict。"""
         main_layout.addLayout(
@@ -1026,7 +1000,6 @@ class BlueprintPage(ExamplePage):
             self._nodes[name] for name in _TRAIN_ORDER if name in self._nodes
         ]
 
-    # ================================================================ 播放入口
     def _stop_playbacks(self):
         """停掉所有节播放（只停脚本，不复位节点状态）。"""
         for player in (self._section_player, self._train_player):
@@ -1043,7 +1016,6 @@ class BlueprintPage(ExamplePage):
         self._train_chain = []
         self._section_player.play_now(self._pipeline_play_steps())
 
-    # -- 01 重建大图 ------------------------------------------------------
     def _playPipeline(self):
         """01 播放：清空画布，逐个节点 / 连线重建 50 节点图。"""
         self._stop_playbacks()
@@ -1095,7 +1067,6 @@ class BlueprintPage(ExamplePage):
             f"{len(self._canvas.graph.edges())} 连线。"
         )
 
-    # -- 03 分布式回放 ----------------------------------------------------
     def _playDistributed(self):
         """03 播放：按 rank 顺序回放执行状态。"""
         self._stop_playbacks()
@@ -1128,7 +1099,6 @@ class BlueprintPage(ExamplePage):
         if self._dist_note is not None:
             self._dist_note.setText(text)
 
-    # -- 04 编辑交互 ------------------------------------------------------
     def _playEditing(self):
         """04 播放：开吸附 → 全选 → 微调 → 写连线标签 → 适应视图。"""
         self._stop_playbacks()
@@ -1151,7 +1121,6 @@ class BlueprintPage(ExamplePage):
         steps.append((0, canvas.fit_view))
         return steps
 
-    # -- 05 保存与恢复 ----------------------------------------------------
     def _playPersistence(self):
         """05 播放：内存快照 → 清空画布 → from_dict 恢复。"""
         self._stop_playbacks()
@@ -1200,7 +1169,6 @@ class BlueprintPage(ExamplePage):
         if self._persist_note is not None:
             self._persist_note.setText(text)
 
-    # ================================================================ 训练控制
     def _run_training(self):
         """重播训练模拟（先复位，再按脚本推进）。"""
         self._stop_playbacks()
@@ -1266,7 +1234,6 @@ class BlueprintPage(ExamplePage):
         if self._train_note is not None:
             self._train_note.setText(text)
 
-    # ================================================================ 节点菜单
     def _rename_node(self, node_id):
         """右键「重命名」：非模态小对话框改标题（示例接法）。"""
         node = self._canvas.graph.node(node_id)
@@ -1312,7 +1279,6 @@ class BlueprintPage(ExamplePage):
             self.window(),
         )
 
-    # ================================================================ 页面装配
     def _addDemoContent(self, main_layout):
         self._addInfoText(
             "以多模态 LLM 平台为例（仅 UI）：右键空白创建节点、拖引脚连线、"

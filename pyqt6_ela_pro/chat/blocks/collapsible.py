@@ -83,7 +83,7 @@ class _CollapsibleBlock(_ThemeAwareMixin, ElaScrollPageArea):
         self._title_label.setWordWrap(False)
         # 折叠块标题含外部数据（工具名 / 审批 action）—— 一律纯文本渲染
         self._title_label.setTextFormat(Qt.TextFormat.PlainText)
-        #: 运行指示按需创建：历史里多数折叠块从未运行，构造期就建 ElaProgressRing 是纯浪费。
+        #: 运行指示按需创建：多数折叠块从不运行，构造期建 ElaProgressRing 纯浪费。
         self._busy: Optional[ElaProgressRing] = None
         self._busy_on = False
         self._header_layout.addWidget(self._chevron)
@@ -102,8 +102,6 @@ class _CollapsibleBlock(_ThemeAwareMixin, ElaScrollPageArea):
         self._header.toggled.connect(self._on_toggled)
         self._sync_chevron()
         self._apply_theme()
-
-    # -- 内容 --------------------------------------------------------------
 
     def setTitle(self, text: str) -> None:
         """设置标题文本。"""
@@ -152,9 +150,8 @@ class _CollapsibleBlock(_ThemeAwareMixin, ElaScrollPageArea):
 
     def setBusy(self, on: bool) -> None:
         """显示 / 隐藏运行中指示（控件按需创建）。
-
-        关闭时必须 ``setIsBusying(False)``：``ElaProgressRing`` 的动画由 ``IsBusying``
-        驱动，仅隐藏控件会留下两个 QPropertyAnimation 永久空转。
+        关闭时必须 ``setIsBusying(False)``：仅隐藏控件会留下两个 QPropertyAnimation
+        永久空转。
         """
         on = bool(on)
         self._busy_on = on
@@ -225,9 +222,8 @@ class _CollapsibleBlock(_ThemeAwareMixin, ElaScrollPageArea):
 
     def _relayoutAncestors(self) -> None:
         """同步刷新祖先布局链。
-
-        ``updateGeometry`` 逐级投递 ``LayoutRequest`` 会分 2-3 帧逐级收缩（展开 / 收起时
-        肉眼可见抖动）；这里从自身向上依次激活，让整条链在同一帧完成重排。
+        ``updateGeometry`` 逐级投递 ``LayoutRequest`` 会分帧收缩（肉眼可见抖动）；
+        这里从自身向上依次激活，让整条链同帧重排。
         """
         widget = self
         for _ in range(32):  # 防御：避免异常父链导致死循环
@@ -246,8 +242,6 @@ class _CollapsibleBlock(_ThemeAwareMixin, ElaScrollPageArea):
             else ElaIconType.IconName.ChevronRight
         )
         self._chevron.setAwesome(icon)
-
-    # -- 外观 --------------------------------------------------------------
 
     def paintEvent(self, event) -> None:  # noqa: N802 (Qt 命名)
         if self._surface:
@@ -283,8 +277,6 @@ class ReasoningBlock(_CollapsibleBlock):
         self.bodyLayout().addWidget(self._label)
         self._apply_theme()
 
-    # -- 流式 --------------------------------------------------------------
-
     def begin(self) -> None:
         """进入思考状态（展开并显示「思考中」与运行指示）。"""
         self.setText("")
@@ -296,8 +288,8 @@ class ReasoningBlock(_CollapsibleBlock):
         """结束思考，标题显示耗时并自动收起。"""
         self._flush_chunks()
         self.setBusy(False)
-        # 宿主可能传非数值（恢复历史时 JSON 里的 "1.2s"），算术会抛异常；
-        # 本方法常在信号槽里被调用，异常穿出 Qt 回调 = 0xC0000409。
+        # 宿主可能传非数值（如 JSON 里的 "1.2s"），算术会抛异常；本方法常在信号槽中
+        # 被调用，异常穿出 Qt 回调 = 0xC0000409。
         try:
             millis = float(durationMs) if durationMs else 0.0
         except (TypeError, ValueError, OverflowError):
@@ -321,8 +313,6 @@ class ReasoningBlock(_CollapsibleBlock):
         else:
             self.setTitle("思考完成")
         self.setOpenedSilently(False)
-
-    # -- 文本 --------------------------------------------------------------
 
     def text(self) -> str:
         """获取思考文本（含尚未刷新的分片）。"""
@@ -377,7 +367,7 @@ class ReasoningBlock(_CollapsibleBlock):
     def _displayText(self) -> str:
         """喂给标签的文本：裁掉尾部空白（``self._text`` 保持原样）。
 
-        PlainText 标签每个换行都真画一行；只裁显示不裁数据，``text()`` / 导出全部保真。
+        PlainText 标签每个换行都真画一行；只裁显示不裁数据。
         """
         return self._text.rstrip()
 

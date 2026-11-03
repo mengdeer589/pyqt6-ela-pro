@@ -1,22 +1,4 @@
-"""
-托盘常驻宿主骨架（``pyqt6_ela_pro.example``）。
-
-这是**应用级接入范式，不是组件库组件** —— 它把「托盘 + 主窗口显隐 + 退出」这套
-常驻后台逻辑收在一起，组件库只提供底层的 :class:`ElaTrayIcon`。
-
-与 :class:`~pyqt6_ela_pro.selection_assistant.assistant.ElaSelectionAssistant`
-一样，**只发信号不执行宿主行为**：
-
-- ``windowVisibilityRequested(bool)`` —— 要显示 / 隐藏主窗口
-- ``quitRequested()`` —— 用户点了「退出」（真退出前宿主有机会拦）
-- ``actionTriggered(str)`` —— 其余自定义项
-
-菜单项复用 :class:`~pyqt6_ela_pro.menu_item.ElaMenuItem`，``"-"`` 约定为分隔符。
-
-**ElaMenu 硬约束**：菜单里一旦有 checkable 项，所有项的 ``ElaIconType`` 图标都
-不再绘制（图标列与勾选框互斥）。所以「显示 / 隐藏主窗口」这类开关**不用勾选框**
-表达，而是把状态写进文案 + 换图标（``显示主窗口`` / ``隐藏主窗口``）。
-"""
+"""托盘常驻宿主骨架（``pyqt6_ela_pro.example``）。?"""
 
 from __future__ import annotations
 
@@ -66,8 +48,6 @@ class ElaTrayHost(QObject):
         self._tray.setMenu(self._menu_obj)
         self._tray.activated.connect(self._on_activated)
 
-    # -- 托盘 --------------------------------------------------------------
-
     def trayIcon(self) -> ElaTrayIcon:  # noqa: N802 (Qt 命名)
         """取底层托盘图标（三态 / 通知 / 显隐都走它）。"""
         return self._tray
@@ -87,8 +67,6 @@ class ElaTrayHost(QObject):
     def hide(self) -> None:
         """隐藏托盘图标。"""
         self._tray.hide()
-
-    # -- 菜单 --------------------------------------------------------------
 
     def setItems(self, items: Sequence) -> None:  # noqa: N802 (Qt 命名)
         """整体替换托盘菜单项（``"-"`` 为分隔符）。
@@ -155,8 +133,6 @@ class ElaTrayHost(QObject):
             self._tray.setMenu(menu)
         return menu
 
-    # -- 显隐 / 退出 -------------------------------------------------------
-
     def toggleWindow(self) -> None:
         """按当前可见性请求翻转主窗口显隐。"""
         self.requestWindowVisibility(not self.isWindowVisible())
@@ -188,8 +164,6 @@ class ElaTrayHost(QObject):
         """真退出（``quitRequested`` 无人拦截时由宿主调用）。"""
         self._tray.hide()
         QApplication.quit()
-
-    # -- 内部 --------------------------------------------------------------
 
     def _on_action(self, actionId: str) -> None:  # noqa: N802 (Qt 命名)
         if actionId == TOGGLE_WINDOW_ID:

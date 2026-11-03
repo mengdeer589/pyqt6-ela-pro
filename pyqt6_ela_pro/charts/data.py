@@ -1,9 +1,4 @@
-"""charts 大数组的紧凑存储与零拷贝摄入口径。
-
-``ndarray`` / 缓冲协议对象按引用持有，普通 list 达到 ``_BUFFER_MIN_LEN`` 才转
-float64 数组包装（含 ``None`` 的间隙写成 NaN）；``getOption()`` / ``data()``
-对外仍返回 list，numpy 缺失时降级为 ``array('d')`` 承载。
-"""
+"""charts 大数组的紧凑存储与零拷贝摄入口径。"""
 
 from __future__ import annotations
 
@@ -56,7 +51,6 @@ class ElaNumericBuffer(Sequence):
     def __init__(self, buf) -> None:
         self._buf = buf
 
-    # -- Sequence 协议 ---------------------------------------------------
     def __len__(self) -> int:
         return int(len(self._buf))
 
@@ -121,7 +115,6 @@ class ElaNumericBuffer(Sequence):
         memo[id(self)] = self
         return self
 
-    # -- 与 list 的可比较性（绘图与测试都直接比较数据） -------------------
     def __eq__(self, other) -> bool:
         # 身份快路径必须在最前：``None`` 间隙在缓冲里是 NaN，而 ``[nan] == [nan]``
         # 为 False，含 NaN 的缓冲自己跟自己都不相等。
@@ -145,7 +138,6 @@ class ElaNumericBuffer(Sequence):
 
     __hash__ = None  # 可比较但不可哈希（与 list 一致）
 
-    # -- 显式转换 --------------------------------------------------------
     def toList(self) -> list:
         """转为原生 Python float 列表（对外 API 的兼容出口）。
 
@@ -165,7 +157,6 @@ class ElaNumericBuffer(Sequence):
 
 def toBuffer(data, minLen: int = _BUFFER_MIN_LEN):
     """把数值序列转为 ``ElaNumericBuffer``；不值得包装时返回 ``None``。
-
     ``None`` 表示调用方继续走深拷贝路径（小数组 / 非数值序列 / 结构型数据）。
     仅当元素全是 ``int`` / ``float``（非 bool）或 ``None`` 时才包装。
     """
@@ -208,9 +199,7 @@ def toBuffer(data, minLen: int = _BUFFER_MIN_LEN):
 
 def unwrapData(value):
     """把紧凑存储还原为 list（供 ``getOption`` 对外输出用）。
-
     裸 ndarray / ``array.array`` 也要转：``getOption()`` 承诺返回脱离的副本，
-    且裸 ndarray 的 ``==`` 返回数组（``if data == other`` 会抛 ValueError，
     从 Qt 回调里抛就是 0xC0000409）。
     """
     if isinstance(value, ElaNumericBuffer):

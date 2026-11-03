@@ -52,7 +52,6 @@ class ElaMessageDialog(ElaDialogBase):
         middleText: str | None = None,
     ) -> Optional[int]:
         """显示消息对话框（类调用模态）或普通显示（实例调用）。
-
         类调用 ``ElaMessageDialog.show(parent, ...)`` 返回按钮值（0=左 / 1=右 /
         2=中间）；实例调用 ``dlg.show()`` 与 ``QDialog.show`` 一致，返回 ``None``。
         """

@@ -23,11 +23,8 @@ from ..axes import chartFont
 
 class ChartTimeline(QObject):
     """图表时间轴：底部轴（节点圆点 + 标签）+ 播放 / 暂停按钮。
-
     option: ``"timeline": {"data": [...], "currentIndex": 0, "autoPlay": False,
     "playInterval": 1500}``，帧 option 放顶层 ``options``，基础 option 放
-    ``baseOption``。``goto(i)`` 深合并后 ``setOption(notMerge=True)``。
-    当前帧下标与播放状态挂在 chart 上，重建组件后不丢。
     """
 
     optionKey = "timeline"
@@ -75,10 +72,8 @@ class ChartTimeline(QObject):
 
     def dispose(self) -> None:
         """停表并从 chart 上解挂（``core._rebuild`` 丢弃旧组件时调用）。
-
         必须连 ``deleteLater()`` 一起做，只 ``stop()`` 会在 chart 上留下停摆
         QObject（每次 ``setOption`` 泄一个）；``deleteLater`` 延迟投递，
-        不会在定时器回调里析构自己。
         """
         if getattr(self.chart, "_timeline_timer", None) is self._timer:
             self.chart._timeline_timer = None
@@ -88,7 +83,6 @@ class ChartTimeline(QObject):
         except Exception:
             pass
 
-    # -- 帧切换 --------------------------------------------------------------
     def goto(self, index: int) -> None:
         """切换到第 index 帧（经 chart 刷新：``baseOption`` 深合并 ``options[i]``）。"""
         n = max(1, len(self.labels))
@@ -156,7 +150,6 @@ class ChartTimeline(QObject):
             return self.BAND_H + 4.0
         return 0.0
 
-    # -- 布局 / 绘制 ---------------------------------------------------------
     def layout(self, rect: QRectF) -> None:
         h = self.BAND_H
         self._band = QRectF(
@@ -267,7 +260,6 @@ class ChartTimeline(QObject):
             p.drawPath(path)
         p.restore()
 
-    # -- 交互 ---------------------------------------------------------------
     def onMousePress(self, pos: QPointF) -> bool:
         if self._play_rect.adjusted(-3, -3, 3, 3).contains(pos):
             self.togglePlay()

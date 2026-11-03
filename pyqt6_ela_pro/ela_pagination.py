@@ -1,15 +1,4 @@
-"""
-分页组件，风格参考 ElaWidgetTools 的 ElaPagination。
-
-支持页码导航、省略号、跳转输入框。
-
-用法::
-
-    pag = ElaPagination(parent=self)
-    pag.setTotalPages(20)
-    pag.setJumperVisible(True)
-    pag.currentPageChanged.connect(lambda p: print(f"页码: {p}"))
-"""
+"""分页组件，风格参考 ElaWidgetTools 的 ElaPagination。"""
 
 from __future__ import annotations
 

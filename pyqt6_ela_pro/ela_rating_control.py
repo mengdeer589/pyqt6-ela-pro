@@ -1,13 +1,4 @@
-"""
-星级评分组件，风格参考 ElaWidgetTools 的 ElaRatingControl。
-
-支持鼠标悬停预览、点击评分、只读模式，支持半星评分。
-
-用法::
-
-    rating = ElaRatingControl(parent=self)
-    rating.ratingChanged.connect(lambda v: print(f"评分: {v}"))
-"""
+"""星级评分组件，风格参考 ElaWidgetTools 的 ElaRatingControl。"""
 
 from __future__ import annotations
 

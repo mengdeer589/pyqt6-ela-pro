@@ -24,7 +24,6 @@ from ..core import SeriesRenderer
 
 class LinesSeriesRenderer(SeriesRenderer):
     """飞线（起终点坐标对，Grid 直角坐标系下绘制）。
-
     支持 ``coordinateSystem`` / ``data``（``coords`` 起终点）/ ``lineStyle`` /
     ``effect``（QTimer 驱动的移动亮点）。
     """

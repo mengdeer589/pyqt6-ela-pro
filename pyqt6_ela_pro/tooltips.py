@@ -1,14 +1,6 @@
-"""
-工具提示组件模块。
+"""工具提示：``ElaToolTip``（8 种位置）与 ``ElaStateToolTip``（加载 / 完成）。
 
-提供两种提示组件：
-
-- ``ElaToolTip``：悬浮提示组件，支持 8 种显示位置
-- ``ElaStateToolTip``：带状态指示的提示卡片，加载中 / 完成两种状态
-
-``set_tooltip`` 和 ``remove_tooltip`` 函数用于为任意 ``QWidget`` 绑定或解除
-悬浮提示，使用弱引用字典管理，不会阻止 widget 被垃圾回收。
-"""
+提示框自绘且需跟随主题；用法见 ``docs/core.md``。"""
 
 from __future__ import annotations
 
@@ -108,10 +100,8 @@ class ElaToolTipPositionType(Enum):
 
 class _ToolTipLabel(QLabel):
     """提示文本标签：绘制前自愈显式色。
-
     提示框是原生 ``Qt.Tool`` 顶层窗；创建 / 改窗口标志 / 平台样式切换都可能把
     子标签的 palette 刷回应用默认色（深色下就是黑字）。和 ``ColorText`` 同一套
-    做法：颜色存实例上，绘制前发现 palette 被改回就重写一次。
     """
 
     def __init__(self, text: str = "", parent: Optional[QWidget] = None) -> None:
@@ -160,7 +150,7 @@ class ElaToolTip(QWidget):
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         # 父窗口尚未 show 时创建的子控件会随父窗口一起显示：本组件此时还没
-        # showAt 定位，不显式隐藏就会被画在父窗口左上角（宿主在窗口 show 之前
+        # showAt 定位，不显式隐藏就会被画在父窗口左上角（宿主在窗口 show 前
         # 建聊天页 / 工具栏时必中）。
         self.hide()
 
@@ -172,10 +162,8 @@ class ElaToolTip(QWidget):
         self._label.setFont(font)
         self._apply_text_color()
 
-        # 跟随主题切换。不能裸连绑定方法：编译形态（Nuitka 单模块 pyd）下
-        # PyQt 不会自动断开已销毁包装器的连接，下次切主题在槽里摸已删子控件
-        # 会穿出 C++ 信号链 = 0xC0000409 静默终止。connect_theme_signal 的
-        # 槽内 is_deleted 自愈不依赖 destroyed 送达（销毁期读不到包装器属性）。
+        # 跟随主题切换。不能裸连绑定方法：编译形态下 PyQt 不会自动断开已销毁
+        # 包装器，下次切主题在槽里摸已删子控件会穿出 C++ 信号链 = 0xC0000409。
         connect_theme_signal(self)
 
         self._updateSize()
@@ -255,7 +243,7 @@ class ElaToolTip(QWidget):
         if self._content_widget is not None:
             widget = self._content_widget
             # 显式 setFixedSize 的内容控件以固定尺寸为准 —— layout 的 sizeHint 可能
-            # 小于固定尺寸，按 hint 定弹体会让内容溢出被裁（实测两行卡片裁掉尾字）。
+            # 小于固定尺寸，按 hint 定弹体会让内容溢出被裁（两行卡片裁掉尾字）。
             if widget.minimumSize() == widget.maximumSize():
                 hint = widget.size()
             else:
@@ -459,20 +447,9 @@ def set_tooltip(
     wordWrap: bool = False,
     contentWidget: Optional[QWidget] = None,
 ) -> None:
-    """为 widget 绑定悬浮提示。
-
-    装上事件过滤器，鼠标进入显示、离开隐藏。同一 widget 重复调用**复用**已有
-    提示框（只更新文本 / 折行配置 / 位置）：``ElaToolTip`` 构造要排一次文本，
-    批量物化时每次 remove + new 是纯浪费（聊天一次恢复实测 4609 次创建）。
-    从自定义内容退回纯文本时没有清空 API，才重建。
-    绑定后会吞掉 ``QEvent.Type.ToolTip``（原生 ``QToolTip`` 与自定义提示会同时弹出）。
-
-    ``maxWidth`` / ``wordWrap`` 用于长文本：默认单行（宽度=文本宽度），超长
-    文本会拉成一条远宽于屏幕的横条；开启折行后按 ``maxWidth`` 换行。
-
-    ``contentWidget`` 给定时用该控件替代文本（透传
-    :meth:`ElaToolTip.setContentWidget`，此时忽略 ``text`` / ``maxWidth`` /
-    ``wordWrap`` 的展示，控件所有权归提示框）。
+    """为 widget 绑定悬浮提示（鼠标进入显示、离开隐藏）。
+    重复调用复用已有提示框，只更新配置；绑定后吞掉 ``QEvent.ToolTip``。
+    ``maxWidth`` / ``wordWrap`` 控制长文本折行；``contentWidget`` 给定时代替文本。
     """
     existing = _tooltip_dict.get(widget)
     if existing is not None and not is_deleted(existing):
@@ -512,17 +489,14 @@ def set_tooltip(
     widget.installEventFilter(filter_instance)
 
     def _auto_remove() -> None:
-        # 注意：这里在 ``destroyed`` 里对（已失效的）wrapper 做 WeakKeyDictionary
-        # 哈希 —— 与 ``animation.py`` 注释里「对已失效 wrapper 取哈希必崩 6/6」
-        # 的说法相反；2026-10 实测本文件该路径 5 种销毁场景全部安全（含
-        # deleteLater / sip.delete / 父窗口级联 / tooltip 显示中 / 对已销毁
-        # 控件 remove）。两处结论并存，改这里前先跑 tests/regression 的销毁用例。
+        # 这里在 ``destroyed`` 里对已失效 wrapper 做 WeakKeyDictionary 哈希是安全的
+        # （与 animation.py 的结论相反）；改这里前先跑 tests/regression 的销毁用例。
         try:
             remove_tooltip_from_dict(widget)
         except RuntimeError:
             pass
 
-    # 只连一次：复用路径不再重复叠 destroyed 连接（长会话里曾叠到数千个）。
+    # 只连一次：复用路径不再重复叠 destroyed 连接。
     if not getattr(widget, "_ela_tooltip_autoremove", False):
         widget._ela_tooltip_autoremove = True
         widget.destroyed.connect(_auto_remove)
@@ -541,7 +515,6 @@ def remove_tooltip(widget: QWidget) -> None:
 
 class ElaStateToolTip(ElaThemeWidget):
     """带状态指示的提示卡片：加载中（旋转图标）/ 完成（对勾）。
-
     表面与 :class:`ElaToast` 同材质（``PopupBase`` + ``PopupBorder`` + 阴影边距），
     宽度随内容自适应（240~360），完成 1s 后淡出并发出 ``closed``。
     """
@@ -774,10 +747,7 @@ class ElaStateToolTip(ElaThemeWidget):
         self._animation.setPropertyName(prop)
         self._animation.setStartValue(1)
         self._animation.setEndValue(0)
-        # 收尾只有一个注册点。之前这里是裸 finished.connect（没有先断开），
-        # 叠上 close()→重新 show→再 _fadeOut 的路径就会连两遍，
-        # _onFadeOutFinished 跑两次 = deleteLater 两次。start_transition
-        # 内部保证「先断旧再连新」。
+        # 收尾只有一个注册点：start_transition 内部先断旧再连新，避免 deleteLater 两次。
         start_transition(
             self._animation,
             TOOLTIP_FADE_DURATION,
@@ -804,10 +774,8 @@ class ElaStateToolTip(ElaThemeWidget):
         super().showEvent(a0)
         if self._destroyed:
             return
-        # 重新展示 = 上一轮的关闭流程作废。_isClosing 只在 _fadeOut 里置位、
-        # 成功路径不复位（那里紧接着就 deleteLater 了），所以中途被 stop 掉的
-        # 淡出会把它永久留在 True：不复位的话这个 tooltip 既再也淡不出去，
-        # spinner 也永远重启不了。
+        # 重新展示 = 上一轮关闭流程作废。_isClosing 只在 _fadeOut 里置位、成功路径
+        # 不复位，中途 stop 掉的淡出会把它永久留在 True，必须在这里清掉。
         self._stopTimerAndAnimation()
         self._isClosing = False
         if self._opacityEffect is not None:

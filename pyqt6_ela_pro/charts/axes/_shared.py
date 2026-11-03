@@ -237,7 +237,6 @@ def _log_ticks(vmin: float, vmax: float, base: float, segments: int = 5) -> list
 
 def _iter_data_values(data):
     """从系列 data 中迭代全部**有限**数值（number / [x, y] / {"value": v}）。
-
     滤 NaN / inf 的原因：调用方用 ``min()`` / ``max()`` 归约，而 ``min()`` 遇
     NaN 的结果是顺序相关的（``[1, 2, nan, 5]`` 会得 0..1 或 0..5）。
     """

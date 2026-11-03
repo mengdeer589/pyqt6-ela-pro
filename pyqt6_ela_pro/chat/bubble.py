@@ -265,7 +265,6 @@ class ElaChatBubble(
         self._body: Optional[_BubbleBody] = None
         self._content: Optional[QWidget] = None
         self._content_layout: Optional[QVBoxLayout] = None
-        # -- 内容分段（助手消息按步骤有序排列） --------------------------
         self._parts: list = []
         self._part_widgets: dict = {}
         self._text_buffers: dict = {}
@@ -302,7 +301,7 @@ class ElaChatBubble(
         self._stats_mode = "footer"
         #: ``setParts`` 重放期间为 True：逐段 setStepStats 不重复摆徽标，收尾统一 apply 一次
         self._stats_batch = False
-        #: 历史分段批量构建深度：回放期间暂缓布局 / 面板显示
+        #: 回放分段的批量构建深度：期间暂缓布局 / 面板显示
         self._bulk_build = 0
         #: 回放期间待统一 show / 刷新摘要的工具面板
         self._bulk_panels: set = set()
@@ -320,7 +319,6 @@ class ElaChatBubble(
         #: 换停靠前要把旧徽标放回时间线
         self._docked_stats: Optional[tuple] = None
         self._thinking_row: Optional[ThinkingRow] = None
-        # -- 工具（每步一个外层面板） ------------------------------------
         self._panels: list = []
         self._panel_steps: dict = {}
         self._current_tool_panel: Optional[ToolGroupPanel] = None
@@ -333,7 +331,6 @@ class ElaChatBubble(
         self._error: Optional[ErrorCard] = None
         self._retry_card = None
         self._attachments: Optional[AttachmentStrip] = None
-        # -- 合成 / 压缩 / 审批分段 -----------------------------------------
         #: 审批分段 id -> 审批卡控件
         self._permission_cards: dict = {}
         #: 仍在 dock 里等待用户操作的交互卡（partId -> 卡片）；落定后清空
@@ -352,8 +349,6 @@ class ElaChatBubble(
             self.setText(text)
         self.setStatus(self._status)
         self._apply_theme()
-
-    # -- 构建 --------------------------------------------------------------
 
     def _build_layout(self) -> None:
         root = QVBoxLayout(self)
@@ -553,10 +548,8 @@ class ElaChatBubble(
         """复制后是否弹成功提示。"""
         return self._copy_notification_enabled
 
-    # -- hover 显现 --------------------------------------------------------
-
     def setActionsHoverReveal(self, on: bool) -> None:
-        """设置操作按钮是否仅在悬停时显示（对齐 opencode）。"""
+        """设置操作按钮是否仅在悬停时显示。"""
         self._actions_hover_reveal = bool(on)
         if self._role == ElaChatRoleType.System:
             return
@@ -583,8 +576,6 @@ class ElaChatBubble(
         super().leaveEvent(event)
         if self._actions_hover_reveal and self._role != ElaChatRoleType.System:
             self._set_actions_revealed(False)
-
-    # -- 头部与外观 --------------------------------------------------------
 
     def actions(self) -> MessageActions:
         """获取底部操作栏（可添加自定义动作按钮）。"""
@@ -785,11 +776,7 @@ class ElaChatBubble(
         self.setTimestamp(datetime.now().strftime("%H:%M:%S"))
 
     def setDuration(self, durationMs: float) -> None:
-        """设置本轮端到端耗时（毫秒）。
-
-        有步骤用量徽标时写入其悬浮提示（与首字延时相邻显示），
-        无徽标时回退为底部 meta 可见文本。
-        """
+        """设置本轮端到端耗时（毫秒）：有步骤用量徽标时进其悬浮提示，否则回退到底部 meta 文本。"""
         self._duration_ms = float(durationMs or 0.0)
         self._sync_stats_duration()
 
@@ -850,9 +837,8 @@ class ElaChatBubble(
 
     def markdownViewer(self) -> Optional[ElaMarkdownViewer]:
         """获取当前正文段的 Markdown 查看器（非助手 / 无正文段返回 ``None``）。
-
-        纯读取：非流式消息没有正文段时不会凭空建一段（那会污染 ``parts``）；
-        流式回合内仍按需建段，查看器是流式光标与占位的落点。
+        纯读取：非流式消息不会凭空建段（会污染 ``parts``）；流式回合内按需建段，
+        查看器是流式光标与占位的落点。
         """
         if self._role != ElaChatRoleType.Assistant:
             return None
@@ -1011,8 +997,6 @@ class ElaChatBubble(
         if self._role == ElaChatRoleType.User and self._label is not None:
             self._render_user_text()
 
-    # -- 内容 --------------------------------------------------------------
-
     def _find_part(self, partId: Optional[str]) -> Optional[ElaChatPart]:
         return self._timeline._find_part(partId)
 
@@ -1099,10 +1083,6 @@ class ElaChatBubble(
         """获取消息角色。"""
         return self._role
 
-    # -- 延迟渲染（批量加载） ----------------------------------------------
-
-    # -- 视口外查看器挂起 --------------------------------------------------
-
     @staticmethod
     def _stepGroups(parts) -> list:
         """按 ``part.step`` 分组（保持原顺序）。"""
@@ -1120,12 +1100,6 @@ class ElaChatBubble(
         if current:
             groups.append(current)
         return groups
-
-    # -- 合成上下文段（steer 插话回执） -------------------------------------
-
-    # -- 压缩段 -------------------------------------------------------------
-
-    # -- 工具审批段 ---------------------------------------------------------
 
     def _reset_part_state(self) -> None:
         """清空全部分段、控件与步骤面板（:meth:`setParts` 的第一步）。
@@ -1219,16 +1193,6 @@ class ElaChatBubble(
             self._parts_layout.activate()
         self.updateGeometry()
 
-    # -- 正文段 ------------------------------------------------------------
-
-    # -- 步骤 --------------------------------------------------------------
-
-    # -- 思考层 ------------------------------------------------------------
-
-    # -- 工具层（每步一个外层面板） ----------------------------------------
-
-    # -- 附件层 ------------------------------------------------------------
-
     def setAttachments(self, attachments) -> None:
         """整体替换附件（用户消息常见）。"""
         self.attachmentStrip().setAttachments(attachments)
@@ -1250,8 +1214,6 @@ class ElaChatBubble(
         if self._attachments is not None:
             self._attachments.clear()
 
-    # -- 错误与用量 --------------------------------------------------------
-
     def errorCard(self) -> ErrorCard:
         """获取错误卡片（按需创建）。"""
         if self._error is None:
@@ -1267,8 +1229,7 @@ class ElaChatBubble(
     def setError(self, message: str, errorType: str = "") -> None:
         """设置错误文本与类型（空文本隐藏卡片）。
 
-        错误通常发生在流式中：先收尾未完成的分段，避免留下永久闪烁的光标。
-
+        错误多发生在流式中：先收尾未完成分段，避免留下永久闪烁的光标。
         :param errorType: 错误类型，决定错误卡上点亮哪些动作
         """
         if message:
@@ -1289,5 +1250,3 @@ class ElaChatBubble(
         """清除错误卡片。"""
         if self._error is not None:
             self._error.setMessage("")
-
-    # -- 流式与状态 --------------------------------------------------------

@@ -62,7 +62,6 @@ class _BubbleStreamMixin:
 
     def _settle_open_tools(self, status: str) -> None:
         """把仍处于 pending / running 的工具调用落到终态。
-
         错误回合落 ``Error``，其余（用户停止 / 消息被替换）落 ``Aborted``。
         以 part 数据为准遍历（分组卡没有单调用状态，part 始终是权威）。
         """
@@ -135,7 +134,6 @@ class _BubbleStreamMixin:
 
     def setStatus(self, status: str) -> None:
         """设置消息状态（同步头部提示、底部行与用量徽标显隐）。
-
         非法值一律回落 ``Done``（直接写入会让状态机被静默污染）。``Queued``
         这类展示态不进 ``_status``，只由头部按 ``Streaming`` 派生。
         """
@@ -160,7 +158,6 @@ class _BubbleStreamMixin:
 
     def _sync_header_status(self) -> None:
         """按状态与「是否已收到首个输出」刷新头部提示。
-
         ``Streaming`` 分两阶段：等待首个输出（TTFT）显示 ``Queued``，收到输出后
         转 ``Streaming``；``Queued`` 只是展示态，不写入 ``_status``。
         """

@@ -1,18 +1,4 @@
-"""
-通知提示组件，风格参考 ElaWidgetTools 的 ElaToast。
-
-非模态提示，支持成功/信息/警告/错误四种类型，
-自动淡入→停留→淡出→自动关闭。
-
-用法::
-
-    from pyqt6_ela_pro import ElaToast
-
-    ElaToast.success("操作成功")
-    ElaToast.error("发生错误")
-    ElaToast.info("提示信息")
-    ElaToast.warning("警告")
-"""
+"""通知提示组件，风格参考 ElaWidgetTools 的 ElaToast。"""
 
 from __future__ import annotations
 
@@ -49,12 +35,8 @@ _TOAST_GAP = 10
 
 def _prune_toasts(anchor) -> None:
     """清掉已销毁的 toast 记录。
-
-    只用 ``is_deleted`` 判断，不看 ``isVisible()``：记录是在 ``__init__``
-    里登记的，那时还没 ``show()``，按可见性过滤会把自己当场裁掉。
-    正常关闭走 :meth:`ElaToast.closeEvent` 注销；这里只兜住「已析构但
-    注销没跑到」的窗口（那时 ``destroyed`` 已经发过，PyQt 包装器失效，
-    碰它就是 0xC0000005，所以不能靠 ``destroyed`` 信号）。
+    只看 ``is_deleted``、不看 ``isVisible()``：登记发生在 ``__init__`` 里，
+    此时还没 ``show()``。也不能靠 ``destroyed`` 信号 —— 那时 PyQt 包装器
     """
     live = _LIVE_TOASTS.get(anchor)
     if not live:
@@ -69,9 +51,7 @@ def _prune_toasts(anchor) -> None:
 def _reflow_toasts(anchor) -> None:
     """把该锚点下存活的 toast 紧凑重排。
 
-    关闭中间一条后如果只从登记里删掉、不重排，剩下的会留在原位留出空洞，
-    下一条 toast 又按「存活高度之和」顺延 —— 结果和还活着的那条落在同一
-    y 上，又叠回去了。必须重排。
+    不重排会在关闭中间一条后留出空洞，下一条 toast 顺延时与存活项重叠。
     """
     live = _LIVE_TOASTS.get(anchor)
     if not live:
@@ -123,10 +103,9 @@ class ElaToast(ElaThemeWidget):
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
 
-        # 停留计时器必须是本控件的**子对象**：`QTimer.singleShot` 是无主定时器，
-        # 回调不随任何控件销毁，toast 被提前关掉后照样在 T+ms 触发去摸已释放的
-        # 包装器 → RuntimeError 穿过 C++ 边界 = 0xC0000409 静默终止。
-        # （PyQt6 没有带 context 的 singleShot 重载，签名只有 ms + slot 两种。）
+        # 计时器必须是本控件的**子对象**：无主 `QTimer.singleShot` 不随控件销毁，
+        # toast 提前关闭后仍会在 T+ms 摸已释放的包装器 → RuntimeError 穿过 C++
+        # 边界 = 0xC0000409 静默终止。
         self._dwell_timer = QTimer(self)
         self._dwell_timer.setSingleShot(True)
         self._dwell_timer.timeout.connect(self._startFadeOut)
@@ -276,8 +255,8 @@ class ElaToast(ElaThemeWidget):
         br = self._border_radius
         fg = QRect(sb, sb, self.width() - 2 * sb, self.height() - 2 * sb)
 
-        # 阴影：边距一直留着（窗口尺寸按 _shadow_border 撑开），但阴影本身一直没画，
-        # 于是 toast 看起来比别的弹层「扁」一层。这里补上。
+        # 阴影：窗口尺寸已按 _shadow_border 撑开，此处必须画出阴影，
+        # 否则 toast 看起来比别的弹层「扁」一层。
         paintOverlayShadow(painter, self.rect(), margin=sb, radius=br)
 
         painter.setPen(eTheme.getThemeColor(mode, ElaThemeType.ThemeColor.PopupBorder))

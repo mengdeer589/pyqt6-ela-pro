@@ -1,15 +1,4 @@
-"""
-ComboBox 组件模块。
-
-提供以下组件：
-
-- ``ElaSearchBox``：基于 ``ElaComboBox`` 的可搜索单选下拉框
-- ``ElaSearchMultiBox``：基于 ``ElaMultiSelectComboBox`` 的可搜索多选下拉框
-
-搜索同时匹配选项原文、全拼与拼音首字母（``"bei"`` / ``"bj"`` 均可命中“北京”），
-空格分隔的多个关键词需全部命中。所有组件均支持主题适配，自动跟随应用程序的
-亮/暗主题切换样式。
-"""
+"""ComboBox 组件模块。"""
 
 from __future__ import annotations
 
@@ -43,7 +32,6 @@ def _split_keyword(keyword: str) -> list[str]:
 
 def _pinyin_index(text: str, cache: dict[str, tuple[str, str]]) -> tuple[str, str]:
     """返回选项文本的 ``(全拼, 首字母)``（均为小写），并按需写入缓存。
-
     ``pypinyin`` 惰性导入（首次需要拼音匹配时才付 ~50 MiB 字典成本）；
     缺失时返回空索引，搜索退化为原文 / 紧凑串匹配。
     """
@@ -72,7 +60,6 @@ def _match_item(
     text: str, tokens: list[str], cache: dict[str, tuple[str, str]]
 ) -> bool:
     """判断选项文本是否命中关键词 token。
-
     匹配规则：原文 / 全拼 / 首字母的任意子串，以及忽略标点空白的紧凑串
     （``"gpt4o"`` 命中 ``"gpt-4o"``）；多个 token 之间为 AND。
     """
@@ -182,9 +169,8 @@ class _SearchComboMixin:
         """子类应重写此方法以响应搜索框文本变化。"""
 
     def _onThemeChanged(self, _mode=None) -> None:
-        # 本 mixin **必须**排在 ``_ThemeAwareMixin`` 之前：后者也定义了同名钩子
-        # 且是个空实现，写在它后面就会被 MRO 遮蔽成永远不被调用的死代码
-        # （后果：搜索框调色板在切深浅色后不跟随）。
+        # 本 mixin 必须排在 ``_ThemeAwareMixin`` 前面：后者也定义了同名空钩子，
+        # 排在后面会被 MRO 遮蔽成死代码，搜索框调色板切主题后不跟随。
         self._applySearchEditPalette()
         super()._onThemeChanged(_mode)
 
@@ -252,10 +238,8 @@ def _apply_search_edit_palette(search_edit: QLineEdit) -> None:
 
 class ElaSearchMultiBox(_SearchComboMixin, _ThemeAwareMixin, ElaMultiSelectComboBox):
     """可搜索多选下拉框。
-
     基于 ``ElaMultiSelectComboBox``：弹层顶部加搜索框，支持汉字原文 / 全拼 /
     首字母过滤（``"bei"`` / ``"bj"`` 都能命中「北京」），空格分隔的关键词 AND。
-    搜索框可用 ``setSearchVisible(False)`` 关闭。
     """
 
     def __init__(self, parent: Optional[QWidget] = None) -> None:
@@ -280,11 +264,9 @@ class ElaSearchMultiBox(_SearchComboMixin, _ThemeAwareMixin, ElaMultiSelectCombo
         self._pinyin_cache.clear()
 
     def setCurrentSelection(self, selection) -> None:
-        """设置当前选中项（接受 ``str`` 或字符串列表）。
+        """设置当前选中项（接受 ``str`` 或字符串列表，``str`` 归一成单元素）。
 
-        与兄弟类（``ElaTagMultiBox`` / ``ElaTagSearchMultiBox``）同口径：
-        **传 ``str`` 归一成单元素** —— 旧实现 ``list(selection)`` 会把字符串
-        拆成单个字符，匹配不到任何选项（「设了没反应、回读一堆字母」）。
+        不能直接 ``list(selection)``：那会把字符串拆成单个字符，匹配不到任何选项。
         """
         if selection is None:
             selection = []
@@ -302,10 +284,8 @@ class ElaSearchMultiBox(_SearchComboMixin, _ThemeAwareMixin, ElaMultiSelectCombo
         if self.count() == 0:
             return
         self._reset_row_filter()
-        # 必须 try/finally：这个标志一旦漏复位就永远是 True，而
-        # _onSearchTextChanged 见它为 True 就直接 return —— 搜索过滤被永久
-        # 短路，搜索框看起来还在但输入任何东西都没反应。中间任何一步抛异常
-        # （_setupSearchInPopup 建控件、_adjust_combobox_popup 定位）都会命中。
+        # 必须 try/finally：标志漏复位就永远是 True，_onSearchTextChanged 见它
+        # 直接 return，搜索过滤被永久短路；中间建控件 / 定位任何一步抛异常都会命中。
         self._isRestoringSelection = True
         try:
             self._restoreSelection()
@@ -320,7 +300,7 @@ class ElaSearchMultiBox(_SearchComboMixin, _ThemeAwareMixin, ElaMultiSelectCombo
             self._isRestoringSelection = False
 
     def _restoreSelection(self) -> None:
-        """恢复之前的选中状态。"""
+        """恢复保存的选中状态。"""
         if self._currentSelection:
             super().setCurrentSelection(self._currentSelection)
 
@@ -344,15 +324,9 @@ class ElaSearchMultiBox(_SearchComboMixin, _ThemeAwareMixin, ElaMultiSelectCombo
 
 
 class ElaSearchBox(_SearchComboMixin, _ThemeAwareMixin, ElaComboBox):
-    """可搜索下拉框。
-
-    基于标准 ``ElaComboBox`` 扩展，在弹出列表顶部增加了一个搜索框，
-    支持汉字原文、全拼与拼音首字母过滤（``"bei"`` / ``"bj"`` 均可命中“北京”），
-    空格分隔的多个关键词需全部命中。
-
-    选项由 ``QComboBox`` 原生模型承载，``addItem`` / ``insertItem`` /
-    ``removeItem`` / ``setItemText`` 等原生增删改 API 与 ``items`` 属性、
-    搜索过滤互不干扰。搜索框可用 ``setSearchVisible(False)`` 关闭。
+    """可搜索下拉框：弹层顶部加搜索框，支持原文 / 全拼 / 首字母过滤（关键词 AND）。
+    选项仍由 ``QComboBox`` 原生模型承载，原生增删改 API 与搜索过滤互不干扰；
+    搜索框可用 ``setSearchVisible(False)`` 关闭。
     """
 
     def __init__(self, parent: Optional[QWidget] = None) -> None:

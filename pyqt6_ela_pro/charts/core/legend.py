@@ -31,11 +31,8 @@ if TYPE_CHECKING:
 
 class Legend:
     """图例组件（ECharts ``legend``）。
-
     条目由 ElaChartWidget 注入（``setItems([(name, color), ...])``，color 仅为
     兜底值）；绘制时按系列名实时取色，主题切换无需重建。``data`` 兼作条目
-    白名单与排序。横向条目超过 ``maxRows``（默认 3）或 ``type: "scroll"`` 时
-    自动分页（‹ › + 页码）。
     """
 
     #: 条目点击回调：chart 注入 ``legend.on_toggle = chart._legendSelectToggle``
@@ -74,7 +71,6 @@ class Legend:
         else:
             self._items = list(self._all_items)
 
-    # -- option 取值 -------------------------------------------------------
     def itemWidth(self) -> float:
         try:
             return max(2.0, float(self.opt.get("itemWidth", 9)))
@@ -127,7 +123,6 @@ class Legend:
     def orient(self) -> str:
         return "vertical" if str(self.opt.get("orient")) == "vertical" else "horizontal"
 
-    # -- 布局 -------------------------------------------------------------
     def _entry(self, name: str):
         """单条目的 (宽, 高)。"""
         font = self._font()
@@ -236,7 +231,6 @@ class Legend:
                 QRectF(rect.right() - 18.0, cy - 8.0, 16.0, 16.0),
             ]
 
-    # -- 交互 -------------------------------------------------------------
     def hitTest(self, pos: QPointF):
         """命中当前页的条目名或 None。"""
         for (name, _), r in zip(self._page_items, self._item_rects):
@@ -269,7 +263,6 @@ class Legend:
         if callable(self.on_toggle):
             self.on_toggle(name)
 
-    # -- 绘制 -------------------------------------------------------------
     def paint(self, p: QPainter) -> None:
         if not self.shown or not self._item_rects:
             return

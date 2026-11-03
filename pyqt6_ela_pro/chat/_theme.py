@@ -17,7 +17,6 @@ MONO_FONT_STACK = ("Consolas", "Cascadia Mono", "Courier New")
 
 def mono_font(size_px: int = 11) -> QFont:
     """等宽标签字体（库内禁 QSS，字体直接给 ``QFont``）。
-
     中文系统收成单族雅黑：多族列表在 Win7 上是慢 shaping 路径且进程级毒化，
     代价是丢掉等宽观感。
     """

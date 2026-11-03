@@ -87,8 +87,6 @@ class _AvatarBadge(QWidget):
         """获取当前头像图标。"""
         return self._icon_name
 
-    # -- 形状 --------------------------------------------------------------
-
     def setShape(self, shape: str) -> None:
         """设置头像形状（``"circle"`` / ``"rounded"`` / ``"square"``；非法值回落默认）。"""
         shape = normalizeAvatarShape(shape)
@@ -100,8 +98,6 @@ class _AvatarBadge(QWidget):
     def shape(self) -> str:
         """获取当前头像形状。"""
         return self._shape
-
-    # -- 自定义头像 --------------------------------------------------------
 
     def setImage(self, source: ElaChatAvatarSource) -> None:
         """设置自定义头像图（``None`` 清除并回退内置图标）。"""
@@ -360,8 +356,6 @@ class MessageHeader(ElaThemeWidget):
         self._sync_subtitle()
         self._apply_theme()
 
-    # -- 内容 --------------------------------------------------------------
-
     def role(self) -> str:
         """获取头部所属消息角色。"""
         return self._role
@@ -431,8 +425,6 @@ class MessageHeader(ElaThemeWidget):
             in (ElaChatStatusType.Streaming, ElaChatStatusType.Queued)
         )
         self._subtitle_row.setVisible(has_context or has_time or has_status)
-
-    # -- 外观 --------------------------------------------------------------
 
     def avatar(self) -> _AvatarBadge:
         """获取头像控件。"""

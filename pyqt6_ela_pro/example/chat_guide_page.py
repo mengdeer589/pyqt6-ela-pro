@@ -1,16 +1,4 @@
-"""[pyqt6_ela_pro] 聊天组件指南（ElaChatWidget 怎么用）。
-
-本页用 :class:`ElaMarkdownViewer` 渲染 Markdown 文档，讲解聊天组件接入：
-
-1. 组件栈概览（含 worker 契约）；
-2. 四步接入（``llm_test/main.py`` 全文）；
-3. 关键 API 速查；
-4. 真实后端（``llm_test/agent_demo.py`` 全文）；
-5. 运行与依赖。
-
-代码块是 ``llm_test`` 源码的**快照**：``tests/example/test_chat_guide_snapshot.py``
-会校验与仓库实际文件一致；llm_test 改动后请同步更新本页常量。
-"""
+"""[pyqt6_ela_pro] 聊天组件指南（ElaChatWidget 怎么用）。?"""
 
 from __future__ import annotations
 
@@ -58,23 +46,9 @@ from pyqt6_ela_pro.chat import (
     ElaChatWidget,
 )
 
-#: 后端错误归一表：``(规范类型, 命中关键词)``。
-#:
-#: ``ElaChatAsyncWorker`` 只发 ``("worker", "ExcName: 文案")``，而错误卡的
-#: 「重试」只对 ``RETRYABLE_ERROR_TYPES``（限流 / 超时 / 网络 / 5xx）里的类型点亮
-#: —— 不做这层归一，真实后端上**「重试」永远不会出现**；反过来鉴权 / 参数错误
-#: 本来也不该给重试（换次机会只会再失败一次）。
-#:
-#: 两类来源都要认：
-#:
-#: - **抛异常的路径**：异常类名拼在文案最前（``APITimeoutError: …``）；
-#: - **哨兵字符串的路径**：``llm_test/agents`` 不抛异常，把 API 错误编码成
-#:   ``__ERROR__:<类型>:<文案>`` 上报（``llm_client.py``），类型是
-#:   ``api_timeout`` / ``api_connection`` / ``api_rate_limit`` /
-#:   ``api_server_error`` / ``api_auth`` / ``api_bad_request``。服务不可用走的
-#:   就是这条，**不认它 = 错误不可重试**（用户看到的仍是错误卡，只是没有重试键）。
-#:
-#: 这是**宿主**该做的事：库把类型原样传下来，不替宿主猜。
+#: 后端错误归一表：(规范类型, 命中关键词)。
+#: worker 只发 ``("worker", "ExcName: 文案")``；错误卡的重试只对可重试类型点亮。
+#: 来源：异常类名拼在文案前，或 ``__ERROR__:<类型>:<文案>``；库只原样传类型。
 _ERROR_TYPE_HINTS = (
     # 抛异常的路径（OpenAI SDK 异常类名）
     ("timeout", ("timeout", "timedout", "timed out")),
@@ -388,11 +362,8 @@ class AgentWorker(ElaChatAsyncWorker):
                 on_llm_end=lambda usage, ttft, tps: self.statsReady.emit(
                     usage, float(ttft or 0), float(tps or 0)
                 ),
-                # **必须接**：agents 把所有 API 异常编码成 ``__ERROR__:<类型>:<文案>``
-                # 哨兵字符串 yield 出来（llm_client.py），**不抛异常**；agent 只经
-                # 这个回调上报（agent.py:1013-1019），随后直接 ``return`` 结束流。
-                # 不接 -> 错误凭空消失，回合以「没有正文」收尾，界面上只剩
-                # 「模型未返回正文（finish_reason=unknown）」，真实原因查不到。
+                # 必须接：agents 把 API 异常编码成 __ERROR__ 哨兵字符串 yield，不抛异常；
+                # 不接的话错误凭空消失，回合只剩「模型未返回正文」。
                 on_error=lambda error_type, message: self.errorOccurred.emit(
                     "worker", f"{error_type}: {message}"
                 ),
@@ -473,8 +444,6 @@ class ChatGuidePage(ExamplePage):
             main_layout.addLayout(self._createHeaderRow(title, demo))
             demo(main_layout)
 
-    # -- 通用 --------------------------------------------------------------
-
     def _addMarkdown(self, main_layout, markdown: str) -> ElaMarkdownViewer:
         """加入一个嵌入式查看器（高度随文档，随页面统一滚动）。"""
         viewer = ElaMarkdownViewer(parent=self)
@@ -491,8 +460,6 @@ class ChatGuidePage(ExamplePage):
         着色，同一 viewer 里后续内容还会被吞进代码块。
         """
         return f"```{lang}\n{source.rstrip()}\n```\n"
-
-    # -- 1. 组件栈概览 -----------------------------------------------------
 
     def _demoOverview(self, main_layout):
         markdown = r"""# 组件栈概览
@@ -528,8 +495,6 @@ binder 和窗口（本页示例里 `worker` 就是这个角色）。
 """
         self._addMarkdown(main_layout, markdown)
 
-    # -- 2. 四步接入 -------------------------------------------------------
-
     def _demoMainSource(self, main_layout):
         markdown = r"""# 四步接入（`llm_test/main.py` 全文）
 
@@ -555,8 +520,6 @@ binder 和窗口（本页示例里 `worker` 就是这个角色）。
 
 """ + self._code_block(LLM_TEST_MAIN_SOURCE)
         self._addMarkdown(main_layout, markdown)
-
-    # -- 3. 关键 API 速查 --------------------------------------------------
 
     def _demoApi(self, main_layout):
         markdown = r"""# 关键 API 速查
@@ -796,8 +759,6 @@ view.beginPermission(messageId, ElaChatPermission(
 """
         self._addMarkdown(main_layout, markdown)
 
-    # -- 4. 真实后端 -------------------------------------------------------
-
     def _demoAgentSource(self, main_layout):
         markdown = r"""# 真实后端（`llm_test/agent_demo.py` 全文）
 
@@ -817,8 +778,6 @@ view.beginPermission(messageId, ElaChatPermission(
 
 """ + self._code_block(LLM_TEST_AGENT_DEMO_SOURCE)
         self._addMarkdown(main_layout, markdown)
-
-    # -- 5. 运行与依赖 -----------------------------------------------------
 
     def _demoRun(self, main_layout):
         markdown = r"""# 运行与依赖

@@ -55,7 +55,7 @@ class ElaNotifyPopup(QWidget):
         self._is_closing = False
         self._animation = None
         self._timer = None
-        #: 阴影边距。必须在 _setup_ui 之前定下来 —— 布局的内容边距要把它算进去。
+        #: 阴影边距。须在 _setup_ui 前定下：布局内容边距要把它算进去。
         self._shadow_margin = SHADOW_MARGIN
 
         self._setup_ui()
@@ -163,8 +163,7 @@ class ElaNotifyPopup(QWidget):
 
         self._animation.setStartValue(self.pos())
         self._animation.setEndValue(self._end_pos)
-        # 滑入**不传 on_complete** —— 传了就会在滑入结束时把弹窗关掉。
-        # 以前靠「先 disconnect 再 start」表达同一件事，现在语义直写在参数上。
+        # 滑入**不传 on_complete** —— 传了会在滑入结束时把弹窗关掉。
         start_transition(self._animation, Duration.Normal)
 
         if self._timeout > 0:
@@ -219,10 +218,8 @@ class ElaNotifyPopup(QWidget):
 
     def deleteLater(self) -> None:
         """断开信号并清理资源。
-
-        弹窗是本库创建/销毁最频繁的无父顶层控件，而 ``processEvents()`` 不派发
-        ``DeferredDelete`` —— 只靠 ``destroyed`` 上的钩子会连着好几个，所以主题单例
-        信号在这里就断。
+        弹窗是无父顶层控件里创建/销毁最频繁的，而 ``processEvents()`` 不派发
+        ``DeferredDelete``，只靠 ``destroyed`` 钩子会积压，故在这里断主题信号。
         """
         self._timer.stop()
         self._animation.stop()

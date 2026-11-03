@@ -75,14 +75,12 @@ class _ChartOptionMixin:
     ) -> "ElaChartWidget":
         """设置 option（ECharts ``setOption(option, notMerge, lazyUpdate)``）。
 
-        默认合并：dict 深合并；``series`` / ``dataZoom`` / ``graphic`` /
-        ``visualMap`` / ``annotations`` 数组按 ``id`` → ``name`` → 下标逐项合并，
-        其余 list 整体替换。``notMerge=True`` 全量替换并重置交互状态；
-        ``lazyUpdate=True`` 把重建 / 重绘推迟到下一事件循环。
+        默认深合并；``series`` / ``dataZoom`` / ``graphic`` / ``visualMap`` 等数组按
+        ``id`` → ``name`` → 下标逐项合并，其余 list 整体替换。``series[].data`` 的
+        大数值数组按引用摄入，调用方此后不得原地修改。
 
-        ``series[].data`` 的大数值数组按引用摄入（``ElaNumericBuffer``），调用方
-        在本次调用后不得原地修改，改数据请重新 ``setOption``。
-
+        :param notMerge: 全量替换并重置交互状态
+        :param lazyUpdate: 把重建 / 重绘推迟到下一事件循环
         :returns: self（支持链式调用）
         """
         self._ensure_alive()
@@ -115,14 +113,10 @@ class _ChartOptionMixin:
             self._apply_option(prev_list, prev_by_name)
         return self
 
-    # -- 全图字体族（单族约束） -------------------------------------------
-
     def setFontFamily(self, family) -> None:
         """设置全图字体族（单个族名；``None`` / 空串恢复系统默认）。
-
-        只接受单族：逗号列表会被折叠成第一个并留告警（多族在 Win7 上走慢
-        shaping 路径且进程级毒化后续文本）。单组件可用 ``textStyle.fontFamily``
-        等覆盖；本方法只失效布局缓存并重绘，不重建组件。
+        只接受单族：多族在 Win7 上走慢 shaping 路径且进程级毒化。只失效布局
+        缓存并重绘，不重建组件。
         """
         self._font_family = single_font_family(family)
         self.invalidateLayout()
@@ -131,8 +125,6 @@ class _ChartOptionMixin:
     def fontFamily(self) -> str:
         """当前全图字体族（空串 = 系统默认）。"""
         return str(getattr(self, "_font_family", "") or "")
-
-    # -- 单组件增量更新（比让宿主手写整个数组更安全） ---------------------
 
     def updateAxis(self, axis: str, patch: dict, axisIndex: int = 0) -> bool:
         """只更新一条坐标轴（深合并到该轴，其余轴原样保留）。
@@ -185,14 +177,11 @@ class _ChartOptionMixin:
     ) -> bool:
         """设置一条（或 x/y 两条）坐标轴刻度标签的样式，只改传入的键。
 
-        默认对齐：x 轴文字水平居中于刻度；y 轴文字垂直居中于刻度线、水平
-        方向贴轴（左侧轴右对齐 / 右侧轴左对齐）。``align="center"`` 可让
-        y 轴标签同列居中，``"auto"`` 恢复默认。
+        默认对齐：x 轴文字水平居中于刻度；y 轴文字垂直居中于刻度线、水平贴轴
+        （左轴右对齐 / 右轴左对齐）。``align="auto"`` / ``"center"`` 可覆盖。
 
         :param axis: ``"x"`` / ``"y"`` / ``"single"`` / ``"both"``（x + y）
         :param bold: ``True`` 加粗 / ``False`` 常规，优先于 ``fontWeight``
-        :param align: ``left`` / ``center`` / ``right`` / ``auto``
-        :param verticalAlign: ``top`` / ``middle`` / ``bottom`` / ``auto``
         :param margin: 标签与轴线的间距（px）
         :returns: 是否写入（轴不存在 / 参数非法 / 没有任何键时 False）
         """
@@ -285,8 +274,7 @@ class _ChartOptionMixin:
 
     def axisLabelStyle(self, axis: str = "x", axisIndex: int = 0) -> dict:
         """一条轴标签的实际样式（含默认对齐 / 间距；无此轴返回 ``{}``）。
-
-        返回键：``fontSize`` / ``fontWeight`` / ``fontFamily`` / ``fontStyle`` /
+        返回 ``fontSize`` / ``fontWeight`` / ``fontFamily`` / ``fontStyle`` /
         ``color`` / ``align`` / ``verticalAlign`` / ``margin`` / ``rotate``。
         """
         name = str(axis or "").strip().lower()
@@ -395,9 +383,7 @@ class _ChartOptionMixin:
         return self.updateAxis("x", {"data": list(labels or ())}, axisIndex)
 
     def _capture_prev_data(self, new_option: dict):
-        """捕获旧系列数据供过渡动画插值；动画关闭时完全跳过。
-
-        百万级数据的 ``list(r.data())`` 是一次完整物化，而插值关闭时根本不读。
+        """捕获旧系列数据供过渡动画插值；动画关闭时完全跳过（避免百万级物化）。
 
         :returns: ``(prev_list, prev_by_name)``；跳过时两者均为 ``None``
         """
@@ -410,11 +396,7 @@ class _ChartOptionMixin:
         return prev_list, prev_by_name
 
     def _schedule_lazy_option(self) -> None:
-        """排一次延迟重建（常驻子定时器）。
-
-        无主 ``QTimer.singleShot`` 不随本对象销毁，而 ``lazyUpdate`` 可以连调多次，
-        所以复用同一个子定时器而不是每次新建。
-        """
+        """排一次延迟重建（常驻子定时器）：``lazyUpdate`` 可连调多次，复用同一个。"""
         timer = self.__dict__.get("_lazy_timer")
         if timer is None:
             timer = QTimer(self)
@@ -433,10 +415,8 @@ class _ChartOptionMixin:
 
     def _capture_timeline_base(self) -> None:
         """捕获 timeline 基线：``baseOption``（优先）或除 ``options`` 外的顶层键。
-
-        一律走 ``_copy_any``：``deepcopy`` 会逐元素复制百万点数组，绕过按引用摄入。
-        只在基线为空时捕获，且调用点只能是 ``setOption`` —— 帧切换期间 ``_option``
-        已是「基线 + 当前帧」，再捕获会把帧值写回基线。
+        一律走 ``_copy_any``（``deepcopy`` 会逐元素复制百万点数组）；只在基线为空
+        时捕获——帧切换期间 ``_option`` 已是「基线 + 当前帧」。
         """
         frames = self._option.get("options")
         if not isinstance(frames, list) or not frames:
@@ -462,8 +442,7 @@ class _ChartOptionMixin:
     def _update_timeline_base(self, option: dict) -> None:
         """把宿主本次传入的非帧键合并进 timeline 基线。
 
-        帧切换时 ``_option`` 是生效结果，不能当基线来源；只用本次 ``setOption``
-        的入参，保证「更新静态配置」与「切帧回落」都成立。
+        帧切换时 ``_option`` 是生效结果，不能当基线来源，只用本次入参。
         """
         frames = self._option.get("options")
         if not isinstance(frames, list) or not frames:
@@ -557,11 +536,7 @@ class _ChartOptionMixin:
         self.update()
 
     def _start_animation(self) -> None:
-        """按 option 动画键启动入场 / 过渡动画；关闭时直接呈现终态。
-
-        读取 ``animation`` / ``animationDuration`` / ``animationEasing`` 及其
-        ``...Update`` 变体。
-        """
+        """按 option 动画键启动入场 / 过渡动画；关闭时直接呈现终态。"""
         opt = self._option
         enabled = opt.get("animation", True) is not False
         has_prev = any(r.prev_data is not None for r in self._series)
@@ -591,10 +566,9 @@ class _ChartOptionMixin:
         return self._overlay_live_state(option)
 
     def _overlay_live_state(self, option: dict) -> dict:
-        """把交互状态写回 ``getOption`` 的返回值（不改内部 ``_option``）。
+        """把交互状态（图例选择 / dataZoom 窗口 / 选中态）写回 ``getOption`` 的返回值。
 
-        ECharts 的 ``getOption`` 返回当前 option：图例选择 / dataZoom 窗口 / 选中态
-        都要反映用户操作，宿主才能保存与恢复视图。
+        不改内部 ``_option``；宿主才能保存与恢复视图。
         """
         if not isinstance(option, dict):
             return option
@@ -665,8 +639,8 @@ class _ChartOptionMixin:
     def appendData(self, params: dict) -> bool:
         """向指定系列追加数据（ECharts ``appendData({seriesIndex|seriesName, data})``）。
 
-        ``params`` 需含 ``seriesIndex`` / ``seriesName`` / ``seriesId`` 之一与
-        ``data``；返回是否找到目标系列并追加。
+        ``params`` 需含 ``seriesIndex`` / ``seriesName`` / ``seriesId`` 之一与 ``data``。
+        :returns: 是否找到目标系列并追加
         """
         self._ensure_alive()
         if not isinstance(params, dict):
@@ -753,13 +727,7 @@ class _ChartOptionMixin:
         self.setOption({}, notMerge=True)
 
     def dispatchAction(self, payload: dict) -> bool:
-        """触发 ECharts 动作（``dispatchAction``）。
-
-        支持：``legendToggleSelect`` / ``legendSelect`` / ``legendUnSelect`` /
-        ``legendAllSelect`` / ``legendInverseSelect`` / ``dataZoom`` /
-        ``restore`` / ``showTip`` / ``hideTip`` / ``highlight`` /
-        ``downplay`` / ``select`` / ``unselect`` / ``toggleSelect`` /
-        ``timelineChange`` / ``timelinePlayChange``。
+        """触发 ECharts 动作（``dispatchAction``；未识别的 ``type`` 返回 ``False``）。
 
         :returns: 动作是否被识别并执行
         """
@@ -1151,17 +1119,15 @@ class _ChartOptionMixin:
 
     def _component_inputs(self, cls, opt: dict, optionKey: str, series_opts: list):
         """列出该组件键下所有该建的实例：``(构造参数, 所属 series 或 None)``。
-
-        数组形式的顶层键在组件声明 ``spawnPerItem = True`` 时逐元素建实例
-        （``visualMap`` 的多实例语义）；否则整包传入（``dataZoom`` 自己处理 list）。
+        数组形式的顶层键在 ``spawnPerItem = True`` 时逐元素建实例（``visualMap``
+        多实例语义）；否则整包传入（``dataZoom`` 自己处理 list）。
         """
         per_item = bool(getattr(cls, "spawnPerItem", False))
 
         def expand(value):
             """→ 构造参数列表（空 = 不建实例）。
-
-            只有 ``spawnPerItem`` 为真时才逐元素拆；否则整包传入，避免把
-            ``dataZoom: [...]`` 拆成多个组件而破坏联动。
+            只有 ``spawnPerItem`` 为真才逐元素拆；否则整包传入，避免拆散
+            ``dataZoom: [...]`` 的联动。
             """
             if not isinstance(value, (dict, list)):
                 return []

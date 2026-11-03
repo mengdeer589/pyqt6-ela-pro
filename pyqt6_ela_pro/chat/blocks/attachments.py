@@ -92,8 +92,6 @@ class AttachmentStrip(ElaThemeWidget):
         policy.setHeightForWidth(True)
         self.setSizePolicy(policy)
 
-    # -- 数据 --------------------------------------------------------------
-
     def attachments(self) -> list:
         """附件快照列表（``ElaChatAttachment``）。"""
         return list(self._attachments)
@@ -189,8 +187,6 @@ class AttachmentStrip(ElaThemeWidget):
         self.setVisible(False)
         self.changed.emit([])
 
-    # -- 对齐与宽度 --------------------------------------------------------
-
     def setAlignment(self, alignment: Qt.AlignmentFlag) -> None:
         """设置 chips 行内对齐（用户消息常用 ``AlignRight``）。"""
         self._alignment = alignment
@@ -249,8 +245,6 @@ class AttachmentStrip(ElaThemeWidget):
         super().resizeEvent(event)
         self._sync_height()
 
-    # -- 布局 --------------------------------------------------------------
-
     def hasHeightForWidth(self) -> bool:  # noqa: N802 (Qt 命名)
         return True
 
@@ -265,8 +259,6 @@ class AttachmentStrip(ElaThemeWidget):
 
     def minimumSizeHint(self) -> QSize:  # noqa: N802 (Qt 命名)
         return self.sizeHint()
-
-    # -- 内部 --------------------------------------------------------------
 
     @staticmethod
     def _normalize(item) -> ElaChatAttachment:

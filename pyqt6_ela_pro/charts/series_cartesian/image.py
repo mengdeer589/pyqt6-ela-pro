@@ -57,7 +57,6 @@ class ImageSeriesRenderer(SeriesRenderer):
         self._interpolation = "nearest"
         self._legend_color = None
 
-    # -- 数据 -------------------------------------------------------------
     def _load_data(self) -> None:
         """数据被 ``updateSeries`` / ``appendData`` 替换后作废旧矩阵与图像缓存。"""
         self._data_epoch += 1
@@ -184,7 +183,6 @@ class ImageSeriesRenderer(SeriesRenderer):
                 return tuple(values)
         return (-0.5, self._cols - 0.5, -0.5, self._rows - 0.5)
 
-    # -- 配色 -------------------------------------------------------------
     def _color_range(self):
         vmin = _to_float(self.opt.get("vmin"), None)
         vmax = _to_float(self.opt.get("vmax"), None)
@@ -252,7 +250,6 @@ class ImageSeriesRenderer(SeriesRenderer):
         np_ = _ds.np
         self._lut_np = np_.array(lut, dtype=np_.uint8) if np_ is not None else None
 
-    # -- 图像构建 ---------------------------------------------------------
     def _sample_for_image(self):
         cells = self._rows * self._cols
         if cells <= _MAX_IMAGE_CELLS:
@@ -422,7 +419,6 @@ class ImageSeriesRenderer(SeriesRenderer):
             bytes(buf), cols, rows, 4 * cols, QImage.Format.Format_RGBA8888
         ).copy()
 
-    # -- 布局 / 绘制 ------------------------------------------------------
     def layout(self, rect: QRectF) -> None:
         self._image_rect = QRectF()
         coord = self.chart.coordFor(self.opt)
@@ -480,7 +476,6 @@ class ImageSeriesRenderer(SeriesRenderer):
         p.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform, previous)
         p.restore()
 
-    # -- 交互 -------------------------------------------------------------
     def hitTest(self, pos: QPointF):
         if self._image is None or self._image_rect.isNull():
             return None

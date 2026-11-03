@@ -1,10 +1,4 @@
-"""
-长按按钮组件。
-
-按住按钮一段时间后才发 ``longPressed`` 的按钮，按住期间在按钮面上叠加
-进度填充；提前松开时进度回流。继承 :class:`~pyqt6_ela_pro.ela_button.ElaButton`，
-因此尺寸 / 变体 / 颜色与 ``ElaButton`` 完全一致。
-"""
+"""长按按钮组件。"""
 
 from __future__ import annotations
 
@@ -33,30 +27,9 @@ from .ela_button import (
 
 
 class ElaLongPressButton(ElaButton):
-    """长按按钮。
-
-    按住一段时间（默认 500ms）才发 :attr:`longPressed`，期间按钮面上有进度
-    填充；提前松开时进度回流清零。**短按不会发** ``longPressed``（Qt 仍会
-    照常发 ``clicked``，宿主应只连前者）。
-
-    按住期间按钮被禁用 / 隐藏 / 失焦会主动中断，不会补发 ``longPressed``。
-
-    :param text: 按钮文本
-    :param icon: ElaAwesome 图标（``ElaIconType.IconName`` 或其整数值）
-    :param iconSize: 图标大小，默认 16
-    :param variant: 变体，取值见 :data:`ElaButtonVariant`
-    :param color: 色彩，取值见 :data:`ElaButtonColor`
-    :param danger: 危险色（等价 ``color="danger"``）
-    :param size: 尺寸档位 ``small`` / ``middle`` / ``large``（22 / 30 / 38）
-    :param duration: 触发长按所需的时长（毫秒），默认 500ms
-    :param parent: 父控件
-
-    Example::
-
-        button = ElaLongPressButton(
-            "长按卸载", variant="outlined", size="small", duration=800, parent=parent
-        )
-        button.longPressed.connect(lambda: print("长按完成！"))
+    """长按按钮：按住 ``duration`` 毫秒才发 :attr:`longPressed`，期间按钮面显示进度。
+    短按**不发** ``longPressed``（Qt 仍会发 ``clicked``，宿主应只连前者）；按住期间
+    被禁用 / 隐藏 / 失焦会中断且不补发。``duration`` 是触发时长（毫秒，默认 500），
     """
 
     longPressed = pyqtSignal()
@@ -65,7 +38,7 @@ class ElaLongPressButton(ElaButton):
     #: 可以「按住」的键（键盘可达性）。autoRepeat 的重复按键不算重新开始。
     _HOLD_KEYS = frozenset({Qt.Key.Key_Space, Qt.Key.Key_Return, Qt.Key.Key_Enter})
 
-    # 类级默认值：主题信号可能在本类 ``__init__`` 走到属性赋值之前回调
+    # 类级默认值：主题信号可能在本类 ``__init__`` 完成属性赋值前回调
     _custom_progress_color: bool = False
     _progress_color: QColor = QColor()
 
@@ -141,14 +114,9 @@ class ElaLongPressButton(ElaButton):
     # ── 计时 ──────────────────────────────────────────────
 
     def _stepLength(self) -> float:
-        # 注意：这里**故意不接**全局动效策略（_motion.start_transition_timer）。
-        #
-        # 进度环不是装饰动效，是**功能契约**：`setDuration(ms)` 的语义就是
-        # 「要按这么久才触发」，进度环是用户唯一的计时反馈。接到策略上会有两个后果：
-        #   * Reduced 下 min(duration, 50) → 800ms 的长按变 50ms，一碰就触发；
-        #   * Disabled 下直接落终值 → 长按按钮退化成单击按钮。
-        # 两者都让控件行为不可预测，属于 bug 而不是无障碍。机器守卫见
-        # tests/motion/test_motion_policy.py::test_essential_gesture_not_scaled。
+        # **故意不接**全局动效策略：进度环是功能契约（``duration`` 就是触发时长），
+        # Reduced/Disabled 会把它压成 50ms 或直接落终值，长按退化成单击。
+        # 机器守卫见 tests/motion/test_motion_policy.py::test_essential_gesture_not_scaled。
         steps = self._duration / 16.0
         return 1.0 / steps if steps >= 1 else 1.0
 

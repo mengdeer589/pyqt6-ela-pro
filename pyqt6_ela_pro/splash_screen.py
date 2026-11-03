@@ -1,18 +1,6 @@
-"""
-启动画面组件，风格参考 ElaWidgetTools 的 ElaSplashScreen。
+"""启动画面组件：全 QPainter 自绘，支持主题、Logo 与淡入淡出。
 
-全 QPainter 自定义绘制，支持主题自适应、Logo、淡入淡出动画、可拖动。
-
-用法::
-
-    splash = ElaSplashScreen(parent=self)
-    splash.setTitle("My App")
-    splash.setSubTitle("Version 1.0")
-    splash.show()
-    # ... loading ...
-    splash.setValue(100)
-    splash.finish(main_window)
-"""
+用法见 ``example`` 与 README。"""
 
 from __future__ import annotations
 
@@ -52,22 +40,9 @@ _TEXT_STACK_WARMED = False
 
 
 def _warmTextStack() -> None:
-    """付掉 Qt6 字体引擎 / Ela 图标字体 / Pygments 的一次性成本（**幂等**）。
-
-    PyQt6/Qt6 下首次 ``QFont().defaultFamily()`` 要 ~190ms（解析系统默认字体、初始化
-    字体引擎；Qt5 几乎为 0）。splash 的职责正是「遮住启动期工作」，所以在这里付掉它 ——
-    否则这笔成本会随机落在宿主第一个页面构造里，让那一页莫名多 190ms（实测落在某个无
-    关演示节里，那一节从 4ms 变成 194ms）。之后调用是 0.0x ms 级。
-
-    字体引擎热了以后还要补两笔，否则它们会落在**第一个代码块渲染**上
-    （实测首块代码 219ms → 3ms）：
-
-    - 首个 ``ElaIcon.getElaIcon``：加载图标字体，字体引擎未热时 ~216ms（大头与上一条
-      同源，所以顺序必须是先 ``defaultFamily`` 再取图标），已热时 ~29ms；
-    - Pygments：首次导入 + 首个词法器 ~35ms。
-
-    不用我们 splash 的宿主可以自己在启动阶段调一次 ``QFont().defaultFamily()``、
-    一次 ``ElaIcon.getElaIcon(...)`` 与一次 ``pygments.lexers.get_lexer_by_name(...)``。
+    """付掉 Qt6 字体引擎 / Ela 图标字体 / Pygments 的一次性成本（幂等）。
+    顺序不能换：先 ``defaultFamily`` 再取图标。字体引擎未热时首次调用要 ~190ms，
+    落在宿主第一页构造里会拖慢该页；pygments 为可选依赖。
     """
     global _TEXT_STACK_WARMED
     if _TEXT_STACK_WARMED:
@@ -90,10 +65,7 @@ def _warmTextStack() -> None:
 
 
 class ElaSplashScreen(ElaThemeWidget):
-    """启动画面组件。
-
-    全 QPainter 自定义绘制，支持 Logo、标题、副标题、状态文字、进度条/环，
-    主题自适应、淡入淡出动画、鼠标拖动。
+    """启动画面：全 QPainter 自绘，支持主题、Logo、进度与淡入淡出。
 
     :param parent: 父控件
     """
@@ -252,9 +224,9 @@ class ElaSplashScreen(ElaThemeWidget):
             )
         self._progress_bar.setVisible(self._is_show_progress_bar)
         self._progress_ring.setVisible(self._is_show_progress_ring)
-        # 复位淡出状态：同一实例复用（finish → show → finish）时第二次 finish
-        # 不能被上一次的 ``_fade_settled`` 静默吞掉（否则启动画面不淡出、
-        # 主窗口永不显示）。同时停掉可能在途的旧淡出。
+        # 每次 show 复位淡出状态：同一实例复用（finish → show → finish）时，
+        # 第二次 finish 会被残留的 ``_fade_settled`` 静默吞掉，启动画面不淡出，
+        # 主窗口永不显示。
         self._fade_timer.stop()
         self._fade_settled = False
         self._fade_target = None
@@ -280,9 +252,9 @@ class ElaSplashScreen(ElaThemeWidget):
         self._fade_target = main_window
         self._fade_opacity = 1.0
         self._fade_timer.setInterval(20)
-        # timeout 连接在 ``__init__`` 里做一次（曾放在这里：close() 之后再次
-        # finish() 会重复 connect —— 每 tick 跑两遍、``_settleFadeOut`` 收尾
-        # 两遍，closed 重复发射、主窗口被 show/raise 两次）
+        # timeout 只在 ``__init__`` 连接一次：若在此处连接，close() 后再次
+        # finish() 会重复 connect，每 tick 跑两遍、``_settleFadeOut`` 收尾两遍，
+        # closed 重复发射、主窗口被 show/raise 两次。
         if not start_transition_timer(self._fade_timer):
             # Reduced/Disabled：同步落终值。收尾（关自己 + 激活主窗口）不能丢，
             # 所以走同一条 _settleFadeOut。

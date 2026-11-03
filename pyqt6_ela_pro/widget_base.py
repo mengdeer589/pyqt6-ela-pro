@@ -19,15 +19,9 @@ from ._internal import _ThemeAwareMixin
 class ElaThemeWidget(_ThemeAwareMixin, QWidget):
     """自动适应主题变化的 ``QWidget`` 基类。
 
-    子类应调用 ``super().__init__(parent)`` 以确保主题连接被建立。
+    子类必须调用 ``super().__init__(parent)``，主题连接在那里建立。
 
     :param parent: 父级 widget，为 ``None`` 时表示顶级窗口。
-
-    Example::
-
-        class MyPanel(ElaThemeWidget):
-            def __init__(self, parent=None):
-                super().__init__(parent)
     """
 
     def __init__(self, parent: Optional[QWidget] = None) -> None:

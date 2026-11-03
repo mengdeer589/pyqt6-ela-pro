@@ -97,10 +97,8 @@ def symbolPixmap(
     dpr: float = 1.0,
 ) -> QPixmap:
     """符号的**预渲染位图**（点量大时批量贴图用）。
-
     逐点 ``drawEllipse`` 与合并 ``QPainterPath`` 在大量点上都很慢，位图贴图快
     一个数量级；按 ``dpr`` 以物理像素渲染。**返回副本**：缓存里的活动对象一旦
-    被调用方就地改写，之后所有调用方都会拿到被改过的图。
     """
     fill = parse_color(color)
     stroke = parse_color(border_color) if border_color is not None else None

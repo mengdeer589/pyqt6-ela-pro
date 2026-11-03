@@ -1,10 +1,4 @@
-"""视图与列表
-
-树 / 表 / 列表 / 选项卡这类「一堆同类项怎么组织」。
-
-数据表格（ElaDataTable / ElaParquetTable）不在这里 —— 那是**绑定
-数据源**的组件，归「数据与图表」分组；这一页只放结构性视图。
-"""
+"""视图与列表?"""
 
 from PyQt6.QtCore import QSize, Qt
 from PyQt6.QtWidgets import QHBoxLayout, QWidget

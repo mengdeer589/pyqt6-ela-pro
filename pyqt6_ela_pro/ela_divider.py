@@ -1,18 +1,4 @@
-"""
-分割线组件，风格参考 Ant Design Divider。
-
-支持水平/垂直方向，可带文字，支持实线/虚线样式，自动适配深浅色主题。
-
-用法::
-
-    from pyqt6_ela_pro import ElaDivider
-
-    ElaDivider(parent=self)                          # 纯水平线
-    ElaDivider(text="OR", parent=self)                # 居中文字
-    ElaDivider(text="请登录", orientation="left")     # 左对齐文字
-    ElaDivider(variant="dashed", parent=self)          # 虚线
-    ElaDivider(vertical=True, parent=self)             # 垂直线
-"""
+"""分割线组件，风格参考 Ant Design Divider。"""
 
 from __future__ import annotations
 

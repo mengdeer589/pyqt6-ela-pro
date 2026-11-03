@@ -1,30 +1,4 @@
-"""
-[pyqt6_ela_pro] 聊天组件的 Agent 能力演示页。
-
-``chat_input_page.py`` 演示的是「怎么把一个聊天组件接起来」；本页演示的是**典型
-智能体软件**比普通聊天多出来的那几件事，每节都能单独点「</> 代码」看接法：
-
-1. **工具结果富渲染**（``registerToolRenderer``）—— 宿主按工具名接管工具卡的
-   **内容区**，头部 / 折叠 / 错误竖线 / 忙碌环 / 展开策略仍由 ``ToolCallCard``
-   负责（所以库内既有工具卡行为一条不变）。本节注册 ``patch`` / ``edit`` 渲染
-   成带增删统计的假 diff，并让 ``subtitle`` 声明来源键以避免「2 个文件
-   files=[...]」重复。
-2. **工具审批**（``beginPermission``）—— 卡片只负责**画 + 收集 + 发信号**，
-   **绝不阻塞**（在 Qt 里挂起等用户点按钮会卡死事件循环）。本节演示批准型
-   （允许一次 / 始终允许【长按 700ms】/ 拒绝…带反馈）与问答型（候选项单选）。
-3. **steer 插话**（``steerMessage``）—— 生成中把新指令送进**正在跑的这一轮**
-   （对齐 opencode 的 ``Delivery = "steer" | "queue"``），投递点是
-   ``beginStep`` 之后的安全边界。回执走「``↳`` 旁注」而不是插一条用户气泡。
-4. **上下文压缩**（``beginCompaction``）—— 库**不实现压缩算法**，只在时间线
-   上如实表达「这里发生过一次压缩」并接住摘要（压不压、压哪段由宿主决定）。
-5. **成本与上下文占用** —— ``cost_usd``（定价表归宿主，库只给换算纯函数）
-   + 输入区工具栏里的占用圆环（三档配色）。
-6. **手动重试** —— 错误类型单独存字段，错误卡据此决定是否点亮「重试」
-   （限流 / 超时可重试，参数错误 / 鉴权失败不给）。
-
-本节代码全部写在各 ``_demo_*`` 方法体内 —— 「</> 代码」按钮展示的就是那个
-方法自己的源码。
-"""
+"""[pyqt6_ela_pro] 聊天组件的 Agent 能力演示页。?"""
 
 import traceback
 
@@ -68,16 +42,8 @@ _DEMO_WINDOW = 200_000
 
 class _DiffView(QWidget):
     """假的 diff 视图（真宿主会换成自己的 unified-diff 控件）。
-
-    实现了**可选**的 ``updateToolResult(result, status)`` —— 卡片有它就把
-    结果推送过来，没有就只在首次展开时建一次。这个方法名与签名是约定，
-    库不做鸭子类型之外的检查。
-
-    **每个 ``ColorText`` 都必须显式 ``setTextPixelSize``。** ``ColorText`` 走
-    ``ElaText``，不设就是 ``ElaText`` 的默认字号（约 18px），比工具卡头部
-    （13/12/11px）大一大截 —— 渲染器内容区突然冒出巨大字号，整张卡的比例就
-    崩了（实测截图里最刺眼的问题）。库内每一处 ``ColorText`` 都显式设了字号，
-    宿主写渲染器时同理。
+    实现可选的 ``updateToolResult(result, status)``；卡片有它就推送结果。
+    每个 ``ColorText`` 都必须显式 ``setTextPixelSize``，否则默认字号会撑坏卡片比例。
     """
 
     #: 文件路径字号（与卡片头部的副标题同级）
@@ -310,20 +276,10 @@ class ChatAgentPage(ExamplePage):
         if card is not None:
             card.setOpened(True)
 
-    # ================================================================ 演示 1
     def _demo_renderer(self) -> None:
         """工具结果富渲染：把 ``demo_patch`` / ``demo_edit`` 的内容区换成 diff 视图。
-
-        关键点（``chat/renderers.py`` 的 docstring 有完整版）：
-
-        - 渲染器**只接管内容区**，卡片 chrome 不动 —— 所以库里既有的
-          「副标题去重 / 运行中不显示参数 / 展开策略」三条回归行为全保留；
-        - ``subtitle`` 返回 ``(键, 值)`` 而不是裸字符串：那个键会被自动从
-          参数摘要里排除，否则折叠态会出现「2 个文件 files=[{...}]」；
-        - 给上下文工具注册渲染器时**默认退出分组**（``groupable=None`` →
-          上下文工具为 ``False``），否则会被 ``ContextToolGroupCard``
-          整张卡绕过；
-        - 返回的 widget 会被卡片持有 Python 引用，宿主**不用**自己 ``del``。
+        渲染器只接管内容区，卡片 chrome 保留；``subtitle`` 返回 ``(键, 值)``，
+        该键会从参数摘要里排除；上下文工具默认退出分组；widget 由卡片持引用。
         """
         if self._renderers_registered:
             return
@@ -380,23 +336,10 @@ class ChatAgentPage(ExamplePage):
         self._renderers_registered = False
         self._note("已注销渲染器（已有卡片不受影响，新建卡片回落纯文本）")
 
-    # ================================================================ 演示 2
     def _demo_permission(self) -> None:
-        """工具审批（批准型）：组件画卡 + 发信号，**不阻塞**。
-
-        真实宿主的完整链路是：
-
-        1. 后端要执行 ``edit``，规则评估结果是「需要确认」；
-        2. 宿主调 ``view.beginPermission(...)`` 插卡；
-        3. 组件发 ``permissionRequested(messageId, requestId)``；
-        4. **宿主自己**把后端挂起（可以真等，也可以先记下继续跑别的）；
-        5. 用户点按钮 → 组件更新卡片并发 ``permissionReplied(...)``；
-        6. **宿主按回复恢复 / 中止后端**。
-
-        「始终允许」是**长按 700ms** 才生效的 ``ElaLongPressButton``（持久授权
-        误触代价高，短按不算通过）；它的规则持久化也归宿主：``resources`` 里的
-        模式串原样交出，怎么匹配、存哪、作用域多大都是产品决策。库不持有任何
-        权限状态。
+        """工具审批（批准型）：组件画卡 + 发信号，不阻塞。
+        真实链路：beginPermission 插卡 → permissionRequested → 宿主挂起后端 →
+        用户点按钮 → permissionReplied → 宿主恢复 / 中止。始终允许是长按 700ms，
         """
         view = self._chat.chatView()
         messageId = view.beginMessage("assistant")
@@ -414,26 +357,9 @@ class ChatAgentPage(ExamplePage):
         self._note("已插入审批卡（不阻塞：组件不会等你的点击）")
 
     def _demo_question(self) -> None:
-        """工具审批（问答型）：**逐题向导**，对齐 opencode 的 question dock。
-
-        问答型与批准型共用同一套信号（``permissionRequested`` /
-        ``permissionReplied``），区别只在卡片形态：``questions`` 非空时渲染成
-        逐题向导，回复走 ``answer``（``json.dumps({key: str | [str, ...]})``）。
-
-        三点值得注意：
-
-        1. **候选项带 description**。截图级 UI 里每个选项都是两行 —— 只给标题
-           逼着用户靠猜，而模型给的选项之间往往差别很微妙。
-        2. **多题逐题答**而不是一张长列表（长列表在窄列里很高、要上下扫），
-           头部有「N / M 个问题」+ 可点的进度段，每题独立草稿。
-        3. **「输入自己的答案」是列表最后一项**（不是独立控件）：点它的标记、点
-           整行、按 ``Space`` 是同一件事 —— **选中它 + 展开输入框**，一步就能开始
-           输入。单选下它是圆点（radio，再点标记不会取消，要换答案点其它选项）；
-           多选下再点标记 = 取消勾选并收起输入框。敲完字直接点「下一步 / 提交」
-           或按 ``Ctrl+↵`` 都会**先把这段文字落定**，不会丢。
-
-        键盘：``1``–``9`` 选中对应行、``Space`` 切换（多选）、``↑↓`` 移动焦点、
-        ``Ctrl+↵`` 下一步 / 提交、``Alt+←`` 上一步、``Esc`` 忽略。
+        """工具审批（问答型）：逐题向导，对齐 opencode 的 question dock。
+        与批准型共用 permissionRequested / permissionReplied；questions 非空时渲染成
+        逐题向导，回复走 answer（JSON）。候选项带 description，多题逐题答，最后一项
         """
         view = self._chat.chatView()
         self._chat.sendUserMessage("这批未提交的改动你想怎么处理？")
@@ -500,10 +426,8 @@ class ChatAgentPage(ExamplePage):
         self, messageId: int, requestId: str, reply: str, answer: str, feedback: str
     ) -> None:
         """宿主侧：收到回复 —— 恢复 / 中止后端，并把 feedback 喂回模型。
-
         问答型的 ``answer`` 是 ``json.dumps({key: str | [str, ...]})``：单选塌缩成
         标量、多选发整个数组、**未答题整条不进 payload**（不是空串）。宿主按
-        ``key`` 对回自己的问题列表即可，不需要理解组件内部怎么组织选项。
         """
         detail = answer or feedback
         self._note(
@@ -511,7 +435,6 @@ class ChatAgentPage(ExamplePage):
             + (f"（{detail}）" if detail else "")
         )
 
-    # ================================================================ 演示 3
     def _demo_steer(self) -> None:
         """steer 插话：生成中把新指令送进**正在跑的这一轮**。
 
@@ -551,14 +474,10 @@ class ChatAgentPage(ExamplePage):
         """宿主侧：把插话文本送进**正在跑的**那一轮。"""
         self._note(f"steerReady：{payload['text']}")
 
-    # ================================================================ 演示 4
     def _demo_compaction(self) -> None:
         """上下文压缩：**库只做「表达」，不做压缩算法**。
-
         摘要模板、``SHRINK_STEPS`` 收缩循环、词元估算、transcript 边界全都依赖
         provider 侧能力，不在 UI 库范围。库负责的是「能表达 + 能持久化」——
-        时间线上如实出现一条分隔卡，接住流式摘要，随消息一起落库 / 恢复。
-        压不压、压哪段、什么时候压，全由宿主决定。
         """
         view = self._chat.chatView()
         messageId = view.beginMessage("assistant")
@@ -573,22 +492,10 @@ class ChatAgentPage(ExamplePage):
         view.endCompaction(messageId, partId, "done", 24)
         self._note("已插入压缩分隔卡（展开看摘要；它不并入正文 text）")
 
-    # ================================================================ 演示 5
     def _demo_cost(self) -> None:
         """成本与上下文占用：数据全由宿主提供，库只给换算规则。
-
-        - ``cost_usd`` 跟着 :class:`ElaChatStats` 走（各步求和 = 整轮汇总），
-          tooltip 里显示「花费 $x」；
-        - 定价表**不烤进库**（价格会变、还分上下文长度阶梯），换算口径对齐
-          opencode：``output`` 与 ``reasoning`` 同价、按输入侧总量选最大的
-          满足档、最后除以 1e6；
-        - 会话级汇总走 ``view.sessionStats(limit)``（``ElaChatSessionStats``）：
-          计数 / 当前上下文四路词元 / 使用率 / 累计成本 / **工具调用统计**
-          （``tool_calls`` 次数、``tool_rounds`` 轮数、``tool_counts`` 按名计数、
-          失败 / 中止 / 在途分档）/ ``reasoning_ms`` 思考耗时合计，口径对齐
-          opencode ``getSessionContext``（取**最后一条有 tokens 的助手消息的
-          最后一步**）；把它的 ``total_tokens`` / ``total_cost_usd`` 直接喂
-          输入区圆环即可。
+        cost_usd 跟 ElaChatStats 走；定价表不内置，换算口径对齐 opencode；
+        会话级汇总走 view.sessionStats(limit)。
         """
         view = self._chat.chatView()
         roundStats = ElaChatStats(
@@ -634,7 +541,6 @@ class ChatAgentPage(ExamplePage):
             f"（{session.tool_counts}）"
         )
 
-    # ================================================================ 演示 6
     def _demo_retry(self) -> None:
         """手动重试：错误类型单独存字段，错误卡据此决定是否点亮「重试」。
 
@@ -659,7 +565,6 @@ class ChatAgentPage(ExamplePage):
         self._chat.setGenerating(False)
         self._note("已插入错误卡（ServerError 可重试 → 展开错误卡点「重试」）")
 
-    # ================================================================ 演示 7
     def _demo_file_changes(self) -> None:
         """文件变更与 diff：内置渲染器 + ElaChatFileChanges + ElaDiffView。"""
         installBuiltinToolRenderers()
@@ -725,7 +630,6 @@ class ChatAgentPage(ExamplePage):
 
 def _parse(arguments: str) -> dict:
     """容错解析工具参数。
-
     示例里够用；真宿主直接用 ``chat.renderers.parseToolArguments``（同一份
     实现：非 JSON 纯文本会落成 ``{"": 原文}``，流式半截参数不会整段消失）。
     """

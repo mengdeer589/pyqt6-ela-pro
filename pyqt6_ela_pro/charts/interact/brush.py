@@ -24,10 +24,8 @@ from ..core import parseDataPoint
 
 class BrushComponent(QObject):
     """矩形 / 套索刷选：Grid 上拖出选框，命中数据点集合并高亮。
-
     option: ``"brush": {"toolbox": ["rect", "clear"], "outOfBrush": {"opacity": 0.4}}``。
     落定后 ``selected_items`` 为命中点列表并发出 ``selected(list)``；
-    配置后 plot 内左键拖拽归刷选，dataZoom inside 仅保留滚轮缩放。
     """
 
     optionKey = "brush"
@@ -252,7 +250,6 @@ class BrushComponent(QObject):
 
     def _collect_vectorized(self, r, series_coord, rect, polygon):
         """numpy 快路径：矩形 / 套索命中（``None`` = 回退逐点实现）。
-
         逐点 ``mapPoint`` 在 10 万点上要 238ms，这里一次向量化映射；
         套索先按 bbox 预筛再逐点判多边形（候选上限见 ``LASSO_MAX_CANDIDATES``）。
         """
@@ -351,7 +348,6 @@ class BrushComponent(QObject):
 
     def _highlight_points(self) -> list:
         """选中点像素位置列表 [(QPointF, QColor)]（带缓存）。
-
         选中集只在落定 / clear 时变化，而 ``paint`` 每帧都会调用；
         10 万点逐帧重映射约 121ms，故按选中集版本 + 视图状态缓存。
         """

@@ -103,7 +103,6 @@ class _ViewScrollMixin:
         minParts: Optional[int] = None,
     ) -> None:
         """设置交互 resize 是否延迟重排（默认开启）。
-
         拖动窗口期间冻结消息内容宽度，停手 ``delayMs`` 后统一按新宽度重排。
         ``minMessages`` / ``minParts`` 是触发阈值（缺省 50 条 / 200 段）。
         """
@@ -133,7 +132,6 @@ class _ViewScrollMixin:
 
     def _freeze_before_resize(self, event) -> None:
         """在 ``QScrollArea`` 处理 resize 之前冻结内容宽（避免逐帧重排）。
-
         布局链通常已按新宽排过内容，所以优先钉住当前内容宽，布局没跟上时才用
         ``oldSize`` 推算。
         """
@@ -230,7 +228,6 @@ class _ViewScrollMixin:
 
     def _on_range_changed(self, _minimum: int, maximum: int) -> None:
         """滚动范围变化（Markdown / 工具卡展开等异步重排）时保持贴底。
-
         展开 / 收起期间消费变化并延长暂停窗口；懒加载插入更早消息后按锚点
         补偿滚动位置。
         """

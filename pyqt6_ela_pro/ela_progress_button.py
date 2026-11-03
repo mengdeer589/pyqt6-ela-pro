@@ -27,32 +27,14 @@ from .ela_button import (
 
 
 class ElaProgressButton(ElaButton):
-    """进度按钮。
-
-    进度由外部通过 :meth:`setProgress` 控制（0-100），填充画在按钮面上、
-    半透明以保证文字始终可读。
-
-    :param text: 按钮文本
-    :param icon: ElaAwesome 图标（``ElaIconType.IconName`` 或其整数值）
-    :param iconSize: 图标大小，默认 16
-    :param variant: 变体，取值见 :data:`ElaButtonVariant`
-    :param color: 色彩，取值见 :data:`ElaButtonColor`
-    :param danger: 危险色（等价 ``color="danger"``）
-    :param size: 尺寸档位 ``small`` / ``middle`` / ``large``（22 / 30 / 38）
-    :param getProgressColor: 进度填充色；``None`` 用主题强调色（实心 / 浅底
-        变体自动改成文字色扫光，否则强调色叠强调色看不见）
-    :param parent: 父控件
-
-    Example::
-
-        button = ElaProgressButton("下载", parent=parent)
-        button.setProgress(50)  # 显示 50% 进度
-        button.setProgress(100)  # 完成
+    """进度按钮：进度由外部 ``setProgress`` 驱动（0-100），填充半透明保证文字可读。
+    ``getProgressColor`` 为 ``None`` 时用主题强调色（实心 / 浅底变体自动改成文字色
+    扫光，否则强调色叠强调色看不见）；其余参数同 :class:`ElaButton`。
     """
 
     progressChanged = pyqtSignal(int)
 
-    # 类级默认值：主题信号可能在本类 ``__init__`` 走到属性赋值之前回调
+    # 类级默认值：主题信号可能在本类 ``__init__`` 完成属性赋值前回调
     _custom_progress_color: bool = False
     _progress_color: QColor = QColor()
 

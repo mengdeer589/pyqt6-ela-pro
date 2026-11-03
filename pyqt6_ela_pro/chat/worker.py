@@ -1,13 +1,6 @@
-"""异步聊天后端 worker 基类（``pyqt6_ela_pro.chat``）。
+"""异步聊天后端 worker 基类（QThread + asyncio + 命令队列）。
 
-``ElaChatAsyncWorker`` 封装 QThread + asyncio 事件循环 + 命令队列 + 取消 / 收尾，
-信号契约与 ``ElaChatMockBackend`` 同构，可直接接 ``ElaChatStreamBinder``。
-
-子类实现 ``_setup`` / ``_stream_turn`` / ``_rollback_turn`` / ``_after_turn`` /
-``_reset_backend`` 钩子，并在钩子内直接发信号。``ask`` / ``regenerate`` 返回回合
-token，``turnFinished`` 原样带回 —— ``cancel()`` 是异步的，认不出的迟到信号必须
-丢弃，否则会把新回合按完成掐掉。
-"""
+子类实现 ``_setup`` / ``_stream_turn`` / ``_rollback_turn`` 等钩子。"""
 
 from __future__ import annotations
 
@@ -91,8 +84,6 @@ class ElaChatAsyncWorker(QThread):
         #: 正在跑的回合 token（run() 的异常补发要带上它）
         self._active_turn = 0
 
-    # -- 子类钩子 ----------------------------------------------------------
-
     async def _setup(self) -> None:
         """初始化后端（子类实现）；默认直接发 ``ready``。"""
         self.ready.emit()
@@ -112,8 +103,6 @@ class ElaChatAsyncWorker(QThread):
 
     async def _reset_backend(self) -> None:
         """重置后端会话（子类可选实现）。"""
-
-    # -- 线程主体 ----------------------------------------------------------
 
     def run(self) -> None:  # noqa: D102
         self._loop = asyncio.new_event_loop()
@@ -182,7 +171,7 @@ class ElaChatAsyncWorker(QThread):
                 try:
                     await self._rollback_turn(text, attachments)
                 except Exception as exc:
-                    # 回滚失败只上报：本回合仍继续跑（历史一致性由后端子类负责）
+                    # 回滚失败只上报：本回合仍继续跑（一致性由后端子类负责）
                     self.errorOccurred.emit("worker", f"{type(exc).__name__}: {exc}")
                 await self._run_turn(text, attachments, turn)
             elif kind == "reset":
@@ -248,8 +237,6 @@ class ElaChatAsyncWorker(QThread):
         except asyncio.CancelledError:
             pass
 
-    # -- 命令接口（线程安全） ----------------------------------------------
-
     def _next_turn_token(self) -> int:
         """分配一个回合 token（加锁：``ask`` 可能来自多个线程）。"""
         with self._token_lock:
@@ -258,16 +245,15 @@ class ElaChatAsyncWorker(QThread):
 
     def ask(self, text: str, attachments=None) -> Optional[int]:
         """提交提问；worker 未就绪返回 ``None``。
-
-        ``attachments`` 原样交给 :meth:`_stream_turn`。返回回合 token
-        （:attr:`turnFinished` 原样带回），真值即代表已受理，不要当 bool 用。
+        ``attachments`` 原样交给 :meth:`_stream_turn`。返回回合 token（``turnFinished``
+        原样带回）——真值只代表已受理，不要当 bool 用。
         """
         turn = self._next_turn_token()
         submitted = self._submit(("ask", (text, list(attachments or ())), turn))
         return turn if submitted else None
 
     def regenerate(self, text: str, attachments=None) -> Optional[int]:
-        """重新生成：先回滚历史再重跑；未就绪返回 ``None``。
+        """重新生成：先回滚再重跑；未就绪返回 ``None``。
 
         必须带上原消息的附件，否则模型看不见用户上传的文件。
         """
@@ -285,14 +271,13 @@ class ElaChatAsyncWorker(QThread):
 
     def _submit(self, command) -> bool:
         """投递命令。worker 未就绪 / 已关闭返回 ``False``（不抛）。
-
-        ``ask()`` 从 GUI 线程直接调用，异常穿过 C++ 边界就是 0xC0000409，
-        所以「事件循环已关闭」也必须走返回路径。
+        ``ask()`` 从 GUI 线程直接调用，异常穿过 C++ 边界就是 0xC0000409，所以
+        「事件循环已关闭」也必须走返回路径。
         """
         loop = self._loop
         if loop is None or self._queue is None or self._closing:
-            # 已请求关闭：不再受理命令（这之前只看了 loop/queue，shutdown 之后、
-            # 线程收尾之前的那段窗口里 ask() 会假成功，命令永不执行）。
+            # 已请求关闭：不再受理命令（只查 loop/queue 会在 shutdown 之后、
+            # 线程收尾前的窗口里让 ask() 假成功，命令永不执行）。
             return False
         put = self._queue.put(command)
         try:
@@ -312,10 +297,8 @@ class ElaChatAsyncWorker(QThread):
 
     def shutdown(self) -> None:
         """请求停止 worker 并立即返回（不阻塞调用线程）。
-
-        只置关闭标记、请求中止当前回合、投递 ``None`` 哨兵；线程随后在
-        :meth:`_arm_watchdog` 的非阻塞轮询下自行收尾。确实要等线程退出时用
-        :meth:`waitForShutdown`。
+        只置关闭标记、中止当前回合、投递 ``None`` 哨兵；线程随后在 :meth:`_arm_watchdog`
+        的非阻塞轮询下自行收尾。确实要等线程退出时用 :meth:`waitForShutdown`。
         """
         self._closing = True
         self.cancel()

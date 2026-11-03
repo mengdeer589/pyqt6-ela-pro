@@ -1,16 +1,6 @@
-"""工具结果富渲染注册表（``pyqt6_ela_pro.chat``）。
+"""工具结果富渲染注册表：宿主接管 ``ToolCallCard`` 的内容区。
 
-``ToolCallCard`` 默认把 ``arguments`` / ``result`` 当纯文本显示；宿主可注册渲染器
-接管内容区（头部 / 折叠 / 错误竖线 / 忙碌环仍归卡片）。库内不内置具体渲染器，
-渲染什么是宿主的产品决策。
-
-三条硬约束：渲染器 widget 必须持 Python 引用（``ToolCallCard`` 内部持有）；工厂
-跑在 GUI 线程的点击槽里，异常会被卡片兜住并落回默认文本 body；工厂里不要做重活。
-结果变化时卡片会调 widget 的 ``updateToolResult``（有就调）。
-
-``subtitle`` 签名是 ``(arguments) -> (key, value)``，返回的键会自动从参数摘要里
-排除，避免同一值重复出现。
-"""
+渲染器必须持 Python 引用；细节见 ``docs/chat.md``。"""
 
 from __future__ import annotations
 
@@ -63,7 +53,6 @@ class ToolRenderContext:
 
     def parsedArguments(self) -> dict:
         """解析参数为字典（容错，永不抛异常）。
-
         ``arguments`` 是模型给的内容，塞进 ``QLabel`` 前必须设 ``PlainText``，
         否则 ``a < b`` 里的 ``&``、``<`` 会被当富文本吃掉。
         """
@@ -92,7 +81,6 @@ _REGISTRY: dict = {}
 
 def parseToolArguments(arguments) -> dict:
     """容错解析工具参数为字典。
-
     ``dict`` 原样返回；非法 JSON / 空串 / 非字典 JSON -> ``{}``；非 JSON 纯文本
     （流式半截参数、模型直接吐的命令行）-> ``{"": 原文}``，避免卡片一片空白。
     """
@@ -117,11 +105,8 @@ def registerToolRenderer(
     replace: bool = False,
 ) -> None:
     """注册一个工具结果渲染器（模块导入时调用一次即可）。
-
     ``factory`` 是 ``(ToolRenderContext) -> QWidget``，返回 ``None`` 表示不接管；
     ``subtitle`` 是 ``(arguments) -> (键, 值)``，返回的键会自动从参数摘要里排除；
-    ``groupable=None`` 时上下文工具自动退出分组；``replace=False`` 时重名抛
-    ``ValueError``（静默覆盖会掩盖插件抢名字的 bug）。
     """
     key = str(name or "").strip()
     if not key:

@@ -132,8 +132,6 @@ class _ViewSearchMixin:
             bar.closeBar()
         self.clearSearch()
 
-    # -- 内部 --------------------------------------------------------------
-
     def _ensure_search_bar(self) -> ElaChatSearchBar:
         bar = getattr(self, "_search_bar", None)
         if bar is not None:

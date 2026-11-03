@@ -98,10 +98,8 @@ class LineSeriesRenderer(_LineSamplingMixin, _LineSymbolMixin, SeriesRenderer):
         self._nearest_x_sorted = None
         self._nearest_index_sorted = None
 
-    # -- 布局 -------------------------------------------------------------
     def plotMode(self) -> str:
         """折线绘制模式（Plotly 语义）：``lines`` / ``markers`` / ``lines+markers``。
-
         默认 ``lines``；显式 ``showSymbol: true`` 或 ``symbol``（非 none）
         视作 ``lines+markers``。
         """
@@ -386,13 +384,10 @@ class LineSeriesRenderer(_LineSamplingMixin, _LineSymbolMixin, SeriesRenderer):
                 )
         return out
 
-    # -- 路径构建 ---------------------------------------------------------
     def _line_path(self, seg):
         """按 smooth / step 构建一段折线几何。
-
         返回 ``(path, pts)``：``path is None`` 表示纯折线（直线段 / step），
         调用方批量 ``drawPolyline(QPolygonF(pts))``；非空只在 ``smooth``
-        （贝塞尔）时出现。
         """
         step = self.opt.get("step") or ""
         if isinstance(step, (list, tuple)):
@@ -450,7 +445,6 @@ class LineSeriesRenderer(_LineSamplingMixin, _LineSymbolMixin, SeriesRenderer):
             return ax.map(value, coord.plot.bottom(), coord.plot.top())
         return None
 
-    # -- 绘制 -------------------------------------------------------------
     def paint(self, p: QPainter, anim_t: float) -> None:
         pts = self._animated_points(anim_t)
         valid = [pt for pt in pts if pt is not None]
@@ -866,7 +860,6 @@ class LineSeriesRenderer(_LineSamplingMixin, _LineSymbolMixin, SeriesRenderer):
             QRectF(x, baseline - fm.ascent(), tw, fm.height() + 2.0),
         )
 
-    # -- 交互 -------------------------------------------------------------
     def hitTest(self, pos: QPointF):
         best = None
         best_d = self.chart.hitRadius()  # 命中半径 px（tooltip.hitRadius）

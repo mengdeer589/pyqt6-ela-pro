@@ -28,14 +28,14 @@ from .message import (
     ElaChatStatusType,
 )
 
-#: 单条消息超过该步骤数时，物化只展开末尾若干步（历史超长回合）
+#: 单条消息超过该步骤数时，物化只展开末尾若干步（超长回合）
 STEP_MATERIALIZE_LIMIT = 24
 #: 超长消息物化时保留的末尾步骤数（用户通常停在最新一步）
 STEP_WINDOW_TAIL = 12
 
 
 def estimate_parts_height(parts, width: int, stats_mode: str = "footer") -> int:
-    """估算分段区高度（未物化消息的占位高度，物化后用实测值替换）。"""
+    """估算分段区高度（未物化消息的占位高度，物化后用实际值替换）。"""
     width = max(320, int(width or 0))
     chars_per_line = max(24, width // 8)
     stats_height = 24 if stats_mode == "steps" else 0
@@ -98,7 +98,6 @@ class ChatPartTimeline:
 
     def _move_step_stats_to_end(self, step: int) -> None:
         """把指定步骤的步骤用量徽标移到该步骤内容的末尾。
-
         用量在该步 LLM 调用结束时即到达（早于工具执行），后续追加内容要维持
         「步骤末尾」的语义。
         """
@@ -184,9 +183,8 @@ class ChatPartTimeline:
 
     def text(self) -> str:
         """获取消息文本（助手消息为全部分段正文的拼接）。
-
-        纯读取：流式期间返回「落定文本 + 在途缓冲」的完整可见全文，但不写回
-        ``part.text``；要可序列化的落定值读 :meth:`parts`。
+        纯读取：流式期间返回「落定文本 + 在途缓冲」全文，但不写回 ``part.text``；
+        要可序列化的落定值读 :meth:`parts`。
         """
         if self._bubble._role == ElaChatRoleType.Assistant:
             return "".join(
@@ -200,9 +198,8 @@ class ChatPartTimeline:
 
     def parts(self) -> tuple:
         """获取内容分段快照（按加入顺序，构成消息时间线）。
-
-        纯读取无副作用：``part.text`` 只含已落定内容，可直接持久化 / 序列化。
-        流式期间在途分片只在缓冲里，实时预览用 :meth:`partText`。
+        纯读取：``part.text`` 只含已落定内容，可直接持久化；在途分片只在缓冲里，
+        实时预览用 :meth:`partText`。
         """
         return tuple(self._bubble._parts)
 
@@ -216,10 +213,8 @@ class ChatPartTimeline:
 
     def setParts(self, parts) -> bool:
         """用一份分段快照重建整条时间线（从存储恢复用），返回是否成功。
-
-        不另写渲染逻辑，而是把每个分段按顺序重放到增量 API 上，保证恢复出来的
-        界面与实时流式逐像素一致。保留原 ``part.id``。仅对助手消息有效，且消息
-        不可处于流式状态；消息级字段由 ``ElaChatView.addMessageFromDict`` 负责。
+        不另写渲染逻辑：把每个分段按顺序重放到增量 API 上，保证恢复的界面与实时
+        流式一致；保留原 ``part.id``。仅对非流式助手消息有效，消息级字段由
         """
         if self._bubble._role != ElaChatRoleType.Assistant:
             return False
@@ -284,8 +279,7 @@ class ChatPartTimeline:
         return True
 
     def setPartsDeferred(self, parts) -> bool:
-        """只保存分段数据、不建控件（批量加载历史时的按需物化入口）。
-
+        """只保存分段数据、不建控件（批量加载时的按需物化入口）。
         不重放增量 API，只把 parts 挂到气泡上并放一个等高占位；``parts()`` /
         ``messages()`` / 导出读到的仍是完整数据。
         """
@@ -307,7 +301,7 @@ class ChatPartTimeline:
             (max(1, int(getattr(part, "step", 1) or 1)) for part in normalized),
             default=1,
         )
-        # 未物化的历史消息只显示占位高度，不摆头像 / 操作栏 / 「AI 生成」提示：
+        # 未物化的消息只显示占位高度，不摆头像 / 操作栏 / 「AI 生成」提示：
         # 一排空壳消息头比空白更像「坏了」。物化时再恢复。
         self._bubble._header.hide()
         if self._bubble._footer is not None:
@@ -335,10 +329,8 @@ class ChatPartTimeline:
 
     def materializeParts(self) -> bool:
         """把延迟保存的分段真正建成控件；返回是否执行了物化。
-
         超过 :data:`STEP_MATERIALIZE_LIMIT` 步的超长消息只建末尾
-        :data:`STEP_WINDOW_TAIL` 步，其余折叠成「展开全部」按钮；完整
-        ``parts`` 数据仍保留，导出 / 搜索不受影响。
+        :data:`STEP_WINDOW_TAIL` 步，其余折叠成「展开全部」；完整 ``parts`` 仍保留。
         """
         if not self._bubble._parts_deferred:
             return False
@@ -495,10 +487,8 @@ class ChatPartTimeline:
 
     def _restore_permission(self, partId: str, request: ElaChatPermission) -> None:
         """重放审批分段（恢复路径：建记录卡 + 灌快照，不发任何交互信号）。
-
-        恢复出来的审批一律是只读记录（``pending`` 也落成 ``Cancelled``）：那一次
-        请求已随上个进程消失，发信号会让宿主去恢复一个不存在的挂起，放进 dock 也会
-        让人以为还能点。
+        恢复出来的审批一律只读（``pending`` 也落成 ``Cancelled``）：请求已随上个进程
+        消失，发信号会让宿主去恢复不存在的挂起，放进 dock 也让人以为还能点。
         """
         record = request
         if request.isPending:

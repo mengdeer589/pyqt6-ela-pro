@@ -19,7 +19,6 @@ from ..core import (
 
 class _SeriesMarkBase:
     """markPoint / markLine / markArea 的公共基类。
-
     core 重建时对每个含同名键的 series 注入 ``comp.series_opt``；构造期它尚未
     注入，所以系列 / 坐标解析一律推迟到 layout / paint。
     """
@@ -32,7 +31,6 @@ class _SeriesMarkBase:
         #: 所属系列 option（core 注入；顶层实例化为 None）
         self.series_opt = None
 
-    # -- 反查 ------------------------------------------------------------
     def _renderer(self):
         """所属系列的渲染器（找不到返回 None）。"""
         chart = self.chart
@@ -107,7 +105,6 @@ class _SeriesMarkBase:
 
 class MarkPointComponent(_SeriesMarkBase):
     """数据点标注：最大 / 最小值或指定坐标，圆点（小旗式插针）+ 值文本。
-
     ``markPoint.data`` 项为 ``{"type": "max"|"min"}`` 或
     ``{"coord": [x, y], "value": v, "name": "..."}``。
     """
@@ -582,10 +579,8 @@ class MarkLineComponent(_SeriesMarkBase):
 
 class MarkAreaComponent(_SeriesMarkBase):
     """区间标域：xAxis / yAxis 值对的半透明填充区域。
-
     填充取主题主色低透明度；category 轴向两侧各扩半个 band。**仅在 Grid 直角
     坐标系下生效** —— polar / calendar / singleAxis 的区间语义与矩形不等价，
-    本库不做近似（挂在这些系列上是不画，而不是画错）。
     """
 
     optionKey = "markArea"
@@ -653,7 +648,6 @@ class MarkAreaComponent(_SeriesMarkBase):
 
     def hitTest(self, pos: QPointF):
         """命中半透明背景区域。
-
         **刻意不接进命中分发**（``_HOVERABLE_COMPONENTS`` 里没有 ``markArea``）：
         它会抢走区间内系列的悬停。保留本方法只为把「不参与」写成显式选择。
         """

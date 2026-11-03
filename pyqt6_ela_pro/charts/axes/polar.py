@@ -16,7 +16,6 @@ from .base import AxisModel, Coord
 
 class PolarCoord(Coord):
     """极坐标系：radiusAxis（value）+ angleAxis（category/value）。
-
     ``polar`` 收 ``radius``（数值 / ``"N%"`` / ``[inner, outer]``，默认 ``"80%"``）
     与 ``center``。``mapPoint(angle, radius)``：角度自正上方起顺时针。
     """

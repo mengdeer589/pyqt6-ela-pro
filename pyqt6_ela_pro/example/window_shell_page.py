@@ -1,15 +1,4 @@
-"""[pyqt6_ela_pro] 「ElaWindow 应用外壳」演示页
-
-本页操作的对象是**真实的主窗口**（``self.window()``，即 ``ElaWindow`` 实例）：
-
-- 每一节 = 一个外壳能力的活开关 + ``</> 代码`` 按钮（展示本节 demo 方法源码）；
-- 没有 ElaWindow 宿主时（单页预览 / 守卫测试），每节退化为一行说明文字。
-
-为什么这些能力都直接作用在主窗口上：外壳能力只有在**有宿主窗口**时才存在
-（导航栏模式、窗口按钮、停靠区、内容堆栈…），散件单独摆一页只能讲解、不能
-演示 —— 而且 ``ElaAppBar`` 这类控件构造时就会接管宿主窗口（边距 / 事件过滤
-器 / 窗口按钮），离开宿主没有「静态预览」这回事。
-"""
+"""[pyqt6_ela_pro] 「ElaWindow 应用外壳」演示页?"""
 
 from __future__ import annotations
 
@@ -115,10 +104,8 @@ class WindowShellPage(ExamplePage):
     @staticmethod
     def _flag_on(flags, flag) -> bool:
         """位测试 ``getWindowButtonFlags()``。
-
         它返回的是**普通 Enum 的伪成员**（组合值如 255）：``&`` / ``|`` / ``int()``
         在这个绑定里都不可用，只有 ``.value`` 能读；组合值要回传时也用
-        ``ElaAppBarType.ButtonType(组合值)`` 造伪成员（裸 int 会被拒）。
         """
         return bool(getattr(flags, "value", 0) & getattr(flag, "value", 0))
 
@@ -345,10 +332,8 @@ class WindowShellPage(ExamplePage):
 
     def _apply_background(self, window: ElaWindow, on: bool) -> None:
         """应用 / 恢复渐变背景。
-
         宿主自己带开关时（示例主窗口的 ``_set_background_enabled``）**走宿主的**，
         否则两处各自记状态、界面立刻自相矛盾；没有该钩子（普通 ElaWindow）就
-        直接调公开 API。
         """
         host_toggle = getattr(window, "_set_background_enabled", None)
         if callable(host_toggle):
@@ -538,7 +523,6 @@ class WindowShellPage(ExamplePage):
 
     def _on_page_open_in_new_window(self, node_key: str) -> None:
         """两条信号（自动开窗 / 宿主开窗）都只是「页面已在新窗口打开」的通知。
-
         计数用本页自己的字典：C++ 的 ``getPageOpenInNewWindowCount`` 只统计
         ``QMetaObject`` 复制出来的窗口，Python 页面走宿主建窗不会进它。
         """

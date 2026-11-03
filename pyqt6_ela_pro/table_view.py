@@ -1,13 +1,6 @@
-"""
-增强型表格视图组件，支持异步数据加载和丰富的单元格样式配置。
+"""增强表格视图：``ElaDataTable`` 在 ``ElaTableView`` 上提供异步加载与样式配置。
 
-提供 ``ElaDataTable``，即 ``ElaTableView`` 的高级封装：
-
-- 同步和异步方式填充表格数据
-- 支持按列索引或表头名称设置列宽
-- 丰富的单元格样式配置（文本、字体、前景/背景色、图标、提示等）
-- 自定义行背景色（通过自定义代理实现）
-"""
+列宽、单元格样式与代理的用法见 ``docs/core.md``。"""
 
 from __future__ import annotations
 
@@ -38,7 +31,7 @@ from ._internal import load_lazy_pinyin
 
 TABLE_MIN_SECTION_SIZE: int = 60
 TABLE_ROW_MIN_HEIGHT: int = 46
-# 保留常量以兼容外部引用（历史版本用于线程 quit 超时，现由轮询清理取代）
+# 保留常量以兼容外部引用（线程 quit 超时已由轮询清理取代）
 TABLE_THREAD_QUIT_TIMEOUT: int = 1000
 
 
@@ -119,17 +112,9 @@ class _LoadThread(QThread):
 
 
 class ElaDataTable(ElaTableView):
-    """增强型表格视图，提供数据加载和样式配置工具。
-
-    封装 ``ElaTableView`` + ``QStandardItemModel``：同步 / 异步设置数据、按列索引
-    或表头名管理列宽、单元格样式、自定义行底色、插入删除行。**表头点击排序默认
-    关闭**，需 ``setSortingEnabled(True)``。
-
-    ::
-
-        table = ElaDataTable()
-        table.setTableData(data)
-        table.setSortingEnabled(True)
+    """增强型表格视图：``ElaTableView`` + ``QStandardItemModel``。
+    同步 / 异步设置数据、列宽、单元格样式、行底色；表头排序默认关闭，
+    需 ``setSortingEnabled(True)``。
     """
 
     sortChanged = pyqtSignal(int, Qt.SortOrder)
@@ -197,8 +182,6 @@ class ElaDataTable(ElaTableView):
 
     def _retire_thread(self, thread: _LoadThread) -> None:
         """取消并清理旧加载线程。
-
-        ``_LoadThread.run`` 是纯 Python 循环，``quit()`` 不生效，
         因此不能阻塞等待其退出；线程真正结束后由轮询统一
         ``deleteLater``，避免对仍在运行的 QThread 销毁导致崩溃。
         """
@@ -219,8 +202,6 @@ class ElaDataTable(ElaTableView):
 
     def _retire_poll_timer(self) -> None:
         """（重）起轮询定时器 —— **常驻子对象**，不用无主 ``singleShot``。
-
-        无主的 ``QTimer.singleShot(100, self._poll_retired_threads)`` 不随控件
         销毁：表格销毁后定时器照样触发，去摸已释放的 ``_retired_threads``。
         而这里每次都能重发，所以必须是**一个**常驻定时器而不是每次 new 一个。
         """
@@ -277,11 +258,8 @@ class ElaDataTable(ElaTableView):
 
     def _get_column_type(self, column: int) -> str:
         """取前 20 个**非空**样本判定列类型：``numeric`` / ``chinese`` / ``string``。
-
         空单元格**不占采样名额、也不参与判定**（旧实现把空值算进名额，一个
         空值就让数字列掉进 ``string`` 分支 —— 排序退化成字典序
-        ``'10' < '9'``，而 ``_sort_numeric`` 专门为「含空值」写好的
-        「空值排最后」永远不会被走到）。
         """
         numeric_count = 0
         chinese_count = 0
@@ -347,14 +325,8 @@ class ElaDataTable(ElaTableView):
         if row_count == 0:
             return
 
-        # 空/非数值单元格排在最后（升序降序都一样）：此前一律当 0 处理，
-        # 升序时空值会顶到最前面（"", "9", "10"），降序时又混在中间。
-        #
-        # **``nan`` / ``inf`` 必须和空值同等对待。** ``float("NaN")`` 与
-        # ``float("1e999")`` 都**成功**返回，所以会被判成数字列；可 NaN 与
-        # 任何值比较都返回 False，``list.sort`` 拿不到全序，结果取决于输入
-        # 顺序 —— 同一列连点两次表头可能给出不同顺序，也可能什么都不发生
-        # （实测 ``["3","NaN","1"]`` 升序后原样不动）。把它们归入 ``blanks``。
+        # 空 / 非数值单元格排最后（升序降序一致）。``nan`` / ``inf`` 与空值同等对待：
+        # 它们能通过 float() 但比较不成立，混进数值排序会拿不到全序。
         numeric: list[tuple[float, int]] = []
         blanks: list[int] = []
         for row in range(row_count):
@@ -382,9 +354,7 @@ class ElaDataTable(ElaTableView):
 
     def _reorder_rows(self, row_order: list[int]) -> None:
         """按目标顺序重排行（takeRow/appendRow 就地搬，避免序列化再重建）。
-
         **必须从尾部取**（再 reverse 回原序）：``takeRow(0)`` 每次都要把剩下的行
-        整体前移一趟，循环下来是 O(n²) —— 实测 1.6 万行排序 312 ms，卡在
         ``sectionClicked`` 槽里（整张表冻住）；从尾部取是 22 ms。
         """
         row_count = self._model.rowCount()
@@ -447,11 +417,8 @@ class ElaDataTable(ElaTableView):
         row_index_start: int = 1,
     ) -> None:
         """同步填充表格数据。
-
         *data* 支持两种格式：列表（首元素为表头，其余为行数据）或字典（列名 →
         该列可迭代对象，各列长度应一致）。默认全部居中对齐，用
-        :meth:`setColumnAlignment` 改。``center_columns`` 已废弃；
-        ``row_index_start`` 用于分页场景传全局行号偏移。
         """
         if not data:
             return
@@ -502,7 +469,7 @@ class ElaDataTable(ElaTableView):
                     [str(row_index_start + i) for i in range(len(rows))]
                 )
             elif vh:
-                # 之前以 show_row_index=True 填过表时，行号会留在新数据旁边
+                # 若上一批数据用 show_row_index=True 填过表，行号会留在新数据旁边
                 vh.setHidden(True)
                 self.setVerticalHeaderLabels([])
 
@@ -535,10 +502,8 @@ class ElaDataTable(ElaTableView):
         callback: Optional[Callable[[], None]] = None,
     ) -> None:
         """在后台线程中异步填充表格数据。
-
         表头立即设置，行数据在后台加载并应用；上次加载仍在跑时再次调用会取消并
         替换旧线程。``row_index_start`` 用于分页场景传全局偏移，
-        ``callback`` 只在本次加载仍是当前加载、且表格未销毁时调用。
         """
         if not data:
             return

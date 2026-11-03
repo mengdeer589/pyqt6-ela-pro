@@ -1,14 +1,6 @@
-"""``pyqt6_ela_pro.chat``：ChatGPT 风格聊天组件（自研）。
+"""``pyqt6_ela_pro.chat``：ChatGPT 风格聊天组件。
 
-分层：``ElaChatWidget`` 只管输入区 + 回合编排；消息内容（正文 / 思考 / 工具 /
-分段 / 用量 / 存储）只在 ``ElaChatView`` 上，经 ``chat.chatView()`` 调用，
-``messageId`` 首位必填。助手正文复用 ``ElaMarkdownViewer`` 的嵌入模式。
-
-持久化：``message.toDict()`` → ``jsonDumps`` 落库，``addMessageFromDict`` /
-``restoreMessages`` 读回；整会话用 ``exportSession`` / ``importSession``。
-后端接 ``ElaChatStreamBinder`` + ``ElaChatAsyncWorker``（或 ``ElaChatMockBackend``），
-崩溃恢复用 ``ElaChatTurnJournal``。
-"""
+分层、持久化与后端接入见 ``docs/chat.md``。"""
 
 from ._json import backend as jsonBackend, dumps as jsonDumps, loads as jsonLoads
 from .binder import ElaChatStreamBinder, ElaChatTurnSummary

@@ -53,8 +53,6 @@ class ElaChatStatusBar(ElaThemeWidget):
         self._apply_theme()
         self._sync_visibility()
 
-    # -- 内容 --------------------------------------------------------------
-
     def setInfo(self, text: str) -> None:
         """设置左侧信息文本（空则隐藏）。"""
         self._info_text = text or ""
@@ -89,8 +87,6 @@ class ElaChatStatusBar(ElaThemeWidget):
     def isBusy(self) -> bool:
         """是否处于运行指示状态。"""
         return self._busy
-
-    # -- 内部 --------------------------------------------------------------
 
     def _sync_visibility(self) -> None:
         self._info_label.setText(self._info_text)

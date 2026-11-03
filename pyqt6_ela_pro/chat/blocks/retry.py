@@ -100,8 +100,6 @@ class ElaChatRetryCard(_ThemeAwareMixin, ElaScrollPageArea):
         self.hide()
         self._apply_theme()
 
-    # -- 数据 --------------------------------------------------------------
-
     def setRetry(self, attempt: int, message: str, nextAt: float) -> None:
         """设置重试状态（``nextAt`` 为 epoch 毫秒；``0`` 表示无倒计时）。"""
         self._attempt = max(1, int(attempt or 1))
@@ -133,8 +131,6 @@ class ElaChatRetryCard(_ThemeAwareMixin, ElaScrollPageArea):
     def isActive(self) -> bool:
         """是否正在显示重试状态。"""
         return self.isVisible() and self._attempt > 0
-
-    # -- 内部 --------------------------------------------------------------
 
     def _remaining_seconds(self) -> int:
         if self._next_at <= 0:
@@ -174,8 +170,6 @@ class ElaChatRetryCard(_ThemeAwareMixin, ElaScrollPageArea):
     def hideEvent(self, event) -> None:  # noqa: N802 (Qt 命名)
         self._timer.stop()
         super().hideEvent(event)
-
-    # -- 主题 --------------------------------------------------------------
 
     def _apply_theme(self) -> None:
         mode = self._theme_mode

@@ -28,9 +28,7 @@ __all__ = [
     "text_italic",
 ]
 
-# ---------------------------------------------------------------------------
 # 数值 / 几何工具
-# ---------------------------------------------------------------------------
 
 
 def to_float(v, default=0.0):
@@ -70,9 +68,7 @@ def dist_point_segment(p, a, b):
     return math.hypot(p.x() - (ax + t * dx), p.y() - (ay + t * dy))
 
 
-# ---------------------------------------------------------------------------
 # 文字样式（顶层 ``textStyle`` 兜底 + ECharts fontWeight 解析）
-# ---------------------------------------------------------------------------
 
 #: 顶层 ``textStyle`` 参与兜底的键（只合外观，不含 show / formatter）。
 TEXT_STYLE_KEYS = ("fontSize", "fontWeight", "fontFamily", "fontStyle", "color")
@@ -136,7 +132,6 @@ def text_italic(value) -> bool:
 
 def text_weight(value, default=None):
     """ECharts ``fontWeight`` → Qt 数值；无法解析返回 ``default``。
-
     支持数字 / 数字字符串 / ``"normal"`` / ``"bold"`` / ``"bolder"`` /
     ``"lighter"``；非法值必须回退（这条链跑在 ``paintAxes`` 里）。
     """
@@ -153,9 +148,7 @@ def text_weight(value, default=None):
     return weight if 1 <= weight <= 1000 else default
 
 
-# ---------------------------------------------------------------------------
 # 异常可见性（「失败不影响主图」契约的配套出口）
-# ---------------------------------------------------------------------------
 
 _warned_keys = set()
 _WARN_LIMIT = 512  # 去重集合上界，防止长期运行无界增长
@@ -163,7 +156,6 @@ _WARN_LIMIT = 512  # 去重集合上界，防止长期运行无界增长
 
 def warn_once(key: str, message: str) -> None:
     """同一 key 仅向 stderr 记录一次（有界去重）。
-
     key 必须带上足以区分故障的信息（类 + 系列名 + 异常类型）：这些异常本来
     就被 ``except Exception`` 静默吞掉，stderr 是唯一的可见性出口。
     """
@@ -182,7 +174,6 @@ def warn_key(prefix: str, *parts) -> str:
 
 def single_option(value, name: str = ""):
     """单实例组件 option：dict 原样，数组取第一个 dict（多元素时告警）。
-
     ECharts 允许数组写法（``grid: [{...}]`` / ``title: [{...}]``），本库只实现
     单实例，但直接 ``dict(list)`` 会抛错或让组件静默消失。
     """
@@ -211,7 +202,6 @@ def grid_options(value) -> list:
 
 def component_options(value, show_key: str = "show") -> list:
     """组件 option → **实例列表**（多实例组件用）。
-
     ``False`` → ``[{show: False}]``；dict → 单元素；数组 → 逐项 dict。
     空数组 / 非法值 → 一个默认 ``{}``（组件照常按默认值渲染）。
     """
@@ -227,7 +217,6 @@ def component_options(value, show_key: str = "show") -> list:
 
 def component_opt(value, show_key: str = "show", name: str = ""):
     """ECharts 组件 option 的 ``False`` 简写 → ``{show_key: False}``。
-
     数组写法取第一个 dict；非 dict 的非法值按「关闭」处理。直接
     ``opt.get(...) or {}`` 会把 ``False`` 吞成空 dict，组件仍按默认值渲染。
     """
@@ -243,7 +232,6 @@ def component_opt(value, show_key: str = "show", name: str = ""):
 
 def parse_roam(value) -> tuple:
     """ECharts ``roam`` → ``(可缩放, 可平移)``。
-
     支持 ``True`` / ``1`` / ``"true"`` / ``"scale"`` / ``"move"`` /
     ``"scale,move"``；数字按 true 认（JSON 里 ``{"roam": 1}`` 就是 true）。
     """
@@ -281,9 +269,7 @@ def ramp_color(colors, t, chart=None) -> QColor:
     )
 
 
-# ---------------------------------------------------------------------------
 # 硬编码颜色豁免常量
-# ---------------------------------------------------------------------------
 
 #: 绘制在彩色填充上的白字常量（与主题无关的 on-fill 前景色）。
 ON_FILL_WHITE = "#ffffff"

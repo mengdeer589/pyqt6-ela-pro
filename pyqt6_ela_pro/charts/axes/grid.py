@@ -52,11 +52,8 @@ def _merge_image_extent(current, new):
 
 class GridCoord(Coord):
     """直角坐标系：grid 边距 + 多 x/y 轴 + 网格 / 区域 / 刻度 / 标签。
-
     ``grid`` 边距默认 left/right/top/bottom = 48/24/40/36（数值 px 或
     ``"N%"``）；``xAxis`` / ``yAxis`` 可以是单个 dict 或数组。多轴经
-    :meth:`axis_view` 返回绑定到某对轴的视图，系列仍读 ``coord.x_axis`` /
-    ``coord.y_axis``。
     """
 
     kind = "grid"
@@ -153,13 +150,10 @@ class GridCoord(Coord):
         xi, yi = self._series_axes(series_opt)
         return self.axis_view_for_indices(xi, yi)
 
-    # -- 数据范围 ---------------------------------------------------------
     def _extent(self, data, positive_x: bool = False, positive_y: bool = False):
         """带缓存的数值范围 ``(x0, x1, y0, y1)``（缺失维度为 ``None``）。
-
         范围只取决于数据本身、与窗口无关，所以按「数据对象身份 + 长度 +
         正值过滤」缓存；缓存值同时**持有数据对象的强引用**，否则对象回收后
-        ``id`` 被复用会把别的数据的范围当成自己的。
         """
         if data is None:
             return None
@@ -185,10 +179,8 @@ class GridCoord(Coord):
 
     def _numpy_extent(self, data, positive_x: bool = False, positive_y: bool = False):
         """numpy 快速路径：``(x0, x1, y0, y1)``（缺失维度 None）或 None。
-
         纯数值列表 x 按下标语义；``[x, y]`` 列表取两列；结构型数据返回 None
         由调用方回退 Python 循环。用 ``nanmin`` / ``nanmax``（只跳 NaN 不跳
-        inf），所以先把非有限值掩成 NaN。
         """
         if data is None or _ds.np is None:
             return None
@@ -363,7 +355,6 @@ class GridCoord(Coord):
                     0.0, 1.0
                 )
 
-    # -- 协议 -------------------------------------------------------------
     def layout(self, rect: QRectF) -> None:
         super().layout(rect)
         # 百分比边距在此换算（左右相对宽、上下相对高）
@@ -534,10 +525,8 @@ class GridCoord(Coord):
         y_axis_index: int = 0,
     ):
         """批量映射（numpy 数组进 → ``(px, py)`` 两个数组）；不支持时返回 ``None``。
-
         与 :meth:`mapPoint` 同语义，只是向量化；缺 numpy / 轴类型不支持 /
         category 的 x 非数值时返回 ``None``。非有限坐标不过滤，由调用方按
-        ``isfinite`` 断开。
         """
         np_ = _ds.np
         if np_ is None or xs is None or ys is None:
@@ -620,10 +609,8 @@ class GridCoord(Coord):
     def containPoint(self, pos: QPointF) -> bool:
         return self.plot.contains(QPointF(pos))
 
-    # -- 绘制 -------------------------------------------------------------
     def _interval_step(self, axis: AxisModel, horizontal: bool, option_key: str) -> int:
         """标签 / 刻度 / 网格线的抽稀步长（``interval: 'auto'`` 语义）。
-
         绘制量与像素宽度挂钩、与数据量解耦；显式 ``interval``（数字 /
         callable）优先。
         """
@@ -1111,7 +1098,6 @@ class GridCoord(Coord):
 
 class _GridAxisView(GridCoord):
     """绑定到一对 ``(xAxisIndex, yAxisIndex)`` 的 GridCoord 视图。
-
     共享 ``plot`` / ``rect``，只把 ``x_axis`` / ``y_axis`` 换成所选轴；继承
     ``GridCoord`` 是为了让既有的 ``isinstance(coord, GridCoord)`` 判断成立。
     """

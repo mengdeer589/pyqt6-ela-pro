@@ -1,13 +1,4 @@
-"""
-窗口淡入淡出动画模块。
-
-两种用法：模块级函数 ``fade_in()`` / ``fade_out()``，或继承 ``ElaAnimatedMixin``
-获得同名实例方法。
-
-时长取 :mod:`pyqt6_ela_pro._motion` 的 ``Duration`` 令牌，实际播放受全局动效策略
-约束：``Reduced`` 下过渡压到 ≤50ms、``Disabled`` 下同步落终值，收尾回调照常触发。
-``shake_window`` 是纯装饰（不产生状态变化），在 ``Reduced`` / ``Disabled`` 下整体不播。
-"""
+"""窗口淡入淡出动画模块。"""
 
 from __future__ import annotations
 
@@ -27,12 +18,8 @@ _animation_registry: weakref.WeakKeyDictionary = weakref.WeakKeyDictionary()
 
 def fade_in(widget: QWidget, duration: int = Duration.Normal) -> None:
     """让窗口淡入（opacity: 0 → 1）。
-
-    如果窗口尚未显示，会先设置 opacity=0，再 show，再启动动画。动画进行中再次调用会
-    忽略新请求。
-
-    :param widget: 目标窗口控件
-    :param duration: ``Full`` 模式下的动画时长（毫秒），默认 ``Duration.Normal``
+    窗口未显示时先设 opacity=0 再 ``show()``；动画进行中再次调用会被忽略。
+    ``duration`` 是 ``Full`` 模式下的时长（毫秒）。
     """
     if not widget.isVisible():
         widget.setWindowOpacity(0)
@@ -51,11 +38,9 @@ def fade_in(widget: QWidget, duration: int = Duration.Normal) -> None:
         if widget in _animation_registry and _animation_registry[widget] is animation:
             del _animation_registry[widget]
 
-    # 故意**不**连 widget.destroyed：destroyed 在 C++ 析构之后才发出，此时对已失效
-    # 的包装器取哈希会触发 0xC0000005（实测全量测试 6/6 必崩）；且 lambda 捕获 widget
-    # 会形成引用环让包装器永不回收。条目清理由 WeakKeyDictionary 负责。
-    # （tooltips._auto_remove 在 destroyed 里做同类哈希却实测 5 场景安全 ——
-    # 两处时机/路径不同，结论并存；改任一处前先跑各自回归。）
+    # 故意**不**连 widget.destroyed：它在 C++ 析构之后才发出，此时对已失效包装器
+    # 取哈希会触发 0xC0000005；lambda 捕获 widget 还会形成引用环。条目清理由
+    # WeakKeyDictionary 负责。
     _animation_registry[widget] = animation
     start_transition(animation, duration, on_complete=_cleanup)
 
@@ -65,16 +50,9 @@ def fade_out(
     duration: int = Duration.Normal,
     on_finished: Optional[Callable[[], None]] = None,
 ) -> None:
-    """让窗口淡出（opacity: 1 → 0）。
-
-    仅将透明度渐变到 0，不会自动关闭窗口。动画结束后调用 ``on_finished`` 回调。
-    动画进行中再次调用会忽略新请求。
-
-    ``Disabled`` 模式下动画同步落终值，``on_finished`` 在 :func:`start_transition`
-    内部当场触发（不排队事件循环），所以「淡出后关窗」在三种模式下都成立。
-
-    :param widget: 目标窗口控件
-    :param duration: ``Full`` 模式下的动画时长（毫秒），默认 ``Duration.Normal``
+    """让窗口淡出（opacity: 1 → 0），不自动关窗。
+    ``on_finished`` 在动画结束后调用；``Disabled`` 模式下同步落终值并当场触发，
+    所以「淡出后关窗」在三种模式下都成立。动画进行中再次调用会被忽略。
     """
     if widget in _animation_registry:
         existing = _animation_registry[widget]
@@ -103,11 +81,8 @@ def shake_window(
     on_finished: Optional[Callable[[], None]] = None,
 ) -> None:
     """让窗口抖动（左右 + 上下晃回原位），动画进行中再次调用会被忽略。
-
-    抖动**不产生任何状态变化**（终点即起点），属纯装饰动效，按
-    ``ElaMotionKindType.Continuous`` 送策略 —— ``Reduced`` / ``Disabled`` 下整体不播
-    （压成 50ms 的抖动只会像渲染故障，不会像反馈）。``duration`` 是 ``Full``
-    模式下的总时长。
+    抖动**不产生状态变化**（终点即起点），按 ``ElaMotionKindType.Continuous`` 送策略：
+    ``Reduced`` / ``Disabled`` 下整体不播（压成 50ms 只会像渲染故障）。
     """
     if hasattr(widget, "_shake_animation"):
         existing = widget._shake_animation
@@ -120,12 +95,9 @@ def shake_window(
         except RuntimeError:
             pass
 
-    # **不要把动画挂到它自己动的那个控件上**（第三参别传 widget）。
-    # 目标控件被销毁时 Qt 会连带删掉这个仍在 Running 的子动画，而此时针对它的
-    # ``finished`` 发射还可能挂在队列里 —— 槽随后就跑在一半销毁的对象图上，
-    # 实测 0xC0000005（无 traceback）。改成 ``KeepWhenStopped`` 或给收尾加
-    # ``is_deleted`` 守卫都**挡不住**：销毁是由 parent-child 关系驱动的，
-    # 与删除策略无关。不挂 parent 后动画的生命周期只由 Python 引用决定。
+    # **不要把动画挂到它自己动的那个控件上**（第三参别传 widget）：
+    # 目标销毁会连带删掉仍在 Running 的子动画，槽随后跑在已释放对象上 = 0xC0000005；
+    # KeepWhenStopped / is_deleted 守卫都挡不住（销毁由 parent-child 驱动）。
     animation = QPropertyAnimation(widget, b"pos")
     widget._shake_animation = animation
 
@@ -175,19 +147,9 @@ def shake_window(
 
 
 class ElaAnimatedMixin:
-    """给窗口/对话框添加淡入淡出动画能力的混入类。
-
-    动画实例被自身持有并复用（先 stop 旧的再启动新的），所以 ``fade_in`` →
-    ``fade_out`` 连调不会攒下一串待销毁的 ``QPropertyAnimation``。
-
-    Example::
-
-        class MyDialog(ElaAnimatedMixin, QDialog):
-            def show_with_animation(self):
-                self.fade_in()
-
-            def close_with_animation(self):
-                self.fade_out(on_finished=self.close)
+    """给窗口 / 对话框添加淡入淡出动画能力的混入类。
+    动画实例由自身持有并复用（先 stop 旧的再启动新的），``fade_in`` → ``fade_out``
+    连调不会攒下一串待销毁的 ``QPropertyAnimation``。
     """
 
     _fade_animation: Optional[QPropertyAnimation] = None
@@ -203,11 +165,8 @@ class ElaAnimatedMixin:
 
     def fade_in(self, duration: int = Duration.Normal) -> None:
         """让窗口淡入（opacity: 0 → 1）。
-
-        如果窗口尚未显示，会先设置 opacity=0，再 show，再启动动画。动画进行中再次调用会
-        忽略新请求。
-
-        :param duration: ``Full`` 模式下的动画时长（毫秒），默认 ``Duration.Normal``
+        窗口未显示时先设 opacity=0 再 ``show()``；动画进行中再次调用会被忽略。
+        ``duration`` 是 ``Full`` 模式下的时长（毫秒）。
         """
         if not self.isVisible():  # type: ignore[attr-defined]
             self.setWindowOpacity(0)  # type: ignore[attr-defined]
@@ -230,13 +189,9 @@ class ElaAnimatedMixin:
         duration: int = Duration.Normal,
         on_finished: Optional[Callable[[], None]] = None,
     ) -> None:
-        """让窗口淡出（opacity: 1 → 0）。
-
-        仅将透明度渐变到 0，不会自动关闭窗口。动画结束后调用 ``on_finished`` 回调。
-        动画进行中再次调用会忽略新请求。
-
-        :param duration: ``Full`` 模式下的动画时长（毫秒），默认 ``Duration.Normal``
-        :param on_finished: 动画完成后的回调函数
+        """让窗口淡出（opacity: 1 → 0），不自动关窗。
+        ``on_finished`` 在动画结束后调用；动画进行中再次调用会被忽略。
+        ``duration`` 是 ``Full`` 模式下的时长（毫秒）。
         """
         if (
             self._fade_animation

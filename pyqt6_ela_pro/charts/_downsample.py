@@ -1,9 +1,4 @@
-"""charts 折线降采样适配层（tsdownsample，可选依赖）。
-
-``analyze_x`` 一次性分析时间基，``downsample_indices`` 返回采样点下标；
-tsdownsample 缺失时调用方退化到 ``bucket_minmax_indices``，numpy 也缺失时
-走全量路径。
-"""
+"""charts 折线降采样适配层（tsdownsample，可选依赖）。"""
 
 from __future__ import annotations
 
@@ -68,7 +63,6 @@ def available() -> bool:
 
 def bucket_minmax_indices(y, n_out: int):
     """纯 numpy 的「按桶 min/max」抽稀；返回升序下标数组，失败返回 ``None``。
-
     按**下标**分桶，不要求 x 有序（乱序 / 重复 x 也能抽稀），也不依赖
     tsdownsample；``n_out`` 会规整成偶数且至少 4。
     """
@@ -144,10 +138,8 @@ _EMPTY_F64 = None
 
 def analyze_x(x):
     """一次性分析 x 的时间基：单调性、步长、记录中断位置。
-
     返回 ``(monotone, strict, step, gap_pos, gap_dur)``：``monotone`` = 非降且
     全有限；``strict`` = 严格递增；``step`` = 正差中位数；``gap_*`` =
-    ``diff > 4.1 × step`` 的位置与时长。调用方应按数据身份缓存（O(n) 一次性）。
     """
     global _EMPTY_I64, _EMPTY_F64
     if np is None:
@@ -187,11 +179,8 @@ def downsample_indices(
     assume_sorted: bool = False,
 ):
     """按算法对 (x, y) 降采样，返回采样点下标 ndarray；失败返回 None。
-
     三道闸门：x 严格递增（可用 ``assume_sorted=True`` 声明已验过）、
-    ``n_out`` 满足算法下界与整除要求、调用包 ``except BaseException``。
     返回 None 而不是抛 —— 这条路走 Qt 回调链，抛出即 0xC0000409 静默终止。
-    tsdownsample 的 panic 是 ``PanicException``，继承 BaseException。
     """
     if not _AVAILABLE or np is None or x is None or y is None:
         return None

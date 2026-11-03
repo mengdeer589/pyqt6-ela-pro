@@ -24,7 +24,6 @@ from ._shared import _label_font, _parse_named_values, _series_palette_color
 
 class FunnelSeriesRenderer(SeriesRenderer):
     """漏斗图（梯形层叠）。
-
     支持 ``data`` / ``sort`` / ``gap`` / ``minSize`` / ``label`` /
     ``funnelAlign`` / ``orient``（当前仅纵向）。
     """

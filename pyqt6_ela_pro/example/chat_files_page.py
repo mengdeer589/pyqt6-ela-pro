@@ -34,8 +34,6 @@ class ChatFilesPage(ExamplePage):
         self._sections: list = []
         super().__init__(parent)
 
-    # -- 页面 --------------------------------------------------------------
-
     def _addDemoContent(self, main_layout):
         main_layout.addWidget(
             note(
@@ -83,8 +81,6 @@ class ChatFilesPage(ExamplePage):
         self._active_note = label
         self._sections.append((label, method))
         return box
-
-    # -- 演示 --------------------------------------------------------------
 
     def _demo_edit(self) -> None:
         """edit：单文件 diff（ElaChatFileChanges 每文件懒建 ElaDiffView）。"""
@@ -250,8 +246,6 @@ class ChatFilesPage(ExamplePage):
     def _demo_uninstall(self) -> None:
         removed = uninstallBuiltinToolRenderers()
         self._note("已卸载内置渲染器：" + (", ".join(removed) if removed else "无"))
-
-    # -- 工具 --------------------------------------------------------------
 
     def _open_card(self, messageId: int, callId: str) -> None:
         view = self._chat.chatView()

@@ -90,9 +90,13 @@ class ElaChatView(
 ):
     """聊天消息列表视图（可独立使用，也可由 ``ElaChatWidget`` 组装）。
 
-    ``parts`` 是消息的唯一真源，``text`` / ``reasoning`` / ``tool_calls`` /
-    ``stats`` 由 :meth:`ElaChatMessage.withParts` 派生；改内容请走宿主 API，
-    别直接对 ``bubble`` 调内部协议（会绕过派生结算）。
+    ``parts`` 是唯一真源，``text`` / ``reasoning`` / ``tool_calls`` / ``stats``
+    由 :meth:`ElaChatMessage.withParts` 派生。
+
+    **性能开关（内部）**：``beginBatch`` / ``endBatch`` / ``setViewportSuspension`` /
+    ``setResizeReflowDeferred`` 是渲染调度；``setRenderDeferred`` / ``renderDeferred`` /
+    ``flushRender`` / ``hasPendingRender`` 只在 ``ElaChatBubble`` 上，view 仅在批量
+    路径内部调用。
     """
 
     #: 新增消息（参数：消息 id、角色）
@@ -212,7 +216,6 @@ class ElaChatView(
         self._hold_timer.setSingleShot(True)
         self._hold_timer.timeout.connect(self._release_follow_hold)
 
-        # -- 交互 resize 延迟重排（大消息量下拖动窗口不逐帧 reflow） --------
         self._resize_reflow_deferred = True
         self._resize_reflow_min = _RESIZE_REFLOW_MIN_MESSAGES
         self._resize_reflow_min_parts = _RESIZE_REFLOW_MIN_PARTS
@@ -223,7 +226,6 @@ class ElaChatView(
         self._resize_reflow_timer.setSingleShot(True)
         self._resize_reflow_timer.timeout.connect(self._release_resize_reflow)
 
-        # -- 批量渐进渲染（历史加载先建骨架，按时间片渲染 Markdown） --------
         self._batch_depth = 0
         #: 批量加载时是否延迟建分段控件（True = 首屏外只存 parts 数据）
         self._virtual_parts_enabled = True
@@ -263,7 +265,6 @@ class ElaChatView(
         self._lazy_timer.setSingleShot(True)
         self._lazy_timer.timeout.connect(self._load_older_page)
 
-        # -- 视口外查看器挂起（大消息量下省内存与文本 reflow） --------------
         self._suspension_enabled = True
         self._suspension_min = _SUSPEND_MIN_MESSAGES
         self._suspended_ids: set = set()
@@ -280,8 +281,6 @@ class ElaChatView(
         for timer in self.findChildren(QTimer):
             timer.stop()
         super().deleteLater()
-
-    # -- 虚拟化 / 视口挂起（实现在 ``virtualizer.py``） -------------------
 
     def _disable_virtual_list(self) -> None:
         self._virtualizer._disable_virtual_list()
@@ -347,8 +346,6 @@ class ElaChatView(
 
     def _restore_all_suspended(self) -> None:
         self._virtualizer._restore_all_suspended()
-
-    # -- 查询 --------------------------------------------------------------
 
     @property
     def _messages(self) -> list[ElaChatMessage]:
@@ -475,13 +472,10 @@ class ElaChatView(
         self._scroll.ensureWidgetVisible(bubble, 0, 0)
         return True
 
-    # -- 严格 id 模式 --------------------------------------------------------
-
     def setStrictIds(self, on: bool) -> None:
-        """严格模式：操作**不存在的消息**时抛 :class:`KeyError` 而非静默忽略。
-
-        默认关闭（流式迟到事件属正常）；开发 / 调试期打开可暴露宿主传错 id。
-        只影响公开 mutator，内部路径（滚动跟随 / 挂起 / 分段同步）继续静默。
+        """严格模式：操作不存在的消息时抛 :class:`KeyError` 而非静默忽略。
+        默认关闭（流式迟到事件属正常），开发 / 调试期打开可暴露宿主传错 id；只影响
+        公开 mutator，内部路径（滚动跟随 / 挂起 / 分段同步）继续静默。
         """
         self._strict_ids = bool(on)
 
@@ -502,9 +496,8 @@ class ElaChatView(
         self, messageId: int, api: str = "", materialize: bool = True
     ) -> ElaChatBubble:
         """取气泡；非法 id 抛 :class:`TypeError`，严格模式下不存在抛 :class:`KeyError`。
-
-        壳被延迟物化的消息会先 ``_materialize_shell``；``materialize=False``
-        时留给调用方自行处理（如 ``removeMessage`` 不需要建壳）。
+        壳被延迟物化的消息会先 ``_materialize_shell``；``materialize=False`` 时留给
+        调用方处理（如 ``removeMessage`` 不需要建壳）。
         """
         self._require_int_id(messageId, api)
         bubble = self._bubbles.get(messageId)
@@ -523,10 +516,10 @@ class ElaChatView(
         return self._messages[-1] if self._messages else None
 
     def sessionStats(self, limit: int = 0) -> ElaChatSessionStats:
-        """会话级用量汇总（计数 / 当前上下文四路词元 / 使用率 / 累计成本 / 工具统计）。
+        """会话级用量汇总（计数 / 上下文四路词元 / 使用率 / 成本 / 工具统计）。
 
-        当前用量取最后一条有 tokens 的助手消息的最后一步（对齐 opencode
-        ``getSessionContext``）；``total_tokens`` = 四路和，成本跨全部消息求和。
+        当前用量取最后一条有 tokens 的助手消息的最后一步；``total_tokens`` = 四路和，
+        成本跨全部消息求和。
 
         :param limit: 模型上下文上限（词元）；``> 0`` 时才计算 ``usage_percent``
         :returns: :class:`ElaChatSessionStats` 快照
@@ -537,15 +530,8 @@ class ElaChatView(
         """获取滚动区内容容器（高级用法）。"""
         return self._content
 
-    # -- 增删改 ------------------------------------------------------------
-
-    # -- 会话 bundle（导出 / 导入） ----------------------------------------
-
-    # -- 批量渐进渲染 ------------------------------------------------------
-
     def beginBatch(self) -> None:
         """进入批量加载模式（可嵌套）。
-
         批量内新增的助手文本消息先建骨架、跳过快照同步与贴底跟随；``endBatch``
         后先渲染最新的 ``_BATCH_EAGER_COUNT`` 条，其余留给滚动懒加载。
         """
@@ -566,7 +552,7 @@ class ElaChatView(
             self._finish_batch_render()
             return
         if self._render_queue:
-            # 用户打开历史会话时停在底部：从最新一条往前渲染，首屏才有内容
+            # 打开会话时停在底部：从最新一条往前渲染，首屏才有内容
             self._render_queue = deque(reversed(self._render_queue))
             self._batch_eager_rendered = 0
             self._render_timer.start(0)
@@ -620,17 +606,13 @@ class ElaChatView(
             # 首次 spacer 高度要等 QScrollArea 重新算完内容尺寸后再刷一次
             self._virtual_window_timer.start(0)
 
-    # -- 更早消息的懒加载 --------------------------------------------------
-
-    # -- 视口外查看器挂起 --------------------------------------------------
-
     def setViewportSuspension(
         self, on: bool = True, minMessages: Optional[int] = None
     ) -> None:
         """设置视口外消息是否挂起重型查看器（默认开启）。
 
-        挂起把离视口较远（上下各 2 屏）消息的 Markdown 查看器替换为等高透明
-        占位控件（``parts`` / 快照数据不变）；流式与批量加载中的消息不挂起。
+        挂起把离视口较远（上下各 2 屏）消息的 Markdown 查看器替换为等高透明占位，
+        ``parts`` / 快照数据不变；流式与批量加载中的消息不挂起。
 
         :param on: 是否启用
         :param minMessages: 启用挂起的最小消息数（缺省 80）
@@ -648,21 +630,10 @@ class ElaChatView(
         """是否启用视口外查看器挂起。"""
         return self._suspension_enabled
 
-    # -- 步骤 --------------------------------------------------------------
-
-    # -- 思考层 ------------------------------------------------------------
-
-    # -- 工具层 ------------------------------------------------------------
-
-    # -- 合成段 / 压缩段 / 审批段 -------------------------------------------
-
-    # -- 附件 / 用量 / 错误 -------------------------------------------------
-
     def guardNestedScroll(self, widget: QWidget) -> Optional["NestedScrollGuard"]:
         """为嵌套滚动区安装防脱离过滤器（到达边界时不再带动外层）。
-
-        接受 ``QAbstractScrollArea`` 或提供 ``textBrowser()`` 的查看器；
-        返回过滤器对象（由视图持有引用，无需手动保存）。
+        接受 ``QAbstractScrollArea`` 或提供 ``textBrowser()`` 的查看器；返回的过滤器
+        由视图持引用。
         """
         area = None
         if isinstance(widget, QAbstractScrollArea):
@@ -694,13 +665,3 @@ class ElaChatView(
                 self._scroll_guards.remove(guard)
             except ValueError:
                 pass
-
-    # -- 内部状态 ----------------------------------------------------------
-
-    # -- 贴底与滚动 --------------------------------------------------------
-
-    # -- 交互 resize 延迟重排 ----------------------------------------------
-
-    # -- 滚动条 ------------------------------------------------------------
-
-    # -- 外观 --------------------------------------------------------------

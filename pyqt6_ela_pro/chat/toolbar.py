@@ -57,8 +57,6 @@ class ElaChatToolButton(ElaIconButton):
             set_tooltip(self, tooltip, ElaToolTipPositionType.Top)
         self.clicked.connect(self._on_clicked)
 
-    # -- 选中态 ------------------------------------------------------------
-
     def setCheckable(self, on: bool) -> None:
         """设置是否可选中。"""
         self._checkable = bool(on)
@@ -85,8 +83,6 @@ class ElaChatToolButton(ElaIconButton):
     def _on_clicked(self) -> None:
         if self._checkable:
             self.setChecked(not self._checked)
-
-    # -- 图标 --------------------------------------------------------------
 
     def isIconOnly(self) -> bool:
         """是否纯图标按钮（``ElaIconButton`` 恒为 True）。"""
@@ -137,8 +133,6 @@ class ElaChatToolBar(ElaThemeWidget):
 
         self._apply_theme()
 
-    # -- 扩展入口 ----------------------------------------------------------
-
     def addButton(
         self,
         icon: Optional[ElaIconType.IconName] = None,
@@ -153,11 +147,8 @@ class ElaChatToolBar(ElaThemeWidget):
         size: int = _ICON_BUTTON_SIZE,
     ) -> QPushButton:
         """添加工具按钮，返回按钮句柄。
-
-        有 ``text`` 时返回 ``ElaButton``（图标 + 文案），否则返回
-        :class:`ElaChatToolButton`（正方形图标按钮）。
-
-        ``key`` 缺省自动生成，显式重复 / 非法 ``zone`` 抛 ``ValueError``。
+        有 ``text`` 时返回 ``ElaButton``（图标 + 文案），否则返回正方形图标按钮
+        :class:`ElaChatToolButton`。``key`` 缺省自动生成；显式重复 / 非法 ``zone``
         """
         zone = self._normalize_zone(zone)
         key = key or self._next_key("tool")
@@ -234,8 +225,6 @@ class ElaChatToolBar(ElaThemeWidget):
         if spacer is not None:
             self._stretches.append((layout, spacer))
 
-    # -- 插入（在已有项之前） ----------------------------------------------
-
     def insertButton(
         self,
         before: Union[str, QWidget],
@@ -291,8 +280,6 @@ class ElaChatToolBar(ElaThemeWidget):
         self._move_before(line, reference)
         return line
 
-    # -- 显隐与启用 --------------------------------------------------------
-
     def setItemVisible(self, item: Union[str, QWidget], on: bool = True) -> bool:
         """显示 / 隐藏已添加项（接受 key 或控件）；不存在返回 ``False``。
 
@@ -321,8 +308,6 @@ class ElaChatToolBar(ElaThemeWidget):
         """项是否启用；不存在返回 ``False``。"""
         widget = self._resolve_item(item)
         return widget is not None and widget.isEnabled()
-
-    # -- 查询与移除 --------------------------------------------------------
 
     def toolButton(self, key: str) -> Optional[QPushButton]:
         """按 key 获取工具按钮（不存在或非按钮返回 ``None``）。"""
@@ -382,8 +367,6 @@ class ElaChatToolBar(ElaThemeWidget):
             layout.removeItem(spacer)
             self._stretches.remove((layout, spacer))
 
-    # -- 外观 --------------------------------------------------------------
-
     def setCompact(self, compact: bool) -> None:
         """切换紧凑模式（消息底部操作栏使用）。"""
         self._compact = bool(compact)
@@ -395,8 +378,6 @@ class ElaChatToolBar(ElaThemeWidget):
     def compact(self) -> bool:
         """是否紧凑模式。"""
         return self._compact
-
-    # -- 内部 --------------------------------------------------------------
 
     def _next_key(self, prefix: str) -> str:
         self._seq += 1

@@ -26,9 +26,8 @@ from ._shared import _dist, _label_font, _series_palette_color, _text_color
 
 class GraphSeriesRenderer(SeriesRenderer):
     """关系图（节点 + 边）。
-
-    支持 ``data`` / ``nodes`` / ``categories`` / ``links`` / ``layout`` /
-    ``force`` / ``label`` / ``symbolSize`` / ``draggable`` / ``roam`` / ``zoom``。
+    选项：``data`` / ``nodes`` / ``categories`` / ``links`` / ``layout`` / ``force`` /
+    ``label`` / ``symbolSize`` / ``draggable`` / ``roam`` / ``zoom``。
     """
 
     def __init__(self, chart, opt):
@@ -124,7 +123,6 @@ class GraphSeriesRenderer(SeriesRenderer):
                     return color
         return _series_palette_color(self.chart, index)
 
-    # -- 布局 --------------------------------------------------------------
     def layout(self, rect: QRectF) -> None:
         self._nodes = []
         self._edges = []
@@ -179,7 +177,6 @@ class GraphSeriesRenderer(SeriesRenderer):
                 }
             )
 
-    # -- 交互：节点拖拽 / roam ----------------------------------------------
     def _transform(self, pt: QPointF) -> QPointF:
         """布局坐标 → 屏幕坐标（roam 缩放 / 平移）。"""
         if self._zoom == 1.0 and self._pan.isNull():
@@ -224,7 +221,7 @@ class GraphSeriesRenderer(SeriesRenderer):
             self.chart.update()
             return True
         if self._pan_start is not None:
-            # 相对本次按下的 pan 累加，否则第二次拖动会丢掉之前的平移量。
+            # 以本次按下时的原点为基准累加，否则第二次拖动会丢掉上次的平移量。
             self._pan = self._pan_origin + (QPointF(pos) - self._pan_start)
             self.chart.invalidateLayout()  # 同上：pan 改的是绘制变换
             self.chart.update()
@@ -271,10 +268,9 @@ class GraphSeriesRenderer(SeriesRenderer):
             self.chart.update()
 
     def _force_positions(self, nodes, edges, force_opt):
-        """力导布局结果（带记忆化）。
-
-        ``_force_layout`` 是纯函数，但每次 ``_layout_all`` 都会重跑
-        O(n² × iterations) 的双层循环（400 节点 / 80 轮约 1.8s），故按全部输入缓存。
+        """力导布局结果（按全部输入记忆化）。
+        ``_force_layout`` 是纯函数，但每次 ``_layout_all`` 都会重跑 O(n² × iterations)
+        双层循环（400 节点 / 80 轮约 1.8s）。
         """
         seed = int(_to_float(force_opt.get("seed"), 42))
         iterations = max(10, int(_to_float(force_opt.get("iterations"), 80)))

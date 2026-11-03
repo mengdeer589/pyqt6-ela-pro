@@ -40,10 +40,8 @@ class _BubbleStatsMixin:
 
     def setStatsMode(self, mode: str) -> None:
         """设置用量徽标展示模式（立即生效；非法值回落 ``"footer"``）。
-
-        ``"footer"``：一个整轮汇总徽标（各步求和）；``"steps"``：每步各自一个
-        徽标；``"none"``：不显示，耗时回退到底部 meta 文本。每步原始用量始终
-        保留在 ``parts`` 中。
+        ``"footer"`` = 整轮汇总一个徽标（各步求和），``"steps"`` = 每步一个，
+        ``"none"`` = 不显示、耗时回退到底部 meta。原始用量始终留在 ``parts`` 中。
         """
         self._stats_mode = mode if mode in _STATS_MODES else "footer"
         self._apply_stats_mode()
@@ -56,8 +54,7 @@ class _BubbleStatsMixin:
     def _apply_stats_mode(self) -> None:
         """按当前模式显隐 / 刷新各步骤用量徽标（不改 ``parts`` 原始数据）。
 
-        流式回合内一律不摆徽标（数字未落定且会反复跳动）；历史恢复时按模式
-        按需建 ``StatsBadge``，footer 每条消息只建最后一个。
+        流式回合内一律不摆徽标（数字未落定且会跳动）；回放时按模式按需建徽标。
         """
         stats_parts = [
             part
@@ -95,7 +92,7 @@ class _BubbleStatsMixin:
             for part in stats_parts:
                 self._ensure_stats_badge(part).setStats(part.stats)
         # 判据是消息状态而不是 ``_stream_ended``：``setParts`` / ``setStatus``
-        # 收尾都不经过 ``endStream``，拿历史标志会把恢复出的汇总徽标留在时间线里。
+        # 收尾都不经过 ``endStream``，用该标志会把恢复出的汇总徽标留在时间线里。
         if self._status != ElaChatStatusType.Streaming:
             self._dock_step_stats_to_footer()
 
@@ -125,9 +122,8 @@ class _BubbleStatsMixin:
         self, stats: Optional[ElaChatStats], partId: Optional[str] = None
     ) -> None:
         """设置当前步骤的用量统计（``None`` 移除当前步骤记录）。
-
-        每步原始用量记录为 ``parts`` 中的 ``Stats`` 分段（不汇总），展示由
-        :meth:`setStatsMode` 决定。``partId`` 由 :meth:`setParts` 传入时保留原 id。
+        每步原始用量记为 ``parts`` 中的 ``Stats`` 分段（不汇总），展示由
+        :meth:`setStatsMode` 决定；``partId`` 由 :meth:`setParts` 传入时保留原 id。
         """
         if self._role != ElaChatRoleType.Assistant:
             return
@@ -149,7 +145,7 @@ class _BubbleStatsMixin:
             partId = partId or uuid4().hex[:12]
             badge = None
             if not self._stats_batch:
-                # 历史回放期只登记数据，可见徽标由 _apply_stats_mode 按需创建
+                # 回放期只登记数据，可见徽标由 _apply_stats_mode 按需创建
                 badge = StatsBadge(self._parts_container or self._content or self)
                 badge._setStats(stats, deferShow=False)
             self._append_part(

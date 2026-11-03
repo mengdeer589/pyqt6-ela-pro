@@ -29,7 +29,6 @@ class _LineSamplingMixin:
 
     def _stacked_data(self):
         """stack 模式：叠加前序同名 stack 可见系列的值（不改原始 opt）；无 stacking 返回 None。
-
         基线存于 ``self._stack_base``（index -> 基线值），tooltip / 标签仍按原始值展示。
         结果必须缓存：每次新建整份 list 会让下游按数据身份命中的采样缓存永不命中。
         """
@@ -247,7 +246,6 @@ class _LineSamplingMixin:
 
     def _window(self, coord):
         """当前可见窗口：``None``（全量）/ ``(start, stop)`` 连续段 / 下标数组。
-
         单调 x 或 category 轴给连续段（下游用切片视图，免掩码免拷贝）；乱序
         value 轴给 ``flatnonzero`` 掩码下标（按数据身份 + 范围缓存）。
         """
@@ -298,10 +296,8 @@ class _LineSamplingMixin:
 
     def _py_window(self, axis):
         """纯 Python 兜底路径的可见窗口下标（``None`` = 不做裁剪）。
-
         没有 numpy 快路径的数据（dict 项 / 混合类型 / 含 None）也要按窗口裁剪，
         否则缩放 / 平移后抽稀跑在全量上、绘制只覆盖窗口的一小段。返回 ``range``
-        （有序 / category，O(log n)）或 ``list[int]``（无序），按数据身份 + 轴范围缓存。
         """
         n = self._data_len
         if axis is None or n <= 0:
@@ -338,7 +334,6 @@ class _LineSamplingMixin:
 
     def _decimate(self, y, x, n_out: int, algo: str, assume_sorted: bool = False):
         """按算法抽稀，返回局部下标数组；不可行时返回 ``None``。
-
         三层兜底：tsdownsample（要求 x 严格递增）→ numpy 按桶 min/max（不要求
         有序）→ 调用方等距抽稀。``assume_sorted`` 表示 x 已按数据身份验过严格递增。
         """
@@ -376,10 +371,8 @@ class _LineSamplingMixin:
 
     def _apply_gap_breaks(self, coord, plot_w: float) -> None:
         """按预计算的记录中断位置在采样点之间插入 None 断点。
-
         数据侧：相邻时间差 > 4.1 × 步长即记录中断（一次性预计算）；屏幕侧：
         中断像素宽 ≥ ``_GAP_MIN_PIXELS`` 才断开（亚像素空洞照常连线，断开反而闪）。
-        ``addGaps: false`` / ``connectNulls: true`` 关闭；仅数值 x 轴生效。
         """
         if not bool(self.opt.get("addGaps", True)):
             return

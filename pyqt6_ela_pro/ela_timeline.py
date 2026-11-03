@@ -1,16 +1,4 @@
-"""
-时间线组件，风格参考 ElaWidgetTools 的 ElaTimeline。
-
-垂直 / 水平两种排布，包含时间戳、标题、正文和可选图标。
-
-用法::
-
-    timeline = ElaTimeline(parent=self)
-    timeline.addItem(ElaTimeline.TimelineItem(
-        title="事件", content="描述", timestamp="2024-01-01",
-    ))
-    timeline.setOrientation("horizontal")
-"""
+"""时间线组件，风格参考 ElaWidgetTools 的 ElaTimeline。"""
 
 from __future__ import annotations
 

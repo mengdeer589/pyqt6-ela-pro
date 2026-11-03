@@ -93,7 +93,6 @@ class _ChartQueryMixin:
 
     def convertToPixel(self, finder, value):
         """数据值 → 像素（ECharts ``convertToPixel``）。
-
         grid / polar / calendar 返回 ``[x, y]``；singleAxis 返回标量；
         无法解析时返回 ``None``。
         """
@@ -123,7 +122,6 @@ class _ChartQueryMixin:
 
     def convertFromPixel(self, finder, value):
         """像素 → 数据值（ECharts ``convertFromPixel``）。
-
         grid 返回 ``[x, y]``；polar 返回 ``[angle, radius]``；singleAxis
         返回标量；calendar 返回 ``[ISO 日期]``。
         """
@@ -204,7 +202,6 @@ class _ChartQueryMixin:
 
     def palette(self) -> list:
         """当前生效调色板：option["color"] 覆盖，否则默认调色板（主题实时取）。
-
         按（主题, 自定义色板身份）缓存；返回深拷贝的 QColor —— 绘制路径会逐图元
         ``setAlphaF``，共享实例会把整个调色板改成半透明。
         """
@@ -229,7 +226,6 @@ class _ChartQueryMixin:
 
     def colorForSeries(self, series) -> QColor:
         """系列主色：series opt 的 "color" → 全局调色板按序号取色。
-
         序号取 ``_rebuild`` 写好的 ``_series_index``（本函数在逐图元绘制路径上，
         不能用 O(系列数) 的 ``list.index()``）。
         """
@@ -547,7 +543,6 @@ class _ChartQueryMixin:
 
     def _hitItemWithSeries(self, pos: QPointF):
         """命中查询：返回 ``(渲染器, 命中 info)``；无命中 None（silent 系列跳过）。
-
         markPoint / markLine 优先（画在系列之上）；markArea 是背景区域、graphic
         是装饰，都不参与命中。
         """
@@ -619,7 +614,6 @@ class _ChartQueryMixin:
 
     def _emptyAreaHit(self, pos: QPointF) -> Optional[dict]:
         """空区命中：把像素反查成数据坐标（``hoveranywhere`` / ``clickanywhere``）。
-
         Plotly 语义：光标不在任何 trace 上时，事件 / 提示仍带**光标的数据坐标**。
         坐标系不支持反查（polar / calendar 等）时返回 ``None``。
         """

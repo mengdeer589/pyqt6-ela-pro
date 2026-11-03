@@ -26,7 +26,6 @@ from ._shared import (
 
 class TreeSeriesRenderer(SeriesRenderer):
     """树图（按层级布局）。
-
     支持 ``data`` / ``orient``（"LR" / "TB"）/ ``edgeShape``（"polyline" /
     "curve"）/ ``label`` / ``symbolSize``。
     """

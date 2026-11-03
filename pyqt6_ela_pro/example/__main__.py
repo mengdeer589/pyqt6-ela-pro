@@ -1,26 +1,4 @@
-"""[pyqt6_ela_pro] 模块示例脚本
-
-侧边栏是**两级**的：一级是可折叠的 expander（按主题分组），展开后是页面 /
-分类。分组依据是「这组页面回答的是同一个问题」—— 此前 23 个页面平铺，
-「AI 对话」的五个能力域被基础控件挤到看不见，而「基础控件 / 容器展示」其实是
-同一个东西（原生控件全集）被按一条用户记不住的线切开了。
-
-**``addExpanderNode`` 在 PyQt6 里返回 ``(NodeResult, key)``。** C++ 那边的
-``QString& expanderKey`` 是出参，sip 把它整条从签名里删掉了、key 改由
-**返回值**给出。所以：
-
-- key 是**拿回来**的，不是传进去的；
-- **第二个位置参数是图标，不是 key** —— 传个空串进去会被当成
-  ``targetExpanderKey``，查不到就返回 ``TargetNodeInvalid``，节点建了但 key
-  是空的，后面所有二级页面全挂不上，**且不抛异常**。
-
-主窗口同时是 ElaWindow **应用外壳**的活示例：右侧 dock（页面导航 / 运行日志 /
-说明）、工具栏、状态栏、AppBar 右键菜单、内容区顶栏的页面搜索、页脚节点
-（关于 / 设置）与关闭确认 —— 每一处都只是对 ``ElaWindow`` 公开 API 的调用，
-可以整段照抄。
-
-（参考实现：``PyElaWidgetTools/example/mainwindow.py``。）
-"""
+"""[pyqt6_ela_pro] 模块示例脚本?"""
 
 import os
 import sys
@@ -124,11 +102,9 @@ class ExampleWindow(ElaWindow):
         super().__init__()
         self.setWindowTitle("pyqt6_ela_pro 组件示例")
         self.resize(1280, 820)
-        # 显式最小尺寸（**不能省**）：切导航栏显示模式时上游会给导航栏做 255ms 的
-        # ``setFixedWidth`` 动画，窗口的「布局最小宽度」跟着逐帧变大 —— 最大化 / 屏幕
-        # 受限时 Qt 每帧都要改窗口尺寸，终端刷一串 ``QWindowsWindow::setGeometry``
-        # 警告，窗口还会被越撑越大（实测第二块屏上每切一次 +160px）。显式最小尺寸一旦
-        # 设置，Qt 就不再拿布局最小值顶窗口；页面都在滚动区里，缩到 800 宽布局也不坏。
+        # 显式最小尺寸不能省：切导航栏模式时上游会对导航栏做 255ms 的 setFixedWidth
+        # 动画，布局最小宽度逐帧变大，Qt 会不断改窗口尺寸并刷 setGeometry 警告。
+        # 页面都在滚动区里，缩到 800 宽布局也不坏。
         self.setMinimumSize(800, 560)
 
         # 左侧导航切页统一用翻转动画（示例主窗口；window_shell_page 可逐档切换对比）
@@ -214,10 +190,7 @@ class ExampleWindow(ElaWindow):
         )
         self.expandNavigationNode(render)
 
-        # ── AI 对话：一个工作台，内部按能力域切七个工作区 ──
-        # 与图表工作台同构：顶部 ElaPivot 切工作区，首次切换才构建。
-        # 七个工作区是「长什么样 / 怎么接 / agent 多了什么 / 改了文件看什么 /
-        # 轨迹状态与检索 / 多话题 / 落库与性能」，各自回答一个问题。
+        # AI 对话工作台：顶部 ElaPivot 切七个工作区，首次切换才构建。
         _, chat = self.addExpanderNode("AI 对话", icon.Comments)
         self._addPage(
             "AI 对话",
@@ -320,7 +293,6 @@ class ExampleWindow(ElaWindow):
     # ── DockWidget 停靠面板 ────────────────────────────────────────────
     def _buildDocks(self) -> None:
         """右侧停靠区：页面导航（真实清单）/ 运行日志 / 说明。
-
         导航在上、日志在下（``splitDockWidget``），说明与日志 tab 化 —— 默认只占
         一列宽度，拖出去 / 换位置后布局由 QMainWindow 记忆（``saveState``）。
         """
@@ -381,9 +353,7 @@ class ExampleWindow(ElaWindow):
 
     def _sync_page_nav(self, page_key: str | None = None) -> None:
         """把页面导航 dock 的高亮对到 ``page_key``（缺省取当前页）。
-
         别用「当前 widget 的 key」兜底导航时的同步：``setStackSwitchMode`` 的
-        Popup / Scale 等模式是**动画结束后**才 ``setCurrentIndex``（默认 Popup
         ~180ms），信号发出这一刻读到的还是上一页。
         """
         key = page_key or self.getCurrentNavigationPageKey()
@@ -526,11 +496,8 @@ class ExampleWindow(ElaWindow):
 
     def _on_close_requested(self) -> None:
         """AppBar 关闭按钮：二次确认（可关，见「设置」）。
-
         用 ``ElaContentDialog`` 系的 ``ElaDialogBase``（= 上游示例拦截关闭时用的
         那个组件）：**居中卡片 + 整窗遮罩**，还自带「最小化」中键。
-        ``ElaConfirmDialog`` 是贴锚点浮出的轻量确认条 —— 锚点是整扇窗口时会被
-        算到屏幕外再夹回来，落点很怪，不适合这里。
         """
         if not self._close_confirm_enabled:
             self.close()
@@ -589,11 +556,8 @@ class ExampleWindow(ElaWindow):
 
     def _open_settings(self) -> None:
         """外壳设置：导航栏模式 / 背景图 / 动效策略 / 关闭确认。
-
         控件用**上游现成的**：分段用 ``ElaPivot``、开关用 ``ElaToggleSwitch``；
         **主题不在这里** —— AppBar 右上角与工具栏都有主题按钮，在模态弹框里切主题
-        会撞上 ElaWindow 的整窗切换动画（覆盖层 + AppBar 按钮临时锁定），且本页
-        的开关状态没法跟着回滚。所有开关即时生效，关掉后状态保留。
         """
         dialog = self._readonly_dialog("外壳设置", self)
         panel = QWidget()
@@ -665,7 +629,6 @@ class ExampleWindow(ElaWindow):
         confirm: ElaToggleSwitch,
     ) -> None:
         """恢复默认 + **把弹框里的控件一起同步**。
-
         只改窗口状态不同步控件，会出现「界面说深色、实际已经浅色」这种自相矛盾的
         中间态（用户报的「恢复默认后不对」就是这类）。
         """
@@ -723,7 +686,6 @@ class ExampleWindow(ElaWindow):
 
     def _set_background_enabled(self, on: bool) -> None:
         """窗口背景：``setWindowPixmap`` + ``setWindowPaintMode``（亮 / 暗各一张）。
-
         仓库不带图片资源，示例用 QPainter 现画一张渐变（页面区不透明，实际可见
         的是导航栏与应用栏那一带 —— 与上游示例同款效果）。
         """
@@ -792,7 +754,7 @@ def _apply_default_theme() -> None:
 
 if __name__ == "__main__":
     # Win7 上 DirectWrite 路径会在部分字体组合下崩 / 卡；GDI 引擎更稳。
-    # 必须在 QApplication 之前设置。
+    # 必须在 QApplication 前设置。
     _prepare_qpa_platform()
     app = QApplication(sys.argv)
     eApp.init()
@@ -830,10 +792,8 @@ if __name__ == "__main__":
     splash.close()
 
     window = ExampleWindow()
-    # 少数页面的内容会往窗口挂**原生子窗口**（blueprint 的 GL 视口，见
-    # ``ExamplePage.PRE_SHOW_BUILD``）：必须在 show 之前建好 —— 给已显示的顶层窗口挂
-    # 原生子窗口时 Windows/Qt 会重建顶层 HWND，视觉上就是主窗口「闪一次」（实测在
-    # 后台预热里 T+1.8s，类名 Qt6xxQWindowIcon → Qt6xxQWindowOwnDCIcon）。
+    # 原生子窗口（blueprint GL 视口）必须在 show 前建好：给已显示窗口挂原生子窗口
+    # 会重建顶层 HWND，主窗口会闪一次。
     for _page in window.findChildren(ExamplePage):
         if getattr(_page, "PRE_SHOW_BUILD", False):
             _page.buildDemoContent()

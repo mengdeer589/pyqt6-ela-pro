@@ -17,33 +17,15 @@ _AUTO_FIT_MAX_WIDTH = 620
 
 
 class ElaDialogBase(ElaContentDialog):
-    """基于 ElaContentDialog 的对话框基类。
+    """基于 ElaContentDialog 的对话框基类：按钮栏 + 可换主体，默认按内容自适应。
 
-    默认提供底部按钮栏（取消/确定），可设置标题和主体内容组件。
-    显示时默认按内容自适应尺寸（长文案不被裁切；``setAutoFit(False)`` 关闭）。
+    :param title: 标题。
+    :param middleText: 中间按钮文本，``None`` 时不显示中间按钮。
+    :param parent: **必填**；底层用它创建遮罩控件，``None`` 会静默 abort（0xC0000409）。
+    :raises ValueError: ``parent`` 为 ``None``。
 
-    :param title: 对话框标题
-    :type title: str
-    :param middleText: 中间按钮文本，为 ``None`` 时隐藏中间按钮。
-    :type middleText: str, optional
-    :param parent: 父级 widget（**必填**）。底层 ``ElaContentDialog`` 需要它来创建遮罩控件，
-        传 ``None`` 会让进程崩溃，因此这里会抛 :class:`ValueError`。
-    :type parent: QWidget
-    :raises ValueError: ``parent`` 为 ``None`` 时抛出（否则进程会静默 abort）
-
-    Example::
-
-        dlg = ElaDialogBase(title="退出", middleText="稍后提醒", parent=parent)
-        dlg.setTitle("退出")
-        dlg.setParamWidget(my_content_widget)
-        dlg.exec()
-
-    .. note::
-
-        ``leftButtonClicked`` / ``middleButtonClicked`` / ``rightButtonClicked`` 都是
-        **0ms 延迟**发出的（关闭动画之后）。``exec()`` 返回后 Qt 会自动取消回调，
-        所以依赖这些信号的宿主必须在 ``exec()`` 之后继续持有对话框引用（例如存成员
-        变量）；只读 ``exec()`` 的返回值（``Accepted`` / ``Rejected``）则不需要。
+    三个 ``*ButtonClicked`` 在关闭动画后以 0ms 延迟发出；``exec()`` 返回后未处理
+    回调会被 Qt 取消，依赖它们的宿主须用成员变量持有对话框。
     """
 
     def __init__(
@@ -61,10 +43,9 @@ class ElaDialogBase(ElaContentDialog):
                 "parent=None 会导致进程崩溃。请传入宿主窗口，例如 "
                 "ElaDialogBase(parent=self.window())。"
             )
-        # 浅色主题下 DialogBase 槽位偏灰，这里把它调到本组件要的浅灰白。
-        # **必须在构造期写、不能放模块级**：模块级等于「import 本库就改掉宿主
-        # 的全局主题」，而且没有 NOTIFY 信号、宿主也还原不回去（resetAccentColor
-        # 只管强调色那一组）。放这里的作用域就是「用了本组件的对话框」。
+        # 浅色主题下 DialogBase 槽位偏灰，调到本组件要的浅灰白。
+        # **只能在构造期写、不能放模块级**：那等于 import 本库就改宿主全局主题，
+        # 且没有 NOTIFY、宿主还原不回去；构造期的作用域是「用了本组件的对话框」。
         eTheme.setThemeColor(
             ElaThemeType.ThemeMode.Light,
             ElaThemeType.ThemeColor.DialogBase,
@@ -127,11 +108,8 @@ class ElaDialogBase(ElaContentDialog):
 
     def setAutoFit(self, on: bool = True) -> None:
         """设置「显示时按内容自适应尺寸」（默认开启）。
-
-        原生 ``ElaContentDialog`` 构造时把窗口定在 400px 宽、``setCentralWidget``
-        换内容后也不重算，多行正文会被裁切；开启后在 ``showEvent`` 里按布局
-        ``heightForWidth`` 重新适配（宽度上限 620px，超出部分换行、高度随内容增长）。
-        宿主需要固定尺寸时传 ``False``。
+        原生 ``ElaContentDialog`` 固定 400px 宽、换内容后不重算，长正文会被裁切；
+        开启后 ``showEvent`` 按 ``heightForWidth`` 重适配（宽度上限 620px）。
         """
         self._auto_fit = bool(on)
 
@@ -146,7 +124,6 @@ class ElaDialogBase(ElaContentDialog):
 
     def _fit_to_content(self) -> None:
         """按内容重算窗口尺寸（先定宽，再按布局 ``heightForWidth`` 求高）。
-
         ``adjustSize()`` 单用不够：顶层窗口会被 Qt 钳到 2/3 屏宽，且高度不走
         子控件的 ``heightForWidth``（长文案仍裁切）。
         """

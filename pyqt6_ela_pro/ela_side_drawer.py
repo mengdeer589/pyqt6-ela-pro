@@ -277,14 +277,9 @@ class ElaDrawer(ElaThemeWidget):
         return self._is_opened
 
     def _on_content_changed(self, widget) -> None:
-        """内容被替换时把新内容挂进布局。
-
-        ``ContentSlot`` 负责所有权与引用，这里只管布局 —— 两者分开才不会互相踩。
-
-        **``widget is None``（内容被外部销毁）时什么都不做**：``destroyed`` 是在
-        ``~QWidget`` **内部**发出的，此刻 ``QLayout`` 可能还没跑完它自己的清理
-        （实测 Qt 会把项自动摘掉，count 1→0）。此时去 ``itemAt`` / ``removeWidget``
-        就是重入布局改结构 = 0xC0000005。
+        """内容被替换时把新内容挂进布局（``ContentSlot`` 管所有权，这里只管布局）。
+        **``widget is None``（内容被外部销毁）时什么都不做**：``destroyed`` 在
+        ``~QWidget`` 内部发出，此刻 ``QLayout`` 可能还没清理完，动它 = 0xC0000005。
         """
         if widget is None:
             return
@@ -327,10 +322,9 @@ class ElaDrawer(ElaThemeWidget):
             self._dim_anim.setEndValue(1)
             start_transition(self._dim_anim, self._animation_duration)
         except Exception as e:
-            # **异常必须回滚到「关闭态」**：此前只 ``print`` 后 return，
-            # 而 ``_is_opened`` 保持 False —— 面板 / 遮罩已 show()，closeDrawer()
-            # 首行守卫却直接返回，抽屉关不掉、isOpened() 还与视觉相反（实测）。
-            # 残留的半截动画也要停掉，否则它可能继续把视觉推到打开态。
+            # **异常必须回滚到「关闭态」**：只 print 后 return 会让面板 / 遮罩
+            # 已 show() 但 ``_is_opened`` 仍为 False，closeDrawer() 首行直接返回，
+            # 抽屉关不掉。残留动画也要停，否则会把视觉继续推向打开态。
             self._show_anim.stop()
             self._dim_anim.stop()
             self._drawer_widget.hide()
@@ -357,13 +351,9 @@ class ElaDrawer(ElaThemeWidget):
 
         self._hide_anim.setStartValue(current_rect)
         self._hide_anim.setEndValue(end_rect)
-        # 关闭动画在跑。_is_opened 要等 _onHideFinished 才复位（那是唯一的复位点），
-        # 所以这里必须另立一个标志，否则关闭动画期间再 toggle 一次会被
-        # 「_is_opened 还是 True」带进 closeDrawer，抽屉就卡在打开态。
-        #
-        # **必须在 start_transition 之前置位**：Disabled 模式下收尾在
-        # start_transition 内部同步跑完（_onHideFinished 会把 _is_closing 清回
-        # False），之后才置位就再也清不掉了。
+        # 关闭动画在跑，_is_opened 要等 _onHideFinished 才复位（唯一复位点），
+        # 故另立 _is_closing；否则动画期间再 toggle 会被旧 _is_opened 带进 closeDrawer。
+        # **必须在 start_transition 前置位**：Disabled 下收尾同步跑完，再置位就清不掉。
         self._is_closing = True
         start_transition(
             self._hide_anim, self._animation_duration, on_complete=self._onHideFinished

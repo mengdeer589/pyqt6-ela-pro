@@ -90,8 +90,6 @@ class SelectionAssistantPage(ExamplePage):
         )
         self._demoResultDialog(main_layout)
 
-    # -- 分区 01：启用与参数 -------------------------------------------------
-
     def _demoSettings(self, main_layout):
         info = ElaText(
             "在任意应用拖选文本（或双击选词），动作条会出现在光标附近；"
@@ -215,11 +213,8 @@ class SelectionAssistantPage(ExamplePage):
 
     def _apply_scope(self, assistant: ElaSelectionAssistant) -> None:
         """按「拖选取词」下拉框配置取词闸门。
-
         拖选取词要向前台窗口注入 ``Ctrl+C``，而拖选与「拖窗口 / 拖滚动条 /
-        拖文件」在鼠标层面无法区分 —— 在终端里注入的 ``Ctrl+C`` 就是中断
         信号。所以默认用**内置启发式过滤器**（跨窗口 / 窗口边框 / 超长拖拽
-        一律拒掉），需要时再显式放开。
         """
         scope = self._scope_combo.currentData() or "builtin"
         if scope == "all":
@@ -247,8 +242,6 @@ class SelectionAssistantPage(ExamplePage):
         assistant = self._ensure_assistant()
         assistant.showFor("这是手动弹出的示例文本", QCursor.pos())
         self._log_line("手动弹出动作条（不经全局钩子）")
-
-    # -- 分区 02：动作配置 ---------------------------------------------------
 
     def _demoActions(self, main_layout):
         """动作条菜单项由宿主定义（示例：6 个动作；组件本身不内置）。"""
@@ -310,8 +303,6 @@ class SelectionAssistantPage(ExamplePage):
         ]
         self._assistant.setActions(actions)
 
-    # -- 分区 03：事件日志 ---------------------------------------------------
-
     def _demoEvents(self, main_layout):
         info = ElaText(
             "selectionCaptured / actionTriggered / popupShown / popupHidden / "
@@ -338,8 +329,6 @@ class SelectionAssistantPage(ExamplePage):
         clear_layout.addWidget(clear_btn)
         main_layout.addWidget(clear_row)
         self._log_line("就绪：勾选「启用」后可在任意应用划词")
-
-    # -- 助手与事件 ----------------------------------------------------------
 
     def _ensure_assistant(self) -> ElaSelectionAssistant:
         if self._assistant is None:
@@ -384,8 +373,6 @@ class SelectionAssistantPage(ExamplePage):
             # ``_start_action`` 是第 04 节 demo 方法里定义的闭包，存了一份到实例上
             self._start_action(actionId, text)
 
-    # -- 分区 04：结果对话框（流式） ------------------------------------------
-
     def _demoResultDialog(self, main_layout):
         """结果对话框：宿主推进流式内容，取消接 ``stopRequested`` 自己中止。
 
@@ -410,7 +397,6 @@ class SelectionAssistantPage(ExamplePage):
 
         def abort(actionId):
             """``stopRequested`` 的处理：停掉本页的假后端。
-
             真实宿主在这里 abort 自己的 HTTP 请求 / 取消 worker —— 对话框管不了
             也不该管网络。不接这一条，面板关了模型还在烧 token。
             """
@@ -459,10 +445,8 @@ class SelectionAssistantPage(ExamplePage):
 
         def regenerate(actionId):
             """**重新生成**：只重开一个回合。
-
             刻意**不调** ``openFor`` —— 重新生成是同一次划词的重跑，标题 / 原文 /
             位置全是现成的，而 ``openFor`` 会按选区落点重新定位，用户刚把窗口挪到
-            顺手的位置就又被他眼前抽走。
             """
             abort(actionId)
             drive(_FAKE_REPLIES[actionId])
@@ -491,10 +475,8 @@ class SelectionAssistantPage(ExamplePage):
             )
             dialog.setError("连接模型服务失败：请求超时（演示）")
 
-        # ---- 接线 ----
-        # ★ 取消的唯一钩子：关窗 / 停止 / 流式中 Esc **都**会发它，宿主必须在这里
-        #   真的 abort 自己的后端。Cherry Studio 就是缺这一步（processMessages 传了
-        #   空 requestOptions，从未注册 AbortSignal），停止按钮点了不真停。
+        # ★ 取消的唯一钩子：关窗 / 停止 / 流式中 Esc 都会发 stopRequested，
+        # 宿主必须在这里真的 abort 后端。
         dialog.stopRequested.connect(abort)
 
         # 重新生成 = 同一次划词的重跑，重开一个回合即可（regenerate 刻意不走
@@ -557,8 +539,6 @@ class SelectionAssistantPage(ExamplePage):
             )
             cursor.removeSelectedText()
         self._log.verticalScrollBar().setValue(self._log.verticalScrollBar().maximum())
-
-    # -- 生命周期 ------------------------------------------------------------
 
     def closeEvent(self, event) -> None:  # noqa: N802 (Qt 命名)
         if self._assistant is not None:

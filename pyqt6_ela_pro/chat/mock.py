@@ -121,8 +121,6 @@ class ElaChatMockBackend(QObject):
         self._ready_timer.timeout.connect(self.ready.emit)
         self._ready_timer.start()
 
-    # -- 配置 --------------------------------------------------------------
-
     def thinkLevel(self) -> str:
         """获取思考强度档位。"""
         return self._think_level
@@ -148,11 +146,8 @@ class ElaChatMockBackend(QObject):
         """是否正在播放回合。"""
         return self._running
 
-    # -- 命令接口（与真实 worker 同构） ------------------------------------
-
     def ask(self, text: str, attachments=None) -> Optional[int]:
         """开始一个模拟回合（已有回合在跑时先取消），返回回合 token。
-
         token 是这一轮的落定凭据（``turnFinished`` 原样带回）；未受理时返回
         ``None``。真值即代表已受理，不要当 bool 用。
         """
@@ -198,8 +193,6 @@ class ElaChatMockBackend(QObject):
     def shutdown(self) -> None:
         """关闭后端（模拟后端与取消等价）。"""
         self.cancel()
-
-    # -- 内部 --------------------------------------------------------------
 
     def _finish_turn(self) -> None:
         self._timer.stop()

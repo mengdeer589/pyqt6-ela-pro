@@ -18,9 +18,7 @@ from .scatter import ScatterSeriesRenderer
 
 class EffectScatterSeriesRenderer(ScatterSeriesRenderer):
     """涟漪散点：散点 + QTimer 驱动的扩散圆动画。
-
     ``rippleEffect``：``period``（秒，默认 3）/ ``scale``（扩散倍数，默认 2.6）/
-    ``brushType``（fill 默认 / stroke）/ ``number``（同时可见环数）；其余同 scatter。
     定时器以 chart 为 parent 随控件销毁，仅系列可见时推进。
     """
 
@@ -92,7 +90,6 @@ class EffectScatterSeriesRenderer(ScatterSeriesRenderer):
 
     def _on_visible_changed(self):
         """显隐变化钩子（core 内部调用）：显示恢复时重启定时器。
-
         必须走 ``start_idle_loop`` 而非裸 ``timer.start()``：后者绕过动效策略，
         Reduced/Disabled 下的涟漪会被图例切换重新打开。
         """

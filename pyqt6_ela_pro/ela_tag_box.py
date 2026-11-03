@@ -27,18 +27,10 @@ from ._internal import (
 
 
 class ElaTagBox(_TagBoxThemeMixin, _TagBoxAnimMixin, ElaComboBox):
-    """具名组合框。
-
-    带有标题标签的组合框，只读模式。
-    继承自 ElaComboBox，使用原生弹出菜单。
+    """具名组合框（只读，标题在左）。
 
     :param title: 标题文字
     :param parent: 父控件
-
-    Example::
-
-        combo = ElaTagBox(title="语言", parent=parent)
-        combo.addItems(["Python", "C++", "JavaScript"])
     """
 
     def __init__(

@@ -1,16 +1,4 @@
-"""外部内容嵌入
-
-把**外部窗口**接进 Qt 布局：`ElaWindowEmbedder`（任意原生窗口）与
-`ElaBrowserEmbedder`（内嵌 Chrome，多实例共享同一浏览器进程）。
-
-这一页合并了原来的「窗口嵌入」和「浏览器嵌入」两页 —— 之前「窗口嵌入」的
-第 02 节就在演示 `ElaBrowserEmbedder`，侧边栏却还有一个独立的「浏览器嵌入」
-条目，用户根本分不清两者什么关系。现在分三节：
-
-- `01` 窗口嵌入：`SetParent` + 客户区尺寸换算（高 DPI 缩放的老坑）
-- `02` 浏览器嵌入：单页内嵌 + 共享会话的窗口认领
-- `03` 多 URL 测试台：一次开多个面板，压共享会话那条路径
-"""
+"""外部内容嵌入?"""
 
 from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import (
@@ -138,13 +126,7 @@ class _BrowserPanel(QWidget):
         self._browser.pageError.connect(
             lambda url, text: self._on_event(f"[CDP] JS 异常: {url} {text}")
         )
-        # 网络请求日志太嘈杂，默认不显示；需要时可取消注释
-        # self._browser.networkRequest.connect(
-        #     lambda url, method, rtype: self._on_event(f"[CDP] 请求: {method} {url} ({rtype})")
-        # )
-        # self._browser.networkResponse.connect(
-        #     lambda url, status, rtype: self._on_event(f"[CDP] 响应: {status} {url} ({rtype})")
-        # )
+        # 网络请求日志太嘈杂，默认不显示；需要时接 networkRequest / networkResponse。
         self._browser.consoleMessage.connect(
             lambda level, text: self._on_event(f"[CDP] 控制台 [{level}]: {text}")
         )
@@ -254,11 +236,8 @@ class EmbedPage(ExamplePage):
 
     def _addDemoContent(self, main_layout):
         """缺可选依赖时**降级**，不要让整页崩掉。
-
         ``ElaWindowEmbedder.__init__`` / ``ElaBrowserEmbedder._checkDependencies()``
         在没有 pywin32 时抛 ``ImportError``。示例页是被主窗口**逐个构造**的，
-        这里抛出去会让主窗口初始化中断 —— 用户看到的是「应用起不来」，
-        而不是「这一页的功能需要装个可选依赖」。
         """
         if _win32gui is None:
             hint = ElaText(
@@ -302,11 +281,8 @@ class EmbedPage(ExamplePage):
 
     def _getAllWindows(self):
         """枚举可嵌入的顶层窗口。
-
         **用库里的 ``window_embedder.win32gui``（没装 pywin32 时是 ``None``），
         不要裸 ``import win32gui``**：示例在缺可选依赖的环境里必须**降级**，
-        而不是让整个应用起不来 —— 之前这里裸 import，主窗口构造到一半直接
-        ``ModuleNotFoundError`` 抛出，剩下 22 个页面都看不到。
         """
         self._windowsList = []
         if _win32gui is None:
@@ -492,10 +468,8 @@ class EmbedPage(ExamplePage):
             parent_layout,
         )
 
-        # 构造与信号接线**就地写在本方法体内**：每节标题的「</> 代码」按钮展示的
-        # 就是本方法的源码，拆进 _newBrowserEmbedder 等于把读者要学的东西藏起来。
-        # 降级分支只跳过「真的实例化」，代码本身照样完整 —— 依赖没装时读者看到的
-        # 仍然是「怎么用」，而不是一段功能罗列。
+        # 构造与信号接线就写在方法体内：每节的「</> 代码」按钮展示本方法源码，
+        # 拆出去会藏起读者要学的东西；降级分支只跳过实例化。
         mode = eTheme.getThemeMode()
         container = QFrame(self)
         container.setFrameShape(QFrame.Shape.NoFrame)
@@ -521,11 +495,8 @@ class EmbedPage(ExamplePage):
             return
 
         self._browser = ElaBrowserEmbedder(container)
-        # 信号全部转成一行状态文字 —— 嵌入器本身是外部输入面（CDP），调试时能
-        # 看见事件流比什么都重要。注意错误信号有**三个**且各司其职：``embedError``
-        # 是嵌入阶段出错、``pageError`` 是页面里的 JS 异常、``consoleMessage`` 是
-        # 控制台输出，只接一个会漏。``embedCompleted`` 尤其要接：**浏览器起不来时
-        # 只发信号不抛异常**，不接就表现为「点了没反应」。
+        # 信号全部转成状态文字。错误信号有三个且各司其职：embedError / pageError /
+        # consoleMessage；embedCompleted 必须接 —— 浏览器起不来时只发信号不抛异常。
         self._browser.loadStarted.connect(lambda: self._showStatus("loadStarted"))
         self._browser.loadFinished.connect(lambda: self._showStatus("loadFinished"))
         self._browser.domContentReady.connect(

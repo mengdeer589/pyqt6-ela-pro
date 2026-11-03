@@ -29,10 +29,8 @@ if TYPE_CHECKING:
 
 class Title:
     """标题组件（ECharts ``title``）。
-
     默认占画布顶部条带；指定 ``bottom``（且未指定 ``top``）时改占底部条带。
     ``top`` / ``bottom`` / ``left`` / ``right`` 支持数值 px 或 ``"N%"``；未设置
-    的外观键回退顶层 ``textStyle``。
     """
 
     def __init__(self, chart: "ElaChartWidget" = None, opt: dict = None):

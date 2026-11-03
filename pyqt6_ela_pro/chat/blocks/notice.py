@@ -86,8 +86,6 @@ class ElaChatNotice(_ThemeAwareMixin, QWidget):
         self.setNotice(noticeType, text, detail)
         self._apply_theme()
 
-    # -- 内容 --------------------------------------------------------------
-
     def setNotice(self, noticeType: str, text: str, detail: str = "") -> None:
         """替换通知类型 / 主文案 / 副值。"""
         self._notice_type = str(noticeType or "")
@@ -109,8 +107,6 @@ class ElaChatNotice(_ThemeAwareMixin, QWidget):
     def detail(self) -> str:
         """获取副值。"""
         return self._detail_label.text()
-
-    # -- 主题 --------------------------------------------------------------
 
     def _apply_theme(self) -> None:
         mode = self._theme_mode

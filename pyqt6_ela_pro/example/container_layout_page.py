@@ -1,10 +1,4 @@
-"""容器与布局
-
-「装东西」的控件：滚动区、抽屉、分隔、分组、流式布局。
-
-与「视图与列表」的分界是**有没有子项列表**：这一页管单个内容块
-怎么摆（滚动 / 折叠 / 切分），下一页管一堆同类项怎么组织。
-"""
+"""容器与布局?"""
 
 from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import QApplication, QHBoxLayout, QVBoxLayout, QWidget

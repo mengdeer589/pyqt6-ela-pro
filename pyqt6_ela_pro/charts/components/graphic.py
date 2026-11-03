@@ -25,7 +25,6 @@ def lerp_color(c1, c2, t: float) -> QColor:
 
 class GraphicComponent:
     """绝对定位图形元素：circle / rect / text / line。
-
     ``left`` / ``top`` 为相对图表内容区的像素偏移、``"center"`` / ``"middle"``
     或 ``"N%"``；``shape`` 内坐标相对该锚点。未知类型静默跳过。
     """
@@ -44,7 +43,6 @@ class GraphicComponent:
 
     def _anchor(self, el: dict) -> QPointF:
         """元素锚点：``left`` / ``top`` 解析成内容区内的绝对坐标。
-
         数值 = 像素偏移，``"center"`` / ``"middle"`` = 该轴居中，``"30%"`` =
         相对内容区宽 / 高；无法解析的值按 0 处理。
         """

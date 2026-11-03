@@ -67,8 +67,6 @@ class ElaChatFileChanges(_ThemeAwareMixin, QWidget):
         self._layout.setSpacing(2)
         self._empty_label: Optional[ColorText] = None
 
-    # -- 数据 --------------------------------------------------------------
-
     def setFiles(self, files) -> None:
         """整体替换文件列表（``ElaDiffFile`` / dict / None）。"""
         items = []
@@ -124,8 +122,6 @@ class ElaChatFileChanges(_ThemeAwareMixin, QWidget):
         """收起全部文件。"""
         self._expanded.clear()
         self._rebuild()
-
-    # -- 构建 --------------------------------------------------------------
 
     def _clear(self) -> None:
         while self._layout.count():
@@ -264,8 +260,6 @@ class ElaChatFileChanges(_ThemeAwareMixin, QWidget):
             row["body"].setVisible(row["opened"])
         self._sync_header(row)
         self.fileToggled.emit(row["file"].path, row["opened"])
-
-    # -- 主题 --------------------------------------------------------------
 
     def _apply_theme(self) -> None:
         mode = self._theme_mode

@@ -1,51 +1,7 @@
 # -*- coding: utf-8 -*-
-"""LaTeX 数学公式轻量渲染（零依赖）。
+"""LaTeX 数学公式轻量渲染（纯 QPainter，无 matplotlib 依赖）。
 
-参考 InstructionX_UIKit 的公式方案（占位标记提取 + 资源嵌入 + LRU 缓存），
-但**不引入 matplotlib**：本模块把常见 LaTeX 数学子集解析为盒模型，用
-``QPainter`` 绘制为透明底 ``QImage``（2x 超采样，高 DPI 清晰）。
-
-支持范围：
-
-- 希腊字母（大小写）与常用符号：``\\infty \\pm \\times \\leq \\in \\to`` 等，
-  以及长尾箭头 / 变体符号（``\\mid \\implies \\iff \\rightleftharpoons`` 等）；
-- 上下标：``x^2`` / ``x_i`` / ``x_i^{n+1}``；
-- 分数：``\\frac`` / ``\\dfrac`` / ``\\tfrac`` / ``\\cfrac`` / ``\\genfrac``；
-  根式：``\\sqrt`` / ``\\sqrt[n]``；
-- 大型算子带上限：``\\sum`` / ``\\prod`` / ``\\int`` / ``\\oint`` / ``\\lim``，
-  极限算子 ``\\max \\min \\sup \\inf \\det \\gcd \\limsup \\liminf`` 自动堆叠
-  （``\\limits`` / ``\\nolimits`` 可覆盖）；
-- 直立函数名：``\\sin \\cos \\log \\ln \\exp`` 等；``\\operatorname*`` 极限算子；
-- 框线与修饰：``\\boxed`` / ``\\underline`` / ``\\overbrace`` / ``\\underbrace`` /
-  ``\\overrightarrow`` 等重音 / ``\\overset`` / ``\\underset`` / ``\\xrightarrow``；
-- 字体与颜色：``\\text \\mathrm \\mathbf \\boldsymbol \\bm \\textbf \\texttt`` 等、
-  ``\\textcolor`` / ``\\color``（基础色名与 ``#RRGGBB``）、``\\cancel`` 系列；
-- 公式编号：``\\tag`` / ``\\tag*``（编号右对齐在公式末尾，``\\tag*`` 不补括号）；
-- 矩阵环境：``\\begin{matrix/pmatrix/bmatrix/Bmatrix/vmatrix/Vmatrix/cases}``
-  （``&`` 分列、``\\\\`` 分行）；多行对齐 ``align`` / ``aligned`` / ``gather`` /
-  ``multline`` / ``split`` / ``alignat`` / ``flalign``（``&`` 对齐位）、
-  ``smallmatrix`` / ``dcases`` / ``rcases``、``array``（``{lcr}`` 列格式、
-  ``\\hline``）、多行下标 ``\\substack``；组合数 ``\\binom``；
-  字母表 ``\\mathbb`` / ``\\mathcal`` / ``\\mathfrak``；
-- 定界符：``\\left( \\right)``、``\\big`` 系列、``\\middle``、``\\lfloor`` 等；
-- 宏：``\\newcommand`` / ``\\def`` / ``\\DeclareMathOperator``（含参数）；
-- 间距 / 占位：``\\quad`` / ``\\hspace{2em}`` / ``\\phantom`` 系列。
-
-排版风格对齐 KaTeX：优先 Cambria Math 并用 Unicode 数学斜体码位渲染变量
-（不可用时回退 Times 系字形斜体）；采用紧凑字形度量（数学字体的行高为
-堆叠公式设计，不可直接使用）；TeX 风格原子间距（关系 / 二元运算符 / 标点）、
-脚本分级缩放（0.7 / 0.55）、大算子 display 尺寸与上下限布局。
-
-**容错渲染**：未知命令按字面文本渲染（``report["degraded"]`` 标记）；
-``\\left`` / ``\\right`` 不闭合时自动配平后重试（``report["repaired"]``
-标记），修复仍失败（括号不闭合、``\\end`` 不匹配等）才返回 ``None``，
-调用方回退为源码文本显示。
-
-用法::
-
-    processed, maths = extract_math(source, "elamath0z{}q")
-    img = render_formula(latex, color, pt, display=False)   # QImage | None
-"""
+支持的语法子集与缓存策略见 ``docs/math.md``。"""
 
 from __future__ import annotations
 
@@ -81,20 +37,14 @@ _SS = 2
 _CACHE_CAP = 256
 _FAILED = object()
 
-#: 单边像素上限。公式是文档内嵌内容，单边超过这个量级早已超出任何视口 ——
-#: 而 ``box.w`` 只有下界没有上界（``\hspace`` 的数值参数直接进 ``box.w``，
-#: ``_SpaceBox`` 只对负值 ``max(0.0, ...)``）。实测不设限时
-#: ``x\hspace{1000000em}x`` 会真实分配 3.1 GiB 缓冲，
-#: ``10000000em`` 让 QImage 返回 null 而被当成功交出去。
-#: 取 20000 是为了给「超宽的长公式」留足余量，同时把最坏分配压到
-#: ``_MAX_PIXELS`` 之下。
+#: 单边像素上限。``\hspace`` 的数值直接进 ``box.w``，不设限时真实分配可达 GiB；
+#: 取 20000 给超宽公式留余量，同时把最坏分配压到 ``_MAX_PIXELS`` 之下。
 _MAX_DIM = 20000
 #: 总像素上限（ARGB32 = 4 字节/像素，20k×20k ≈ 1.6 GiB 太离谱）。
 #: 6400 万像素 ≈ 256 MiB 缓冲，已远超任何真实公式（典型公式不到 10 万像素）。
 _MAX_PIXELS = 64_000_000
 
-#: 宏展开后的字符数上限（``\def\a{\a\a\a}`` 这类自引用宏每轮 ×3，
-#: 只限轮数会指数爆炸，实测 20 轮后 3.5e9 字符把 GUI 线程彻底卡死）
+#: 宏展开后的字符数上限（自引用宏每轮 ×3，只限轮数会指数爆炸）。
 _MACRO_EXPANSION_LIMIT = 200_000
 
 #: 多行块级公式环境（``\begin{...}`` 形式）
@@ -133,7 +83,6 @@ _MATH_ENVS = (
 #: 公开别名（供流式稳定边界扫描复用）
 MATH_ENVS = _MATH_ENVS
 
-# --------------------------------------------------------------------- 符号表
 _SYMBOLS = {
     r"\alpha": "α",
     r"\beta": "β",
@@ -731,7 +680,6 @@ _NOT_COMBOS = {
 }
 
 
-# ===================================================================== 预处理
 #: ``\text{}`` 内的转义序列 → 字面字符
 _TEXT_ESCAPES = {
     "%": "%",
@@ -1164,7 +1112,6 @@ class _ParseError(Exception):
     """公式语法不受支持。"""
 
 
-# ===================================================================== 解析
 class _Node:
     """AST 节点基类。"""
 
@@ -1434,15 +1381,7 @@ def _parse_color(raw: str) -> Optional[QColor]:
 def _dimension_em(raw: str, size: float) -> float:
     """物理维度（``2em`` / ``3pt`` / ``1cm``）→ em 值（无法解析返回 0）。
 
-    **解析必须线性**：原先的 ``r"\\s*([+-]?[\\d.]+)\\s*([a-zA-Z]*)\\s*$"`` 里
-    三个可回溯量词相邻又带尾锚 ``$``，在「有数字段和单位段、没有收尾空格」的
-    长输入上会从中间 ``\\s*`` 的每个回溯位置重试 → **O(n²)**。实测
-    ``\\hspace{1} + 空格×N + a×N}`` 的 N 从 10k 翻到 60k，耗时
-    282ms → 1135ms → 4517ms → 10223ms（干净的二次），单个公式就能把 GUI
-    线程按住十秒。
-
-    改成「单位段先行切出 + 数字段用贪心前缀」，两遍都线性，且对同样输入
-    结果完全一致。
+    解析必须线性：带尾锚的多段可回溯正则在长输入上是 O(n²)，会按住 GUI 线程。
     """
     text = (raw or "").strip()
     if not text:
@@ -1503,7 +1442,6 @@ class _Parser:
         self.i = 0
         self.tolerant = tolerant
 
-    # -- 基础 -------------------------------------------------------------
     def _peek(self) -> str:
         return self.s[self.i] if self.i < len(self.s) else ""
 
@@ -1591,7 +1529,6 @@ class _Parser:
             self.i += 1
         raise _ParseError("unclosed {")
 
-    # -- 原子与上下标 -------------------------------------------------------
     def _atom_with_scripts(self):
         self._skip_spaces()
         base = self._atom()
@@ -1663,7 +1600,6 @@ class _Parser:
             return _Space(0.5)
         return _Text(c, italic=False)
 
-    # -- 命令 -------------------------------------------------------------
     def _command(self):
         assert self._peek() == "\\"
         start = self.i
@@ -1985,7 +1921,6 @@ class _Parser:
         return _DELIMS[token]
 
 
-# ===================================================================== 布局
 #: 优先使用的数学字体（含 Unicode 数学斜体码位）；无数学字体时回退普通衬线
 _MATH_FONT_NAMES = ("Cambria Math", "STIX Two Math", "Latin Modern Math")
 _FALLBACK_FONT_NAMES = ("Times New Roman", "Georgia", "DejaVu Serif")
@@ -2055,10 +1990,8 @@ def _font(
 
 def _reference_metrics(size: float) -> tuple:
     """字号 → (大写字母上伸、下伸) 参考度量（紧凑，按字号缓存）。
-
     Cambria Math 等数学字体的 ``ascent``/``descent`` 为堆叠公式设计，
     行高极大（12pt 时约 50/39），不能用于排版；这里用字形紧包围盒
-    计算参考度量。
     """
     key = round(float(size), 2)
     cached = _REF_METRICS.get(key)
@@ -2084,7 +2017,6 @@ _REF_HEIGHTS: dict = {}
 
 def _reference_heights(size: float) -> tuple:
     """字号 → (x-height, 大写高度)。
-
     上下标偏移按字体度量分档（x-height / cap-height），而不是逐字形紧包围盒，
     否则 `a`/`c` 的墨迹差 1px 就会让上标不在同一水平线。
     """
@@ -2914,7 +2846,6 @@ class _MiddleBox(_Box):
         return _GlyphBox(self.text, self.size * max(target / glyph.h, 1.0))
 
 
-# ===================================================================== 构建
 #: TeX 风格间距（em）：关系符两侧、二元运算符两侧、标点后
 _RELATION_ATOMS = set("=<>≤≥≠≈≡∼≃∝∈∉⊂⊆⊃⊇→←↔⇒⇐⇔↦∥⊥")
 _BINARY_ATOMS = set("+−-×÷·⋅∗±∓∪∩∖⊕⊗")
@@ -3204,7 +3135,6 @@ def _build(
     raise _ParseError(f"unsupported node {type(node).__name__}")
 
 
-# ===================================================================== 渲染
 _CACHE: "OrderedDict[tuple, object]" = OrderedDict()
 
 
@@ -3240,16 +3170,9 @@ def _render(
         node = _Parser(source, tolerant=False).parse()
     except _ParseError:
         degraded = True
-        # **兄弟处理器不接兄弟块内抛出的异常**，所以这三层重试里每一层都
-        # 必须自己写全 ``except Exception``：原先只接 ``_ParseError``，于是
-        # 「严格解析因浅层未知命令失败 -> 进容错重试 -> 容错路径深递归爆栈」
-        # 这条链上抛出的 ``RecursionError`` 会从上一层的处理块里穿出去，
-        # 没人接。而 ``render_formula`` 的对外契约是「不支持时返回 None」。
-        #
-        # 实测阈值（recursionlimit=1000）：``\zzz`` + 400 层花括号即逃逸；
-        # 不带未知命令的纯深嵌套反而被最外层的 ``except Exception`` 兜住
-        # —— 因为严格解析先撞限，抛的正是 ``RecursionError``。只要先浅层
-        # 失败进容错分支，就失守。
+        # 三层重试的每一层都必须自己写全 ``except Exception``：兄弟处理块不接
+        # 兄弟块抛出的异常，容错路径的 RecursionError 会穿出去。对外契约是不支持时
+        # 返回 None。
         try:
             node = _Parser(source, tolerant=True).parse()
         except _ParseError:
@@ -3275,21 +3198,15 @@ def _render(
     if box.w <= 0 or box.h <= 0:
         return None
     if not (math.isfinite(box.w) and math.isfinite(box.h)):
-        # ``\hspace{1e400}`` 这类会让 ``_dimension_em`` 返回 inf，一路加进
-        # ``box.w``。下面 ``int(inf)`` 抛OverflowError，而这一行**在模块里
-        # 唯一没有 try 兜底的输出级**（preprocess / parse / build 三级都有），
-        # 异常会顺着 ``_stream_timer.timeout -> _render_into -> _embed_math``
-        # 冲出 Qt 回调 = **0xC0000409 零traceback 终止**。
+        # ``\hspace{1e400}`` 会让 ``box.w`` 变成 inf，下面 ``int(inf)`` 抛
+        # OverflowError；这是输出级唯一没有 try 兜底的位置，异常冲出 Qt 回调 =
+        # 0xC0000409。
         return None
     pad = max(1.0, pt * 0.2)
     width = int(box.w + 2 * pad) + 1
     height = int(box.h + 2 * pad) + 1
-    # **尺寸上限**：``box.w`` 只有下界没有上界（``_SpaceBox`` 只对负值
-    # ``max(0.0, ...)``），而 ``\hspace`` 的数值参数直接进 ``box.w``。实测
-    # ``x\hspace{1000000em}x`` 会**真实分配 3.1 GiB** 缓冲，
-    # ``10000000em`` 让 QImage 返回 null 而本函数把它当成功交出去 ——
-    # 调用方的 ``if image is None`` 降级分支因此被绕过（``setWidth(0.0)``）。
-    # 超过上限按「不支持」处理，走调用方既有的降级路径。
+    # 尺寸上限：``box.w`` 只有下界没有上界，``\hspace`` 数值直接进宽度；
+    # 超过上限按「不支持」返回 None，走调用方既有的降级路径。
     if width > _MAX_DIM or height > _MAX_DIM:
         return None
     if width * height > _MAX_PIXELS:
@@ -3356,7 +3273,6 @@ def render_formula(
     return image
 
 
-# ===================================================================== 提取
 #: 行内公式扫描的特殊字符（其余字符整段跳过，避免逐字符 Python 循环）
 _MATH_SPECIAL_RE = re.compile(r"[`$\\]")
 
@@ -3450,16 +3366,12 @@ def _scan_inline_math(line: str, maths: list, mark: str) -> str:
 def extract_math(text: str, mark: str, macros: Optional[dict] = None):
     """从 Markdown 源文中提取数学公式并替换为占位标记。
 
-    返回 ``(处理后的文本, [(latex, display), ...])``；代码围栏内的内容
-    不提取。多行 ``$$`` / ``\\[`` 块与 ``\\begin{...}`` 环境按块级公式
-    处理（环境保留 ``&``/``\\\\`` 结构交给渲染器对齐）；文档中的
-    ``\\newcommand`` / ``\\def`` 定义会被收集并按公式展开。未找到闭合符
-    的块级公式**不吞内容**：开启行与中间行原样输出（行内公式仍可提取），
-    与流式增量路径的降级显示语义一致。
+    返回 ``(处理后的文本, [(latex, display), ...])``；代码围栏内不提取，多行
+    ``$$`` / ``\\[`` / ``\\begin{...}`` 按块级处理。未闭合的块级公式不吞内容。
 
     :param text: Markdown 源文
     :param mark: 公式占位模板（``{}`` 为序号位）
-    :param macros: 可选的文档级宏表（外部预收集）
+    :param macros: 可选的文档级宏表
     """
     maths: list = []
     text, macros = _collect_macros(text, macros)

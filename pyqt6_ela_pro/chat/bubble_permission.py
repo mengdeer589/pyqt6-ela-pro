@@ -29,22 +29,8 @@ class _BubblePermissionMixin:
         self, request: ElaChatPermission, partId: Optional[str] = None
     ) -> str:
         """登记一次工具审批 / 提问，返回分段 id。
-
-        **交互卡不放在时间线上，而是交给输入区上方的 dock**
-        （:attr:`permissionDockRequested` -> :meth:`ElaChatWidget.setDockWidget`）。
-        理由：审批是**当前这一步**要用户做的事，摆在历史流里既窄又旧（提问正文
-        会被压到折行、候选卡说明被页脚盖住），而且用户正在输入区附近，交互就该
-        在那儿。opencode 的 ``session-question-dock`` 就是这个位置。
-
-        时间线上此刻**只登记数据**（``_append_part(part, None)``），等用户答完再
-        补一张「记录卡」—— 交互是大控件、记录是小控件，两者的排版需求完全不同，
-        所以**不复用同一个 widget**，而是用已落定的 payload 新建一张。
-
-        **只画卡 + 发 ``permissionRequested``，不阻塞。** 在 Qt 里挂起等用户
-        点按钮会卡死事件循环；宿主拿到信号后自行决定怎么挂起后端。
-
-        进来的 ``request`` 已经是**落定态**时（宿主重放后端历史、或自己判定完再补
-        登记）直接落成时间线上的记录卡：不进 dock、不发 ``permissionRequested``。
+        交互卡交给输入区上方的 dock（``permissionDockRequested``）而非时间线：审批是
+        新建记录卡。只发信号不阻塞（Qt 里挂起等按钮会卡死事件循环）；传入的 ``request``
         """
         self._ensure_parts_materialized()
         self._mark_generation_started()
@@ -62,10 +48,8 @@ class _BubblePermissionMixin:
         )
         self._append_part(part, None)
         if not request.isPending:
-            # 进来的就已经是**落定态**（宿主重放后端历史、或者自己判定完再补登记）
-            # —— 直接落成记录卡：不进 dock、不发 ``permissionRequested``。
-            # 硬塞进 dock 会得到一张没有按钮的空卡（``_sync_all`` 把动作区和页脚
-            # 都藏了），用户看着一个空壳，既不能答也不能关。
+            # 已是落定态：直接落成记录卡，不进 dock。空卡进 dock 会得到没有按钮
+            # 也关不掉的空壳（``_sync_all`` 会藏掉动作区和页脚）。
             self._settle_permission_card(partId, request)
             return partId
         card = self._create_interactive_card(partId, request)
@@ -107,11 +91,7 @@ class _BubblePermissionMixin:
         )
 
     def _settle_permission_card(self, partId: str, settled: ElaChatPermission) -> None:
-        """落定：把交互卡收掉，并在时间线的**原位**补一张记录卡。
-
-        必须插回原位而不是 ``addWidget`` 追加 —— 审批之后往往还会来工具调用 /
-        正文段，追加会让记录跑到整条消息的最末尾，顺序就错了。
-        """
+        """落定：收掉交互卡，并在时间线原位补一张记录卡（追加会让记录跑到消息末尾）。"""
         if is_deleted(self):
             return
         interactive = self._interactive_cards.pop(partId, None)
@@ -132,10 +112,8 @@ class _BubblePermissionMixin:
 
     def _part_layout_index(self, partId: str) -> int:
         """该 part 在时间线布局里应处的位置。
-
-        取「目标 part 之后第一个真正在 ``_parts_layout`` 里的控件下标」——
-        不能按「前面有几个带控件的 part」数：上下文工具分组时 N 个 tool part
-        共用同一张分组卡会被重复计数，已停靠底部行的用量徽标也不在时间轴里。
+        取「目标 part 之后第一个真在 ``_parts_layout`` 里的控件下标」——不能数
+        「前面有几个带控件的 part」：分组工具卡共用一张卡会被重复计数，停靠底部
         """
         layout = self._parts_layout
         if layout is None:
@@ -163,11 +141,9 @@ class _BubblePermissionMixin:
         return card
 
     def ensureInteractivePermissionCard(self, partId: str) -> Optional[PermissionCard]:
-        """取交互卡；缺失 / 已被销毁时按 part 的 pending 载荷**重建**。
-
-        dock 撤卡（``clearPermissionDock``）等路径会让卡片先于审批落定被删，
-        而 part 仍是 pending —— 重建保证「下一次 promote 顶上来」时还有卡可用，
-        且不会把已释放的包装器塞回 dock。
+        """取交互卡；缺失 / 已销毁时按 part 的 pending 载荷重建。
+        dock 撤卡等路径会让卡片先于落定被删，而 part 仍是 pending —— 重建保证
+        「下一次 promote 顶上来」时有卡可用。
         """
         card = self.interactivePermissionCard(partId)
         if card is not None:
@@ -182,8 +158,7 @@ class _BubblePermissionMixin:
     ) -> bool:
         """以编程方式落定一次审批（对应卡片按钮）；找不到 / 已落定返回 ``False``。
 
-        已落定的请求**不再改写**（用户的原答案与已发出的信号都不能被二次调用
-        覆盖）—— 与 :meth:`cancelPendingPermissions` 的 ``isPending`` 口径一致。
+        已落定的请求不再改写，用户原答案与已发出的信号不能被二次调用覆盖。
         """
         for part in self._parts:
             if (
@@ -198,10 +173,9 @@ class _BubblePermissionMixin:
         return False
 
     def permissionCard(self, requestId: str) -> Optional[PermissionCard]:
-        """按 ``requestId`` 取时间线上的**记录卡**（不存在返回 ``None``）。
+        """按 ``requestId`` 取时间线上的记录卡（不存在返回 ``None``）。
 
-        等待用户操作期间的交互卡在 dock 里，不在这里 —— 用
-        :meth:`interactivePermissionCard` + partId 取。
+        等待期间的交互卡在 dock 里，用 :meth:`interactivePermissionCard` 按 partId 取。
         """
         for part in self._parts:
             if (
@@ -224,9 +198,8 @@ class _BubblePermissionMixin:
 
     def pendingPermissionParts(self) -> list:
         """按时间线顺序返回 ``(partId, permission)``（仅仍待答复的）。
-
-        dock 一次只能显示一张卡；这个列表让 :class:`ElaChatWidget` 在当前那张
-        落定后**接着把下一张顶上**，而不是把其余的晾在一边点不到。
+        dock 一次只显示一张卡；列表让 :class:`ElaChatWidget` 在当前那张落定后
+        接着把下一张顶上。
         """
         return [
             (part.id, part.permission)
@@ -240,9 +213,6 @@ class _BubblePermissionMixin:
         """把所有未答复的审批作废（清话题 / 删消息 / 中止回合时必须先调）。
 
         否则界面上会留下永远点不动、也等不到回复的死卡，用户只能重启。
-        这也是 opencode 漏掉的一环：它的 ``Permission.assert`` 在回合中止
-        路径上只 ``pending.delete`` 而**不发事件**，客户端要靠重新 sync 才
-        清得掉（``permission.ts:254-258``）。
         """
         for part in list(self._parts):
             if (

@@ -1,21 +1,4 @@
-"""
-拆分按钮组件，风格参考 ElaWidgetTools 的 ElaSplitButton。
-
-左侧为主要按钮区域（文字 + 可选图标），右侧为下拉箭头，
-点击箭头弹出菜单。
-
-用法::
-
-    from pyqt6_ela_pro import ElaSplitButton
-    from PyQt6ElaWidgetTools import ElaMenu
-
-    btn = ElaSplitButton(text="保存", icon=ElaIconType.IconName.FloppyDisk, parent=self)
-    btn.clicked.connect(lambda: print("保存"))
-
-    menu = ElaMenu(btn)                       # Ela 风格菜单（别用裸 QMenu）
-    menu.addElaIconAction(ElaIconType.IconName.FloppyDisk, "另存为")
-    btn.setMenu(menu)
-"""
+"""拆分按钮组件，风格参考 ElaWidgetTools 的 ElaSplitButton。"""
 
 from __future__ import annotations
 
@@ -176,9 +159,9 @@ class ElaSplitButton(ElaThemeWidget):
             if self._is_left_pressed and event.position().toPoint().x() < split_x:
                 self.clicked.emit()
             elif self._is_right_pressed and event.position().toPoint().x() >= split_x:
-                # **必须判存活**：宿主动态重建菜单时会先删旧菜单，而
-                # ``bool(已删除包装器)`` 仍是 True —— 不判存活就对死对象调
-                # ``popup()`` 抛 RuntimeError，穿出 Qt 回调 = 0xC0000409（实测）
+                # **必须判存活**：宿主重建菜单会先删旧菜单，而 ``bool(已删除包装器)``
+                # 仍是 True —— 对死对象调 ``popup()`` 抛 RuntimeError，
+                # 穿出 Qt 回调 = 0xC0000409。
                 if self._menu is not None and not is_deleted(self._menu):
                     pos = self.mapToGlobal(QPoint(0, self.height()))
                     self._menu.popup(pos)

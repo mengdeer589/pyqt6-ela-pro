@@ -1,25 +1,4 @@
-"""
-运行指示（ComfyUI 式执行状态展示）。
-
-``ElaExecutionController`` 提供**纯 UI** 的运行指示 API：把节点标记为
-running / done / error、展示耗时徽标、高亮执行路径上的边（流动虚线）。
-
-重要：本控制器**不执行任何业务逻辑**——不调度、不求值、不跑模型。
-它只接收开发者（或模拟器，如 Demo 的 QTimer 顺序模拟）发来的状态
-通知并驱动界面反馈。
-
-用法::
-
-    ex = canvas.execution()
-    ex.set_path([n1.id, n2.id, n3.id])   # 可选：路径边流动虚线
-    ex.start(n1.id)                       # running：脉冲描边 + 旋转圈
-    ex.finish(n1.id, 123.0)               # done：success 描边 + "123 ms" 徽标
-    ex.fail(n2.id, "模拟失败")            # error：danger 描边 + tooltip
-    ex.reset()                            # 全部回 idle，清耗时与路径
-
-移植自 InstructionX_UIKit.blueprint.execution（原库为 PyQt6，
-类名 Ela* 前缀；原库无 LICENSE，保留出处）。
-"""
+"""运行指示（ComfyUI 式执行状态展示）。"""
 
 from __future__ import annotations
 
@@ -54,10 +33,8 @@ class ElaExecutionController(QObject):
         self._active = set()
         self._path_edges = []
 
-    # -- 节点状态 ----------------------------------------------------------
     def start(self, node) -> None:
         """标记节点 running（脉冲描边 + 标题栏旋转圈），记录起始时刻。
-
         ``node`` 接受 ``ElaBlueprintNode`` 或 id。幂等：已在 running 的节点
         重复调用直接返回——不覆盖起始时刻、不重复发射 ``node_started``。
         """
@@ -112,7 +89,6 @@ class ElaExecutionController(QObject):
         if was_active:
             self._maybe_finished()
 
-    # -- 路径高亮 ----------------------------------------------------------
     def set_path(self, nodes) -> None:
         """高亮执行路径上的边（流动虚线动画）。
 
@@ -148,7 +124,6 @@ class ElaExecutionController(QObject):
             widget.set_flowing(False)
         self._path_edges = []
 
-    # -- 复位 --------------------------------------------------------------
     def reset(self) -> None:
         """全部节点回 idle、清耗时与错误信息、取消路径高亮。"""
         self._clear_path()
@@ -160,7 +135,6 @@ class ElaExecutionController(QObject):
             node.set_progress(None)
             node.set_status("idle")
 
-    # -- 内部 --------------------------------------------------------------
     def _maybe_finished(self) -> None:
         if not self._active:
             self.finished.emit()

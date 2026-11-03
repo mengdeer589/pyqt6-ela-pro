@@ -1,17 +1,4 @@
-"""
-ElaDrawerArea 折叠面板增强组件。
-
-基于 PyQt6ElaWidgetTools 的原生 ``ElaDrawerArea``，修复其设置自定义
-标题栏组件后点击标题栏无法展开/收起的问题：
-
-原生 ``ElaDrawerHeader`` 仅在 ``childAt(pos)`` 为空白（无子控件或子控件
-objectName 为空）时才切换状态，而自定义标题栏组件（如 ``ElaThemeWidget``、
-``ElaText``）通常都带有非空 objectName，导致点击标题栏没有任何响应。
-
-本组件通过事件过滤器在标题栏收到冒泡的鼠标释放事件时补上切换逻辑，
-同时避让原生已处理的空白区域，保证不会双重切换；标题栏内的交互控件
-（按钮、开关、输入框等）自行处理点击，不会被当成"点击标题栏"。
-"""
+"""ElaDrawerArea 折叠面板增强组件。"""
 
 from __future__ import annotations
 
@@ -106,10 +93,8 @@ class ElaDrawerArea(_ElaDrawerArea):
 
     def _should_toggle_on(self, pos: QPoint) -> bool:
         """是否应由本组件补做切换。
-
         原生实现在 ``childAt`` 为 ``None`` 或 objectName 为空时自行切换，
         此处避让这些情况以防双重切换；命中带 objectName 的交互控件
-        （开关 / 按钮 / 输入框等）时也不切换，避免与控件自身行为冲突。
         """
         if self._header is None:
             return False

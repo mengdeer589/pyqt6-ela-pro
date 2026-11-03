@@ -25,7 +25,6 @@ from ._shared import _datum_list, _lerp
 
 class ParallelSeriesRenderer(SeriesRenderer):
     """平行坐标：自带多条垂直轴，每行数据一条折线穿轴，半透明多系列。
-
     维度名取顶层 ``parallelAxis``（dict 或字符串列表）；缺省时若 data 第一行
     全为字符串则取它作维度名（该行不参与绘制），否则生成 dim0..dimN。
     """
@@ -36,7 +35,6 @@ class ParallelSeriesRenderer(SeriesRenderer):
         self._rows = []  # [dict(pts=[QPointF], values=[float], index)]
         self._area = QRectF()
 
-    # -- 维度 -------------------------------------------------------------
     def _raw_rows(self):
         rows = []
         for item in self.data():
@@ -103,7 +101,6 @@ class ParallelSeriesRenderer(SeriesRenderer):
             for i in range(n)
         ], rows
 
-    # -- 布局 -------------------------------------------------------------
     def layout(self, rect: QRectF) -> None:
         self._axes = []
         self._rows = []
@@ -155,7 +152,6 @@ class ParallelSeriesRenderer(SeriesRenderer):
         label = ax.get("labelStyle")
         return not (isinstance(label, dict) and label.get("show", True) is False)
 
-    # -- 绘制 -------------------------------------------------------------
     def paint(self, p: QPainter, anim_t: float) -> None:
         if not self._axes:
             return
@@ -285,7 +281,6 @@ class ParallelSeriesRenderer(SeriesRenderer):
             )
         p.restore()
 
-    # -- 交互 -------------------------------------------------------------
     def hitTest(self, pos: QPointF):
         best = None
         best_d = 6.0

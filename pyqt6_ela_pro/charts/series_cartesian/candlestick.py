@@ -20,9 +20,7 @@ from ._shared import _axis_label, _datum_list, _fix_value_axis, _lerp
 
 class CandlestickSeriesRenderer(SeriesRenderer):
     """K线（OHLC）。数据项：[开, 收, 最低, 最高]（或 {"value": [...]}）。
-
     配色遵循 ECharts 语义：``itemStyle.color`` / ``color0`` 为涨 / 跌，
-    ``borderColor`` / ``borderColor0`` 同理；缺省涨用 ``color.danger``、
     跌用 ``color.success``。``barWidth``：实体宽 px（缺省 band 的 60%，上限 24）。
     """
 
@@ -30,7 +28,6 @@ class CandlestickSeriesRenderer(SeriesRenderer):
         super().__init__(chart, opt)
         self._items = []  # [dict(cx, open, close, low, high, w, x, index, prev)]
 
-    # -- 布局 -------------------------------------------------------------
     def layout(self, rect: QRectF) -> None:
         self._items = []
         coord = self.chart.coordFor(self.opt)
@@ -69,7 +66,6 @@ class CandlestickSeriesRenderer(SeriesRenderer):
                 }
             )
 
-    # -- 配色（ECharts itemStyle 语义：color=涨 / color0=跌） ---------------
     def _up_color(self):
         style = self.itemStyle()
         c = style.get("color") or style.get("borderColor")
@@ -82,7 +78,6 @@ class CandlestickSeriesRenderer(SeriesRenderer):
             parse_color(c) if isinstance(c, str) and c else QColor(T("color.success", self.chart))
         )
 
-    # -- 绘制 -------------------------------------------------------------
     def paint(self, p: QPainter, anim_t: float) -> None:
         if not self._items:
             return
@@ -126,7 +121,6 @@ class CandlestickSeriesRenderer(SeriesRenderer):
             p.drawRect(body)
         p.restore()
 
-    # -- 交互 -------------------------------------------------------------
     def hitTest(self, pos: QPointF):
         if self._anim_t < 1.0:
             # 实体从 open 向 high/low 生长：终态影线位置此刻还是空白。

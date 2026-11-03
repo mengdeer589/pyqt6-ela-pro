@@ -1,24 +1,4 @@
-"""
-[pyqt6_ela_pro] 聊天输入区能力页
-
-**一个真正能用的 chat**（``ElaChatMockBackend`` + ``ElaChatStreamBinder``），
-按能力域分小节。每节都有一个按钮直接触发那个能力，并注明**正常使用时你会在
-哪里点它** —— 输入区上有些入口（比如「清空上下文」）本来就在组件内部，
-示例页如果不额外给一个按钮，读者只能靠猜。
-
-小节：
-
-1. **工具栏自定义** —— ``toolBar()`` 的 ``addButton`` / ``addWidget`` /
-   ``addSeparator``，以及 checkable 开关怎么表达状态；
-2. **附件** —— 文件 / 图片 / 粘贴 / 拖放四个来源统一走一条通道；
-3. **@ 引用补全** —— ``setMentionProvider`` 提供候选；
-4. **清空上下文** —— 组件自带 ``ElaConfirmDialog`` 二次确认；
-5. **新建话题** —— 组件**只发信号**，界面与会话归宿主；
-6. **排队 / 撤回 / 重新生成 / 停止** —— 一轮对话的四种干预。
-
-这一页是「怎么把聊天接起来」的完整答案；组件**能力面**在「概览」工作区，
-agent 专属能力在「Agent 能力」。
-"""
+"""[pyqt6_ela_pro] 聊天输入区能力页?"""
 
 from datetime import datetime
 
@@ -214,7 +194,6 @@ class ChatInputPage(ExamplePage):
         self._chat.newTopicRequested.connect(self._on_new_topic_requested)
         self._chat.contextUsageClicked.connect(self._on_context_usage_clicked)
 
-    # -- 页面高度 ----------------------------------------------------------
 
     def resizeEvent(self, event):  # noqa: N802 (Qt 命名)
         super().resizeEvent(event)
@@ -242,7 +221,6 @@ class ChatInputPage(ExamplePage):
         if label is not None:
             label.setText(text)
 
-    # ================================================================ 01 工具栏
     def _section_toolbar(self):
         box = self._section(
             1,
@@ -261,17 +239,9 @@ class ChatInputPage(ExamplePage):
         return box
 
     def _demo_toolbar(self) -> None:
-        """``chat.toolBar()`` 的三个入口：``addButton`` / ``addWidget`` /
-        ``addSeparator``。
-
-        - ``addButton(icon, tooltip, key, callback, checkable=)`` —— 图标按钮，
-          ``key`` 用于后续 ``toolToggled`` 回调里分辨是哪个（**别用闭包捕获
-          文案**，用户改文案就认不出来了）；
-        - ``addWidget(widget, key=)`` —— 任意控件（下拉 / 开关）；
-        - ``addSeparator()`` 分组。
-
-        组件只管摆放与状态回传，**点了干什么归宿主**。checkable 项会发
-        ``toolToggled(key, checked)``。
+        """``chat.toolBar()`` 的三个入口：``addButton`` / ``addWidget`` / ``addSeparator``。
+        ``addButton`` 的 ``key`` 用于 ``toolToggled`` 回调（别用闭包捕获文案）；
+        ``addWidget`` 放任意控件；组件只管摆放与状态回传，点了干什么归宿主。
         """
         toolbar = self._chat.toolBar()
         toolbar.addButton(
@@ -410,7 +380,6 @@ class ChatInputPage(ExamplePage):
                 else ElaChatReasoningStyleType.Collapse
             )
 
-    # ================================================================ 02 附件
     def _section_attachment(self):
         box = self._section(
             2,
@@ -429,16 +398,8 @@ class ChatInputPage(ExamplePage):
 
     def _demo_attachment(self) -> None:
         """附件：``chatInput().addAttachment(name, path, size)``。
-
-        **拖放与粘贴不需要你写**：组件把整块（卡片 / 工具栏空白 / 编辑框）
-        都设成放置点，判定逻辑集中在库内一份 ``chat/_mime.py``。真宿主要做的
-        只有「点击附件名」的反应 —— 连 ``attachmentClicked(messageId, path)``。
-
-        容易漏的一处：**复制的文件**（Explorer 里 Ctrl+C）拖进来，mime 是
-        ``file://`` URL 而不是路径，各写一份判定就会漏掉这一种。
-
-        **大段粘贴（≥8000 字符或 ≥120 行）自动转附件**：写成临时文件后走
-        同一条附件通道（``filesAdded`` 照常发），不把几兆文本塞进编辑框。
+        拖放与粘贴由库内 ``chat/_mime.py`` 统一处理，宿主只需接 ``attachmentClicked``。
+        大段粘贴（≥8000 字符或 ≥120 行）自动转附件。
         """
         self._chat.chatInput().addAttachment("blocks.py", "src/chat/blocks.py", 48_120)
         self._chat.sendUserMessage(
@@ -464,7 +425,6 @@ class ChatInputPage(ExamplePage):
     def _on_attachment_clicked(self, messageId: int, path: str):
         self._status.setStatus(f"附件被点击：消息 #{messageId} → {path}")
 
-    # ================================================================ 03 引用
     def _section_mention(self):
         box = self._section(
             3,
@@ -481,9 +441,7 @@ class ChatInputPage(ExamplePage):
 
     def _demo_mention(self) -> None:
         """``setMentionProvider(callable)``：给关键词，返回候选列表。
-
         provider 收到的是「用户已经敲的那段关键词」，返回
-        ``[ElaChatSuggestion(id, label), ...]``。**返回空列表就关闭浮层** ——
         不要用「返回上一次结果」来保活，用户会觉得幽灵条目在乱跳。
         """
         self._chat.setMentionProvider(self._mention_suggestions)
@@ -505,7 +463,6 @@ class ChatInputPage(ExamplePage):
         query = (query or "").lower()
         return [item for item in items if query in item.id.lower()]
 
-    # ================================================================ 04 清空
     def _section_clear(self):
         box = self._section(
             4,
@@ -543,7 +500,6 @@ class ChatInputPage(ExamplePage):
         self._mock.reset()
         self._say(4, "cleared —— 组件已清界面，这里补上 worker.reset()")
 
-    # ================================================================ 05 话题
     def _section_new_topic(self):
         box = self._section(
             5,
@@ -579,7 +535,6 @@ class ChatInputPage(ExamplePage):
     def _on_new_topic_requested(self):
         self._say(5, "newTopicRequested —— 宿主在这里建话题（本页只有一个话题）")
 
-    # ================================================================ 06 干预
     def _section_turn_control(self):
         box = self._section(
             6,
@@ -604,19 +559,13 @@ class ChatInputPage(ExamplePage):
         return box
 
     def _demo_turn_control(self) -> None:
-        """一轮对话的四种干预，四个 API 各自的语义差别要记住：
+        """一轮对话的四种干预：
 
-        - ``stopGeneration()`` —— 停当前轮，**保留已输出内容**，收尾状态
-          ``Stopped``；
-        - ``undoLastUserMessage()`` —— 撤回**最后一条用户消息**：删该条及其后
-          所有消息，原文 / 附件回填输入框；按显式 id 撤回用 ``undoMessage(id)``，
-          它**只对用户消息生效**（传助手消息返回 ``None``）；
-        - ``regenerateFrom(id)`` —— **删掉**那条回答重发（回答侧）；
-        - ``retryMessage(id)`` —— 同参数重发但**不删消息**，保留 id 与时间线
-          位置（错误卡上的「重试」走这条）；
-        - ``enqueueMessage()`` —— 排队，等整轮跑完自动续发。
-
-        生成中再发一条消息，默认就是排队（``setAutoSendQueue(True)``）。
+        - ``stopGeneration`` 停当前轮，保留已输出内容；
+        - ``undoLastUserMessage`` 撤回最后一条用户消息并回填输入框
+          （``undoMessage(id)`` 只对用户消息生效）；
+        - ``regenerateFrom(id)`` 删掉该回答重发；``retryMessage(id)`` 原地重试；
+        - ``enqueueMessage`` 排队，等整轮结束自动续发。
         """
         self._chat.enqueueMessage("排队中的一条", messageId=42)  # 生成中提交 → 排队
         self._chat.stopGeneration()  # 停当前轮（保留已输出内容）
@@ -624,10 +573,7 @@ class ChatInputPage(ExamplePage):
         # 「撤回最后一条」= 撤回最后一条用户消息（不是最后一条消息）
         self._chat.undoLastUserMessage()
 
-        # 显式 id 的两种方向：
-        # self._chat.undoMessage(userMessageId)         # 只对用户消息生效
-        # self._chat.regenerateFrom(assistantMessageId) # 删掉这条回答重发
-        # self._chat.retryMessage(assistantMessageId)   # 原地重试（不删消息）
+        # 显式 id：undoMessage(用户消息) / regenerateFrom 或 retryMessage(助手消息)。
 
     def _on_enqueue(self) -> None:
         self._chat.enqueueMessage("（排队中）这一条等上一轮跑完再发")
@@ -670,7 +616,6 @@ class ChatInputPage(ExamplePage):
         self._chat.chatView().scrollToBottom()
         self._say(6, "已追加 30 条消息（验证贴底与滚动）")
 
-    # ================================================================ mock 后端
     def _reply_for(self, question: str) -> str:
         answer = self._pending_answer or _pick_answer(question)
         self._pending_answer = None
@@ -756,7 +701,6 @@ class ChatInputPage(ExamplePage):
         self._pending_answer = None
         self._start_answer()
 
-    # ================================================================ 杂项
     def _on_template(self) -> None:
         self._chat.chatInput().setText(_TEMPLATE)
         self._chat.chatInput().textEdit().setFocus()
@@ -789,7 +733,6 @@ class ChatInputPage(ExamplePage):
         label = {"build": "构建", "plan": "规划"}.get(self._agent_mode, "构建")
         self._status.setInfo(f"mock 后端 · {self._model_name} · Agent {label}")
 
-    # ================================================ 07 上下文占用圆环
     def _section_usage(self):
         box = self._section(
             7,
@@ -806,18 +749,9 @@ class ChatInputPage(ExamplePage):
         return box
 
     def _demo_usage(self) -> None:
-        """上下文占用圆环：数据全由宿主提供（库不推断），按百分比三档配色。
-
-        - ``chat.chatInput().setContextUsage(used, window, costUsd)`` —— 圆环挂在
-          **输入区工具栏**（经 ``chatInput()`` 访问），是**默认常驻**组件
-          （与新建话题 / 添加文件 / 清空同排，无数据时画空底环）；``window <= 0``
-          按 0% 显示（换话题 / 清空后宿主可这样重置）；显隐走
-          ``setContextUsageVisible``；
-        - 三档配色：``<60%`` 弱化 / ``60~85%`` 警示 / ``>=85%`` 危险（红色 +
-          tooltip 追加「建议压缩上下文」）；hover 显示花费 / 百分比 / 词元数；
-        - **圆环可点击**：``chat.contextUsageClicked``（或
-          ``chatInput().contextUsageClicked``）—— 组件不做任何行为，
-          弹什么详情面板归宿主（本页写在说明行里）。
+        """上下文占用圆环：数据全由宿主提供，按百分比三档配色。
+        chatInput().setContextUsage(used, window, costUsd)；window <= 0 按 0% 显示。
+        三档：<60% 弱化 / 60-85% 警示 / >=85% 危险；圆环可点击，行为归宿主。
         """
         states = (
             (18_000, 200_000, 0.0900),  # 9%  弱化
@@ -841,7 +775,6 @@ class ChatInputPage(ExamplePage):
             f" · 花费 ${cost:.4f} —— 点一下工具栏里的圆环看点击回执",
         )
 
-    # ================================================================ 08 命令 / 选择器
     def _section_composer_extras(self):
         box = self._section(
             8,
@@ -899,7 +832,6 @@ class ChatInputPage(ExamplePage):
         )
         self._say(8, "已在发送键前显示模型选择器；切换会发 selectorChanged(key, id)")
 
-    # ================================================================ 09 shell / 历史
     def _section_shell_history(self):
         box = self._section(
             9,
@@ -932,7 +864,6 @@ class ChatInputPage(ExamplePage):
         self._chat.setHistory(history)
         self._say(9, "已预置两条历史：在输入框按 ↑ / ↓ 浏览，状态会保留当前草稿")
 
-    # ================================================================ 10 队列增强
     def _section_queue_advanced(self):
         box = self._section(
             10,

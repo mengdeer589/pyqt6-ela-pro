@@ -1,15 +1,4 @@
-"""
-蓝图数据模型（纯数据与信号，不涉及界面绘制）。
-
-- ``ElaPinDirectionType`` / ``ElaPin``：引脚方向与引脚描述；
-- ``ElaEdge``：一条输出引脚到输入引脚的连线；
-- ``ElaBlueprintNode``：节点（引脚、属性、运行状态、耗时），可 JSON 序列化；
-- ``ElaBlueprintGraph``：图容器，负责增删查与 ``add_edge`` 全量校验
-  （方向相反、类型兼容含 any 通配、单连接替换、禁止自连 / 重复）。
-
-移植自 InstructionX_UIKit.blueprint.model（原库为 PyQt6，
-类名 Ela* 前缀；原库无 LICENSE，保留出处）。
-"""
+"""蓝图数据模型（纯数据与信号，不涉及界面绘制）。"""
 
 from __future__ import annotations
 
@@ -55,10 +44,8 @@ def types_compatible(out_type: str, in_type: str) -> bool:
 
 def _finite_pair(value, default) -> tuple:
     """把外部 ``[x, y]`` 数据转成**有限**二元组；非法一律回退 ``default``。
-
     与 ``_finite`` 同源：JSON 里的 ``1e999`` 会解析成 ``inf``，而
     ``int(inf)`` 抛的 ``OverflowError`` 穿出 Qt 槽就是 0xC0000409 零
-    traceback 终止（见 ``_finite`` 的注释）。
     """
     if isinstance(value, (list, tuple)) and len(value) >= 2:
         return _finite(value[0], default[0]), _finite(value[1], default[1])
@@ -67,7 +54,6 @@ def _finite_pair(value, default) -> tuple:
 
 def _as_bool(value, default: bool = False) -> bool:
     """把外部布尔字段转成 bool：字符串只认显式真 / 假。
-
     ``bool("false")`` 是 True —— 直接把 JSON 里的字符串塞给 ``bool()``
     会把明确的「关」读成「开」。无法判断时回退 ``default``。
     """
@@ -88,7 +74,6 @@ def _as_bool(value, default: bool = False) -> bool:
 @dataclass
 class ElaPin:
     """引脚描述。
-
     ``data_type`` 决定颜色（见 ``registry.PIN_COLORS``），``"any"`` 为通配；
     ``multi`` 只对输入引脚有意义 —— 为 ``False`` 时新连线自动替换旧连线。
     """
@@ -112,11 +97,8 @@ class ElaPin:
     @classmethod
     def from_dict(cls, data: dict) -> "ElaPin":
         """由 ``to_dict`` 结果重建引脚。
-
         容错契约（与 chat 的 ``fromDict`` 一致）：缺字段取默认、方向未知
         回退 Input 并记 WARNING；但**没有 id 的引脚**没有存在意义（连线
-        找不到它），抛 ``ValueError`` 由上层（``ElaBlueprintNode.from_dict``）
-        跳过 —— 上层不会因为这个抛异常。
         """
         if not isinstance(data, dict):
             raise ValueError(f"引脚数据不是字典: {data!r}")
@@ -171,10 +153,8 @@ class ElaEdge:
     @classmethod
     def from_dict(cls, data: dict) -> "ElaEdge":
         """由 ``to_dict`` 结果重建连线；字段缺失 / 非法抛 ``ValueError``。
-
         有效性（引脚存在 / 方向 / 类型兼容）不在这里判断 —— 那是
         ``ElaBlueprintGraph.add_edge`` 的职责，``from_dict`` 只保证数据
-        形状可用。
         """
         if not isinstance(data, dict):
             raise ValueError(f"连线数据不是字典: {data!r}")
@@ -199,9 +179,6 @@ class ElaEdge:
 
 def _finite(value, default: float = 0.0) -> float:
     """把外部数据转成**有限** float；NaN / inf / 不可转一律归 ``default``。
-
-    序列化反序列化的边界上，非有限值只有一个正确去处：丢弃。之所以在这里
-    归零而不是让 ``int()`` 去抛 —— ``int(float("inf"))`` 抛的
     ``OverflowError`` 继承 ``ArithmeticError``，既不是 ``ValueError`` 也不是
     ``TypeError``，穿出 Qt 槽就是 0xC0000409 零 traceback 终止。
     """
@@ -214,7 +191,6 @@ def _finite(value, default: float = 0.0) -> float:
 
 def _pins_from_dicts(raw) -> list:
     """把外部引脚列表解析成 ``ElaPin`` 列表：非法条目跳过并记 WARNING。
-
     一条坏引脚定义不应该毁掉整个节点的恢复（连线本来就会按引脚缺失被
     ``add_edge`` 拒掉）。
     """
@@ -236,12 +212,8 @@ class ElaBlueprintNode(QObject):
     :param title: 节点标题（可修改，重命名即改它）
     :param node_id: 可选固定 id，缺省自动生成
 
-    常用属性：``pos`` / ``size``、``inputs`` / ``outputs``、``properties``、
-    ``status``（idle/running/done/error）、``elapsed_ms``、``progress``、
-    ``accent``。
-
-    注意：``title`` / ``properties`` 为裸属性，**直接赋值不发射
-    ``changed``**；请使用 ``set_title()`` / ``set_properties()``。
+    ``title`` / ``properties`` 为裸属性，直接赋值不发射 ``changed``；
+    请用 ``set_title()`` / ``set_properties()``。
     """
 
     #: 节点任意数据变化（标题 / 引脚 / 属性 / 位置）
@@ -271,7 +243,6 @@ class ElaBlueprintNode(QObject):
         # 所属图（add_node 时写入弱引用；用于 node.connect(...)，不延长图的生命）
         self._graph_ref = None
 
-    # -- 状态 ------------------------------------------------------------
     @property
     def status(self) -> str:
         """当前运行状态：``idle / running / done / error``。"""
@@ -304,10 +275,8 @@ class ElaBlueprintNode(QObject):
 
     def set_progress(self, value) -> None:
         """设置节点进度（``None`` 或 0–1，越界夹紧、非有限归 0）。
-
         只发 ``progress_changed``（节点体内进度条重绘），**不走** ``changed``
         —— 后者会触发 ``_relayout``（重算宽度 / 重排子控件），训练演示里进度
-        每几十毫秒推进一次，每帧全量布局完全不值。
         """
         if value is None:
             progress = None
@@ -318,7 +287,6 @@ class ElaBlueprintNode(QObject):
         self._progress = progress
         self.progress_changed.emit(progress)
 
-    # -- 标题 / 属性 ------------------------------------------------------
     def set_title(self, title: str) -> None:
         """设置节点标题并发射 ``changed``（画布据此重排标题栏宽度等）。"""
         self.title = str(title)
@@ -330,7 +298,6 @@ class ElaBlueprintNode(QObject):
         self.properties_changed.emit()
         self.changed.emit()
 
-    # -- 引脚 ------------------------------------------------------------
     def add_input(
         self, pin_id: str, name: str = None, data_type: str = "any", multi: bool = False
     ) -> ElaPin:
@@ -395,7 +362,6 @@ class ElaBlueprintNode(QObject):
             )
         return graph.add_edge(self, from_pin, target, to_pin, label=label)
 
-    # -- 序列化 ----------------------------------------------------------
     def to_dict(self) -> dict:
         """序列化为 JSON 友好字典（含位置 / 尺寸 / 引脚 / 属性）。"""
         return {
@@ -413,19 +379,8 @@ class ElaBlueprintNode(QObject):
     @classmethod
     def from_dict(cls, data: dict) -> "ElaBlueprintNode":
         """由 ``to_dict`` 结果重建节点（运行时状态不回放，保持 idle）。
-
-        容错契约：非有限坐标 / 尺寸归默认、非法引脚定义**跳过并记
-        WARNING**、``properties`` 非字典归空；但缺 ``type_name`` 抛
-        ``ValueError``（没有类型的节点无法解析注册表，交给上层决定是否
-        跳过），``id`` 缺失 / 非法则自动生成。
-
-        **非有限坐标必须在这里拒收**（归默认值）。这不是洁癖：``json`` 接受
-        ``1e999`` 并解析成 ``inf``（``json.dumps(float("inf"))`` 还会写出
-        ``Infinity``），而 ``inf`` 一路走到 ``ElaNodeWidget.apply_view`` 的
-        ``int(scene_pos.x())`` 就抛 ``OverflowError`` —— ``OverflowError``
-        继承 ``ArithmeticError``，既不是 ``ValueError`` 也不是 ``TypeError``，
-        穿出 Qt 槽 = **进程 0xC0000409 零traceback 终止**（实测复现）。
-        ``NaN`` 同理（``int(nan)`` 抛 ``ValueError``）。
+        抛 ``ValueError``。非有限值必须在这里拒收：``json`` 会把 ``1e999``
+        （不是 ``ValueError``），穿出 Qt 槽 = 0xC0000409 零 traceback 终止。
         """
         if not isinstance(data, dict):
             raise ValueError(f"节点数据不是字典: {data!r}")
@@ -463,17 +418,8 @@ def _pin_id(value) -> str:
 
 class ElaBlueprintGraph(QObject):
     """蓝图图容器：节点与边的增删查、连线校验、序列化。
-
-    ``add_edge`` 校验规则（不满足抛 ``ValueError``，原因可读；不产生副作用）：
-    1. 节点与引脚必须存在；2. 必须是输出 → 输入；3. 数据类型兼容（any 通配）；
-    4. 禁止自连与完全重复；5. 输入引脚非 multi 时保持单连接（旧边自动移除）。
-
-    节点 / 引脚既可以传对象，也可以传 id：
-
-    .. code-block:: python
-
-        graph.add_edge(encoder, "hidden", head, "hidden")
-        # 等价于 graph.add_edge(encoder.id, "hidden", head.id, "hidden")
+    ``add_edge`` 不满足校验时抛 ``ValueError`` 且无副作用：节点 / 引脚须
+    存在、输出 → 输入、类型兼容（any 通配）、禁自连与完全重复、非 multi
     """
 
     node_added = pyqtSignal(object)
@@ -488,7 +434,6 @@ class ElaBlueprintGraph(QObject):
         self._nodes = {}
         self._edges = {}
 
-    # -- 节点 ------------------------------------------------------------
     def add_node(self, node: ElaBlueprintNode) -> ElaBlueprintNode:
         """加入节点（id 冲突 / 已属于别的图时抛 ``ValueError``），发射 ``node_added``。"""
         if node.id in self._nodes:
@@ -522,7 +467,6 @@ class ElaBlueprintGraph(QObject):
         """全部节点列表（插入序）。"""
         return list(self._nodes.values())
 
-    # -- 边 --------------------------------------------------------------
     def add_edge(
         self,
         from_node,
@@ -564,7 +508,6 @@ class ElaBlueprintGraph(QObject):
 
     def set_edge_label(self, edge, text: str) -> bool:
         """设置连线标签（``edge`` 接受 ``ElaEdge`` 或 id；``text`` 支持多行）。
-
         发 ``edge_changed``，画布自动失效标签缓存并局部重绘。边不存在 /
         标签没变化返回 ``False``。
         """
@@ -647,7 +590,6 @@ class ElaBlueprintGraph(QObject):
         for node_id in list(self._nodes.keys()):
             self.remove_node(node_id)
 
-    # -- 序列化 ----------------------------------------------------------
     def to_dict(self) -> dict:
         """序列化为 JSON 友好字典：``{"nodes": [...], "edges": [...]}``。"""
         return {

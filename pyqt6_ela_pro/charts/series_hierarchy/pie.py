@@ -32,7 +32,6 @@ from ._shared import (
 
 class PieSeriesRenderer(SeriesRenderer):
     """饼 / 环形 / 南丁格尔玫瑰图。
-
     支持 ``data`` / ``radius`` / ``center`` / ``startAngle`` / ``roseType`` /
     ``minAngle`` / ``padAngle`` / ``label`` / ``totalLabel``。
     """
@@ -71,7 +70,6 @@ class PieSeriesRenderer(SeriesRenderer):
             )
         return out
 
-    # -- 布局 -------------------------------------------------------------
     def layout(self, rect: QRectF) -> None:
         self._sectors = []
         entries = [
@@ -160,7 +158,6 @@ class PieSeriesRenderer(SeriesRenderer):
             acc += span
         return out
 
-    # -- 角度换算：a 为自 12 点方向顺时针度数 -------------------------------
     def _start_angle(self) -> float:
         """ECharts ``startAngle``（0 = 3 点、逆时针）→ 内部角度（12 点起顺时针）。"""
         return 90.0 - _to_float(self.opt.get("startAngle"), 90.0)
@@ -443,7 +440,6 @@ class PieSeriesRenderer(SeriesRenderer):
                 title,
             )
 
-    # -- 命中 -------------------------------------------------------------
     def hitTest(self, pos: QPointF):
         if not self._sectors:
             return None

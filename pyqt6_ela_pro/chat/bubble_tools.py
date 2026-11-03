@@ -65,10 +65,8 @@ class _BubbleToolsMixin:
 
     def setToolDefaultOpen(self, policy) -> None:
         """注入「哪些工具卡默认展开」的策略 ``policy(toolName, arguments, ok) -> bool``。
-
         只在新建卡片时被调用（已存在的卡片不受影响）。库默认只保留「失败展开」，
         编码 agent 可用 :func:`~pyqt6_ela_pro.chat.blocks.toolDefaultOpenCoding`；
-        传 ``None`` 恢复库默认。
         """
         self._tool_open_policy = policy if callable(policy) else toolDefaultOpen
 

@@ -18,7 +18,6 @@ class ChatMessageStore:
         self.dirty: set[int] = set()
         self.next_id = 1
 
-    # -- 读 ----------------------------------------------------------------
     def count(self) -> int:
         return len(self.items)
 
@@ -34,7 +33,6 @@ class ChatMessageStore:
     def ids(self) -> list[int]:
         return list(self.index)
 
-    # -- 结构变更 ----------------------------------------------------------
     def add(self, message: ElaChatMessage) -> None:
         self.items.append(message)
         self.positions[message.id] = len(self.items) - 1
@@ -97,7 +95,6 @@ class ChatMessageStore:
             self.positions[message.id] = index
         self.height_meta.pop(message.id, None)
 
-    # -- 派生同步 / 高度缓存 ----------------------------------------------
     def mark_dirty(self, message_id: int) -> None:
         self.dirty.add(message_id)
 

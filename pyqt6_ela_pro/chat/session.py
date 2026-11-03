@@ -46,8 +46,6 @@ class ElaChatSessionInfo:
         """返回替换消息条数后的新快照。"""
         return replace(self, message_count=_as_int(count))
 
-    # -- 持久化 ------------------------------------------------------------
-
     def toDict(self) -> dict:
         """转为纯 JSON 字典，可直接 ``json.dumps`` 落库。"""
         return {
@@ -72,9 +70,7 @@ class ElaChatSessionInfo:
         )
 
 
-# ---------------------------------------------------------------------------
 # 会话级用量汇总
-# ---------------------------------------------------------------------------
 
 
 def _last_stats(message):
@@ -144,7 +140,6 @@ def _add_tool_call(call, tool_counts: dict) -> tuple[int, int, int, int]:
 @dataclass(frozen=True)
 class ElaChatSessionStats:
     """会话级用量汇总（口径对齐 opencode ``getSessionContext``）。
-
     「当前用量」取最后一条有 tokens 的助手消息的最后一步；累计成本跨全部消息
     求和。字段说明见各 ``#:`` 注释。
     """
