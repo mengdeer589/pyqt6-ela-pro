@@ -252,8 +252,8 @@ class TestHeadingAnchorsAndToc:
         assert "[toc]" not in v.document().toPlainText()
         v.deleteLater()
 
-    def test_links_underlined(self):
-        """opencode TUI 风格：链接带下划线。"""
+    def test_links_not_underlined(self):
+        """Bear / Ink：链接只靠 accent 色区分，默认不下划线。"""
         v = ElaMarkdownViewer()
         v.setMarkdown("访问 [示例](https://example.com) 链接")
 
@@ -263,7 +263,7 @@ class TestHeadingAnchorsAndToc:
             if fragment.charFormat().isAnchor() and fragment.charFormat().anchorHref()
         ]
         assert anchors
-        assert all(fragment.charFormat().fontUnderline() for fragment in anchors)
+        assert all(not fragment.charFormat().fontUnderline() for fragment in anchors)
         v.deleteLater()
 
 

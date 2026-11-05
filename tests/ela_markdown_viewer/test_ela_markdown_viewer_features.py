@@ -7,7 +7,7 @@ from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QTextTable
 from PyQt6.QtTest import QTest
 
-from pyqt6_ela_pro import ela_markdown_viewer as viewer_module
+from pyqt6_ela_pro.markdown_viewer import code as code_module
 from pyqt6_ela_pro.ela_markdown_viewer import ElaMarkdownViewer
 from pyqt6_ela_pro.example.markdown_page import (
     _MARKDOWN_ALL,
@@ -111,7 +111,7 @@ class TestElaMarkdownViewerHighlight:
 
     def test_missing_pygments_degrades_gracefully(self, monkeypatch):
         monkeypatch.setattr(
-            viewer_module, "_PYGMENTS_STATE", {"loaded": True, "module": None}
+            code_module, "_PYGMENTS_STATE", {"loaded": True, "module": None}
         )
         v = ElaMarkdownViewer()
         v.setMarkdown("```python\ndef foo():\n    pass\n```")

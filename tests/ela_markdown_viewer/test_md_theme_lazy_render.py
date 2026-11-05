@@ -11,7 +11,8 @@ import pytest
 from PyQt6.QtWidgets import QVBoxLayout, QWidget
 
 from PyQt6ElaWidgetTools import eTheme, ElaThemeType
-from pyqt6_ela_pro import ElaMarkdownViewer, ela_markdown_viewer as md_module
+from pyqt6_ela_pro import ElaMarkdownViewer
+from pyqt6_ela_pro.markdown_viewer import code as code_module
 
 BIG_MD = ("## 标题\n\n正文一段。\n\n```python\n" + "x = 1\n" * 10 + "```\n\n") * 20
 
@@ -160,9 +161,9 @@ class TestHighlightCacheAcrossThemes:
         # 词法器实例是进程级缓存的（_LEXER_CACHE），先清空才能让本用例的
         # spy 真的装上；计数点选 get_tokens（真正的词法分析）而不是
         # get_lexer_by_name（实例构造已被缓存，不再每次发生）。
-        monkeypatch.setattr(md_module, "_LEXER_CACHE", {})
+        monkeypatch.setattr(code_module, "_LEXER_CACHE", {})
         lexers = {"n": 0}
-        real_load = md_module._load_pygments
+        real_load = code_module._load_pygments
 
         def counting_load():
             pair = real_load()
@@ -183,7 +184,7 @@ class TestHighlightCacheAcrossThemes:
 
             return counting_lexer, token_module
 
-        monkeypatch.setattr(md_module, "_load_pygments", counting_load)
+        monkeypatch.setattr(code_module, "_load_pygments", counting_load)
 
         current = viewer._theme_mode
         before = lexers["n"]

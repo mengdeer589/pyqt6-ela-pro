@@ -4,6 +4,10 @@ from __future__ import annotations
 
 import time
 
+import pytest
+from PyQt6.QtCore import QByteArray, QMimeData, QTimer
+from PyQt6.QtGui import QColor, QImage
+
 from _qthelpers import wait_for_clipboard
 from _qthelpers import wait_until as _wait_until
 
@@ -46,11 +50,58 @@ def _fake_send_copy(action):
     return _send
 
 
+@pytest.fixture
+def fake_clipboard(monkeypatch):
+    """确定性剪贴板桩：真实 ``QMimeData`` + 显式序列号，避免系统剪贴板抖动。"""
+    state = {"seq": 1000, "mime": QMimeData()}
+
+    class _FakeClipboard:
+        def text(self) -> str:
+            return state["mime"].text()
+
+        def mimeData(self):  # noqa: N802
+            return state["mime"]
+
+        def setText(self, text: str) -> None:  # noqa: N802
+            mime = QMimeData()
+            mime.setText(text)
+            state["mime"] = mime
+            state["seq"] += 1
+
+        def setMimeData(self, mime) -> None:  # noqa: N802
+            state["mime"] = mime
+            state["seq"] += 1
+
+        def setImage(self, image) -> None:  # noqa: N802
+            mime = QMimeData()
+            mime.setImageData(image)
+            state["mime"] = mime
+            state["seq"] += 1
+
+        def image(self):
+            return state["mime"].imageData()
+
+        def clear(self) -> None:
+            state["mime"] = QMimeData()
+            state["seq"] += 1
+
+    cb = _FakeClipboard()
+
+    class _FakeApp:
+        @staticmethod
+        def clipboard() -> _FakeClipboard:
+            return cb
+
+    monkeypatch.setattr(capture_module, "QApplication", _FakeApp)
+    monkeypatch.setattr(capture_module, "clipboard_sequence_number", lambda: state["seq"])
+    monkeypatch.setattr(capture_module, "any_modifier_down", lambda: False)
+    return cb, state
+
+
 class TestCapture:
     def test_success_and_clipboard_restored(
         self, qapp, monkeypatch, requires_clipboard
     ):
-        clipboard = qapp.clipboard()
         before = _set_clipboard(qapp, "旧内容")
         capture = ElaClipboardCapture()
         _speed_up(capture)
@@ -59,7 +110,7 @@ class TestCapture:
         monkeypatch.setattr(
             capture_module,
             "send_copy",
-            _fake_send_copy(lambda: clipboard.setText("选中的文本")),
+            _fake_send_copy(lambda: _set_clipboard(qapp, "选中的文本")),
         )
 
         capture.capture()
@@ -93,7 +144,6 @@ class TestCapture:
     def test_restore_disabled_keeps_selection(
         self, qapp, monkeypatch, requires_clipboard
     ):
-        clipboard = qapp.clipboard()
         _set_clipboard(qapp, "旧内容")
         capture = ElaClipboardCapture()
         _speed_up(capture)
@@ -101,7 +151,7 @@ class TestCapture:
         assert capture.restoreClipboard() is False
         results = []
         capture.captured.connect(results.append)
-        fake = _fake_send_copy(lambda: clipboard.setText("选中"))
+        fake = _fake_send_copy(lambda: _set_clipboard(qapp, "选中"))
         monkeypatch.setattr(capture_module, "send_copy", fake)
 
         capture.capture()
@@ -147,6 +197,9 @@ class TestCapture:
 
         capture.capture()
         assert _wait_until(qapp, lambda: bool(failures))
+        # 本用例只验「空副本 = 失败」；停掉恢复定时器避免污染后续用例
+        capture._restore_timer.stop()
+        capture._need_restore = False
         capture.deleteLater()
 
     def test_cancel_keeps_clipboard(self, qapp, monkeypatch, requires_clipboard):
@@ -174,4 +227,180 @@ class TestCapture:
         assert capture.timeoutMs() == 400
         assert capture.restoreDelayMs() == 200
         assert capture.restoreClipboard() is True
+        capture.deleteLater()
+
+
+class TestRichTextAndImages:
+    def test_html_only_selection_with_image_is_captured(
+        self, qapp, fake_clipboard, monkeypatch
+    ):
+        """纯文本为空、文字在 HTML 里时也要取到词（图片忽略）。"""
+        clipboard, _state = fake_clipboard
+        clipboard.setText("旧内容")
+        capture = ElaClipboardCapture()
+        _speed_up(capture)
+        results: list[str] = []
+        capture.captured.connect(results.append)
+        mime = QMimeData()
+        mime.setHtml("<p>before <img src='x' width='10' height='10'> after</p>")
+        monkeypatch.setattr(
+            capture_module,
+            "send_copy",
+            _fake_send_copy(lambda: clipboard.setMimeData(mime)),
+        )
+
+        capture.capture()
+        assert _wait_until(qapp, lambda: bool(results))
+        assert "before" in results[0] and "after" in results[0]
+        assert "\ufffc" not in results[0]
+        assert _wait_until(qapp, lambda: clipboard.text() == "旧内容")
+        capture.deleteLater()
+
+    def test_markdown_only_selection_with_image_is_captured(
+        self, qapp, fake_clipboard, monkeypatch
+    ):
+        clipboard, _state = fake_clipboard
+        clipboard.setText("旧内容")
+        capture = ElaClipboardCapture()
+        _speed_up(capture)
+        results: list[str] = []
+        capture.captured.connect(results.append)
+        mime = QMimeData()
+        mime.setData(
+            "text/markdown",
+            QByteArray("before ![red](x.png) after".encode("utf-8")),
+        )
+        monkeypatch.setattr(
+            capture_module,
+            "send_copy",
+            _fake_send_copy(lambda: clipboard.setMimeData(mime)),
+        )
+
+        capture.capture()
+        assert _wait_until(qapp, lambda: bool(results))
+        assert "before" in results[0] and "after" in results[0]
+        assert "\ufffc" not in results[0]
+        assert _wait_until(qapp, lambda: clipboard.text() == "旧内容")
+        capture.deleteLater()
+
+    def test_plain_text_image_placeholder_is_stripped(
+        self, qapp, fake_clipboard, monkeypatch
+    ):
+        clipboard, _state = fake_clipboard
+        clipboard.setText("旧内容")
+        capture = ElaClipboardCapture()
+        _speed_up(capture)
+        results: list[str] = []
+        capture.captured.connect(results.append)
+        monkeypatch.setattr(
+            capture_module,
+            "send_copy",
+            _fake_send_copy(lambda: clipboard.setText("before \ufffc after")),
+        )
+
+        capture.capture()
+        assert _wait_until(qapp, lambda: bool(results))
+        assert results == ["before  after"]
+        assert _wait_until(qapp, lambda: clipboard.text() == "旧内容")
+        capture.deleteLater()
+
+    def test_same_text_new_sequence_is_captured(
+        self, qapp, fake_clipboard, monkeypatch
+    ):
+        """文本与剪贴板原内容相同，但用户确实重新复制了一次。"""
+        clipboard, _state = fake_clipboard
+        clipboard.setText("同样的文本")
+        capture = ElaClipboardCapture()
+        _speed_up(capture)
+        results: list[str] = []
+        capture.captured.connect(results.append)
+        monkeypatch.setattr(
+            capture_module,
+            "send_copy",
+            _fake_send_copy(lambda: clipboard.setText("同样的文本")),
+        )
+
+        capture.capture()
+        assert _wait_until(qapp, lambda: bool(results))
+        assert results == ["同样的文本"]
+        assert _wait_until(qapp, lambda: clipboard.text() == "同样的文本")
+        capture.deleteLater()
+
+    def test_image_only_selection_fails_and_restores_text(
+        self, qapp, fake_clipboard, monkeypatch
+    ):
+        """纯图片选区不弹窗，但注入过的剪贴板要还原。"""
+        clipboard, _state = fake_clipboard
+        clipboard.setText("旧内容")
+        capture = ElaClipboardCapture()
+        _speed_up(capture, timeout_ms=40)
+        monkeypatch.setattr(capture_module, "_IMAGE_TEXT_GRACE_MS", 60)
+        failures: list[bool] = []
+        results: list[str] = []
+        capture.failed.connect(lambda: failures.append(True))
+        capture.captured.connect(results.append)
+        image = QImage(8, 8, QImage.Format.Format_ARGB32)
+        image.fill(QColor("red"))
+        capture_module.send_copy = _fake_send_copy(lambda: clipboard.setImage(image))
+
+        capture.capture()
+        assert _wait_until(qapp, lambda: bool(failures))
+        assert results == []
+        assert _wait_until(qapp, lambda: clipboard.text() == "旧内容")
+        assert clipboard.mimeData().hasImage() is False
+        capture.deleteLater()
+
+    def test_success_restores_image_baseline(
+        self, qapp, fake_clipboard, monkeypatch
+    ):
+        """基准是图片时，取词成功后也要把图片还回去。"""
+        clipboard, _state = fake_clipboard
+        image = QImage(8, 8, QImage.Format.Format_ARGB32)
+        image.fill(QColor("red"))
+        clipboard.setImage(image)
+        capture = ElaClipboardCapture()
+        _speed_up(capture)
+        results: list[str] = []
+        capture.captured.connect(results.append)
+        monkeypatch.setattr(
+            capture_module,
+            "send_copy",
+            _fake_send_copy(lambda: clipboard.setText("选中文本")),
+        )
+
+        capture.capture()
+        assert _wait_until(qapp, lambda: bool(results))
+        assert results == ["选中文本"]
+        assert _wait_until(qapp, lambda: clipboard.mimeData().hasImage())
+        assert clipboard.image().pixelColor(0, 0).name() == "#ff0000"
+        assert clipboard.text() == ""
+        capture.deleteLater()
+
+    def test_delayed_text_after_image_is_captured(
+        self, qapp, fake_clipboard, monkeypatch
+    ):
+        """图片先写入、文本稍后才到时，宽限窗口内仍能取词。"""
+        clipboard, _state = fake_clipboard
+        clipboard.setText("旧内容")
+        capture = ElaClipboardCapture()
+        _speed_up(capture, timeout_ms=50)
+        monkeypatch.setattr(capture_module, "_IMAGE_TEXT_GRACE_MS", 400)
+        results: list[str] = []
+        capture.captured.connect(results.append)
+        image = QImage(8, 8, QImage.Format.Format_ARGB32)
+        image.fill(QColor("red"))
+
+        def fake() -> bool:
+            clipboard.setImage(image)
+            timer = QTimer(capture)
+            timer.setSingleShot(True)
+            timer.timeout.connect(lambda: clipboard.setText("延迟文本"))
+            timer.start(150)
+            return True
+
+        monkeypatch.setattr(capture_module, "send_copy", fake)
+        capture.capture()
+        assert _wait_until(qapp, lambda: bool(results))
+        assert results == ["延迟文本"]
+        assert _wait_until(qapp, lambda: clipboard.text() == "旧内容")
         capture.deleteLater()

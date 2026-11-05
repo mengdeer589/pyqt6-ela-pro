@@ -1,5 +1,10 @@
 """聊天视图的布局 / 批量渲染 / 视口度量常量（view 与 virtualizer 共用）。"""
 
+#: 阅读列最大宽度（像素；0 表示不限）。ChatGPT / Claude 一类对话界面的
+#: 正文列约 768px，宽屏居中后行长和视觉重心更稳。
+_READING_MAX_WIDTH = 768
+#: 内容区基础边距（左、上、右、下）
+_CONTENT_MARGIN = (10, 12, 10, 12)
 #: 消息间距（Editorial Agent 节奏：turn 之间更松弛）
 _MESSAGE_SPACING = 20
 #: 虚拟列表每帧最多物化的气泡数（单个约 7ms：建壳 + 查看器 + Markdown 渲染）

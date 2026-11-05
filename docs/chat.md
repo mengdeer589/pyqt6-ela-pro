@@ -150,7 +150,9 @@
   头像自定义 `setUserAvatar` / `setAssistantAvatar`（SVG / 路径 / `QPixmap` 等）、
   形状 `setAvatarShape`（默认圆形 / `rounded` / `square`）；
   免责提示文案 / 显隐 `setDisclaimer(text)` / `setDisclaimerVisible(on)`
-  （默认 `DISCLAIMER_TEXT`，只作用于助手消息，空文案自动隐藏）
+  （默认 `DISCLAIMER_TEXT`，只作用于助手消息，空文案自动隐藏）；
+  阅读列默认 768px 居中（`setContentMaxWidth()`，`0` 恢复全宽），
+  用户气泡 / 助手正文 / 工具卡共用同一条列；输入区与 dock 同宽居中
 - **ElaChatInput** — 单卡片输入区（对齐 opencode：附件条 / 多行输入 / 工具栏
   同在一个圆角卡片内——`inputSurface()`；聚焦时边框转强调色，空草稿时发送
   按钮置灰）；卡片上方是补全浮层（`@` 引用，provider 接口）；

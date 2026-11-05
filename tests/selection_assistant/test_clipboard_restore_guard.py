@@ -13,12 +13,15 @@
 from __future__ import annotations
 
 import pytest
-from PyQt6.QtCore import QCoreApplication, Qt
+from PyQt6.QtCore import QByteArray, QCoreApplication, QMimeData, Qt
 from PyQt6.QtGui import QImage, QPixmap
 from PyQt6.QtWidgets import QApplication
 
 from pyqt6_ela_pro import svg_icon as svg_mod
-from pyqt6_ela_pro.selection_assistant.capture import ElaClipboardCapture
+from pyqt6_ela_pro.selection_assistant.capture import (
+    ElaClipboardCapture,
+    _clone_mime_data,
+)
 
 SVG = (
     '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16">'
@@ -77,18 +80,37 @@ def fake_clipboard(monkeypatch):
     """
     from pyqt6_ela_pro.selection_assistant import capture as capture_mod
 
-    state = {"n": 1000, "text": ""}
+    state = {"n": 1000, "text": "", "mime": QMimeData()}
 
     class _FakeClipboard:
         def text(self) -> str:
             return state["text"]
 
+        def mimeData(self):  # noqa: N802
+            return state["mime"]
+
         def setText(self, text: str) -> None:  # noqa: N802
             state["text"] = text
+            mime = QMimeData()
+            mime.setText(text)
+            state["mime"] = mime
+            state["n"] += 1
+
+        def setMimeData(self, mime) -> None:  # noqa: N802
+            state["mime"] = mime
+            state["text"] = mime.text()
+            state["n"] += 1
+
+        def setImage(self, image) -> None:  # noqa: N802
+            state["text"] = ""
+            mime = QMimeData()
+            mime.setImageData(image)
+            state["mime"] = mime
             state["n"] += 1
 
         def clear(self) -> None:
             state["text"] = ""
+            state["mime"] = QMimeData()
             state["n"] += 1
 
     cb = _FakeClipboard()
@@ -100,6 +122,7 @@ def fake_clipboard(monkeypatch):
 
     monkeypatch.setattr(capture_mod, "QApplication", _FakeApp)
     monkeypatch.setattr(capture_mod, "clipboard_sequence_number", lambda: state["n"])
+    monkeypatch.setattr(capture_mod, "any_modifier_down", lambda: False)
     return cb, state
 
 
@@ -248,6 +271,79 @@ class TestClipboardRestoreDoesNotClobberNewerCopy:
         capture.cancel()
         assert capture._capture_seq == 0
         assert capture.lastRestoreSkipReason() == ""
+
+
+class TestRestoreSafety:
+    def test_modifier_down_skips_restore(self, fake_clipboard, monkeypatch):
+        """用户正按着 Ctrl / Shift / Alt（可能在 Ctrl+C/V）时不动剪贴板。"""
+        from pyqt6_ela_pro.selection_assistant import capture as capture_mod
+
+        cb, _ = fake_clipboard
+        capture = ElaClipboardCapture()
+        capture._old_text = "ORIGINAL"
+        cb.setText("TAKEN")
+        _capture_with(capture, "TAKEN")
+        monkeypatch.setattr(capture_mod, "any_modifier_down", lambda: True)
+        capture._restore_clipboard()
+        assert capture.lastRestoreSkipReason() == "user-active"
+        assert cb.text() == "TAKEN"
+        capture._restore_timer.stop()
+
+    def test_user_copies_new_image_during_delay_skips_restore(self, fake_clipboard):
+        """延时窗口里用户复制了新图片：签名变化，不能覆盖。"""
+        cb, _ = fake_clipboard
+        capture = ElaClipboardCapture()
+        capture._old_text = "ORIGINAL"
+        cb.setText("TAKEN")
+        _capture_with(capture, "TAKEN")
+        image = QImage(4, 4, QImage.Format.Format_ARGB32)
+        cb.setImage(image)
+        capture._restore_clipboard()
+        assert capture.lastRestoreSkipReason() == "user-copied"
+        assert cb.mimeData().hasImage() is True
+        capture._restore_timer.stop()
+
+    def test_text_plus_ole_baseline_restores_text_only(self, fake_clipboard):
+        """Word 的 OLE 格式不回写；文本部分仍然还原。"""
+        cb, _ = fake_clipboard
+        mime = QMimeData()
+        mime.setText("ORIGINAL")
+        mime.setData(
+            'application/x-qt-windows-mime;value="Embed Source"',
+            QByteArray(b"ole"),
+        )
+        cb.setMimeData(mime)
+        capture = ElaClipboardCapture()
+        capture._old_text = "ORIGINAL"
+        capture._baseline_mime = _clone_mime_data(mime)
+        capture._baseline_non_text = True
+        cb.setText("TAKEN")
+        _capture_with(capture, "TAKEN")
+        capture._restore_clipboard()
+        assert capture.lastRestoreSkipReason() == ""
+        assert cb.text() == "ORIGINAL"
+        assert cb.mimeData().formats() == ["text/plain"]
+        capture._restore_timer.stop()
+
+    def test_ole_only_baseline_is_not_cleared(self, fake_clipboard):
+        """基准只有 OLE 时没有安全可还原内容：留着注入内容，不 clear。"""
+        cb, _ = fake_clipboard
+        mime = QMimeData()
+        mime.setData(
+            'application/x-qt-windows-mime;value="Embed Source"',
+            QByteArray(b"ole"),
+        )
+        cb.setMimeData(mime)
+        capture = ElaClipboardCapture()
+        capture._old_text = ""
+        capture._baseline_mime = _clone_mime_data(mime)
+        capture._baseline_non_text = True
+        cb.setText("TAKEN")
+        _capture_with(capture, "TAKEN")
+        capture._restore_clipboard()
+        assert capture.lastRestoreSkipReason() == "non-text-baseline"
+        assert cb.text() == "TAKEN"
+        capture._restore_timer.stop()
 
 
 class TestSvgCacheIsNotHandedOutAsALivePixmap:

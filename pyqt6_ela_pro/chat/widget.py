@@ -131,14 +131,21 @@ class ElaChatWidget(ElaThemeWidget):
         self._view = ElaChatView(self)
         layout.addWidget(self._view, 1)
         self._input_dock = ElaChatInputDock(self)
-        layout.addWidget(self._input_dock)
+        layout.addWidget(self._input_dock, 0, Qt.AlignmentFlag.AlignHCenter)
         # 审批交互卡的专用 dock（不占用输入区）
         self._permission_dock = ElaChatPermissionDock(self)
-        layout.addWidget(self._permission_dock)
+        layout.addWidget(self._permission_dock, 0, Qt.AlignmentFlag.AlignHCenter)
         self._queue_dock = ElaChatQueueDock(self)
-        layout.addWidget(self._queue_dock)
+        layout.addWidget(self._queue_dock, 0, Qt.AlignmentFlag.AlignHCenter)
         self._input = ElaChatInput(self)
-        layout.addWidget(self._input)
+        layout.addWidget(self._input, 0, Qt.AlignmentFlag.AlignHCenter)
+        self._composer_widgets = (
+            self._input_dock,
+            self._permission_dock,
+            self._queue_dock,
+            self._input,
+        )
+        self._sync_composer_width()
         #: 当前占据审批 dock 的 partId（空 = dock 上没有审批卡）
         self._permission_dock_part = ""
 
@@ -205,6 +212,20 @@ class ElaChatWidget(ElaThemeWidget):
             super().dropEvent(event)
             return
         event.acceptProposedAction()
+
+    def resizeEvent(self, event) -> None:  # noqa: N802 (Qt 命名)
+        super().resizeEvent(event)
+        self._sync_composer_width()
+
+    def _sync_composer_width(self) -> None:
+        """输入区 / dock 与阅读列同宽并居中（ChatGPT 式版心）。"""
+        available = max(120, self.width() - 20)
+        max_width = self._view.contentMaxWidth() if hasattr(self, "_view") else 0
+        width = available if max_width <= 0 else min(max_width, available)
+        for widget in getattr(self, "_composer_widgets", ()):
+            if widget.minimumWidth() == width and widget.maximumWidth() == width:
+                continue
+            widget.setFixedWidth(width)
 
     def chatView(self) -> ElaChatView:
         """获取消息列表视图。"""

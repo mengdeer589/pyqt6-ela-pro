@@ -9,12 +9,13 @@ from __future__ import annotations
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
 from _qthelpers import wait_for_clipboard as _wait_for_clipboard
 from _qthelpers import wait_until as _wait
 from PyQt6.QtGui import QImage, QTextCursor
 from PyQt6.QtPrintSupport import QPrinter
 
-from pyqt6_ela_pro import ela_markdown_viewer as viewer_module
+from pyqt6_ela_pro.markdown_viewer import media as media_module
 from pyqt6_ela_pro import math_lite
 from pyqt6_ela_pro.ela_markdown_viewer import ElaMarkdownViewer
 
@@ -154,7 +155,7 @@ class TestImageSave:
         _set_cursor_after(v, fragment)
         target = tmp_path / "out.png"
         monkeypatch.setattr(
-            viewer_module,
+            media_module,
             "QFileDialog",
             SimpleNamespace(getSaveFileName=lambda *args, **kwargs: (str(target), "")),
         )
@@ -164,8 +165,16 @@ class TestImageSave:
         v.deleteLater()
 
 
+def _load_pdf(path):
+    pdf_module = pytest.importorskip("PyQt6.QtPdf")
+    document = pdf_module.QPdfDocument(None)
+    assert document.load(str(path)) == pdf_module.QPdfDocument.Error.None_
+    return document
+
+
 class TestExportPdf:
     SOURCE = "# 标题\n\n正文 $x^2$"
+    LONG_SOURCE = "\n\n".join(f"第 {index} 段：" + "内容" * 60 for index in range(80))
 
     def test_default_export(self, qapp, tmp_path):
         v = ElaMarkdownViewer()
@@ -173,6 +182,7 @@ class TestExportPdf:
         path = tmp_path / "default.pdf"
         assert v.exportPdf(str(path))
         assert path.stat().st_size > 0
+        assert _load_pdf(path).pageCount() >= 1
         v.deleteLater()
 
     def test_custom_page_size_and_margins(self, qapp, tmp_path):
@@ -180,6 +190,61 @@ class TestExportPdf:
         v.setMarkdown(self.SOURCE)
         path = tmp_path / "letter.pdf"
         assert v.exportPdf(str(path), pageSize="Letter", marginsMm=(10, 20, 10, 20))
+        assert path.stat().st_size > 0
+        size = _load_pdf(path).pagePointSize(0)
+        assert round(size.width()) == 612 and round(size.height()) == 792
+        v.deleteLater()
+
+    def test_orientation_landscape(self, qapp, tmp_path):
+        v = ElaMarkdownViewer()
+        v.setMarkdown(self.SOURCE)
+        path = tmp_path / "landscape.pdf"
+        assert v.exportPdf(str(path), orientation="landscape")
+        size = _load_pdf(path).pagePointSize(0)
+        assert size.width() > size.height()
+        v.deleteLater()
+
+    def test_font_point_size_reduces_page_count(self, qapp, tmp_path):
+        v = ElaMarkdownViewer()
+        v.setMarkdown(self.LONG_SOURCE)
+        default = tmp_path / "default-font.pdf"
+        small = tmp_path / "small-font.pdf"
+        assert v.exportPdf(str(default))
+        assert v.exportPdf(str(small), fontPointSize=8.0)
+        assert _load_pdf(small).pageCount() < _load_pdf(default).pageCount()
+        v.deleteLater()
+
+    def test_line_spacing_increases_page_count(self, qapp, tmp_path):
+        v = ElaMarkdownViewer()
+        v.setMarkdown(self.LONG_SOURCE)
+        normal = tmp_path / "normal-spacing.pdf"
+        loose = tmp_path / "loose-spacing.pdf"
+        assert v.exportPdf(str(normal))
+        assert v.exportPdf(str(loose), lineSpacing=2.4)
+        assert _load_pdf(loose).pageCount() > _load_pdf(normal).pageCount()
+        v.deleteLater()
+
+    def test_metadata(self, qapp, tmp_path):
+        v = ElaMarkdownViewer()
+        v.setMarkdown(self.SOURCE)
+        path = tmp_path / "meta.pdf"
+        assert v.exportPdf(str(path), title="导出标题", creator="unit-test")
+        document = _load_pdf(path)
+        pdf_module = pytest.importorskip("PyQt6.QtPdf")
+        assert (
+            document.metaData(pdf_module.QPdfDocument.MetaDataField.Title) == "导出标题"
+        )
+        assert (
+            document.metaData(pdf_module.QPdfDocument.MetaDataField.Creator)
+            == "unit-test"
+        )
+        v.deleteLater()
+
+    def test_page_numbers_can_be_disabled(self, qapp, tmp_path):
+        v = ElaMarkdownViewer()
+        v.setMarkdown(self.SOURCE)
+        path = tmp_path / "no-page-numbers.pdf"
+        assert v.exportPdf(str(path), pageNumbers=False)
         assert path.stat().st_size > 0
         v.deleteLater()
 
@@ -227,6 +292,21 @@ class TestHtmlEmbedImages:
         html = v.toHtml(embedImages=True)
         assert "data:image/png;base64," in html
         assert "pic.png" not in html
+        v.deleteLater()
+
+    def test_paper_reading_width_is_not_exported(self):
+        v = ElaMarkdownViewer()
+        v.setMarkdownTheme("paper")
+        v.setMarkdown("Hello")
+        frame = v.document().rootFrame().frameFormat()
+        frame.setLeftMargin(90)
+        frame.setRightMargin(90)
+        v.document().rootFrame().setFrameFormat(frame)
+
+        clone = v._document_for_export()
+        clone_frame = clone.rootFrame().frameFormat()
+        assert clone_frame.leftMargin() == clone.documentMargin()
+        assert clone_frame.rightMargin() == clone.documentMargin()
         v.deleteLater()
 
     def test_default_html_keeps_names(self):

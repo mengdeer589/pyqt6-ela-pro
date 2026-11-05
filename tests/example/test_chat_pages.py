@@ -173,9 +173,9 @@ class TestChatOverviewPage:
         page = make(ChatOverviewPage)
         view = page._chat.chatView()
         page._on_content_width()
-        assert view.contentMaxWidth() == 720
-        page._on_content_width()
         assert view.contentMaxWidth() == 0
+        page._on_content_width()
+        assert view.contentMaxWidth() == 768
 
     def test_replay_appends_another_turn(self, qapp, make):
         """重播走 QTimer 回调链，跑完必须还活着。"""

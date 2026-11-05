@@ -312,7 +312,7 @@ class ChatOverviewPage(ExamplePage):
         row.addWidget(self._toggle("复制提示", True, self._on_copy_notification))
         row.addWidget(self._toggle("等待骨架", True, self._on_waiting_placeholder))
         row.addWidget(self._toggle("贴底跟随", True, self._on_stick))
-        row.addWidget(self._button("正文限宽 720", self._on_content_width))
+        row.addWidget(self._button("正文限宽 768", self._on_content_width))
         row.addStretch()
         box.addLayout(row)
         return box
@@ -329,7 +329,7 @@ class ChatOverviewPage(ExamplePage):
         view.setCopyNotificationEnabled(True)
         view.setWaitingPlaceholderEnabled(True)
         view.setAvatarShape("rounded")
-        view.setContentMaxWidth(720)
+        view.setContentMaxWidth(768)
         view.setStickToBottom(True)
 
     def _dropdown(self, label, tip, choices, callback):
@@ -425,11 +425,11 @@ class ChatOverviewPage(ExamplePage):
     def _on_content_width(self):
         view = self._chat.chatView()
         current = view.contentMaxWidth()
-        target = 0 if current else 720
+        target = 0 if current else 768
         view.setContentMaxWidth(target)
         self._note.setText(
-            f"setContentMaxWidth({target}) —— 限的是整列（正文 + 附件条 + 底部行），"
-            "不限时行为完全不变；0 = 不限。"
+            f"setContentMaxWidth({target}) —— 阅读列居中（正文 + 附件条 + 底部行），"
+            "0 = 不限。"
         )
 
 

@@ -10,7 +10,7 @@ from __future__ import annotations
 import pytest
 from PyQt6.QtGui import QFont, QFontDatabase, QRawFont
 
-from pyqt6_ela_pro import ela_markdown_viewer as viewer_module
+from pyqt6_ela_pro.markdown_viewer import code as viewer_module
 from pyqt6_ela_pro._internal import missingGlyphFont
 from pyqt6_ela_pro.ela_markdown_viewer import ElaMarkdownViewer
 
@@ -21,19 +21,62 @@ _CJK = "Microsoft YaHei"
 def cjk_system(monkeypatch):
     monkeypatch.setattr(viewer_module, "system_cjk_font_family", lambda: _CJK)
     monkeypatch.setattr(viewer_module, "_DEFAULT_CODE_FONT_FAMILY", None)
+    monkeypatch.setattr(viewer_module, "_DEFAULT_LATIN_CODE_FONT_FAMILY", None)
+    monkeypatch.setattr(viewer_module, "_font_family_available", lambda name: False)
     return _CJK
+
+
+@pytest.fixture
+def cjk_with_nsimsun(monkeypatch):
+    monkeypatch.setattr(viewer_module, "system_cjk_font_family", lambda: _CJK)
+    monkeypatch.setattr(viewer_module, "_DEFAULT_CODE_FONT_FAMILY", None)
+    monkeypatch.setattr(viewer_module, "_DEFAULT_LATIN_CODE_FONT_FAMILY", None)
+    monkeypatch.setattr(
+        viewer_module, "_font_family_available", lambda name: name == "NSimSun"
+    )
+    return "NSimSun"
+
+
+@pytest.fixture
+def cjk_with_latin(monkeypatch):
+    monkeypatch.setattr(viewer_module, "system_cjk_font_family", lambda: _CJK)
+    monkeypatch.setattr(viewer_module, "_DEFAULT_CODE_FONT_FAMILY", None)
+    monkeypatch.setattr(viewer_module, "_DEFAULT_LATIN_CODE_FONT_FAMILY", None)
+    monkeypatch.setattr(
+        viewer_module,
+        "_font_family_available",
+        lambda name: name in ("NSimSun", "Consolas"),
+    )
+    return "NSimSun", "Consolas"
 
 
 @pytest.fixture
 def non_cjk_system(monkeypatch):
     monkeypatch.setattr(viewer_module, "system_cjk_font_family", lambda: None)
     monkeypatch.setattr(viewer_module, "_DEFAULT_CODE_FONT_FAMILY", None)
+    monkeypatch.setattr(viewer_module, "_DEFAULT_LATIN_CODE_FONT_FAMILY", None)
     return None
 
 
 class TestDefaultCodeFontFamily:
     def test_cjk_system_uses_cjk_font(self, cjk_system):
         assert viewer_module._default_code_font_family() == _CJK
+
+    def test_cjk_prefers_nsimsun(self, cjk_with_nsimsun):
+        assert viewer_module._default_code_font_family() == "NSimSun"
+
+    def test_cjk_latin_font_is_independent(self, cjk_with_latin):
+        cjk_family, latin_family = cjk_with_latin
+        assert viewer_module._default_code_font_family() == cjk_family
+        assert viewer_module._default_latin_code_font_family() == latin_family
+
+    def test_cjk_falls_back_to_simsun(self, monkeypatch):
+        monkeypatch.setattr(viewer_module, "system_cjk_font_family", lambda: _CJK)
+        monkeypatch.setattr(viewer_module, "_DEFAULT_CODE_FONT_FAMILY", None)
+        monkeypatch.setattr(
+            viewer_module, "_font_family_available", lambda name: name == "SimSun"
+        )
+        assert viewer_module._default_code_font_family() == "SimSun"
 
     def test_non_cjk_system_uses_preferred_monospace(self, non_cjk_system):
         family = viewer_module._default_code_font_family()
@@ -91,9 +134,7 @@ class TestProducedGlyphs:
     def test_fold_marker_uses_covered_glyph(self, qapp, make):
         viewer = make(ElaMarkdownViewer)
         # 用转义拼标签：避免工具链把尖括号标签当成控制标签吞掉
-        source = (
-            "前置\n\n\x3cthink\x3e\n内部推理\n\x3c/think\x3e\n\n后置"
-        )
+        source = "前置\n\n\x3cthink\x3e\n内部推理\n\x3c/think\x3e\n\n后置"
         viewer.setMarkdown(source)
 
         text = viewer.toPlainText()
@@ -151,9 +192,7 @@ class TestMissingGlyphFallback:
         viewer.show()
         qapp.processEvents()
         viewer.setMarkdown("a \u2194 b\n")
-        assert self._families_for(viewer, "\u2194") == [
-            missingGlyphFont("\u2194")
-        ]
+        assert self._families_for(viewer, "\u2194") == [missingGlyphFont("\u2194")]
 
         viewer.setMissingGlyphFallbackEnabled(False)
         qapp.processEvents()
@@ -196,6 +235,23 @@ class TestCodeFormatFamilies:
                 iterator += 1
             block = block.next()
         assert seen, "文档里应有带字体族的片段（代码）"
+        assert all(len(families) == 1 for families in seen)
+        assert all(families == [v.codeLatinFontFamily()] for families in seen)
+
+    def test_viewer_uses_cjk_font_for_cjk_code(self, qapp, make, cjk_system):
+        v = make(ElaMarkdownViewer)
+        v.setMarkdown("行内 `中文`\n\n```\n中文 = 1\n```\n")
+        seen = []
+        block = v.document().begin()
+        while block.isValid():
+            iterator = block.begin()
+            while not iterator.atEnd():
+                fragment = iterator.fragment()
+                if fragment.isValid() and fragment.charFormat().fontFamilies():
+                    seen.append(list(fragment.charFormat().fontFamilies()))
+                iterator += 1
+            block = block.next()
+        assert seen
         assert all(families == [_CJK] for families in seen)
 
     def test_host_override_stays_single_family_on_cjk(self, qapp, make, cjk_system):

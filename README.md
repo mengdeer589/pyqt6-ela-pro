@@ -82,8 +82,11 @@ tests/                     回归测试（按组件 / 家族目录组织；`-m "
   （`setGroup` + `connectCharts`）、可配命中半径、空区坐标事件、图例悬停高亮与**自动分页**、
   联合提示排序、`connectNulls`、**SVG 导出**；工具条是真实 `ElaIconButton`（含 `magicType`）。
   详见 [docs/charts.md](docs/charts.md)。
-- **内容渲染**：`ElaMarkdownViewer`（Typora 结构排版、4 套配色主题、GFM / Alert / 脚注 /
-  公式 / Mermaid / 流式追加）与 `ElaTerminalView`（ANSI 颜色、跨分片转义、只读）。
+- **内容渲染**：`ElaMarkdownViewer`（10 套主题：Bear / Lark / Typo / Vue /
+  Ayu / Solarized / Indigo / Paper / GitHub / Nord，每套独立排版与可选阅读列；
+  GFM / Alert / 脚注 / 公式 / Mermaid / 流式追加、PDF 字号 / 行距 / 页边距可配）与
+  `ElaTerminalView`
+  （ANSI 颜色、跨分片转义、只读）。
   详见 [docs/markdown.md](docs/markdown.md)。
 - **桌面集成**：全局划词助手（**默认带取词安全闸门**，避免向终端注入 Ctrl+C）、
   划词结果对话框、Windows 托盘、窗口 / Chromium 嵌入（CDP）、任务栏进度。
@@ -319,7 +322,7 @@ sys.exit(app.exec())
 | **ElaSelectionPopup** | 动作条浮窗（置顶 / 不抢焦点 / 越界收敛，可独立复用） |
 | **ElaSelectionResultDialog** | 结果对话框（上游 ElaWidget 窗口；流式 Markdown / 停止 / 复制（Ctrl+C 默认纯文本；Markdown 源走 Ctrl+Shift+C）/ 重新生成，**只发信号不碰网络**） |
 | **ElaMouseMonitor** | 轮询式全局鼠标监视（主线程 QTimer，信号坐标物理像素） |
-| **ElaClipboardCapture** | 模拟 Ctrl+C 异步取词（不预先改动剪贴板；恢复有三道校验，含剪贴板序列号与非文本保护） |
+| **ElaClipboardCapture** | 模拟 Ctrl+C 异步取词（只取文本：图片忽略、纯图片不弹窗；plain→markdown→html 回退）；恢复用注入前完整 mime 快照，安全格式 + 内容指纹 + 序列号 + 修饰键闸门；不拦截键盘，用户自己的 Ctrl+C / Ctrl+V 不受影响 |
 
 #### 系统 / 窗口 / 嵌入
 

@@ -121,8 +121,8 @@ class TestEnable:
         _dispose(qapp, assistant)
 
     def test_disable_cancels_inflight_capture(self, qapp):
-        """取词是异步的（延迟+轮询共 100~350ms），停用必须取消在途取词，
-        否则已发出的 Ctrl+C 仍会在几十毫秒后带回结果。"""
+        """取词是异步的（通常 100~350ms，带图片的副本可能到 ~1s），停用必须
+        取消在途取词，否则已发出的 Ctrl+C 仍会带回结果。"""
         assistant, monitor, capture = _make(qapp)
         assistant.setCaptureFilter(lambda down, up: True)
         assistant.setEnabled(True)

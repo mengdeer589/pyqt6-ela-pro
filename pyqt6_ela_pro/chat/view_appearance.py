@@ -167,17 +167,20 @@ class _ViewAppearanceMixin:
         return self._user_bubble_ratio
 
     def setContentMaxWidth(self, width: int) -> None:
-        """设置助手消息内容最大宽度（像素，``0`` 表示不限，默认不限）。
-        限的是整列（``_column`` 同时装正文、附件条与底部行），否则宽窗口下
-        底部行会伸出去。
+        """设置阅读列最大宽度（像素，``0`` 表示不限；宽屏居中）。
+
+        这是 view 级设置：用户气泡、助手正文、工具卡与时间线共用同一条列；
+        不再只限助手气泡，否则宽窗口下左右边缘对不齐。
         """
         self._content_max_width = max(0, int(width))
-        for bubble in self._bubbles.values():
-            if bubble.role() == ElaChatRoleType.Assistant:
-                bubble.setContentMaxWidth(self._content_max_width)
+        self._apply_content_margins()
+        host = self.parentWidget()
+        sync = getattr(host, "_sync_composer_width", None)
+        if callable(sync):
+            sync()
 
     def contentMaxWidth(self) -> int:
-        """获取助手消息内容最大宽度（``0`` 表示不限）。"""
+        """获取阅读列最大宽度（``0`` 表示不限）。"""
         return self._content_max_width
 
     def setEmptyTitle(self, text: str) -> None:

@@ -1,9 +1,8 @@
 """流式 / 分块提交必须继承片段首块的 ``QTextBlockFormat``。
 
 ``_flush_stream`` 与 ``_render_large_step`` 造分块时若用默认 ``QTextBlockFormat()``，
-``insertFragment`` 会把片段首块并入该默认块，于是稳定段的段距（正文 12px / 标题 16px）
-与行高（160%）全丢：实测四段思考流式期间 ``document().size().height()`` = 120.8、
-``endStream()`` 后 = 188.0 —— 聊天里表现为「思考内容定稿那一瞬间掉下数行」。
+``insertFragment`` 会把片段首块并入该默认块，于是稳定段的段距（正文 10px / 标题 24px）
+与行高（165%）全丢 —— 聊天里表现为「思考内容定稿那一瞬间掉下数行」。
 """
 
 from __future__ import annotations
@@ -80,9 +79,9 @@ class TestStreamKeepsBlockFormats:
         qapp.processEvents()
 
         rows = _format_table(streamed)
-        # 鉴别力：正文 12px 段距、标题 16px 都在表里（不是两边一起塌成 0 也算「一致」）
-        assert rows[0][2] == 12.0
-        assert rows[1][2] == 16.0
+        # 鉴别力：正文 10px 段距、标题 8px 下边距都在表里
+        assert rows[0][2] == 10.0
+        assert rows[1][2] == 8.0
         assert rows == _format_table(reference)
 
     def test_document_height_does_not_jump_on_settle(self, qapp, make):
@@ -103,8 +102,8 @@ class TestStreamKeepsBlockFormats:
         viewer = _make_viewer(make, qapp)
         _stream(viewer, qapp)
         rows = {r[0]: r for r in _format_table(viewer)}
-        assert rows["一级标题"][1:3] == (16.0, 16.0)
-        assert rows["二级标题"][1:3] == (16.0, 16.0)
+        assert rows["一级标题"][1:3] == (24.0, 8.0)
+        assert rows["二级标题"][1:3] == (20.0, 8.0)
 
 
 class TestChunkedLargeRenderKeepsBlockFormats:
@@ -133,7 +132,7 @@ class TestChunkedLargeRenderKeepsBlockFormats:
 
 @pytest.mark.parametrize(
     ("index", "expected_margin"),
-    [(0, 12.0), (1, 16.0), (3, 16.0)],
+    [(0, 10.0), (1, 8.0), (3, 8.0)],
     ids=["paragraph", "h1", "h2"],
 )
 def test_streamed_block_carries_expected_margin(qapp, make, index, expected_margin):

@@ -18,10 +18,29 @@ from PyQt6.QtWidgets import (
     QLabel,
     QMessageBox,
     QPushButton,
+    QVBoxLayout,
+    QWidget,
 )
 
-from PyQt6ElaWidgetTools import ElaLineEdit, ElaProgressBar, ElaText
-from pyqt6_ela_pro import ElaButton, ElaDialogBase, ElaMarkdownViewer
+from PyQt6ElaWidgetTools import (
+    ElaComboBox,
+    ElaIconType,
+    ElaLineEdit,
+    ElaProgressBar,
+    ElaScrollArea,
+    ElaText,
+    ElaToggleSwitch,
+)
+from pyqt6_ela_pro import (
+    ElaButton,
+    ElaDialogBase,
+    ElaDrawer,
+    ElaDrawerPositionType,
+    ElaMarkdownViewer,
+    ElaThemeWidget,
+    defaultMarkdownTheme,
+    markdownThemes,
+)
 from .base_page import ExamplePage
 
 #: 文本与排版样例（标题 / 行内 / 列表任务 / 表格 / 引用 / 折叠 / 图片 / 脚注）
@@ -290,13 +309,154 @@ sequenceDiagram
 
 ---
 
-> 以上内容由一次 `setMarkdown()` 渲染；工具栏提供搜索高亮、缩放、
-> 复制全文与 PDF 导出。"""
+> 以上内容由一次 `setMarkdown()` 渲染；右侧「阅读设置」抽屉提供搜索高亮、
+> 缩放、主题切换与流式重放。"""
 
 #: 全量静态示例（四块拼接，供示例与流式演示共用）
 _MARKDOWN_ALL = "\n\n".join(
     (_MARKDOWN_TEXT, _MARKDOWN_CODE, _MARKDOWN_MATH, _MARKDOWN_MERMAID)
 )
+
+#: 阅读器开场白（正文只留阅读内容，操作收进右侧抽屉）
+_READER_INTRO = r"""# 大文档渲染长文
+
+> 这是一篇用于观察**大文档渲染**的长文示例：标题、正文、代码卡、表格、公式与
+> Mermaid 连续排布。页面只保留阅读内容；主题、行号、折叠、缩放、搜索与流式重放
+> 都收在右上角「阅读设置」抽屉里，一键唤出。
+
+阅读器关注的是连续滚动时的排版稳定性：标题阶梯与段距不跳动，代码卡边缘对齐，
+表格不溢出视口，图片按宽度自适应；切换主题后整篇文档重新排版，但阅读位置保持。
+
+```python
+from pyqt6_ela_pro import ElaMarkdownViewer
+
+viewer = ElaMarkdownViewer()
+viewer.setLineNumbersEnabled(True)  # 右侧「阅读设置」可随时开关
+viewer.setMarkdown("正文里的代码卡片会自动预留行号槽")
+```
+"""
+
+#: 长文附录（补充滚动长度与更多块级语法组合）
+_READER_APPENDIX = r"""
+## 9. 长文滚动与排版节奏
+
+连续滚动时，标题间距、正文行高、列表缩进和代码卡边缘都应保持稳定。下面这段文字
+刻意写长一些，用来观察滚动过程中的重绘成本与视觉节奏。中文正文与 English terms
+混排时，行高由主题的 `body_line_height` 统一控制，不会因为字体回退而忽高忽低。
+
+长文阅读的另一个重点是「位置感」：当读者从代码卡滚动到公式，再滚动到表格时，
+每一屏都应该有清晰的层级。标题的上间距大于下间距，段落之间保持统一的呼吸感，
+引用块的竖线不越出正文列，代码卡与表格的左右边缘对齐到同一条基线。
+
+### 9.1 中英文混排
+
+Markdown 的渲染结果最终要落到 `QTextDocument` 上，Qt 的排版引擎会按片段拆分文本，
+再逐段计算行高与换行点。对于包含 `inline_code`、**加粗强调**、[链接](#) 与
+~~删除线~~ 的段落，片段数量会明显增加；阅读器需要在保证语义颜色的同时，避免
+每个片段都触发一次昂贵的格式合并。
+
+在 Win7 交付环境中，字体回退是比排版算法更敏感的因素。CJK 字符必须落在单一字体族
+内，Latin 等宽字体只用于纯 ASCII 代码；这条约束在长文中尤其重要，因为一次错误的
+字体回退会污染后续所有文本绘制。
+
+### 9.2 列表与层级
+
+- 一级列表：用于并列的阅读要点；
+  - 二级列表：用于补充说明与边界条件；
+    - 三级列表：用于极少数需要展开的细节。
+- 列表项内的行内代码 `viewer.setMarkdown(source)` 与正文保持同一行高。
+- 有序列表可以表达步骤：
+
+1. 准备 Markdown 源文本；
+2. 调用 `setMarkdown()` 完成一次全量渲染；
+3. 滚动阅读，观察标题、代码卡与表格的对齐；
+4. 打开「阅读设置」切换主题，确认阅读位置不丢失。
+
+## 10. 宽表格与信息密度
+
+| 场景 | 推荐设置 | 说明 |
+|:-----|:---------|:-----|
+| 长文阅读 | 行号关闭 | 减少代码卡左侧的视觉噪音 |
+| 代码审阅 | 行号开启 | 便于引用具体行 |
+| 超长代码 | 折叠 12 / 24 行 | 保留上下文，避免单块占满视口 |
+| 主题对比 | bear / vue / solarized | 观察标题线与代码底色的差异 |
+| 数学公式 | 保持默认字号 | 缩放时公式会同步调整 |
+
+表格在窄视口下会按列宽重新分配空间；如果内容仍然过宽，查看器保持表格自身的最小宽度，
+由外层横向滚动承接，而不是把文字压成无法阅读的窄列。
+
+## 11. 代码阅读
+
+```python
+from dataclasses import dataclass
+
+
+@dataclass
+class ReaderState:
+    theme: str = "bear"
+    line_numbers: bool = False
+    collapse_lines: int = 0
+
+    def describe(self) -> str:
+        mode = "on" if self.line_numbers else "off"
+        return f"{self.theme}: line numbers {mode}, collapse {self.collapse_lines}"
+```
+
+```diff
+@@ -1,4 +1,4 @@
+-旧的主题切换按钮常驻在页面上
++主题切换收进右侧阅读设置抽屉
+  正文区域只保留阅读内容
+  滚动位置在切换主题后保持
+```
+
+```bash
+uv run python -m pyqt6_ela_pro.example
+```
+
+## 12. 公式与长文中的数学
+
+行内公式 $E = mc^2$ 与正文共享行高；块级公式单独居中，并在缩放时同步调整尺寸。
+
+$$
+\begin{aligned}
+\nabla \cdot \mathbf{E} &= \frac{\rho}{\varepsilon_0} \\
+\nabla \times \mathbf{B} &= \mu_0 \mathbf{J}
+\end{aligned}
+$$
+
+$$
+\boxed{\sum_{k=1}^{n} k = \frac{n(n+1)}{2}}
+$$
+
+## 13. Mermaid 长图
+
+```mermaid
+flowchart TB
+    A[打开阅读器] --> B{需要调整?}
+    B -->|主题| C[打开阅读设置]
+    B -->|排版| C
+    C --> D[切换主题 / 行号 / 折叠]
+    D --> E[继续阅读]
+    E --> B
+```
+
+## 14. 引用与脚注
+
+> [!NOTE]
+> 长文中的提示块用于打断大段正文，帮助读者快速定位重点。
+
+> [!WARNING]
+> 示例中的「重新播放」会临时接管正文；播放结束后恢复静态渲染与阅读位置。
+
+脚注把补充信息移出正文，避免打断阅读节奏[^reader]。点击上标编号可以跳转到文末，
+再点击编号返回原位置。
+
+[^reader]: 阅读设置抽屉里的所有操作都对应 `ElaMarkdownViewer` 的公开 API。
+"""
+
+#: 阅读器正文（开场 + 四类能力 + 长文附录）
+_MARKDOWN_READER = "\n\n".join((_READER_INTRO, _MARKDOWN_ALL, _READER_APPENDIX))
 
 #: 聊天式演示的预置回答（覆盖主要块级语法，真实场景可替换为模型输出）
 _MARKDOWN_ANSWER = r"""<think>
@@ -371,7 +531,7 @@ def _ensure_demo_image() -> str:
 
 
 class MarkdownPage(ExamplePage):
-    """ElaMarkdownViewer 两个场景演示：全量静态渲染 + 流式渲染"""
+    """ElaMarkdownViewer 长文阅读：正文占满页面，设置收进 ElaDrawer。"""
 
     PAGE_TITLE = "Markdown 渲染"
 
@@ -389,327 +549,396 @@ class MarkdownPage(ExamplePage):
         self._speed_btn = None
         self._progress = None
         self._stream_status = None
-        self._input_edit = None
-        self._send_btn = None
+        self._reader_view = None
+        self._settings_drawer = None
+        self._md_theme_combo = None
+        self._line_numbers_switch = None
+        self._collapse_combo = None
+        self._collapse_lines = (0, 12, 24)
+        self._zoom_label = None
+        self._search_edit = None
+        self._search_count = None
+        self._reader_status = None
         super().__init__(parent)
 
+    def _setupUI(self):
+        """阅读器布局：不套外层滚动区，正文查看器自己滚动。"""
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+        self._mainLayout = QVBoxLayout()
+        self._mainLayout.setContentsMargins(0, 0, 0, 0)
+        self._mainLayout.setSpacing(0)
+        layout.addLayout(self._mainLayout, 1)
+
+    def buildDemoContent(self):
+        if self._demo_built:
+            return
+        self._demo_built = True
+        self._addDemoContent(self._mainLayout)
+
     def _addDemoContent(self, main_layout):
-        self._addInfoText(
-            "面向 AI 对话场景的 Markdown 渲染组件：按「文本 / 代码 / 公式 / Mermaid」"
-            "四块分别展示，最后是流式渲染演示（逐 token 追加、空态占位、打字光标、"
-            "贴底自动跟随）。",
-            main_layout,
+        """创建阅读器正文，并把全部演示开关收进右侧 ElaDrawer。"""
+        header = QWidget(self)
+        header_layout = QHBoxLayout(header)
+        header_layout.setContentsMargins(28, 14, 20, 12)
+        header_layout.setSpacing(12)
+
+        title_column = QVBoxLayout()
+        title_column.setSpacing(2)
+        title = ElaText("Markdown 阅读器", header)
+        title.setTextPixelSize(20)
+        title_font = QFont()
+        title_font.setPixelSize(20)
+        title_font.setBold(True)
+        title.setFont(title_font)
+        title_column.addWidget(title)
+        subtitle = ElaText(
+            "大文档阅读 · 主题 / 排版 / 搜索收进右上角「阅读设置」",
+            header,
         )
-        self._demoText(main_layout)
-        main_layout.addSpacing(24)
-        self._demoCode(main_layout)
-        main_layout.addSpacing(24)
-        self._demoMath(main_layout)
-        main_layout.addSpacing(24)
-        self._demoMermaid(main_layout)
-        main_layout.addSpacing(24)
-        self._demoStreaming(main_layout)
+        subtitle.setTextPixelSize(13)
+        subtitle.setWordWrap(True)
+        title_column.addWidget(subtitle)
+        header_layout.addLayout(title_column, 1)
 
-    # 刻意不抽「创建演示查看器」helper：每节的「</> 代码」按钮展示本节方法源码，
-    # 构造抽出去后读者就看不到查看器是怎么建起来的。
+        code_btn = ElaButton("</> 代码", variant="text", color="primary", parent=header)
+        code_btn.setFixedWidth(85)
+        code_btn.clicked.connect(lambda: self._show_code(self._addDemoContent))
+        header_layout.addWidget(code_btn)
 
-    def _createDemoStatus(self, text: str):
-        """创建演示状态行（由调用方加入布局，保证位于工具条之后）。"""
-        status = ElaText(text, self)
-        status.setTextPixelSize(13)
-        return status
-
-    def _demoText(self, main_layout):
-        main_layout.addLayout(self._createHeaderRow("1. 文本与排版", self._demoText))
-        self._addInfoText(
-            "标题层级与锚点 / `[toc]` 目录、行内样式与 emoji、列表与可点击任务、"
-            "表格斑马纹、引用与五种提示块、推理块 / details 折叠、图片缩放与远程拦截、"
-            "脚注回跳；工具栏：搜索高亮 / 缩放 / 复制全文 / 导出 PDF；"
-            "选中文本右键可「复制为 Markdown」用于引用回复；外链二次确认后打开。",
-            main_layout,
+        settings_btn = ElaButton(
+            "阅读设置",
+            icon=ElaIconType.IconName.Sliders,
+            variant="outlined",
+            parent=header,
         )
-        # 查看器构造**就地写出来**（与第 5 节流式演示同款）：每节标题的「</> 代码」
-        # 按钮展示的就是本方法的源码，抽到 _createDemoViewer 里等于把读者要学的东西
-        # 藏起来了。四节里只有这三个 setter 不同，所以刻意不用 helper。
+        settings_btn.setFixedWidth(118)
+        settings_btn.clicked.connect(self._toggle_settings_drawer)
+        header_layout.addWidget(settings_btn)
+        main_layout.addWidget(header)
+
         viewer = ElaMarkdownViewer(parent=self)
-        viewer.setMinimumHeight(620)
         viewer.setOpenExternalLinks(False)
         viewer.setBaseUrl(_ensure_demo_image())
-        viewer.setMarkdown(_MARKDOWN_TEXT)
-        main_layout.addWidget(viewer)
-        status = self._createDemoStatus(
-            "最近操作：—（试试点击推理/详情折叠、点击任务勾选、选中文本后右键引用、"
-            "点击本地图片预览）"
-        )
+        viewer.setStickToBottom(False)
+        viewer.setLineNumbersEnabled(False)
+        viewer.setMarkdown(_MARKDOWN_READER)
         viewer.codeCopied.connect(
-            lambda text: status.setText(f"已复制内容（{len(text)} 字符）")
+            lambda text: self._set_reader_status(f"已复制代码（{len(text)} 字符）")
         )
         viewer.selectionQuoted.connect(
-            lambda text: status.setText(
-                f"已复制引用为 Markdown（{len(text)} 字符）：{text.splitlines()[0][:32]}"
+            lambda text: self._set_reader_status(
+                f"已复制引用为 Markdown（{len(text)} 字符）"
             )
         )
         viewer.taskToggled.connect(
-            lambda index, checked: status.setText(
-                f"任务 #{index} 已{'勾选' if checked else '取消勾选'}，源 Markdown 已同步"
+            lambda index, checked: self._set_reader_status(
+                f"任务 #{index} 已{'勾选' if checked else '取消勾选'}"
             )
         )
         viewer.imageClicked.connect(self._preview_image)
-        self._addViewerToolbar(
-            main_layout, viewer, status_label=status, confirm_external=True
-        )
-        main_layout.addWidget(status)
+        viewer.linkActivated.connect(self._on_link_activated)
+        main_layout.addWidget(viewer, 1)
 
-    def _demoCode(self, main_layout):
-        main_layout.addLayout(self._createHeaderRow("2. 代码块", self._demoCode))
-        self._addInfoText(
-            "语言标签与语法高亮（Pygments 可选）、行号、超长折叠与「展开其余 N 行」、"
-            "悬停右上角复制按钮；`diff` 围栏行级着色（新增绿 / 删除红 / 位置行蓝）。",
-            main_layout,
-        )
-        # 构造就地写出来（见 _demoText 的说明）：行号 + 超长折叠
-        viewer = ElaMarkdownViewer(parent=self)
-        viewer.setMinimumHeight(560)
-        viewer.setOpenExternalLinks(False)
-        viewer.setBaseUrl(_ensure_demo_image())
-        viewer.setLineNumbersEnabled(True)
-        viewer.setCodeBlockCollapseLines(12)
-        viewer.setMarkdown(_MARKDOWN_CODE)
-        main_layout.addWidget(viewer)
-        status = self._createDemoStatus(
-            "最近操作：—（悬停代码卡片右上角复制 / 点击「展开其余 N 行」）"
-        )
-        viewer.codeCopied.connect(
-            lambda text: status.setText(f"已复制代码（{len(text)} 字符）")
-        )
-        main_layout.addWidget(status)
-
-    def _demoMath(self, main_layout):
-        main_layout.addLayout(self._createHeaderRow("3. 数学公式", self._demoMath))
-        self._addInfoText(
-            "行内 / 块级公式；矩阵、`cases`、`align` / `gather` 环境、`\\boxed`、"
-            "极限算子堆叠、`\\newcommand` 宏展开；未收录命令容错为字面文本。"
-            "点击公式可复制 LaTeX 源码，悬浮可查看源码。",
-            main_layout,
-        )
-        # 构造就地写出来（见 _demoText 的说明）
-        viewer = ElaMarkdownViewer(parent=self)
-        viewer.setMinimumHeight(700)
-        viewer.setOpenExternalLinks(False)
-        viewer.setBaseUrl(_ensure_demo_image())
-        viewer.setMarkdown(_MARKDOWN_MATH)
-        main_layout.addWidget(viewer)
-        status = self._createDemoStatus("最近操作：—（点击任意公式复制 LaTeX 源码）")
-        viewer.formulaCopied.connect(
-            lambda latex: status.setText(f"已复制公式：{latex[:48]}")
-        )
-        main_layout.addWidget(status)
-
-    def _demoMermaid(self, main_layout):
-        main_layout.addLayout(self._createHeaderRow("4. Mermaid 图", self._demoMermaid))
-        self._addInfoText(
-            "flowchart / sequenceDiagram 等图类型由 mermaidx 异步渲染为图片，"
-            "主题随亮/暗模式切换；未安装可选依赖时回退为代码卡片；"
-            "点击图片可复制 Mermaid 源码。本页开启了引擎预热"
-            "（setMermaidPrewarm），并按视口距离优先渲染可见的图。",
-            main_layout,
-        )
-        # 构造就地写出来（见 _demoText 的说明）；引擎预热按视口距离优先渲染可见的图
-        viewer = ElaMarkdownViewer(parent=self)
-        viewer.setMinimumHeight(520)
-        viewer.setOpenExternalLinks(False)
-        viewer.setBaseUrl(_ensure_demo_image())
-        viewer.setMermaidPrewarm(True)
-        viewer.setMarkdown(_MARKDOWN_MERMAID)
-        main_layout.addWidget(viewer)
-        status = self._createDemoStatus("最近操作：—（点击图可复制 Mermaid 源码）")
-        viewer.mermaidCopied.connect(
-            lambda code: status.setText(f"已复制 Mermaid 源码（{len(code)} 字符）")
-        )
-        main_layout.addWidget(status)
-
-    def _demoStreaming(self, main_layout):
-        main_layout.addLayout(
-            self._createHeaderRow(
-                "5. 流式渲染（与上方四块内容一致）", self._demoStreaming
-            )
-        )
-        self._addInfoText(
-            "支持两种玩法：① 输入问题后回车「发送」——以聊天方式流式输出预置回答；"
-            "②「重新播放」——逐 token 输出与上方四块拼接后完全相同的样例。"
-            "过程中可暂停/继续、调速、立即完成；空态占位、未闭合围栏/公式实时预览、"
-            "推理块未闭合时显示「思考中…」、末尾打字光标、贴底自动跟随；"
-            "endStream 后自动开启行号与折叠；本地图片点击可弹窗预览。",
-            main_layout,
-        )
-        viewer = ElaMarkdownViewer(parent=self)
-        viewer.setMinimumHeight(560)
-        viewer.setOpenExternalLinks(False)
-        viewer.setBaseUrl(_ensure_demo_image())
-        viewer.setCodeBlockCollapseLines(12)
-        viewer.setMermaidPrewarm(True)
-        viewer.setPlaceholderText("输入问题后回车，或点击「重新播放」体验流式输出…")
-        main_layout.addWidget(viewer)
-
-        question = ElaLineEdit(self)
-        question.setPlaceholderText("输入问题后回车发送（演示：统一返回预置回答）")
-        send = ElaButton("发送", variant="solid", color="primary", parent=self)
-        send.setFixedWidth(96)
-        input_row = QHBoxLayout()
-        input_row.addWidget(question)
-        input_row.addWidget(send)
-        main_layout.addLayout(input_row)
-
-        replay = ElaButton("重新播放", variant="solid", color="primary", parent=self)
-        pause = ElaButton("暂停", variant="outlined", parent=self)
-        finish = ElaButton("立即完成", variant="outlined", parent=self)
-        speed = ElaButton("速度 x1", variant="outlined", parent=self)
-        for button in (replay, pause, finish, speed):
-            button.setFixedWidth(96)
-        pause.setEnabled(False)
-        finish.setEnabled(False)
-
-        controls = QHBoxLayout()
-        controls.addWidget(replay)
-        controls.addWidget(pause)
-        controls.addWidget(finish)
-        controls.addWidget(speed)
-        controls.addStretch()
-        main_layout.addLayout(controls)
-
-        progress = ElaProgressBar(self)
-        progress.setRange(0, 100)
-        progress.setValue(0)
-        progress.setTextVisible(False)
-        progress.setFixedHeight(10)
-        main_layout.addWidget(progress)
-
-        status = ElaText(
-            "等待开始：点击「重新播放」，可随时暂停 / 调速 / 立即完成。", self
-        )
-        status.setTextPixelSize(13)
-        main_layout.addWidget(status)
-
+        self._reader_view = viewer
         self._stream_view = viewer
-        self._replay_btn = replay
-        self._pause_btn = pause
-        self._finish_btn = finish
-        self._speed_btn = speed
-        self._progress = progress
-        self._stream_status = status
-        self._input_edit = question
-        self._send_btn = send
-        self._stream_elapsed = QElapsedTimer()
-        self._stream_timer = QTimer(viewer)
-        self._stream_timer.setInterval(35)
-        self._stream_timer.timeout.connect(self._onStreamTick)
-        replay.clicked.connect(self._restartStream)
-        pause.clicked.connect(self._togglePauseStream)
-        finish.clicked.connect(self._finishStream)
-        speed.clicked.connect(self._cycleStreamSpeed)
-        viewer.streamFinished.connect(self._onStreamFinished)
-        viewer.imageClicked.connect(self._preview_image)
-        question.returnPressed.connect(self._send_message)
-        send.clicked.connect(self._send_message)
+        self._create_settings_drawer()
 
-    def _addViewerToolbar(
-        self,
-        main_layout,
-        viewer,
-        status_label=None,
-        confirm_external: bool = False,
-    ):
-        """给查看器叠加交互工具条：搜索高亮、缩放、复制全文、导出 PDF。
-        ``status_label`` 为 ``None`` 时自动创建并加入布局；``confirm_external``
-        决定外链是否二次确认后打开。
-        """
-        search = ElaLineEdit(self)
-        search.setPlaceholderText("搜索并高亮：输入关键词")
-        search.setFixedWidth(220)
-        count = ElaText("", self)
-        count.setTextPixelSize(13)
-        count.setFixedWidth(56)
+    def _create_settings_drawer(self):
+        """把主题、行号、折叠、缩放、搜索和流式演示收进右侧抽屉。"""
+        drawer = ElaDrawer(
+            position=ElaDrawerPositionType.Right,
+            drawer_size=360,
+            parent=self,
+        )
+        content = ElaThemeWidget()
+        outer = QVBoxLayout(content)
+        outer.setContentsMargins(18, 16, 18, 16)
+        outer.setSpacing(12)
 
-        prev_btn = ElaButton("上一个", variant="outlined", parent=self)
-        next_btn = ElaButton("下一个", variant="outlined", parent=self)
-        clear_btn = ElaButton("清除", variant="outlined", parent=self)
+        head = QHBoxLayout()
+        title = ElaText("阅读设置", content)
+        title.setTextPixelSize(18)
+        title_font = QFont()
+        title_font.setPixelSize(18)
+        title_font.setBold(True)
+        title.setFont(title_font)
+        head.addWidget(title)
+        head.addStretch()
+        code_btn = ElaButton(
+            "</> 代码", variant="text", color="primary", parent=content
+        )
+        code_btn.setFixedWidth(85)
+        code_btn.clicked.connect(lambda: self._show_code(self._create_settings_drawer))
+        head.addWidget(code_btn)
+        outer.addLayout(head)
+
+        scroll = ElaScrollArea(content)
+        scroll.setWidgetResizable(True)
+        inner = ElaThemeWidget()
+        form = QVBoxLayout(inner)
+        form.setContentsMargins(0, 0, 6, 0)
+        form.setSpacing(10)
+
+        def section(text):
+            label = ElaText(text, inner)
+            label.setTextPixelSize(13)
+            font = QFont()
+            font.setPixelSize(13)
+            font.setBold(True)
+            label.setFont(font)
+            form.addWidget(label)
+
+        section("主题")
+        self._md_theme_combo = ElaComboBox(inner)
+        for name in markdownThemes():
+            self._md_theme_combo.addItem(name)
+        index = self._md_theme_combo.findText(defaultMarkdownTheme())
+        self._md_theme_combo.setCurrentIndex(max(0, index))
+        self._md_theme_combo.currentIndexChanged.connect(self._on_md_theme_changed)
+        form.addWidget(self._md_theme_combo)
+
+        section("排版")
+        line_row = QHBoxLayout()
+        line_label = ElaText("代码行号", inner)
+        line_label.setTextPixelSize(13)
+        line_row.addWidget(line_label)
+        line_row.addStretch()
+        self._line_numbers_switch = ElaToggleSwitch(inner)
+        self._line_numbers_switch.setIsToggled(self._reader_view.lineNumbersEnabled())
+        self._line_numbers_switch.toggled.connect(self._on_line_numbers_toggled)
+        line_row.addWidget(self._line_numbers_switch)
+        form.addLayout(line_row)
+
+        collapse_row = QHBoxLayout()
+        collapse_label = ElaText("长代码", inner)
+        collapse_label.setTextPixelSize(13)
+        collapse_row.addWidget(collapse_label)
+        collapse_row.addStretch()
+        self._collapse_combo = ElaComboBox(inner)
+        for text in ("不折叠", "折叠 12 行", "折叠 24 行"):
+            self._collapse_combo.addItem(text)
+        current = self._reader_view.codeBlockCollapseLines()
+        self._collapse_combo.setCurrentIndex(
+            self._collapse_lines.index(current)
+            if current in self._collapse_lines
+            else 0
+        )
+        self._collapse_combo.currentIndexChanged.connect(self._on_collapse_changed)
+        self._collapse_combo.setFixedWidth(128)
+        collapse_row.addWidget(self._collapse_combo)
+        form.addLayout(collapse_row)
+
+        zoom_row = QHBoxLayout()
+        zoom_out = ElaButton("−", variant="outlined", parent=inner)
+        zoom_reset = ElaButton("100%", variant="outlined", parent=inner)
+        zoom_in = ElaButton("+", variant="outlined", parent=inner)
+        for button in (zoom_out, zoom_reset, zoom_in):
+            button.setFixedWidth(64)
+        self._zoom_label = zoom_reset
+        zoom_out.clicked.connect(self._on_zoom_out)
+        zoom_in.clicked.connect(self._on_zoom_in)
+        zoom_reset.clicked.connect(self._on_zoom_reset)
+        zoom_row.addWidget(zoom_out)
+        zoom_row.addWidget(zoom_reset)
+        zoom_row.addWidget(zoom_in)
+        zoom_row.addStretch()
+        form.addLayout(zoom_row)
+
+        section("搜索")
+        self._search_edit = ElaLineEdit(inner)
+        self._search_edit.setPlaceholderText("输入关键词，回车定位")
+        self._search_edit.textChanged.connect(self._on_search_changed)
+        self._search_edit.returnPressed.connect(self._on_find_next)
+        form.addWidget(self._search_edit)
+        search_row = QHBoxLayout()
+        self._search_count = ElaText("", inner)
+        self._search_count.setTextPixelSize(12)
+        self._search_count.setFixedWidth(60)
+        prev_btn = ElaButton("上一个", variant="outlined", parent=inner)
+        next_btn = ElaButton("下一个", variant="outlined", parent=inner)
+        clear_btn = ElaButton("清除", variant="outlined", parent=inner)
         for button in (prev_btn, next_btn, clear_btn):
             button.setFixedWidth(72)
-        prev_btn.setEnabled(False)
-        next_btn.setEnabled(False)
-
-        def on_search(text: str):
-            total = viewer.searchText(text)
-            count.setText("" if not text else f"{total} 处")
-            prev_btn.setEnabled(total > 0)
-            next_btn.setEnabled(total > 0)
-
-        search.textChanged.connect(on_search)
-        prev_btn.clicked.connect(lambda: viewer.findNext(backward=True))
-        next_btn.clicked.connect(lambda: viewer.findNext())
-        clear_btn.clicked.connect(
-            lambda: (viewer.clearSearch(), search.clear(), count.setText(""))
-        )
-
-        zoom_label = ElaText("100%", self)
-        zoom_label.setTextPixelSize(13)
-        zoom_label.setFixedWidth(48)
-        zoom_out = ElaButton("缩小", variant="outlined", parent=self)
-        zoom_in = ElaButton("放大", variant="outlined", parent=self)
-        zoom_reset = ElaButton("重置", variant="outlined", parent=self)
-        for button in (zoom_out, zoom_in, zoom_reset):
-            button.setFixedWidth(72)
-
-        def sync_zoom_label():
-            zoom_label.setText(f"{viewer.zoomFactor() * 100:.0f}%")
-
-        zoom_in.clicked.connect(lambda: (viewer.zoomIn(0.1), sync_zoom_label()))
-        zoom_out.clicked.connect(lambda: (viewer.zoomOut(0.1), sync_zoom_label()))
-        zoom_reset.clicked.connect(
-            lambda: (viewer.setZoomFactor(1.0), sync_zoom_label())
-        )
-        # 不要用无主 QTimer.singleShot 改按钮文案：页面销毁后它仍会触发，异常穿出
-        # C++ 边界 = 0xC0000409。定时器必须是 ctx 的子对象，或回调里 is_deleted 自查。
-
-        search_row = QHBoxLayout()
-        search_row.addWidget(search)
-        search_row.addWidget(count)
+        prev_btn.clicked.connect(self._on_find_prev)
+        next_btn.clicked.connect(self._on_find_next)
+        clear_btn.clicked.connect(self._on_clear_search)
+        search_row.addWidget(self._search_count)
         search_row.addWidget(prev_btn)
         search_row.addWidget(next_btn)
         search_row.addWidget(clear_btn)
         search_row.addStretch()
-        main_layout.addLayout(search_row)
+        form.addLayout(search_row)
 
-        zoom_row = QHBoxLayout()
-        zoom_row.addWidget(zoom_out)
-        zoom_row.addWidget(zoom_label)
-        zoom_row.addWidget(zoom_in)
-        zoom_row.addWidget(zoom_reset)
-        zoom_row.addStretch()
-        main_layout.addLayout(zoom_row)
+        section("流式演示")
+        stream_hint = ElaText(
+            "以流式方式重放整篇文档，观察稳定段提交与打字光标。", inner
+        )
+        stream_hint.setTextPixelSize(12)
+        form.addWidget(stream_hint)
+        stream_row = QHBoxLayout()
+        self._replay_btn = ElaButton(
+            "重新播放", variant="solid", color="primary", parent=inner
+        )
+        self._pause_btn = ElaButton("暂停", variant="outlined", parent=inner)
+        self._finish_btn = ElaButton("立即完成", variant="outlined", parent=inner)
+        for button in (self._replay_btn, self._pause_btn, self._finish_btn):
+            button.setFixedWidth(96)
+        self._pause_btn.setEnabled(False)
+        self._finish_btn.setEnabled(False)
+        self._replay_btn.clicked.connect(self._restartStream)
+        self._pause_btn.clicked.connect(self._togglePauseStream)
+        self._finish_btn.clicked.connect(self._finishStream)
+        self._stream_elapsed = QElapsedTimer()
+        self._stream_timer = QTimer(self._reader_view)
+        self._stream_timer.setInterval(35)
+        self._stream_timer.timeout.connect(self._onStreamTick)
+        self._reader_view.streamFinished.connect(
+            self._onStreamFinished, Qt.ConnectionType.QueuedConnection
+        )
+        stream_row.addWidget(self._replay_btn)
+        stream_row.addWidget(self._pause_btn)
+        stream_row.addWidget(self._finish_btn)
+        stream_row.addStretch()
+        form.addLayout(stream_row)
 
-        if status_label is None:
-            status_label = ElaText("最近点击链接：—（试试文中的目录或脚注）", self)
-            status_label.setTextPixelSize(13)
-            main_layout.addWidget(status_label)
+        self._speed_btn = ElaButton("速度 x1", variant="outlined", parent=inner)
+        self._speed_btn.setFixedWidth(96)
+        self._speed_btn.clicked.connect(self._cycleStreamSpeed)
+        speed_row = QHBoxLayout()
+        speed_row.addWidget(self._speed_btn)
+        speed_row.addStretch()
+        form.addLayout(speed_row)
 
-        def on_link_activated(url: str):
-            status_label.setText(f"最近点击链接：{url}")
-            if confirm_external and url.startswith(("http://", "https://")):
-                answer = QMessageBox.question(
-                    self,
-                    "打开外部链接",
-                    f"是否使用系统浏览器打开？\n{url}",
-                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-                    QMessageBox.StandardButton.No,
-                )
-                if answer == QMessageBox.StandardButton.Yes:
-                    QDesktopServices.openUrl(QUrl(url))
+        self._progress = ElaProgressBar(inner)
+        self._progress.setRange(0, 100)
+        self._progress.setValue(0)
+        self._progress.setTextVisible(False)
+        self._progress.setFixedHeight(10)
+        form.addWidget(self._progress)
 
-        viewer.linkActivated.connect(on_link_activated)
+        self._stream_status = ElaText(
+            "等待开始：点击「重新播放」可在正文中观察流式输出。", inner
+        )
+        self._stream_status.setTextPixelSize(12)
+        self._stream_status.setWordWrap(True)
+        form.addWidget(self._stream_status)
+        form.addStretch()
+        scroll.setWidget(inner)
+        outer.addWidget(scroll, 1)
+
+        footer = QHBoxLayout()
+        self._reader_status = ElaText("最近操作：—", content)
+        self._reader_status.setTextPixelSize(12)
+        self._reader_status.setWordWrap(True)
+        footer.addWidget(self._reader_status, 1)
+        close_btn = ElaButton("关闭", variant="outlined", parent=content)
+        close_btn.setFixedWidth(72)
+        close_btn.clicked.connect(drawer.closeDrawer)
+        footer.addWidget(close_btn)
+        outer.addLayout(footer)
+
+        drawer.setContentWidget(content)
+        self._settings_drawer = drawer
+
+    def hideEvent(self, event) -> None:  # noqa: N802 (Qt 命名)
+        if self._settings_drawer is not None and self._settings_drawer.isOpened():
+            self._settings_drawer.closeDrawer()
+        super().hideEvent(event)
+
+    def _toggle_settings_drawer(self) -> None:
+        if self._settings_drawer is not None:
+            self._settings_drawer.toggleDrawer()
+
+    def _set_reader_status(self, text: str) -> None:
+        if self._reader_status is not None:
+            self._reader_status.setText(f"最近操作：{text}")
+
+    def _on_md_theme_changed(self, _index: int) -> None:
+        """把下拉框当前主题应用到页面内所有演示查看器。"""
+        name = self._md_theme_combo.currentText()
+        for viewer in self.findChildren(ElaMarkdownViewer):
+            viewer.setMarkdownTheme(name)
+        self._set_reader_status(f"主题已切换：{name}")
+
+    def _on_line_numbers_toggled(self, enabled: bool) -> None:
+        if self._reader_view is not None:
+            self._reader_view.setLineNumbersEnabled(enabled)
+        self._set_reader_status("代码行号已" + ("开启" if enabled else "关闭"))
+
+    def _on_collapse_changed(self, index: int) -> None:
+        if self._reader_view is None or not 0 <= index < len(self._collapse_lines):
+            return
+        lines = self._collapse_lines[index]
+        self._reader_view.setCodeBlockCollapseLines(lines)
+        self._set_reader_status(
+            "长代码" + ("不折叠" if not lines else f"折叠 {lines} 行")
+        )
+
+    def _sync_zoom_label(self) -> None:
+        if self._reader_view is not None:
+            self._zoom_label.setText(f"{self._reader_view.zoomFactor() * 100:.0f}%")
+
+    def _on_zoom_in(self) -> None:
+        if self._reader_view is not None:
+            self._reader_view.zoomIn(0.1)
+        self._sync_zoom_label()
+
+    def _on_zoom_out(self) -> None:
+        if self._reader_view is not None:
+            self._reader_view.zoomOut(0.1)
+        self._sync_zoom_label()
+
+    def _on_zoom_reset(self) -> None:
+        if self._reader_view is not None:
+            self._reader_view.setZoomFactor(1.0)
+        self._sync_zoom_label()
+
+    def _on_search_changed(self, text: str) -> None:
+        if self._reader_view is None:
+            return
+        if not text:
+            self._reader_view.clearSearch()
+            self._search_count.setText("")
+            return
+        total = self._reader_view.searchText(text)
+        self._search_count.setText(f"{total} 处")
+        self._set_reader_status(f"搜索「{text}」：{total} 处")
+
+    def _on_find_next(self) -> None:
+        if self._reader_view is not None:
+            self._reader_view.findNext()
+
+    def _on_find_prev(self) -> None:
+        if self._reader_view is not None:
+            self._reader_view.findNext(backward=True)
+
+    def _on_clear_search(self) -> None:
+        if self._reader_view is not None:
+            self._reader_view.clearSearch()
+        if self._search_edit is not None:
+            self._search_edit.clear()
+        if self._search_count is not None:
+            self._search_count.setText("")
+
+    def _on_link_activated(self, url: str) -> None:
+        self._set_reader_status(f"链接：{url}")
+        if not url.startswith(("http://", "https://")):
+            return
+        answer = QMessageBox.question(
+            self,
+            "打开外部链接",
+            f"是否使用系统浏览器打开？\n{url}",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if answer == QMessageBox.StandardButton.Yes:
+            QDesktopServices.openUrl(QUrl(url))
 
     def _preview_image(self, url: str) -> None:
         """图片点击预览（本地图片弹窗，远程链接交给系统浏览器）。"""
+        self._set_reader_status(f"图片：{url}")
         local_path = QUrl(url).toLocalFile()
         if local_path and os.path.exists(local_path):
             pixmap = QPixmap(local_path)
@@ -755,17 +984,8 @@ class MarkdownPage(ExamplePage):
         self._stream_timer.setInterval(max(4, int(35 / self._stream_speed)))
 
     def _restartStream(self):
-        """重新播放：与静态渲染完全相同的样例（逐 token 输出）。"""
-        self._start_stream(self._build_stream_chunks(_MARKDOWN_ALL))
-
-    def _send_message(self):
-        """聊天式：显示提问并以流式输出预置回答。"""
-        text = self._input_edit.text().strip()
-        if not text or self._stream_view.isStreaming():
-            return
-        self._input_edit.clear()
-        prefix = f"**你：** {text}\n\n---\n\n"
-        self._start_stream(self._build_stream_chunks(_MARKDOWN_ANSWER), prefix=prefix)
+        """重新播放：在正文中流式重放整篇文档。"""
+        self._start_stream(self._build_stream_chunks(_MARKDOWN_READER, 48))
 
     def _start_stream(self, chunks: list, prefix: str = "") -> None:
         """启动一次流式输出（``prefix`` 非空时先呈现提问再续写）。"""
@@ -774,6 +994,7 @@ class MarkdownPage(ExamplePage):
         self._stream_total = len(self._stream_chunks)
         self._stream_done = 0
         self._stream_view.setLineNumbersEnabled(False)
+        self._stream_view.setStickToBottom(True)
         if prefix:
             self._stream_view.setMarkdown(prefix)
         else:
@@ -784,8 +1005,8 @@ class MarkdownPage(ExamplePage):
         self._stream_status.setText("输出中… 0%")
         self._replay_btn.setText("输出中…")
         self._replay_btn.setEnabled(False)
-        self._send_btn.setEnabled(False)
-        self._input_edit.setEnabled(False)
+        self._line_numbers_switch.setEnabled(False)
+        self._collapse_combo.setEnabled(False)
         self._pause_btn.setText("暂停")
         self._pause_btn.setEnabled(True)
         self._finish_btn.setEnabled(True)
@@ -839,19 +1060,20 @@ class MarkdownPage(ExamplePage):
         )
 
     def _onStreamFinished(self):
-        """流式收尾：开启行号，使结果与静态渲染一致。"""
-        self._stream_view.setLineNumbersEnabled(True)
+        """流式收尾：恢复阅读模式与抽屉里的排版开关。"""
+        self._stream_view.setStickToBottom(False)
+        self._stream_view.setLineNumbersEnabled(
+            self._line_numbers_switch.getIsToggled()
+        )
+        self._line_numbers_switch.setEnabled(True)
+        self._collapse_combo.setEnabled(True)
         self._progress.setValue(100)
         elapsed = self._stream_elapsed.elapsed() / 1000.0
         self._stream_status.setText(
-            f"已完成：{self._stream_total} 段 / {elapsed:.1f}s，"
-            "行号 / 折叠已启用；可继续输入提问或重新播放"
+            f"已完成：{self._stream_total} 段 / {elapsed:.1f}s，可继续阅读或重新播放"
         )
         self._pause_btn.setText("暂停")
         self._pause_btn.setEnabled(False)
         self._finish_btn.setEnabled(False)
         self._replay_btn.setText("重新播放")
         self._replay_btn.setEnabled(True)
-        self._send_btn.setEnabled(True)
-        self._input_edit.setEnabled(True)
-        self._input_edit.setFocus()

@@ -93,7 +93,9 @@ class SelectionAssistantPage(ExamplePage):
     def _demoSettings(self, main_layout):
         info = ElaText(
             "在任意应用拖选文本（或双击选词），动作条会出现在光标附近；"
-            "取词通过模拟 Ctrl+C 完成，默认会恢复原剪贴板。",
+            "取词通过模拟 Ctrl+C 完成，默认会恢复原剪贴板。"
+            "文字+图片混选只取文字，纯图片选区不弹窗；"
+            "助手不拦截键盘，用户自己的 Ctrl+C / Ctrl+V 不受影响。",
             self,
         )
         info.setTextPixelSize(14)

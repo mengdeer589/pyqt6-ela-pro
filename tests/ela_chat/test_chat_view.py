@@ -812,32 +812,41 @@ class TestScrollBar:
 
 
 class TestContentMaxWidth:
-    """阅读宽度默认不限；宿主显式收紧时只作用于助手内容列。"""
+    """阅读列默认 768px 居中；0 恢复全宽。"""
 
-    def test_default_unlimited(self, qapp, make):
+    def test_default_is_centered_reading_column(self, qapp, make):
         view = make(ElaChatView)
-        assert view.contentMaxWidth() == 0
-        messageId = view.addMessage(ElaChatRoleType.Assistant, "hi")
-        assert view.bubble(messageId).contentMaxWidth() == 0
-        assert view.bubble(messageId)._column.maximumWidth() == 16777215
+        view.resize(1200, 700)
+        view.show()
+        qapp.processEvents()
+        assert view.contentMaxWidth() == 768
+        margins = view._content_layout.contentsMargins()
+        assert margins.left() > 10 and margins.right() > 10
+        inner = view._content.width() - margins.left() - margins.right()
+        assert inner == 768
 
-    def test_user_message_unaffected(self, qapp, make):
+    def test_user_and_assistant_share_column(self, qapp, make):
         view = make(ElaChatView)
         messageId = view.addMessage(ElaChatRoleType.User, "hi")
-        assert view.bubble(messageId).contentMaxWidth() == 0
-        assert view.bubble(messageId)._column.maximumWidth() == 16777215
-
-    def test_setter_applies_to_existing_and_disable(self, qapp, make):
-        view = make(ElaChatView)
-        messageId = view.addMessage(ElaChatRoleType.Assistant, "hi")
-        view.setContentMaxWidth(500)
-        # 限的是整列（正文 + 附件条 + 底部行），不是只限正文 ——
-        # 否则宽窗口下 footer 比正文列宽，往右伸出去
         bubble = view.bubble(messageId)
-        assert bubble._column.maximumWidth() == 500
+        assert bubble._content.parentWidget() is bubble._column
+
+    def test_setter_recenters_and_disable(self, qapp, make):
+        view = make(ElaChatView)
+        view.resize(1200, 700)
+        view.show()
+        qapp.processEvents()
+        view.setContentMaxWidth(500)
+        inner = (
+            view._content.width()
+            - view._content_layout.contentsMargins().left()
+            - view._content_layout.contentsMargins().right()
+        )
+        assert inner == 500
         view.setContentMaxWidth(0)
-        assert bubble._column.maximumWidth() == 16777215
         assert view.contentMaxWidth() == 0
+        assert view._content_layout.contentsMargins().left() == 10
+        assert view._content_layout.contentsMargins().right() == 10
 
     def test_column_wraps_content_and_footer(self, qapp, make):
         """内容列必须同时装下正文、附件条与底部行（否则限宽时 footer 伸出列外）。"""
@@ -851,7 +860,7 @@ class TestContentMaxWidth:
     def test_widget_passthrough(self, qapp, make):
 
         chat = make(ElaChatWidget)
-        assert chat.chatView().contentMaxWidth() == 0
+        assert chat.chatView().contentMaxWidth() == 768
         chat.chatView().setContentMaxWidth(640)
         assert chat.chatView().contentMaxWidth() == 640
 

@@ -17,7 +17,6 @@
 from __future__ import annotations
 
 import inspect
-import re
 
 import pytest
 from PyQt6.QtCore import QUrl
@@ -134,11 +133,7 @@ class TestMarkdownCodeButtonInvalidation:
 
     @staticmethod
     def _method_body(name: str) -> str:
-
-        src = inspect.getsource(M.ElaMarkdownViewer)
-        match = re.search(rf"\n    def {name}\(.*?(?=\n    def )", src, re.S)
-        assert match is not None
-        return match.group(0)
+        return inspect.getsource(getattr(M.ElaMarkdownViewer, name))
 
     def test_flush_does_not_wipe_button_refs(self):
         body = self._method_body("_flush_stream")
@@ -207,11 +202,8 @@ class TestMarkdownCellAtGuard:
     """``cellAt()`` 对合并覆盖的单元格返回 ``None``。"""
 
     def test_is_code_table_guards_none_cell(self):
-
-        src = inspect.getsource(M.ElaMarkdownViewer)
-        match = re.search(r"\n    def _is_code_table\(.*?(?=\n    def )", src, re.S)
-        assert match is not None
-        assert "if cell is None" in match.group(0)
+        src = inspect.getsource(M.ElaMarkdownViewer._is_code_table)
+        assert "if cell is None" in src
 
     def test_is_code_table_handles_single_column_table(self, qapp):
 

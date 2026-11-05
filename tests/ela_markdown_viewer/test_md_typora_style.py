@@ -1,4 +1,4 @@
-"""Typora（github.css）风格还原测试：排版规格与自绘装饰。"""
+"""Bear / Ink 排版规格与自绘装饰测试。"""
 
 from __future__ import annotations
 
@@ -7,7 +7,6 @@ from PyQt6.QtGui import QColor, QFont, QTextCursor, QTextFormat
 from PyQt6ElaWidgetTools import ElaThemeType
 
 from pyqt6_ela_pro.ela_markdown_viewer import (
-    _HEADING_RULE_WIDTH,
     _HR_MARK,
     _INLINE_CODE_MARK,
     ElaMarkdownViewer,
@@ -112,9 +111,9 @@ class TestTypograhySpec:
         # 后者在字体没有显式 pointSize 时返回 Qt 的哨兵 ``-1``，于是
         # ``base * expected`` 变成负数、断言恒假（本机实测 h1 实际21.9375pt
         # 恰好等于 9.75 × 2.25，比例完全正确，却因为基准取错而红）。
-        # Typora 阶梯本身就是「相对基准的比例」，用 h6（比例 1.0）当基准
+        # 标题阶梯本身就是「相对基准的比例」，用 h6（比例 1.0）当基准
         # 钉的正是同一条不变量，且与基准字号从哪来无关。
-        expected = {1: 2.25, 2: 1.75, 3: 1.5, 4: 1.25, 5: 1.0, 6: 1.0}
+        expected = {1: 1.5, 2: 1.3, 3: 1.15, 4: 1.05, 5: 1.0, 6: 1.0}
         sizes: dict[int, float] = {}
         for level, needle in enumerate(("一", "二", "三", "四", "五", "六"), start=1):
             block = _find_block(v, needle)
@@ -123,7 +122,9 @@ class TestTypograhySpec:
                 QTextCursor.MoveOperation.EndOfBlock, QTextCursor.MoveMode.KeepAnchor
             )
             sizes[level] = cursor.charFormat().fontPointSize()
-            assert int(cursor.charFormat().fontWeight()) == int(QFont.Weight.Bold)
+            assert int(cursor.charFormat().fontWeight()) == int(
+                QFont.Weight.DemiBold
+            )
         base = sizes[6]
         assert base > 0, sizes
         for level, ratio in expected.items():
@@ -134,8 +135,8 @@ class TestTypograhySpec:
         v = _viewer(qapp, "# 一\n\n###### 六\n")
         h1 = _find_block(v, "一")
         h6 = _find_block(v, "六")
-        assert h1.blockFormat().topMargin() == 16.0
-        assert h1.blockFormat().bottomMargin() == 16.0
+        assert h1.blockFormat().topMargin() == 24.0
+        assert h1.blockFormat().bottomMargin() == 8.0
         cursor = QTextCursor(h6)
         cursor.movePosition(
             QTextCursor.MoveOperation.EndOfBlock, QTextCursor.MoveMode.KeepAnchor
@@ -160,30 +161,13 @@ class TestPaintedDecorations:
             viewer.repaint()
         return viewer.grab().toImage()
 
-    def test_heading_rule_pixels(self, qapp):
+    def test_no_heading_rule_pixels(self, qapp):
+        """Bear / Ink 不再给 h1/h2 画分隔线（标题块不进装饰索引）。"""
         v = _viewer(qapp)
-        image = _grab_image(v)
+        v._ensure_paint_index()
         for needle in ("一级标题", "二级标题"):
             block = _find_block(v, needle)
-            rect = _block_rect(v, block)
-            x = int(rect.x() + 40)
-            # 分隔线自绘在 [bottom - _HEADING_RULE_WIDTH, bottom) 这条带上。
-            # blockBoundingRect() 可能是亚像素（如 h2 的 bottom=142.59375），
-            # 直接 int(bottom-1) 会向下取整到带外而误报；这里按带取整后扫描。
-            band = range(
-                int(rect.bottom()) - int(_HEADING_RULE_WIDTH),
-                int(rect.bottom()) + 1,
-            )
-            rows = [
-                y
-                for y in band
-                if image.pixelColor(x, y).name() == v._heading_rule_color.name()
-            ]
-            assert rows, (
-                f"{needle}: 未在分隔线带 {list(band)} 找到 "
-                f"{v._heading_rule_color.name()}，实际 "
-                f"{ {y: image.pixelColor(x, y).name() for y in band} }"
-            )
+            assert block.blockNumber() not in v._paint_index_decorations
         v.deleteLater()
 
     def test_hr_pixels(self, qapp):
@@ -197,7 +181,7 @@ class TestPaintedDecorations:
             for y in range(int(rect.top()), int(rect.bottom()) + 1)
             if image.pixelColor(x, y).name() == v._hr_color.name()
         ]
-        assert len(rows) == 1  # opencode TUI hr 为 1px 正文色线
+        assert len(rows) == 1  # hr 为 1px 浅边框线
         v.deleteLater()
 
     def test_quote_rail_pixels(self, qapp):
@@ -205,11 +189,12 @@ class TestPaintedDecorations:
         image = _grab_image(v)
         quote = _find_block(v, "引用第一行")
         rect = _block_rect(v, quote)
-        x = int(rect.x() + 4 + 2)
+        x = int(rect.x() + 4)
         y = int(rect.top() + 10)
         assert image.pixelColor(x, y).name() == v._quote_rail_color.name()
-        # 竖线宽 4px：内侧仍是竖线色，再往右回到页面底色
+        # 竖线宽 3px：内侧仍是竖线色，再往右回到页面底色
         assert image.pixelColor(x + 1, y).name() == v._quote_rail_color.name()
+        assert image.pixelColor(x + 2, y).name() == v._quote_rail_color.name()
         assert image.pixelColor(x + 3, y).name() == v._base_bg.name()
         # 引用块不再有底色
         assert quote.blockFormat().background().style() == Qt.BrushStyle.NoBrush
@@ -234,21 +219,13 @@ class TestPaintedDecorations:
     def test_decorations_adapt_to_dark_theme(self, qapp):
 
         v = _viewer(qapp)
-        light_rule = v._heading_rule_color.name()
+        light_hr = v._hr_color.name()
         light_rail = v._quote_rail_color.name()
         v._onThemeChanged(ElaThemeType.ThemeMode.Dark)
         for _ in range(10):
             qapp.processEvents()
-        assert v._heading_rule_color.name() != light_rule
+        assert v._hr_color.name() != light_hr
         assert v._quote_rail_color.name() != light_rail
-        image = _grab_image(v)
-        block = _find_block(v, "一级标题")
-        rect = _block_rect(v, block)
-        y = int(rect.bottom() - 1)
-        assert (
-            image.pixelColor(int(rect.x() + 40), y).name()
-            == v._heading_rule_color.name()
-        )
         v.deleteLater()
 
     def test_code_card_soft_edge_and_corner(self, qapp):
@@ -257,10 +234,10 @@ class TestPaintedDecorations:
         table = next(t for t in v._code_buttons_tables if v._is_code_table(t))
         rect = v._code_table_viewport_rect(table)
         assert not rect.isNull()
-        # 软卡片：无描边，卡片边缘直接是代码底色
+        # 卡片内部是代码底色；左上角被页面底色遮成圆角
         x = int(rect.left())
         y = int(rect.center().y())
-        assert image.pixelColor(x, y).name() == v._code_bg.name()
+        assert image.pixelColor(x + 4, y).name() == v._code_bg.name()
         # 左上角被页面底色遮成圆角（最角上像素完全在圆角之外）
         assert image.pixelColor(int(rect.left()), int(rect.top())).name() == (
             v._base_bg.name()

@@ -138,8 +138,8 @@ class ElaSelectionAssistant(QObject):
 
     def setEnabled(self, on: bool) -> bool:
         """启用 / 停用划词助手；返回操作后的启用状态。
-        停用会顺带**取消在途取词** —— 取词是异步的（延迟 + 轮询，共
-        100~350ms），若不取消，用户在这段时间内关掉助手，已经发出的
+        停用会顺带**取消在途取词** —— 取词是异步的（延迟 + 轮询，通常
+        100~350ms，带图片的副本可能到 ~1s），若不取消，用户在这段时间内关掉助手，已经发出的
         """
         on = bool(on)
         if on == self._enabled:

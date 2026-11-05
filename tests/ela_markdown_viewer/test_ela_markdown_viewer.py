@@ -4,7 +4,7 @@ from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QColor, QFont, QPalette, QTextLength, QTextTable
 from PyQt6ElaWidgetTools import ElaScrollBar, ElaThemeType, eTheme
 
-from pyqt6_ela_pro import ela_markdown_viewer as viewer_module
+from pyqt6_ela_pro.markdown_viewer import viewer as viewer_module
 from pyqt6_ela_pro.ela_markdown_viewer import _INLINE_CODE_MARK, ElaMarkdownViewer
 
 
@@ -168,7 +168,7 @@ class TestElaMarkdownViewerCodeStyle:
         assert cell.format().background().color() == v._code_bg
         cell_format = cell.format().toTableCellFormat()
         assert cell_format.topPadding() == 9
-        assert cell_format.leftPadding() == 14
+        assert cell_format.leftPadding() > 14  # 行号槽
         assert tables[0].format().topMargin() == 8
         assert tables[0].format().bottomMargin() == 8
 
@@ -178,7 +178,7 @@ class TestElaMarkdownViewerCodeStyle:
 
         frags = [f for f in _fragments(v) if f.text() == "code()"]
         assert len(frags) == 1
-        assert frags[0].charFormat().fontFamilies()[0] == v.codeFontFamily()
+        assert frags[0].charFormat().fontFamilies()[0] == v.codeLatinFontFamily()
         v.deleteLater()
 
     def test_inline_code_styled_and_content_preserved(self):
@@ -190,7 +190,7 @@ class TestElaMarkdownViewerCodeStyle:
         frags = [f for f in _fragments(v) if f.text() == "inl<x>()"]
         assert len(frags) == 1
         fmt = frags[0].charFormat()
-        assert fmt.fontFamilies()[0] == v.codeFontFamily()
+        assert fmt.fontFamilies()[0] == v.codeLatinFontFamily()
         assert fmt.fontFixedPitch() is True
         # Typora 风格：底色/圆角由自绘提供，字符格式只带标记属性
         assert fmt.property(_INLINE_CODE_MARK) is True
@@ -275,7 +275,7 @@ class TestElaMarkdownViewerThemeColors:
         v = ElaMarkdownViewer()
         v.setMarkdown("[link](https://example.com)")
 
-        theme = viewer_module._MD_THEMES["opencode"]
+        theme = viewer_module._MD_THEMES[v._md_theme]
         expected = QColor(
             theme["dark" if v._is_dark_theme else "light"]["semantic"]["link"]
         )
@@ -296,7 +296,7 @@ class TestElaMarkdownViewerThemeColors:
         v._onThemeChanged(ElaThemeType.ThemeMode.Dark)
 
         expected_link = QColor(
-            viewer_module._MD_THEMES["opencode"]["dark"]["semantic"]["link"]
+            viewer_module._MD_THEMES[v._md_theme]["dark"]["semantic"]["link"]
         )
         expected_code_bg = v._code_bg
         assert light_code_bg != expected_code_bg.name()
@@ -323,12 +323,12 @@ class TestElaMarkdownViewerTableStyle:
         assert fmt.borderCollapse() is True
         assert fmt.cellSpacing() == 0
 
-        # Typora（github.css）：全网格 1px + 单元格 6px 13px 内边距
+        # Bear / Ink：浅全网格 1px + 单元格 8px 12px 内边距
         cell = table.cellAt(1, 0).format().toTableCellFormat()
-        assert cell.topPadding() == 6
-        assert cell.bottomPadding() == 6
-        assert cell.leftPadding() == 13
-        assert cell.rightPadding() == 13
+        assert cell.topPadding() == 8
+        assert cell.bottomPadding() == 8
+        assert cell.leftPadding() == 12
+        assert cell.rightPadding() == 12
         assert cell.topBorder() == 1.0
         assert cell.bottomBorder() == 1.0
         assert cell.leftBorder() == 1.0
@@ -343,8 +343,8 @@ class TestElaMarkdownViewerTableStyle:
         table = _tables(v)[0]
         header = table.cellAt(0, 0).format()
         body = table.cellAt(1, 0).format()
-        assert header.background().color().alphaF() > 0
-        assert int(header.fontWeight()) == int(QFont.Weight.Bold)
+        assert header.background().style() == Qt.BrushStyle.NoBrush
+        assert int(header.fontWeight()) == int(QFont.Weight.DemiBold)
         assert body.background().style() == Qt.BrushStyle.NoBrush
         v.deleteLater()
 
@@ -352,15 +352,12 @@ class TestElaMarkdownViewerTableStyle:
 
         v = ElaMarkdownViewer()
         v.setMarkdown(self.MD)
-        light_header = v._table_header_bg.name(QColor.NameFormat.HexArgb)
+        light_border = v._table_border.name(QColor.NameFormat.HexArgb)
 
         v._onThemeChanged(ElaThemeType.ThemeMode.Dark)
 
-        dark_header = v._table_header_bg.name(QColor.NameFormat.HexArgb)
-        assert light_header != dark_header
-        table = _tables(v)[0]
-        header_bg = table.cellAt(0, 0).format().background().color()
-        assert header_bg.alphaF() > 0
+        dark_border = v._table_border.name(QColor.NameFormat.HexArgb)
+        assert light_border != dark_border
         v.deleteLater()
 
     def test_table_cell_alignment_preserved(self):
@@ -416,8 +413,8 @@ class TestElaMarkdownViewerBlockSpacing:
         before = v.document().findBlock(table.firstPosition() - 1)
         after = v.document().findBlock(table.lastPosition() + 1)
         # 间距加在表格外的相邻块上，避免把表头首格文字顶下来
-        assert before.blockFormat().bottomMargin() == 12
-        assert after.blockFormat().topMargin() == 12
+        assert before.blockFormat().bottomMargin() == 10
+        assert after.blockFormat().topMargin() == 10
         header = table.cellAt(0, 0).firstCursorPosition().block()
-        assert header.blockFormat().topMargin() != 12
+        assert header.blockFormat().topMargin() != 10
         v.deleteLater()

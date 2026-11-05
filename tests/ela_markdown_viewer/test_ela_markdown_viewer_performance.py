@@ -11,7 +11,10 @@ import random
 import pytest
 from PyQt6.QtTest import QTest
 
-from pyqt6_ela_pro import ela_markdown_viewer as viewer_module
+from pyqt6_ela_pro.markdown_viewer import code as code_module
+from pyqt6_ela_pro.markdown_viewer import paint as paint_module
+from pyqt6_ela_pro.markdown_viewer import syntax as syntax_module
+from pyqt6_ela_pro.markdown_viewer import viewer as viewer_module
 from pyqt6_ela_pro import math_lite
 from pyqt6_ela_pro.ela_markdown_viewer import ElaMarkdownViewer
 
@@ -31,7 +34,7 @@ class TestLongParagraphStreaming:
 
         assert v._stream_committed > 0
         tail = len(paragraph) - v._stream_committed
-        assert tail <= viewer_module._STREAM_SENTENCE_MAX
+        assert tail <= syntax_module._STREAM_SENTENCE_MAX
         v.endStream()
         v.deleteLater()
 
@@ -53,13 +56,13 @@ class TestLongParagraphStreaming:
 
     def test_blank_line_cut_still_prioritized(self):
         text = "第一段。\n\n第二段内容。"
-        assert viewer_module._stable_cut(text, 0, allow_sentence=True)[0] == len(
+        assert syntax_module._stable_cut(text, 0, allow_sentence=True)[0] == len(
             "第一段。\n\n"
         )
 
     def test_short_tail_not_force_cut(self):
         text = "很短的一段。"
-        assert viewer_module._stable_cut(text, 0, allow_sentence=True)[0] == 0
+        assert syntax_module._stable_cut(text, 0, allow_sentence=True)[0] == 0
 
 
 class TestStableCutIncremental:
@@ -88,10 +91,10 @@ class TestStableCutIncremental:
         committed = 0
         safe_from = 0
         for _ in range(60):
-            cut_inc, next_from = viewer_module._stable_cut(
+            cut_inc, next_from = syntax_module._stable_cut(
                 text, committed, allow_sentence, safe_from=safe_from
             )
-            cut_full, _ = viewer_module._stable_cut(
+            cut_full, _ = syntax_module._stable_cut(
                 text, committed, allow_sentence, safe_from=0
             )
             assert max(cut_inc, committed) == max(cut_full, committed), (
@@ -240,13 +243,13 @@ class TestCodeFontFamilyCache:
                 calls["n"] += 1
                 return ["Consolas"]
 
-        monkeypatch.setattr(viewer_module, "QFontDatabase", _FakeFontDatabase)
+        monkeypatch.setattr(code_module, "QFontDatabase", _FakeFontDatabase)
         # 强制走非 CJK 分支：中文系统不查全量字体族（见 test_md_cjk_fonts.py）
-        monkeypatch.setattr(viewer_module, "system_cjk_font_family", lambda: None)
-        monkeypatch.setattr(viewer_module, "_DEFAULT_CODE_FONT_FAMILY", None)
+        monkeypatch.setattr(code_module, "system_cjk_font_family", lambda: None)
+        monkeypatch.setattr(code_module, "_DEFAULT_CODE_FONT_FAMILY", None)
 
-        first = viewer_module._default_code_font_family()
-        second = viewer_module._default_code_font_family()
+        first = code_module._default_code_font_family()
+        second = code_module._default_code_font_family()
 
         assert first and first == second
         assert calls["n"] == 1
@@ -258,9 +261,9 @@ class TestLexerInstanceCache:
 
     def test_lexer_constructed_once_per_language(self, monkeypatch):
         pytest.importorskip("pygments")
-        monkeypatch.setattr(viewer_module, "_LEXER_CACHE", {})
+        monkeypatch.setattr(code_module, "_LEXER_CACHE", {})
         constructed = {"n": 0}
-        real_load = viewer_module._load_pygments
+        real_load = code_module._load_pygments
 
         def counting_load():
             pair = real_load()
@@ -274,7 +277,7 @@ class TestLexerInstanceCache:
 
             return counting_lexer, token_module
 
-        monkeypatch.setattr(viewer_module, "_load_pygments", counting_load)
+        monkeypatch.setattr(code_module, "_load_pygments", counting_load)
 
         v = ElaMarkdownViewer()
         # 三个**不同内容**的代码块 -> 高亮缓存不命中，必须真正走词法
@@ -313,6 +316,9 @@ class TestCodeGeometryCulling:
             pass
 
         def drawPath(self, *_args):
+            pass
+
+        def drawRoundedRect(self, *_args):
             pass
 
     @staticmethod
@@ -380,9 +386,9 @@ class TestCodeGeometryCulling:
         assert {b for b in v._code_buttons if b is not None} == v._code_button_widgets
         v.setMarkdown("```js\nlet a = 1;\n```")
         qapp.processEvents()
-        assert {b for b in v._code_buttons if b is not None} == v._code_button_widgets, (
-            "换文档后旧按钮没被回收"
-        )
+        assert {
+            b for b in v._code_buttons if b is not None
+        } == v._code_button_widgets, "换文档后旧按钮没被回收"
         assert all(b is None or not b.isVisible() for b in v._code_buttons)
         v.close()
         v.deleteLater()
@@ -399,7 +405,9 @@ class TestCodeGeometryCulling:
             qapp.processEvents()
         total = len(v._code_buttons_tables)
         assert total >= 60
-        assert len(v._code_buttons) == total, "按钮列表仍按下标与表对齐（离屏项为 None）"
+        assert len(v._code_buttons) == total, (
+            "按钮列表仍按下标与表对齐（离屏项为 None）"
+        )
         created = sum(1 for button in v._code_buttons if button is not None)
         assert 0 < created < 12, f"离屏代码块也建了按钮：{created}/{total}"
 
@@ -445,14 +453,14 @@ class TestCodeGeometryCulling:
     def test_stream_flush_reuses_buttons(self, qapp, monkeypatch):
         """流式每次 flush 不得全量重建按钮（旧实现 10 秒 2 万+ 控件创建）。"""
         created = []
-        real = viewer_module.FlatIconButton
+        real = paint_module.FlatIconButton
 
         class _Counting(real):
             def __init__(self, *args, **kwargs):
                 super().__init__(*args, **kwargs)
                 created.append(self)
 
-        monkeypatch.setattr(viewer_module, "FlatIconButton", _Counting)
+        monkeypatch.setattr(paint_module, "FlatIconButton", _Counting)
         v = ElaMarkdownViewer()
         v.resize(500, 400)
         v.show()

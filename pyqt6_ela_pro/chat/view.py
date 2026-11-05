@@ -52,11 +52,11 @@ from .session import ElaChatSessionStats
 from .store import ChatMessageStore
 from .virtualizer import ChatVirtualizer
 from .view_metrics import (
+    _CONTENT_MARGIN,
     _MESSAGE_SPACING,
+    _READING_MAX_WIDTH,
 )
 
-#: 滚动容器内容边距（左、上、右、下）
-_CONTENT_MARGIN = (10, 12, 10, 12)
 #: 交互 resize 延迟重排：停手多久后统一 reflow（毫秒）
 _RESIZE_REFLOW_DELAY_MS = 120
 #: 交互 resize 延迟重排的最小消息数（小会话保持实时 reflow）
@@ -75,8 +75,8 @@ _BATCH_RENDER_BUDGET_MS = 8
 _BATCH_EAGER_COUNT = 12
 #: 首屏渲染的时间上限（毫秒）：超过就把剩余消息留给懒加载，先把画面放出来
 _BATCH_EAGER_BUDGET_MS = 48
-#: 助手消息阅读宽度（像素，0 表示不限；宿主可 setContentMaxWidth 收紧）
-_CONTENT_MAX_WIDTH = 0
+#: 阅读列最大宽度（像素，0 表示不限；宿主可 setContentMaxWidth 调整）
+_CONTENT_MAX_WIDTH = _READING_MAX_WIDTH
 
 
 class ElaChatView(
@@ -275,6 +275,7 @@ class ElaChatView(
         self._scroll.verticalScrollBar().valueChanged.connect(self._on_scrolled)
         self._scroll.verticalScrollBar().rangeChanged.connect(self._on_range_changed)
         self._empty.suggestionClicked.connect(self.suggestionClicked)
+        self._apply_content_margins()
 
     def deleteLater(self) -> None:  # noqa: N802 (Qt 命名)
         """销毁前停掉全部子定时器：0ms 跟随定时器可能在 DeferredDelete 前触发。"""

@@ -104,9 +104,7 @@ class TestTableZebra:
         striped = table.cellAt(2, 0).format().background()
         assert striped.style() != Qt.BrushStyle.NoBrush
         assert striped.color().name() == v._table_stripe_bg.name()
-        assert table.cellAt(0, 0).format().background().color().name() == (
-            v._table_header_bg.name()
-        )
+        assert table.cellAt(0, 0).format().background().style() == Qt.BrushStyle.NoBrush
         v.deleteLater()
 
     def test_zebra_toggle_off(self):

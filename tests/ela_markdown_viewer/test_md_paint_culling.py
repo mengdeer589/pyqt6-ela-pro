@@ -262,7 +262,8 @@ class TestPaintIndex:
         viewer.setMarkdown("## 标题\n\n> 引用\n\n---\n\n正文\n")
         qapp.processEvents()
         viewer._ensure_paint_index()
-        assert len(viewer._paint_index_decorations) >= 3
+        # 引用竖线 + hr；Bear / Ink 标题不再画分隔线
+        assert len(viewer._paint_index_decorations) == 2
 
 
 class TestCodeCardCulling:

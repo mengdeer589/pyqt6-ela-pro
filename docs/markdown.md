@@ -1,13 +1,18 @@
 # Markdown 查看器（ElaMarkdownViewer）
 
 主题自适应的 Markdown 渲染控件，面向 AI 对话场景（流式追加，聊天助手消息复用它
-的嵌入模式）。本页是能力清单；API 细节见 `pyqt6_ela_pro/ela_markdown_viewer.py`
-的类 docstring，可运行示例见 `example/markdown_page.py`。
+的嵌入模式）。本页是能力清单；API 细节见 `pyqt6_ela_pro/markdown_viewer/viewer.py`
+的类 docstring，可运行示例见 `example/markdown_page.py`。示例页是长文阅读器：
+正文由单个查看器占满页面，主题 / 行号 / 折叠 / 缩放 / 搜索 / 流式重放收在右上角
+「阅读设置」`ElaDrawer` 中。
 
 ## 排版
 
-- 对齐 Typora 结构：标题层级字号阶梯、1.6 倍行高、引用块浅底色、无边框代码卡片、图片居中；
-- 表格斑马纹与列宽设置；
+- Bear / Ink 骨架：标题 1.5/1.3/1.15/1.05/1/1 阶梯、Medium/DemiBold 字重、
+  1.65 倍行高、标题上间距大于下间距、无 h1/h2 分隔线；
+- 引用块 3px 竖线 + muted 正文（不斜体、无底色）；表格浅 1px 网格、表头不加底色；
+- 代码卡浅 surface + 1px 边框 + 4px 圆角；行内代码浅底、无边框；图片居中；
+- 表格斑马纹（默认关闭）与列宽设置；
 - 任务列表可点击勾选；
 - `<details>` 折叠块；
 - YAML front matter 自动剥离；
@@ -29,10 +34,35 @@ viewer.missingGlyphFallbackEnabled()           # 查询
 其它 `QTextDocument` 组件可复用
 `pyqt6_ela_pro._internal.applyMissingGlyphFonts(document, family)`。
 
-## 配色主题
+## 主题（配色 + 排版）
 
-内置 4 套配色：`opencode`（默认）/ `github` / `solarized` / `dracula`，
-按当前浅 / 深主题自动取对应变体；每套含 `semantic`（8 个语义键）与 `syntax`（代码高亮）。
+内置 10 套主题，按当前浅 / 深主题自动取对应变体；每套含 `semantic`
+（8 个语义键）、`syntax`（代码高亮）与可选的 `layout` 排版覆盖。主题不仅换色，
+也会切换标题阶梯 / 字重 / 间距 / 引用 / 表格 / 代码样式；未写的 layout token
+继承 Bear / Ink 默认。
+
+| 主题 | 特征 |
+|---|---|
+| `bear` | 默认；墨色纸面、单一蓝链接、柔和排版 |
+| `lark` | 飞书文档；蓝色单强调、8px 节奏、2px 引用线 |
+| `typo` | Typo.css；细标题、青绿链接、1.8 行高、链接下划线 |
+| `vue` | Vue 文档；绿色强调、H2 下边框、表格斑马纹、橙色行内代码 |
+| `ayu` | 暖纸色 / 橙色强调；深色为 Ayu Mirage |
+| `solarized` | 经典 Solarized Light / Dark |
+| `indigo` | 紫蓝强调；H1/H2 左侧 6px + 底部边框、淡蓝引用底 |
+| `paper` | 暖纸底 + 衬线正文；820px 阅读列、12px 段距 |
+| `github` | GitHub Primer；980px、H1/H2 底边线、表头底色 |
+| `nord` | Nord 冷灰配色；不限宽、深色下更适合长时间代码阅读 |
+
+排版 token 除了标题 / 正文行高 / 引用 / 表格 / 代码外，还支持：
+
+- `body_font_family`：`""` 继承控件默认，`"serif"` 在中文系统优先宋体系、
+  其它系统回退 Georgia 等衬线字体，也可以直接写字体族名；
+- `content_max_width`：独立查看器的最大正文宽度（px，`0` = 不限）；居中留白，
+  嵌入聊天模式忽略，由聊天列控制；
+- `surface`：`{"light": ..., "dark": ...}`，覆盖查看器页面底色（`None` =
+  跟随 eTheme 的 `BasicPress`）；`paper` 用它实现暖纸底。
+
 颜色值接受 `#rgb` / `#rrggbb` / 具名色 / `rgb()` / `rgba()`（`setCodeTokenColors` 与
 `registerMarkdownTheme` 的自定义色同样支持）—— 库内统一过 `_colors.parse_color`。
 正文片段不写显式前景色（颜色由控件 palette 的 `Text` 提供、随主题切换）；
@@ -41,9 +71,9 @@ viewer.missingGlyphFallbackEnabled()           # 查询
 ```python
 from pyqt6_ela_pro import registerMarkdownTheme, setDefaultMarkdownTheme
 
-viewer.setMarkdownTheme("github")            # 切换当前实例
-registerMarkdownTheme("mine", light=..., dark=...)   # 注册自定义（同名覆盖）
-setDefaultMarkdownTheme("github")            # 改「之后新建实例」的默认主题
+viewer.setMarkdownTheme("lark")              # 切换当前实例
+registerMarkdownTheme("mine", light=..., dark=..., layout=...)   # 注册自定义
+setDefaultMarkdownTheme("typo")              # 改「之后新建实例」的默认主题
 ```
 
 ## GFM 与扩展语法
@@ -60,7 +90,13 @@ setDefaultMarkdownTheme("github")            # 改「之后新建实例」的默
 ## 代码块
 
 - 语法高亮与语言标签（可选依赖 `pygments`，缺失自动降级为纯文本）；
-- 悬停复制按钮；行号与超长折叠。
+- 悬停复制按钮；超长折叠；
+- 行号是**绘制层**：代码卡左侧预留行号槽，`setLineNumbersEnabled()` 只重绘，
+  不重渲染文档；行号不进入复制、搜索、`toPlainText()`、HTML 或 PDF；
+- 纯 ASCII 代码（行内 / 围栏）用 Consolas 一类 Latin 等宽字体；
+  含 CJK 的代码优先 `NSimSun`（单族 CJK 等宽，Win7 中文版自带），
+  没有时回退当前 CJK 字体。`setCodeFontFamily()` 可强制覆盖两者；
+  `codeFontFamily()` / `codeLatinFontFamily()` 分别查 CJK 安全字体与 ASCII 字体。
 
 ## 数学公式
 
@@ -91,7 +127,10 @@ setDefaultMarkdownTheme("github")            # 改「之后新建实例」的默
 ## 搜索 / 导出 / 打印
 
 - 文档内搜索与缩放；
-- `exportPdf(path, pageSize, marginsMm)` 与 `printDocument()`；
+- `exportPdf(path, *, pageSize, orientation, marginsMm, fontPointSize, lineSpacing,
+  pageNumbers, title, creator)`：字号 / 行距 / 方向 / 页边距 / 页码 / 元数据只影响
+  导出，不改屏幕；`fontPointSize=None` 表示沿用当前正文等效字号；
+- `printDocument()`；
 - `toHtml(embedImages=True)` 单文件导出（图片内嵌 data URI）。
 
 ## 引用回复与流式

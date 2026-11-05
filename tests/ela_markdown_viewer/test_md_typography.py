@@ -1,9 +1,9 @@
-"""Tests for Typora-style typography and the categorized example samples."""
+"""Tests for Bear / Ink typography and the categorized example samples."""
 
 from __future__ import annotations
 
 from PyQt6.QtCore import Qt
-from PyQt6.QtGui import QTextCursor, QTextFormat
+from PyQt6.QtGui import QFont, QTextCursor, QTextFormat
 
 from pyqt6_ela_pro.ela_markdown_viewer import ElaMarkdownViewer
 from pyqt6_ela_pro.example.markdown_page import (
@@ -52,7 +52,7 @@ class TestTypography:
         v.setMarkdown("正文段落")
 
         block = _blocks(v)[0]
-        assert block.blockFormat().lineHeight() == 160.0
+        assert block.blockFormat().lineHeight() == 165.0
         v.deleteLater()
 
     def test_heading_inline_format_keeps_uniform_size(self):
@@ -78,7 +78,7 @@ class TestTypography:
         v.deleteLater()
 
     def test_heading_uses_semantic_color(self):
-        """标题使用语义标题色（opencode TUI 调色板）。"""
+        """标题使用语义标题色（当前主题注册表）。"""
         v = ElaMarkdownViewer()
         v.setMarkdown("## 标题")
 
@@ -91,15 +91,15 @@ class TestTypography:
         v.deleteLater()
 
     def test_paragraph_bottom_margin(self):
-        """普通段落有下边距（Typora 0.8em ≈ 12px 段落节奏）。"""
+        """普通段落有下边距（Bear / Ink 的 10px 节奏）。"""
         v = ElaMarkdownViewer()
         v.setMarkdown("正文段落")
 
-        assert _blocks(v)[0].blockFormat().bottomMargin() == 12.0
+        assert _blocks(v)[0].blockFormat().bottomMargin() == 10.0
         v.deleteLater()
 
-    def test_table_full_grid(self):
-        """Typora 表格：单元格四边 1px 全网格 + 表头底色。"""
+    def test_table_light_grid_without_header_fill(self):
+        """Bear / Ink 表格：浅 1px 网格，表头不加底色、只用半粗体。"""
         v = ElaMarkdownViewer()
         v.setMarkdown("| a | b |\n| --- | --- |\n| 1 | 2 |")
 
@@ -111,11 +111,12 @@ class TestTypography:
             assert cell.bottomBorder() == 1.0
             assert cell.leftBorder() == 1.0
             assert cell.rightBorder() == 1.0
-        assert header.background().style() != Qt.BrushStyle.NoBrush
+        assert header.background().style() == Qt.BrushStyle.NoBrush
+        assert int(header.fontWeight()) == int(QFont.Weight.DemiBold)
         v.deleteLater()
 
-    def test_quote_rail_and_italic_text(self):
-        """opencode TUI 引用块：无底色、左侧竖线（自绘）、斜体引用色。"""
+    def test_quote_rail_without_italic(self):
+        """Bear / Ink 引用块：无底色、左侧竖线（自绘）、muted 正文。"""
         v = ElaMarkdownViewer()
         v.setMarkdown("> 引用内容")
 
@@ -128,7 +129,7 @@ class TestTypography:
         )
         color = cursor.charFormat().foreground().color()
         assert color.name() == v._md_quote_color.name()
-        assert cursor.charFormat().fontItalic()
+        assert not cursor.charFormat().fontItalic()
         v.deleteLater()
 
     def test_table_after_quote_keeps_header_single_block(self):

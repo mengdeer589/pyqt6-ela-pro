@@ -5,12 +5,14 @@ from __future__ import annotations
 
 from typing import Optional
 
+from PyQt6.QtCore import QMargins
 from PyQt6.QtWidgets import (
     QScrollBar,
 )
 
 from .view_metrics import (
     _BOTTOM_MARGIN,
+    _CONTENT_MARGIN,
     _FLOAT_MARGIN,
     _FOLLOW_HOLD_MS,
     _JUMP_MIN_DISTANCE,
@@ -88,9 +90,11 @@ class _ViewScrollMixin:
         super().resizeEvent(event)
         self._position_jump_button()
         self._on_view_resized(event.size().width())
+        self._apply_content_margins()
 
     def showEvent(self, event) -> None:  # noqa: N802 (Qt 命名)
         super().showEvent(event)
+        self._apply_content_margins()
         if self._virtual_list_mode:
             self._virtual_window_timer.start(0)
         self._schedule_suspension_update()
@@ -212,6 +216,26 @@ class _ViewScrollMixin:
         viewport_width = self._scroll.viewport().width()
         if viewport_width > 0 and self._content.width() != viewport_width:
             self._content.resize(viewport_width, self._content.height())
+        self._apply_content_margins()
+
+    def _apply_content_margins(self) -> None:
+        """按阅读列宽度居中内容（窄窗口自动收成基础边距）。"""
+        if self._resize_frozen_width > 0:
+            return
+        viewport_width = self._scroll.viewport().width()
+        container_width = self._content.width() or viewport_width
+        left, top, right, bottom = _CONTENT_MARGIN
+        extra = 0
+        max_width = self._content_max_width
+        if max_width > 0 and container_width > 0:
+            extra = max(0, (container_width - left - right - max_width) // 2)
+        margins = QMargins(left + extra, top, right + extra, bottom)
+        if self._content_layout.contentsMargins() == margins:
+            return
+        self._content_layout.setContentsMargins(
+            margins.left(), margins.top(), margins.right(), margins.bottom()
+        )
+        self._content_layout.activate()
 
     def _follow_bottom(self) -> None:
         """内容变化后跟随底部（用户已上滚 / 批量加载中不打扰）。"""
