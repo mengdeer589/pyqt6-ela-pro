@@ -112,9 +112,9 @@
   数据全由宿主
   提供，**不进 `ElaChatStats`**（那个字段的 `merge()` 是各步求和语义，上下文
   占用是当前值）
-- **会话统计（`view.sessionStats(limit=0)` → `ElaChatSessionStats`）** —
+- **会话统计（`view.sessionStats(contextWindow=0)` → `ElaChatSessionStats`）** —
   计数（总 / 用户 / 助手）、当前上下文的四路词元（输入 / 输出 / 推理 /
-  缓存读 + 写）与合计、使用率（给了 `limit` 时）、会话累计成本、最后活动时间；
+  缓存读 + 写）与合计、使用率（给了 `contextWindow` 时）、会话累计成本、最后活动时间；
   以及**工具调用统计**：`tool_calls`（总次数）、`tool_rounds`（轮数 = 有工具
   调用的步骤数，消息内按 `step` 去重）、`tool_errors` / `tool_aborted` /
   `tool_unsettled`（按状态分档，`unsettled` = pending + running）、

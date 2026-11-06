@@ -12,6 +12,7 @@ from PyQt6.QtGui import (
     QFontMetrics,
     QPaintEvent,
     QMouseEvent,
+    QKeyEvent,
 )
 from PyQt6.QtWidgets import QWidget
 
@@ -19,7 +20,7 @@ from PyQt6ElaWidgetTools import ElaThemeType, ElaIconType, ElaMenu
 
 from ._colors import state_tint
 from ._internal import is_deleted
-from ._styles import iconGlyph, paintRoundedCard
+from ._styles import coerceElaIcon, iconGlyph, paintRoundedCard
 from ._theme import text, textDisabled
 from .widget_base import ElaThemeWidget
 
@@ -42,7 +43,7 @@ class ElaDropDownButton(ElaThemeWidget):
         super().__init__(parent)
 
         self._text = text
-        self._icon = icon
+        self._icon = coerceElaIcon(icon)
         self._border_radius = 6
         self._menu: Optional[ElaMenu] = None
         self._is_hover = False
@@ -51,6 +52,7 @@ class ElaDropDownButton(ElaThemeWidget):
         self.setObjectName("ElaDropDownButton")
         self.setFixedHeight(_HEIGHT)
         self.setMouseTracking(True)
+        self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         self.setAttribute(Qt.WidgetAttribute.WA_Hover, True)
         self._icon_font = QFont("ElaAwesome")
         self._arrow_font = QFont("ElaAwesome")
@@ -64,7 +66,7 @@ class ElaDropDownButton(ElaThemeWidget):
         return self._text
 
     def setElaIcon(self, icon: ElaIconType.IconName) -> None:
-        self._icon = icon
+        self._icon = coerceElaIcon(icon)
         self.updateGeometry()
         self.update()
 
@@ -131,6 +133,20 @@ class ElaDropDownButton(ElaThemeWidget):
             self._is_pressed = True
             self.update()
         super().mousePressEvent(event)
+
+    def keyPressEvent(self, event: QKeyEvent) -> None:  # noqa: N802 (Qt 命名)
+        if self.isEnabled() and event.key() in (
+            Qt.Key.Key_Space,
+            Qt.Key.Key_Return,
+            Qt.Key.Key_Enter,
+            Qt.Key.Key_Down,
+        ):
+            menu = self._menu
+            if menu is not None and not is_deleted(menu):
+                menu.popup(self.mapToGlobal(QPoint(0, self.height())))
+            event.accept()
+            return
+        super().keyPressEvent(event)
 
     def mouseReleaseEvent(self, event: QMouseEvent) -> None:
         if event.button() == Qt.MouseButton.LeftButton:

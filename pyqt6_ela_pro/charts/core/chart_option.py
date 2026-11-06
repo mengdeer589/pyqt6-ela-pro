@@ -200,6 +200,8 @@ class _ChartOptionMixin:
                 return False
             if not math.isfinite(size) or size <= 0.0:
                 return False
+            if size > 4096.0:
+                return False
             patch["fontSize"] = int(size) if size.is_integer() else size
         if bold is not None:
             if not isinstance(bold, bool):
@@ -329,6 +331,7 @@ class _ChartOptionMixin:
 
         重建前会把 dataZoom / 图例 / 选中态写回 option，缩放窗口不会被打回初始值。
         """
+        self._ensure_alive()
         if not isinstance(patch, dict):
             return False
         index = self._series_option_index(seriesIndex, seriesName, seriesId)
@@ -834,6 +837,7 @@ class _ChartOptionMixin:
 
         无 dataZoom 组件时返回 ``False``；窗口最小 0.5%、最大 100%。
         """
+        self._ensure_alive()
         comp = self._component("dataZoom")
         if comp is None:
             return False
@@ -1058,6 +1062,13 @@ class _ChartOptionMixin:
 
     def _rebuild_components(self, opt: dict, series_opts: list) -> None:
         """重建交互 / 表达组件，并恢复 dataZoom 窗口与默认滚轮缩放。"""
+        # 用户一旦配了 dataZoom，自动创建的滚轮 inside 必须退场；否则它留在
+        # _host_components 里、永远排在最前，_component("dataZoom") / 滚轮 /
+        # dispatchAction 都会命中隐藏的 auto，而可见 slider 不动。
+        if opt.get("dataZoom"):
+            auto = self._auto_wheel_zoom()
+            if auto is not None:
+                self._drop_component(auto)
         # 丢弃旧组件前先 dispose（解挂事件过滤器 / 定时器），否则旧实例会继续
         # 拦截输入并用陈旧状态改坐标轴。
         old_zoom = self._component("dataZoom")

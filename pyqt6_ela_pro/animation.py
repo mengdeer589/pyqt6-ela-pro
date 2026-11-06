@@ -8,12 +8,24 @@ from typing import Callable, Optional
 from PyQt6.QtCore import QPropertyAnimation, QPoint
 from PyQt6.QtWidgets import QWidget
 from ._internal import is_deleted
-
 from ._internal import safe_call
 from ._motion import Duration, ElaMotionKindType, start_transition
 
 
 _animation_registry: weakref.WeakKeyDictionary = weakref.WeakKeyDictionary()
+
+
+def _registry_get(widget: QWidget):
+    return _animation_registry.get(widget)
+
+
+def _registry_set(widget: QWidget, animation: QPropertyAnimation) -> None:
+    _animation_registry[widget] = animation
+
+
+def _registry_drop(widget: QWidget, animation: QPropertyAnimation) -> None:
+    if _animation_registry.get(widget) is animation:
+        del _animation_registry[widget]
 
 
 def fade_in(widget: QWidget, duration: int = Duration.Normal) -> None:
@@ -25,23 +37,21 @@ def fade_in(widget: QWidget, duration: int = Duration.Normal) -> None:
         widget.setWindowOpacity(0)
         widget.show()
 
-    if widget in _animation_registry:
-        existing = _animation_registry[widget]
-        if existing and existing.state() == QPropertyAnimation.State.Running:
-            return
+    existing = _registry_get(widget)
+    if existing is not None and existing.state() == QPropertyAnimation.State.Running:
+        return
 
     animation = QPropertyAnimation(widget, b"windowOpacity")
     animation.setStartValue(0)
     animation.setEndValue(1)
+    widget_ref = weakref.ref(widget)
 
     def _cleanup():
-        if widget in _animation_registry and _animation_registry[widget] is animation:
-            del _animation_registry[widget]
+        w = widget_ref()
+        if w is not None:
+            _registry_drop(w, animation)
 
-    # 故意**不**连 widget.destroyed：它在 C++ 析构之后才发出，此时对已失效包装器
-    # 取哈希会触发 0xC0000005；lambda 捕获 widget 还会形成引用环。条目清理由
-    # WeakKeyDictionary 负责。
-    _animation_registry[widget] = animation
+    _registry_set(widget, animation)
     start_transition(animation, duration, on_complete=_cleanup)
 
 
@@ -54,23 +64,23 @@ def fade_out(
     ``on_finished`` 在动画结束后调用；``Disabled`` 模式下同步落终值并当场触发，
     所以「淡出后关窗」在三种模式下都成立。动画进行中再次调用会被忽略。
     """
-    if widget in _animation_registry:
-        existing = _animation_registry[widget]
-        if existing and existing.state() == QPropertyAnimation.State.Running:
-            return
+    existing = _registry_get(widget)
+    if existing is not None and existing.state() == QPropertyAnimation.State.Running:
+        return
 
     animation = QPropertyAnimation(widget, b"windowOpacity")
     animation.setStartValue(1)
     animation.setEndValue(0)
+    widget_ref = weakref.ref(widget)
 
     def _on_finished():
-        if widget in _animation_registry and _animation_registry[widget] is animation:
-            del _animation_registry[widget]
+        w = widget_ref()
+        if w is not None:
+            _registry_drop(w, animation)
         if on_finished is not None:
             safe_call(on_finished)
 
-    # 同 fade_in：不连 destroyed（理由同上）
-    _animation_registry[widget] = animation
+    _registry_set(widget, animation)
     start_transition(animation, duration, on_complete=_on_finished)
 
 

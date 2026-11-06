@@ -325,6 +325,15 @@ class TestSelectionPollSafety:
         m.sig.emit(7)
         assert got == [7]
 
+    def test_safe_connect_drops_extra_signal_args(self, qapp):
+        """零参槽接带参信号时必须像 PyQt 一样丢掉多余实参。"""
+
+        m = _Sig()
+        hits = []
+        safe_connect(m, "sig", lambda: hits.append(1), "zero")
+        m.sig.emit(7)
+        assert hits == [1]
+
     def test_library_uses_safe_connect(self):
         """库内部连接 monitor 信号时必须走 safe_connect。"""
 

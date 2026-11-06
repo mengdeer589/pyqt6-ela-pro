@@ -1,37 +1,21 @@
 """``pyqt6_ela_pro.chat``：ChatGPT 风格聊天组件。
 
-分层、持久化与后端接入见 ``docs/chat.md``。"""
+分层、持久化与后端接入见 ``docs/chat.md``。
+"""
 
-from ._json import backend as jsonBackend, dumps as jsonDumps, loads as jsonLoads
-from .binder import ElaChatStreamBinder, ElaChatTurnSummary
+from __future__ import annotations
+
+from importlib import import_module
+
 from .._diff import ElaDiffFile as ElaChatFileChange
 from .._diff import ElaDiffLine as ElaChatFileChangeLine
 from .._diff import diffLines as diffChatLines
 from .._diff import filesFromMetadata as chatFilesFromMetadata
 from .._diff import parseUnifiedDiff as parseChatDiff
-from .blocks import (
-    AttachmentStrip,
-    ContextToolGroupCard,
-    ElaChatAvatarSource,
-    ElaChatFileChanges,
-    ElaChatNotice,
-    ElaChatRetryCard,
-    ElaChatWorkingRow,
-    ErrorCard,
-    MessageActions,
-    MessageHeader,
-    MessageMeta,
-    ReasoningBlock,
-    StatsBadge,
-    ThinkingRow,
-    ToolCallCard,
-    ToolGroupPanel,
-    toolDefaultOpen,
-    toolDefaultOpenCoding,
-)
-from .bubble import DISCLAIMER_TEXT, ElaChatBubble
-from .docks import ElaChatInputDock, ElaChatPermissionDock, ElaChatQueueDock
-from .input import ElaChatInput
+from ._json import backend as jsonBackend, dumps as jsonDumps, loads as jsonLoads
+from ._pricing import ModelPricing, cost_from_parts, formatCost, stats_cost
+from .binder import ElaChatStreamBinder, ElaChatTurnSummary
+from .journal import JOURNAL_VERSION, ElaChatTurnJournal
 from .message import (
     SCHEMA_VERSION,
     ElaChatAttachment,
@@ -51,16 +35,8 @@ from .message import (
     ElaChatToolCall,
     ElaChatToolStatusType,
 )
-from .timeline_detail import (
-    DEFAULT_TIMELINE_DETAIL,
-    ElaChatDetailDepthType,
-    ElaChatDetailPlacementType,
-    ElaChatDetailSection,
-    ElaChatTimelineDetail,
-)
-from ._pricing import ModelPricing, cost_from_parts, formatCost, stats_cost
-from .journal import JOURNAL_VERSION, ElaChatTurnJournal
 from .mock import ElaChatMockBackend, ElaChatMockChunk, ElaChatMockUsage
+from .prompt_history import ElaChatPromptHistory
 from .renderers import (
     ToolRendererFactory,
     ToolRenderContext,
@@ -72,21 +48,57 @@ from .renderers import (
     toolRendererNames,
     unregisterToolRenderer,
 )
-from .renderers_builtin import (
-    cleanAnsi,
-    installBuiltinToolRenderers,
-    uninstallBuiltinToolRenderers,
-)
-from .prompt_history import ElaChatPromptHistory
-from .search import ElaChatSearchBar, ElaChatSearchHit
-from .selector import ElaChatSelector, ElaChatSelectorItem
 from .session import SESSION_SCHEMA_VERSION, ElaChatSessionInfo, ElaChatSessionStats
-from .status import ElaChatStatusBar
-from .suggestions import ElaChatSuggestion, SuggestionPopup
-from .toolbar import ElaChatToolBar, ElaChatToolButton
-from .view import ElaChatView
-from .widget import ElaChatWidget
+from .timeline_detail import (
+    DEFAULT_TIMELINE_DETAIL,
+    ElaChatDetailDepthType,
+    ElaChatDetailPlacementType,
+    ElaChatDetailSection,
+    ElaChatTimelineDetail,
+)
 from .worker import ElaChatAsyncWorker
+
+#: 纯 UI / 内部块：首次访问属性时再导入，数据模型与后端保持轻量。
+_LAZY_MODULES = {
+    "widget": ("ElaChatWidget",),
+    "view": ("ElaChatView",),
+    "input": ("ElaChatInput",),
+    "bubble": ("ElaChatBubble", "DISCLAIMER_TEXT"),
+    "blocks": (
+        "AttachmentStrip",
+        "ContextToolGroupCard",
+        "ElaChatAvatarSource",
+        "ElaChatFileChanges",
+        "ElaChatNotice",
+        "ElaChatRetryCard",
+        "ElaChatWorkingRow",
+        "ErrorCard",
+        "MessageActions",
+        "MessageHeader",
+        "MessageMeta",
+        "ReasoningBlock",
+        "StatsBadge",
+        "ThinkingRow",
+        "ToolCallCard",
+        "ToolGroupPanel",
+        "toolDefaultOpen",
+        "toolDefaultOpenCoding",
+    ),
+    "docks": ("ElaChatInputDock", "ElaChatPermissionDock", "ElaChatQueueDock"),
+    "search": ("ElaChatSearchBar", "ElaChatSearchHit"),
+    "selector": ("ElaChatSelector", "ElaChatSelectorItem"),
+    "suggestions": ("ElaChatSuggestion", "SuggestionPopup"),
+    "status": ("ElaChatStatusBar",),
+    "toolbar": ("ElaChatToolBar", "ElaChatToolButton"),
+    "renderers_builtin": (
+        "cleanAnsi",
+        "installBuiltinToolRenderers",
+        "uninstallBuiltinToolRenderers",
+    ),
+}
+_LAZY_ATTRS = {
+    name: module for module, names in _LAZY_MODULES.items() for name in names
+}
 
 __all__ = [
     "ElaChatWidget",
@@ -102,9 +114,6 @@ __all__ = [
     "ElaChatPermissionStatusType",
     "ElaChatMention",
     "ElaChatNoticeType",
-    "ElaChatNotice",
-    "ElaChatRetryCard",
-    "ElaChatWorkingRow",
     "ElaChatDetailDepthType",
     "ElaChatDetailPlacementType",
     "ElaChatDetailSection",
@@ -151,20 +160,6 @@ __all__ = [
     "ElaChatRoleType",
     "ElaChatStatusType",
     "ElaChatReasoningStyleType",
-    "ElaChatAvatarSource",
-    "MessageHeader",
-    "MessageMeta",
-    "ReasoningBlock",
-    "ThinkingRow",
-    "ToolCallCard",
-    "ContextToolGroupCard",
-    "ToolGroupPanel",
-    "AttachmentStrip",
-    "StatsBadge",
-    "MessageActions",
-    "ErrorCard",
-    "toolDefaultOpen",
-    "toolDefaultOpenCoding",
     "registerToolRenderer",
     "unregisterToolRenderer",
     "toolRenderer",
@@ -183,3 +178,16 @@ __all__ = [
     "jsonLoads",
     "jsonBackend",
 ]
+
+
+def __getattr__(name: str):
+    module_name = _LAZY_ATTRS.get(name)
+    if module_name is None:
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+    value = getattr(import_module(f"{__name__}.{module_name}"), name)
+    globals()[name] = value
+    return value
+
+
+def __dir__():
+    return sorted(set(globals()) | set(_LAZY_ATTRS))

@@ -16,7 +16,7 @@ from .._utils import to_float as _utils_to_float, warn_once
 from .._utils import parse_color
 
 _EXTENT_CACHE: dict = {}
-_EXTENT_CACHE_LIMIT = 64
+_EXTENT_CACHE_LIMIT = 16
 _MAX_TICKS = 2000
 _MAX_SEGMENTS = 200
 _MAX_DATE_YEAR = 9999
@@ -75,6 +75,9 @@ def chartFont(
     px_value = _to_float(px, T("font.xs"))
     if px_value is None or not math.isfinite(px_value) or px_value <= 0:
         px_value = float(T("font.xs"))
+    # 上限保护：QFont.setPixelSize 超过 int32 会抛 OverflowError，从 resize /
+    # paint 回调穿出就是 0xC0000409；4096 已远超任何可读字号。
+    px_value = min(px_value, 4096.0)
     font.setPixelSize(max(1, int(round(px_value))))
     if weight:
         try:

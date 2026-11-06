@@ -146,6 +146,18 @@ class _ChartPaintMixin:
         # 记录需复原的状态：notMerge 会重置图例选中态并重新起动画，测量后要还原。
         was_anim = self.anim.isRunning()
         saved_state = dict(self._series_state)
+        saved_item_state = dict(self._item_state)
+        saved_selection = {key: set(value) for key, value in self._selection.items()}
+        saved_zooms = [
+            (
+                getattr(comp, "start", 0.0),
+                getattr(comp, "end", 100.0),
+                getattr(comp, "y_start", 0.0),
+                getattr(comp, "y_end", 100.0),
+            )
+            for comp in self._components
+            if getattr(comp, "optionKey", "") == "dataZoom"
+        ]
         # notMerge 会 tooltip.hide()；tooltip 自身持有全部状态，留引用即可复原。
         saved_tip = (
             self.tooltip,
@@ -179,6 +191,32 @@ class _ChartPaintMixin:
         finally:
             # 复原图例选中态与悬浮提示（``notMerge`` 会清空两者）
             self._series_state = dict(saved_state)
+            self._item_state = dict(saved_item_state)
+            self._selection = {
+                key: set(value) for key, value in saved_selection.items()
+            }
+            hidden = {
+                str(item) for item, shown in self._item_state.items() if not shown
+            }
+            for renderer in self._series:
+                setter = getattr(renderer, "setHiddenItems", None)
+                if callable(setter):
+                    try:
+                        setter(hidden)
+                    except Exception:
+                        pass
+            zooms = [
+                comp
+                for comp in self._components
+                if getattr(comp, "optionKey", "") == "dataZoom"
+            ]
+            for comp, (start, end, y_start, y_end) in zip(zooms, saved_zooms):
+                comp.start, comp.end = start, end
+                comp.y_start, comp.y_end = y_start, y_end
+                try:
+                    comp.apply()
+                except Exception:
+                    pass
             tip, was_active, pos, lines, marker = saved_tip
             if was_active:
                 tip.showAt(pos, list(lines), marker)
@@ -354,9 +392,18 @@ class _ChartPaintMixin:
 
     def resizeEvent(self, event) -> None:
         super().resizeEvent(event)
-        if self._annotation_editor is not None and self._annotation_editor.isVisible():
-            self._hide_annotation_editor()
-        self._layout_all()
+        try:
+            if (
+                self._annotation_editor is not None
+                and self._annotation_editor.isVisible()
+            ):
+                self._hide_annotation_editor()
+            self._layout_all()
+        except Exception as exc:  # noqa: BLE001 —— Qt 回调异常不能穿出
+            warn_once(
+                warn_key("resize-layout", type(exc).__name__),
+                f"resize 布局异常（已跳过本帧）: {exc!r}",
+            )
         self.update()
 
     def paintEvent(self, event) -> None:
@@ -525,10 +572,11 @@ class _ChartPaintMixin:
         self._series_pixmap_cache = None
         self._series_pixmap_key = None
 
-    def _paint_content(self, p: QPainter) -> None:
+    def _paint_content(self, p: QPainter, *, use_series_cache: bool = True) -> None:
         """内容绘制体（坐标轴 → 系列 → 组件 → 图例/标题/提示框/遮罩）。
         从 ``paintEvent`` 抽出，供 ``benchmark`` 画到离屏 QImage；绘制顺序不可
-        调换（画家算法）。
+        调换（画家算法）。SVG 导出传 ``use_series_cache=False``，否则系列层
+        会把整幅位图贴进矢量文件。
         """
         p.setRenderHint(QPainter.RenderHint.TextAntialiasing)
         t = self.anim.t
@@ -542,7 +590,10 @@ class _ChartPaintMixin:
                     f"coord-paint:{c.__class__.__name__}",
                     f"坐标绘制异常（{c.__class__.__name__}）: {exc!r}",
                 )
-        self._paint_series_cached(p, t)
+        if use_series_cache:
+            self._paint_series_cached(p, t)
+        else:
+            self._paint_series(p, t)
         for comp in self._components:
             paint = getattr(comp, "paint", None)
             if callable(paint):

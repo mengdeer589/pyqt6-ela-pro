@@ -20,6 +20,7 @@ from PyQt6ElaWidgetTools import (
     ElaIconType,
 )
 
+from ..._internal import safe_connect
 from ...ela_chip import ElaChip
 from ...tooltips import ElaToolTipPositionType, set_tooltip
 from ...widget_base import ElaThemeWidget
@@ -308,14 +309,26 @@ class AttachmentStrip(ElaThemeWidget):
                 card.clicked.connect(
                     lambda a=attachment: self.attachmentClicked.emit(a.path or a.name)
                 )
-                card.removed.connect(lambda a=attachment: self._on_card_removed(a))
+                safe_connect(
+                    card,
+                    "removed",
+                    lambda a=attachment: self._on_card_removed(a),
+                    "attachments.remove_image",
+                    receiver=card,
+                )
                 card.setToolTip(tooltip)
                 return card
         chip = ElaChip(self._chip_text(attachment), self)
         chip.setClosable(True)
         chip.setToolTip(tooltip)
         set_tooltip(chip, tooltip, ElaToolTipPositionType.Top)
-        chip.closed.connect(lambda a=attachment: self._on_card_removed(a))
+        safe_connect(
+            chip,
+            "closed",
+            lambda a=attachment: self._on_card_removed(a),
+            "attachments.remove_chip",
+            receiver=chip,
+        )
         chip.clicked.connect(
             lambda a=attachment: self.attachmentClicked.emit(a.path or a.name)
         )

@@ -116,7 +116,7 @@ class ChartExporter:
             try:
                 self._paint_backgrounds(painter, width, height, {})
                 chart._layout_all()
-                chart._paint_content(painter)
+                chart._paint_content(painter, use_series_cache=False)
             finally:
                 painter.end()
             return target

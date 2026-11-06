@@ -7,7 +7,7 @@ from typing import Callable, Optional
 from PyQt6.QtGui import QColor
 
 from ._tokens import T
-from .model import ElaBlueprintNode
+from .model import ElaBlueprintNode, _as_bool
 
 logger = logging.getLogger(__name__)
 
@@ -287,14 +287,14 @@ class ElaNodeRegistry:
                 pd["id"],
                 pd.get("name"),
                 pd.get("data_type", "any"),
-                bool(pd.get("multi", False)),
+                _as_bool(pd.get("multi", False)),
             )
         for pd in spec.outputs:
             node.add_output(
                 pd["id"],
                 pd.get("name"),
                 pd.get("data_type", "any"),
-                bool(pd.get("multi", False)),
+                _as_bool(pd.get("multi", False)),
             )
         return node
 

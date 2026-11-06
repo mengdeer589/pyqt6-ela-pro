@@ -49,7 +49,9 @@ class _HangingSetupWorker(ElaChatAsyncWorker):
     async def _setup(self) -> None:
         await asyncio.sleep(3600)
 
-    def _stream_turn(self, prompt: str, attachments: list):  # pragma: no cover - 不会走到
+    def _stream_turn(
+        self, prompt: str, attachments: list
+    ):  # pragma: no cover - 不会走到
         async def gen():
             yield {}
 
@@ -208,7 +210,7 @@ class TestWorkerSubmitNeverRaises:
         _spin(400)
         assert worker.ask("hi") is not None
         worker.shutdown()
-        _spin(50)
+        assert worker.waitForShutdown(1500)
         assert worker.ask("again") is None
 
     def test_closed_loop_returns_none_instead_of_raising(self, qapp, make):

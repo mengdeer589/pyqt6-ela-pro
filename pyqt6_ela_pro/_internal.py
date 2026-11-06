@@ -6,9 +6,12 @@
 
 from __future__ import annotations
 
+import inspect
+import logging
 import sys
 import traceback
 import unicodedata
+import warnings
 from functools import wraps
 from typing import Any, Callable, Optional, Protocol, TypeVar, runtime_checkable
 
@@ -32,9 +35,13 @@ from PyQt6ElaWidgetTools import ElaThemeType, eTheme
 #: ``QWIDGETSIZE_MAX``（Qt5 的绑定从 QtWidgets 导出）；Qt6 的 PyQt6 / PySide6 都已移除，本地定义。
 WIDGET_SIZE_MAX = 16777215
 
+logger = logging.getLogger(__name__)
+
 __all__ = [
     "single_shot_on",
     "catch_error",
+    "guard_callback",
+    "safe_connect",
     "connect_theme_signal",
     "disconnect_theme",
     "disconnect_theme_signal",
@@ -249,9 +256,7 @@ def applyMissingGlyphFonts(
                     break
                 next_position = found.selectionEnd()
                 found.mergeCharFormat(char_format)
-                cursor.setPosition(
-                    min(next_position, document.characterCount() - 1)
-                )
+                cursor.setPosition(min(next_position, document.characterCount() - 1))
                 if next_position >= document.characterCount() - 1:
                     break
             applied += 1
@@ -275,12 +280,19 @@ def single_shot_on(ctx: QObject, msec: int, slot) -> QTimer:
 
     不要用 ``QTimer.singleShot(ms, callable)``：它没有接收方，控件销毁后回调
     会在 Qt 回调链上炸（0xC0000409）。``ctx`` 的寿命必须覆盖整个延时窗口。
+    槽异常在连接侧吞掉；定时器触发后自行 ``deleteLater``，不会把闭包留在
+    ``ctx`` 上。返回的定时器只用于提前 ``stop()``，触发后不可再访问。
 
     :returns: 该定时器（取消时自行 ``stop()``）
     """
     timer = QTimer(ctx)
     timer.setSingleShot(True)
-    timer.timeout.connect(slot)
+
+    def _invoke() -> None:
+        timer.deleteLater()
+        slot()
+
+    safe_connect(timer, "timeout", _invoke, "single_shot_on", receiver=timer)
     timer.start(int(msec))
     return timer
 
@@ -299,6 +311,142 @@ def catch_error(func: F) -> F:
             return None
 
     return wrapper  # type: ignore
+
+
+def _slot_arity(slot: Callable[..., Any]) -> Optional[int]:
+    """槽能接受的最大位置参数个数（``None`` = 不限 / 无法判断）。
+
+    Qt 信号只按自己的签名发参数，PyQt 会自动丢掉槽不需要的多余实参；连接侧
+    包装器必须复刻这个行为，否则 ``clicked(bool)`` 会把零参方法打崩。
+    """
+    try:
+        parameters = inspect.signature(slot).parameters.values()
+    except (TypeError, ValueError):
+        return None
+    count = 0
+    for parameter in parameters:
+        if parameter.kind in (
+            inspect.Parameter.POSITIONAL_ONLY,
+            inspect.Parameter.POSITIONAL_OR_KEYWORD,
+        ):
+            count += 1
+        elif parameter.kind is inspect.Parameter.VAR_POSITIONAL:
+            return None
+    return count
+
+
+def _trim_args(arity: Optional[int], args):
+    if arity is not None and len(args) > arity:
+        return args[:arity]
+    return args
+
+
+def guard_callback(callback: Callable[..., Any], label: str = "") -> Callable[..., Any]:
+    """把回调包成「异常不穿过 Qt/C++ 边界」的形状（无 QObject 接收者时用）。
+
+    Qt 回调里未捕获的异常会直接 ``abort()``（0xC0000409），且不会传回
+    ``emit()`` 调用方；连接非 QObject 槽时必须在连接侧包好。
+    """
+    name = label or getattr(callback, "__name__", repr(callback))
+    arity = _slot_arity(callback)
+
+    def guarded(*args, **kwargs):
+        try:
+            return callback(*_trim_args(arity, args), **kwargs)
+        except Exception:  # noqa: BLE001 —— 槽异常绝不能逃逸
+            logger.debug("%s 回调异常（已忽略）", name, exc_info=True)
+            return None
+
+    guarded.__name__ = "guarded_%s" % name
+    return guarded
+
+
+_SAFE_CONNECT_WARNED: set = set()
+
+
+class _GuardedSlot(QObject):
+    """槽包装器（QObject 接收者）：随接收者销毁自动断开，避免悬空回调。"""
+
+    def __init__(self, receiver, slot, name: str) -> None:
+        super().__init__(receiver)
+        self._slot = slot
+        self._name = name
+        self._arity = _slot_arity(slot)
+
+    def handle(self, *args, **kwargs):
+        try:
+            return self._slot(*_trim_args(self._arity, args), **kwargs)
+        except Exception as exc:  # noqa: BLE001 —— 槽异常绝不能逃逸
+            key = (self._name, type(exc))
+            if key not in _SAFE_CONNECT_WARNED:
+                _SAFE_CONNECT_WARNED.add(key)
+                warnings.warn(
+                    f"{self._name} 槽异常（已忽略）：{type(exc).__name__}: {exc}",
+                    RuntimeWarning,
+                    stacklevel=3,
+                )
+            return None
+
+
+def safe_connect(obj, signal_name, slot, label: str = "", *, receiver=None) -> None:
+    """连接受保护槽：槽内异常只告警一次，不会穿过 Qt 边界终止进程。
+
+    PyQt6 中槽抛出的异常不会传播给 ``signal.emit()`` 调用方，而是在 Qt 回调
+    边界直接 abort（0xC0000409）；唯一有效防线是在连接侧包装槽。
+
+    :param obj: 拥有信号的对象；``signal_name`` 也可直接传信号对象
+    :param signal_name: 信号名或信号对象
+    :param slot: 槽（可调用）
+    :param label: 告警标签（默认取槽的 ``__name__``）
+    :param receiver: 接收者（默认从绑定方法推断）；QObject 接收者会获得一个
+        子包装器，接收者销毁时 Qt 自动断开，避免包装器比 Qt 连接活得更久
+    """
+    name = label or getattr(slot, "__name__", repr(slot))
+    arity = _slot_arity(slot)
+    owner = receiver if receiver is not None else getattr(slot, "__self__", None)
+    signal = getattr(obj, signal_name) if isinstance(signal_name, str) else signal_name
+    if owner is None and isinstance(obj, QObject):
+        # 匿名 lambda 没有绑定接收者：把包装器挂到信号发送者上，随发送者销毁断开。
+        owner = obj
+
+    if isinstance(owner, QObject):
+        try:
+            if is_deleted(owner):
+                return None
+        except (RuntimeError, TypeError):
+            return None
+        guard = _GuardedSlot(owner, slot, name)
+        slots = getattr(owner, "_safe_connect_slots", None)
+        if slots is None:
+            slots = []
+            setattr(owner, "_safe_connect_slots", slots)
+        slots.append(guard)
+        signal.connect(guard.handle)
+        return None
+
+    def guarded(*args, **kwargs):
+        if owner is not None:
+            try:
+                if is_deleted(owner):
+                    return None
+            except (RuntimeError, TypeError):
+                return None
+        try:
+            return slot(*_trim_args(arity, args), **kwargs)
+        except Exception as exc:  # noqa: BLE001 —— 槽异常绝不能逃逸
+            key = (name, type(exc))
+            if key not in _SAFE_CONNECT_WARNED:
+                _SAFE_CONNECT_WARNED.add(key)
+                warnings.warn(
+                    f"{name} 槽异常（已忽略）：{type(exc).__name__}: {exc}",
+                    RuntimeWarning,
+                    stacklevel=3,
+                )
+            return None
+
+    guarded.__name__ = f"guarded_{name}"
+    signal.connect(guarded)
+    return None
 
 
 def disconnect_theme_signal(slot: Callable[[Any], None]) -> None:
@@ -426,7 +574,10 @@ def _make_theme_slot(obj, slot: Optional[Callable[[Any], None]] = None):
         if not alive:
             disconnect_theme_signal(_slot)
             return
-        slot(mode)
+        try:
+            slot(mode)
+        except Exception:  # noqa: BLE001 —— 主题槽异常不能穿出 Qt
+            logger.debug("主题槽异常（已忽略）", exc_info=True)
 
     return _slot
 

@@ -15,7 +15,7 @@ from PyQt6ElaWidgetTools import (
     eTheme,
 )
 
-from .._internal import _ThemeAwareMixin
+from .._internal import _ThemeAwareMixin, safe_connect
 from .._styles import ColorText
 from .._theme import text as text_color, textMuted
 
@@ -67,8 +67,13 @@ class ElaChatSearchBar(_ThemeAwareMixin, QWidget):
         self._edit.setPlaceholderText("在对话中查找…")
         self._edit.setIsClearButtonEnable(True)
         self._edit.setFixedHeight(SEARCH_BAR_HEIGHT)
-        self._edit.textChanged.connect(self._on_text_changed)
-        self._edit.returnPressed.connect(self.nextRequested.emit)
+        safe_connect(self._edit, "textChanged", self._on_text_changed, "search.text")
+        safe_connect(
+            self._edit,
+            "returnPressed",
+            lambda *_: self.nextRequested.emit(),
+            "search.return",
+        )
         self._count_label = ColorText(self)
         self._count_label.setTextFormat(Qt.TextFormat.PlainText)
         self._prev = ElaIconButton(ElaIconType.IconName.ChevronUp, 12, 20, 20, self)
@@ -80,9 +85,24 @@ class ElaChatSearchBar(_ThemeAwareMixin, QWidget):
         self._prev.setToolTip("上一个")
         self._next.setToolTip("下一个")
         self._close.setToolTip("关闭")
-        self._prev.clicked.connect(self.prevRequested)
-        self._next.clicked.connect(self.nextRequested)
-        self._close.clicked.connect(self.closeBar)
+        safe_connect(
+            self._prev,
+            "clicked",
+            lambda *_: self.prevRequested.emit(),
+            "search.prev",
+        )
+        safe_connect(
+            self._next,
+            "clicked",
+            lambda *_: self.nextRequested.emit(),
+            "search.next",
+        )
+        safe_connect(
+            self._close,
+            "clicked",
+            lambda *_: self.closeBar(),
+            "search.close",
+        )
         layout.addWidget(self._edit, 1)
         layout.addWidget(self._count_label)
         layout.addWidget(self._prev)
@@ -91,7 +111,7 @@ class ElaChatSearchBar(_ThemeAwareMixin, QWidget):
         self._timer = QTimer(self)
         self._timer.setSingleShot(True)
         self._timer.setInterval(SEARCH_DEBOUNCE_MS)
-        self._timer.timeout.connect(self._emit_query)
+        safe_connect(self._timer, "timeout", self._emit_query, "search.debounce")
         self.hide()
         self._apply_theme()
 

@@ -61,6 +61,12 @@ if pg is not None:
             """``addPlot`` 的别名。"""
             return self.addPlot(*args, **kwargs)
 
+        def addPlot(self, *args, **kwargs) -> pg.PlotItem:
+            """创建 PlotItem 后立即套用当前主题的轴/文字颜色。"""
+            item = super().addPlot(*args, **kwargs)
+            self._style_plot(item)
+            return item
+
         def setStyleParams(self, **kwargs) -> None:
             """额外的 pyqtgraph 全局配置（转发 ``setConfigOptions``）。
             **进程级副作用**：改的是 pyqtgraph 的全局配置，影响宿主**所有**
@@ -74,6 +80,25 @@ if pg is not None:
             is_dark = self._theme_mode == ElaThemeType.ThemeMode.Dark
             theme = _DARK_THEME if is_dark else _LIGHT_THEME
             self.setBackground(theme["background"])
+            try:
+                items = list(self.ci.items)
+            except Exception:
+                return
+            for item in items:
+                if isinstance(item, pg.PlotItem):
+                    self._style_plot(item)
+
+        def _style_plot(self, item) -> None:
+            """轴/标签颜色跟随主题；背景由 ``setBackground`` 统一处理。"""
+            is_dark = self._theme_mode == ElaThemeType.ThemeMode.Dark
+            theme = _DARK_THEME if is_dark else _LIGHT_THEME
+            for name in ("left", "bottom", "right", "top"):
+                try:
+                    axis = item.getAxis(name)
+                    axis.setPen(pg.mkPen(theme["axis"]))
+                    axis.setTextPen(pg.mkPen(theme["label"]))
+                except Exception:
+                    continue
 
         def _onThemeChanged(self, mode: ElaThemeType.ThemeMode) -> None:
             self._theme_mode = mode

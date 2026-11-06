@@ -11,7 +11,7 @@ from PyQt6.QtWidgets import QWidget
 
 from PyQt6ElaWidgetTools import eTheme, ElaThemeType, ElaIconType
 
-from ._styles import iconGlyph
+from ._styles import coerceElaIcon, iconGlyph
 from ._theme import ElaStatusRoleType, statusColor
 from .widget_base import ElaThemeWidget
 
@@ -58,13 +58,13 @@ class ElaInfoBadge(ElaThemeWidget):
             self._value = value
         elif icon is not None:
             self._badge_mode = self.ElaBadgeModeType.Icon
-            self._icon = icon
+            self._icon = coerceElaIcon(icon)
 
     # ── Public API ────────────────────────────────────────
 
     def setBadgeMode(self, mode: int) -> None:
         self._badge_mode = mode
-        self._updateGeometry()
+        self._relayout()
         self.update()
 
     def badgeMode(self) -> int:
@@ -72,7 +72,7 @@ class ElaInfoBadge(ElaThemeWidget):
 
     def setValue(self, value: int) -> None:
         self._value = value
-        self._updateGeometry()
+        self._relayout()
         self.update()
 
     def value(self) -> int:
@@ -81,13 +81,15 @@ class ElaInfoBadge(ElaThemeWidget):
     def setMaxValue(self, max_value: int) -> None:
         """超出上限时显示 ``{max_value}+``。"""
         self._max_value = max_value
+        self._relayout()
         self.update()
 
     def maxValue(self) -> int:
         return self._max_value
 
     def setElaIcon(self, icon: ElaIconType.IconName) -> None:
-        self._icon = icon
+        self._icon = coerceElaIcon(icon)
+        self._relayout()
         self.update()
 
     def elaIcon(self) -> ElaIconType.IconName:
@@ -139,6 +141,11 @@ class ElaInfoBadge(ElaThemeWidget):
     def _updateGeometry(self) -> None:
         self.updateGeometry()
         self.adjustSize()
+
+    def _relayout(self) -> None:
+        """尺寸变化后重新贴到目标右上角（宽度变化时不能只往下挪）。"""
+        self._updateGeometry()
+        self._updatePosition()
 
     def _updatePosition(self) -> None:
         if self._target:

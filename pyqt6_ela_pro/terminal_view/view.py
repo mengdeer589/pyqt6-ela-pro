@@ -137,6 +137,8 @@ _GUTTER_MIN_WIDTH = 46
 #: 搜索命中高亮色（向背景混合）
 _HIGHLIGHT = QColor("#ffcf4d")
 _HIGHLIGHT_RATIO = 0.45
+#: 格式缓存上限：truecolor 输出可产生近乎无限的唯一样式
+_FORMAT_CACHE_LIMIT = 512
 
 
 class _TerminalCard(QWidget):
@@ -480,6 +482,7 @@ class ElaTerminalView(ElaThemeWidget):
         self._glyph_guard_pos = 0
         self._match_index = []
         self._match_pos = -1
+        self._format_cache.clear()
         self._edit.clear()
         self._update_match_label()
         self.cleared.emit()
@@ -1188,6 +1191,8 @@ class ElaTerminalView(ElaThemeWidget):
             fmt.setFontUnderline(True)
         if style.strike:
             fmt.setFontStrikeOut(True)
+        if len(self._format_cache) >= _FORMAT_CACHE_LIMIT:
+            self._format_cache.clear()
         self._format_cache[style] = fmt
         return fmt
 

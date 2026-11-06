@@ -10,7 +10,7 @@ from PyQt6.QtWidgets import QWidget
 
 from PyQt6ElaWidgetTools import eTheme, ElaThemeType, ElaIconType
 
-from ._styles import iconGlyph
+from ._styles import coerceElaIcon, iconGlyph
 from .widget_base import ElaThemeWidget
 
 ElaTimelineOrientation = Literal["vertical", "horizontal"]
@@ -50,7 +50,7 @@ class ElaTimeline(ElaThemeWidget):
             self.title = title
             self.content = content
             self.timestamp = timestamp
-            self.icon = icon
+            self.icon = coerceElaIcon(icon)
 
     def __init__(self, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
@@ -334,8 +334,18 @@ class ElaTimeline(ElaThemeWidget):
     def sizeHint(self) -> QSize:
         if not self._items:
             return QSize(_DEFAULT_WIDTH, 0)
+        height = self.heightForWidth(_DEFAULT_WIDTH)
+        return QSize(_DEFAULT_WIDTH, height)
+
+    def hasHeightForWidth(self) -> bool:  # noqa: N802 (Qt 命名)
+        return bool(self._items)
+
+    def heightForWidth(self, width: int) -> int:  # noqa: N802 (Qt 命名)
+        if not self._items:
+            return 0
+        width = max(1, int(width))
         if self._orientation == "horizontal":
-            _, _, _, total = self._layout_horizontal(_DEFAULT_WIDTH)
+            _, _, _, total = self._layout_horizontal(width)
         else:
-            _, total = self._layout_vertical(_DEFAULT_WIDTH)
-        return QSize(_DEFAULT_WIDTH, int(total))
+            _, total = self._layout_vertical(width)
+        return max(0, int(total))

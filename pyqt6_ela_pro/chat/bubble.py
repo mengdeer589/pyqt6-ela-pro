@@ -12,7 +12,7 @@ import html
 from datetime import datetime
 from typing import Optional
 
-from .._internal import execElaMenu, is_deleted
+from .._internal import execElaMenu, is_deleted, safe_connect
 from PyQt6.QtCore import QRectF, Qt, pyqtSignal
 from PyQt6.QtGui import (
     QColor,
@@ -103,9 +103,21 @@ class _SelectableLabel(QLabel):
         menu.setMenuItemHeight(_CONTEXT_MENU_ITEM_HEIGHT)
         copy = menu.addElaIconAction(ElaIconType.IconName.Copy, "复制")
         copy.setEnabled(self.hasSelectedText())
-        copy.triggered.connect(self._copy_selection)
+        safe_connect(
+            copy,
+            "triggered",
+            self._copy_selection,
+            "bubble.context_copy",
+            receiver=menu,
+        )
         select_all = menu.addElaIconAction(ElaIconType.IconName.BorderAll, "全选")
-        select_all.triggered.connect(self._select_all)
+        safe_connect(
+            select_all,
+            "triggered",
+            self._select_all,
+            "bubble.context_select_all",
+            receiver=menu,
+        )
         return menu
 
     def _copy_selection(self) -> None:
@@ -514,7 +526,7 @@ class ElaChatBubble(
             self._actions.addUndoAction()
         else:
             self._actions.addRegenerateAction()
-        self._actions.copyRequested.connect(self._on_copy)
+        safe_connect(self._actions, "copyRequested", self._on_copy, "bubble.copy")
         self._actions.undoRequested.connect(self.undoRequested)
         self._actions.regenerateRequested.connect(self.regenerateRequested)
         self._actions.actionTriggered.connect(self.actionTriggered)
@@ -792,7 +804,9 @@ class ElaChatBubble(
         if card is None:
             card = ElaChatRetryCard(self._content)
             card.retryRequested.connect(self.retryRequested)
-            card.cancelRequested.connect(self._on_retry_cancelled)
+            safe_connect(
+                card, "cancelRequested", self._on_retry_cancelled, "bubble.retry_cancel"
+            )
             self._retry_card = card
             if self._content_layout is not None:
                 self._content_layout.insertWidget(0, card)
@@ -1222,8 +1236,18 @@ class ElaChatBubble(
                 self._content_layout.addWidget(self._error)
             # 错误卡的「重新生成」复用气泡既有通道（同一语义不开第二条路），
             # 「重试」是新通道
-            self._error.retryRequested.connect(self.retryRequested.emit)
-            self._error.regenerateRequested.connect(self.regenerateRequested.emit)
+            safe_connect(
+                self._error,
+                "retryRequested",
+                lambda *_: self.retryRequested.emit(),
+                "bubble.retry",
+            )
+            safe_connect(
+                self._error,
+                "regenerateRequested",
+                lambda *_: self.regenerateRequested.emit(),
+                "bubble.regenerate",
+            )
         return self._error
 
     def setError(self, message: str, errorType: str = "") -> None:

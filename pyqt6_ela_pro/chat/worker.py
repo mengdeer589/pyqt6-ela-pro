@@ -320,6 +320,16 @@ class ElaChatAsyncWorker(QThread):
         except RuntimeError:
             put.close()
 
+    def deleteLater(self) -> None:  # noqa: N802 (Qt 命名)
+        """销毁前先结束线程：运行中的 QThread 被 deleteLater 会触发 AV。"""
+        if self.isRunning():
+            self.shutdown()
+            if not self.waitForShutdown(1500):
+                # waitForShutdown 已把它记入 lingering；这里绝不能再 deleteLater，
+                # 否则等于在运行中销毁 QThread。
+                return
+        super().deleteLater()
+
     def waitForShutdown(self, timeoutMs: Optional[int] = None) -> bool:  # noqa: N802
         """阻塞等到线程退出（必要时 ``terminate()``）；返回是否已退出。
 

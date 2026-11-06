@@ -106,6 +106,7 @@ class _ToolTipLabel(QLabel):
 
     def __init__(self, text: str = "", parent: Optional[QWidget] = None) -> None:
         super().__init__(text, parent)
+        self.setTextFormat(Qt.TextFormat.PlainText)
         self._text_color: Optional[QColor] = None
 
     def setTextColor(self, color) -> None:  # noqa: N802 (Qt 命名)
@@ -509,8 +510,9 @@ def remove_tooltip(widget: QWidget) -> None:
         del _filter_dict[widget]
     if widget in _tooltip_dict:
         tooltip = _tooltip_dict.pop(widget)
-        tooltip.hide()
-        tooltip.deleteLater()
+        if not is_deleted(tooltip):
+            tooltip.hide()
+            tooltip.deleteLater()
 
 
 class ElaStateToolTip(ElaThemeWidget):

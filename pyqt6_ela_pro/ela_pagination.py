@@ -6,6 +6,7 @@ from typing import Optional
 
 from PyQt6.QtCore import Qt, QEvent, QRect, QRectF, QSize, pyqtSignal
 from PyQt6.QtGui import (
+    QKeyEvent,
     QPainter,
     QPainterPath,
     QFont,
@@ -17,6 +18,7 @@ from PyQt6.QtWidgets import QWidget
 
 from PyQt6ElaWidgetTools import eTheme, ElaThemeType, ElaLineEdit, ElaText
 
+from ._internal import is_deleted
 from .widget_base import ElaThemeWidget
 
 
@@ -37,6 +39,7 @@ class ElaPagination(ElaThemeWidget):
 
         self.setObjectName("ElaPagination")
         self.setMouseTracking(True)
+        self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         self.setFixedHeight(self._button_size + 8)
         self._icon_font = QFont("ElaAwesome")
 
@@ -56,6 +59,8 @@ class ElaPagination(ElaThemeWidget):
     def _apply_page_change(self, page: int) -> None:
         self._current_page = page
         self.currentPageChanged.emit(page)
+        if is_deleted(self):
+            return
         if self._jumper_visible:
             self._page_label.setText(f"第{self._current_page}/{self._total_pages}页")
             self._page_label.adjustSize()
@@ -256,11 +261,23 @@ class ElaPagination(ElaThemeWidget):
 
     # ── Paint ─────────────────────────────────────────────
 
+    def keyPressEvent(self, event: QKeyEvent) -> None:  # noqa: N802 (Qt 命名)
+        if self.isEnabled() and event.key() == Qt.Key.Key_Left:
+            self.setCurrentPage(self._current_page - 1)
+            event.accept()
+            return
+        if self.isEnabled() and event.key() == Qt.Key.Key_Right:
+            self.setCurrentPage(self._current_page + 1)
+            event.accept()
+            return
+        super().keyPressEvent(event)
+
     def paintEvent(self, _event: QPaintEvent) -> None:
         self._updateJumperPosition()
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         painter.setRenderHint(QPainter.RenderHint.TextAntialiasing)
+        painter.setOpacity(1.0 if self.isEnabled() else 0.45)
 
         mode = self._theme_mode
         primary = eTheme.getThemeColor(mode, ElaThemeType.ThemeColor.PrimaryNormal)

@@ -6,6 +6,7 @@ from typing import Optional
 
 from PyQt6.QtCore import Qt, QRectF, QFileInfo, QEvent, pyqtSignal
 from PyQt6.QtGui import (
+    QKeyEvent,
     QPainter,
     QPainterPath,
     QPen,
@@ -54,6 +55,7 @@ class ElaUploadArea(ElaThemeWidget):
         self.setMinimumSize(260, 160)
         self.setAcceptDrops(True)
         self.setMouseTracking(True)
+        self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         self._icon_font = QFont("ElaAwesome")
         self._title_font = QFont()
@@ -130,7 +132,12 @@ class ElaUploadArea(ElaThemeWidget):
         return list(self._file_paths)
 
     def clearFiles(self) -> None:
+        removed = list(self._file_paths)
         self._file_paths.clear()
+        for path in removed:
+            self.fileRemoved.emit(path)
+        if removed:
+            self.filesSelected.emit([])
         self.update()
 
     # ── Internal ──────────────────────────────────────────
@@ -278,10 +285,31 @@ class ElaUploadArea(ElaThemeWidget):
 
     # ── Paint ─────────────────────────────────────────────
 
+    def keyPressEvent(self, event: QKeyEvent) -> None:  # noqa: N802 (Qt 命名)
+        if self.isEnabled() and event.key() in (
+            Qt.Key.Key_Space,
+            Qt.Key.Key_Return,
+            Qt.Key.Key_Enter,
+        ):
+            self._openFileDialog()
+            event.accept()
+            return
+        super().keyPressEvent(event)
+
+    def changeEvent(self, event) -> None:  # noqa: N802 (Qt 命名)
+        super().changeEvent(event)
+        if event.type() == QEvent.Type.EnabledChange:
+            self.setCursor(
+                Qt.CursorShape.PointingHandCursor
+                if self.isEnabled()
+                else Qt.CursorShape.ArrowCursor
+            )
+
     def paintEvent(self, _event: QPaintEvent) -> None:
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         painter.setRenderHint(QPainter.RenderHint.TextAntialiasing)
+        painter.setOpacity(1.0 if self.isEnabled() else 0.45)
 
         mode = self._theme_mode
         br = self._border_radius

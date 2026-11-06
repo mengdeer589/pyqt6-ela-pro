@@ -15,6 +15,21 @@ from ._motion import start_transition_timer
 from ._theme import ElaStatusRoleType, statusColor
 from .widget_base import ElaThemeWidget
 
+#: 刻度总数上限：避免外部数据把 paintEvent 变成百万次循环
+_MAX_TOTAL_TICKS = 2000
+#: 数值字号上限：QFont.setPixelSize 超过 int32 会抛 OverflowError
+_MAX_VALUE_PIXEL_SIZE = 512
+_MAX_DECIMALS = 6
+
+
+def _finite_number(value) -> Optional[float]:
+    """转成有限 float；非法 / NaN / inf 返回 ``None``。"""
+    try:
+        number = float(value)
+    except (TypeError, ValueError, OverflowError):
+        return None
+    return number if math.isfinite(number) else None
+
 
 class ElaDashboardGauge(ElaThemeWidget):
     """仪表盘组件。
@@ -64,7 +79,11 @@ class ElaDashboardGauge(ElaThemeWidget):
     # ── Public API ────────────────────────────────────────
 
     def setMinimum(self, minimum: float) -> None:
-        self._minimum = minimum
+        value = _finite_number(minimum)
+        if value is None:
+            return
+        self._minimum = value
+        self._maximum = max(self._maximum, self._minimum)
         self._value = max(self._minimum, min(self._value, self._maximum))
         self._animated_value = max(
             self._minimum, min(self._animated_value, self._maximum)
@@ -76,7 +95,10 @@ class ElaDashboardGauge(ElaThemeWidget):
         return self._minimum
 
     def setMaximum(self, maximum: float) -> None:
-        self._maximum = maximum
+        value = _finite_number(maximum)
+        if value is None:
+            return
+        self._maximum = max(self._minimum, value)
         self._value = max(self._minimum, min(self._value, self._maximum))
         self._animated_value = max(
             self._minimum, min(self._animated_value, self._maximum)
@@ -97,6 +119,9 @@ class ElaDashboardGauge(ElaThemeWidget):
 
     def setValue(self, value: float) -> None:
         """设置当前值（带动画过渡）。"""
+        value = _finite_number(value)
+        if value is None:
+            return
         value = max(self._minimum, min(value, self._maximum))
         if self._value == value:
             return
@@ -143,42 +168,64 @@ class ElaDashboardGauge(ElaThemeWidget):
         return self._value
 
     def setMajorTickCount(self, n: int) -> None:
-        self._major_tick_count = max(2, n)
+        value = _finite_number(n)
+        if value is None:
+            return
+        self._major_tick_count = max(2, min(int(value), 100))
+        if self._major_tick_count * self._minor_tick_count > _MAX_TOTAL_TICKS:
+            self._minor_tick_count = max(1, _MAX_TOTAL_TICKS // self._major_tick_count)
         self.update()
 
     def majorTickCount(self) -> int:
         return self._major_tick_count
 
     def setMinorTickCount(self, n: int) -> None:
-        self._minor_tick_count = max(1, n)
+        value = _finite_number(n)
+        if value is None:
+            return
+        self._minor_tick_count = max(1, min(int(value), 20))
+        if self._major_tick_count * self._minor_tick_count > _MAX_TOTAL_TICKS:
+            self._major_tick_count = max(2, _MAX_TOTAL_TICKS // self._minor_tick_count)
         self.update()
 
     def minorTickCount(self) -> int:
         return self._minor_tick_count
 
     def setStartAngle(self, angle: int) -> None:
-        self._start_angle = angle
+        value = _finite_number(angle)
+        if value is None:
+            return
+        self._start_angle = int(value)
         self.update()
 
     def startAngle(self) -> int:
         return self._start_angle
 
     def setSpanAngle(self, angle: int) -> None:
-        self._span_angle = max(10, min(angle, 360))
+        value = _finite_number(angle)
+        if value is None:
+            return
+        self._span_angle = max(10, min(int(value), 360))
         self.update()
 
     def spanAngle(self) -> int:
         return self._span_angle
 
     def setArcWidth(self, width: int) -> None:
-        self._arc_width = max(2, width)
+        value = _finite_number(width)
+        if value is None:
+            return
+        self._arc_width = max(2, min(int(value), 200))
         self.update()
 
     def arcWidth(self) -> int:
         return self._arc_width
 
     def setValuePixelSize(self, size: int) -> None:
-        self._value_pixel_size = max(10, size)
+        value = _finite_number(size)
+        if value is None:
+            return
+        self._value_pixel_size = max(10, min(int(value), _MAX_VALUE_PIXEL_SIZE))
         self.update()
 
     def valuePixelSize(self) -> int:
@@ -199,7 +246,10 @@ class ElaDashboardGauge(ElaThemeWidget):
         return self._is_animated
 
     def setDecimals(self, n: int) -> None:
-        self._decimals = max(0, n)
+        value = _finite_number(n)
+        if value is None:
+            return
+        self._decimals = max(0, min(int(value), _MAX_DECIMALS))
         self.update()
 
     def decimals(self) -> int:
@@ -221,7 +271,10 @@ class ElaDashboardGauge(ElaThemeWidget):
 
     def setDangerPercent(self, percent: float) -> None:
         """超过此值时弧线与指针变红。"""
-        self._danger_percent = max(0.0, min(1.0, percent))
+        value = _finite_number(percent)
+        if value is None:
+            return
+        self._danger_percent = max(0.0, min(1.0, value))
         self.update()
 
     def dangerPercent(self) -> float:
@@ -229,7 +282,10 @@ class ElaDashboardGauge(ElaThemeWidget):
 
     def setWarningPercent(self, percent: float) -> None:
         """超过此值时弧线变橙。"""
-        self._warning_percent = max(0.0, min(1.0, percent))
+        value = _finite_number(percent)
+        if value is None:
+            return
+        self._warning_percent = max(0.0, min(1.0, value))
         self.update()
 
     def warningPercent(self) -> float:
@@ -237,7 +293,10 @@ class ElaDashboardGauge(ElaThemeWidget):
 
     def setTickWarningPercent(self, percent: float) -> None:
         """超过此值时刻度变橙 / 红。"""
-        self._tick_warning_percent = max(0.0, min(1.0, percent))
+        value = _finite_number(percent)
+        if value is None:
+            return
+        self._tick_warning_percent = max(0.0, min(1.0, value))
         self.update()
 
     def tickWarningPercent(self) -> float:

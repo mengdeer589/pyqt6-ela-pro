@@ -524,6 +524,8 @@ class AxisModel:
         if self.type != "category":
             return value
         if isinstance(value, (int, float)) and not isinstance(value, bool):
+            if isinstance(value, float) and not math.isfinite(value):
+                return -1
             return int(value) - self.windowOffset()
         return self.categoryIndex(value)
 
@@ -690,6 +692,8 @@ class AxisModel:
     def categoryIndex(self, value) -> int:
         """类别值（名字或序号）→ 下标（不 clamp）。"""
         if isinstance(value, (int, float)) and not isinstance(value, bool):
+            if isinstance(value, float) and not math.isfinite(value):
+                return -1
             return int(value)
         s = str(value)
         if s in self.categories:

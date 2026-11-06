@@ -213,8 +213,15 @@ def iconGlyph(icon) -> str:
     """取 ``icon`` 对应的 ElaAwesome **字形字符**（枚举成员 / 整数都收）。
     PyQt6 的枚举成员不是 int，``int(成员)`` 抛 ``TypeError`` 会直接让进程静默
     abort（0xC0000409，无 traceback），所以取值统一走 ``.value`` 兜底。
+    ``None`` / 非法值返回空串，调用方不必在 paintEvent 里再兜。
     """
-    return chr(int(getattr(icon, "value", icon)))
+    value = getattr(icon, "value", icon)
+    if value is None:
+        return ""
+    try:
+        return chr(int(value))
+    except (TypeError, ValueError, OverflowError):
+        return ""
 
 
 def drawElaIcon(  # noqa: N802

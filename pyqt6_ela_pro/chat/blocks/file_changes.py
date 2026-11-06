@@ -11,7 +11,7 @@ from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtWidgets import QHBoxLayout, QSizePolicy, QVBoxLayout, QWidget
 from PyQt6ElaWidgetTools import ElaIconButton, ElaIconType, eTheme
 
-from ..._internal import _ThemeAwareMixin
+from ..._internal import _ThemeAwareMixin, safe_connect
 from ..._styles import BareButton, ColorText
 from ..._theme import statusColor, text as text_color, textMuted
 from ..._theme import ElaStatusRoleType
@@ -159,7 +159,13 @@ class ElaChatFileChanges(_ThemeAwareMixin, QWidget):
                 size="small",
                 parent=self,
             )
-            more.clicked.connect(self._show_all_rows)
+            safe_connect(
+                more,
+                "clicked",
+                self._show_all_rows,
+                "file_changes.show_all",
+                receiver=more,
+            )
             self._layout.addWidget(more)
             self._more_button = more
         else:
@@ -211,7 +217,12 @@ class ElaChatFileChanges(_ThemeAwareMixin, QWidget):
             "status": status_label,
             "opened": opened,
         }
-        header.clicked.connect(lambda _checked=False, r=row: self._toggle_row(r))
+        safe_connect(
+            header,
+            "clicked",
+            lambda _checked=False, r=row: self._toggle_row(r),
+            "file_changes.toggle",
+        )
         path_label.setToolTip(file.path)
         self._sync_header(row)
         return row
@@ -246,7 +257,12 @@ class ElaChatFileChanges(_ThemeAwareMixin, QWidget):
         body.setMaximumHeight(self._diff_max_height)
         # 高度由 sizeHint 决定；Fixed 防止父布局拉回默认 192px。
         body.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-        body.fileClicked.connect(self.fileClicked)
+        safe_connect(
+            body,
+            "fileClicked",
+            lambda *args: self.fileClicked.emit(*args),
+            "file_changes.file_clicked",
+        )
         row["body"] = body
         index = self._layout.indexOf(row["header"])
         if index >= 0:

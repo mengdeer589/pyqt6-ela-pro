@@ -26,7 +26,7 @@ from PyQt6ElaWidgetTools import (
     eTheme,
 )
 
-from .._internal import _ThemeAwareMixin, is_deleted, single_shot_on
+from .._internal import _ThemeAwareMixin, is_deleted, safe_connect, single_shot_on
 from .._styles import ColorText, paintRoundedCard
 from ._theme import (
     accent_color,
@@ -376,16 +376,39 @@ class QuestionOptionCard(QAbstractButton):
             self._editor.setSizePolicy(
                 QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Minimum
             )
-            self._editor.textChanged.connect(self._on_editor_changed)
+            safe_connect(
+                self._editor,
+                "textChanged",
+                self._on_editor_changed,
+                "question.editor_text",
+            )
             # 文档排版完成（折行高度变化）后再同步一次：textChanged 触发时布局
             # 往往还没更新，只靠那一次会把行高压在旧值上
-            self._editor.document().documentLayout().documentSizeChanged.connect(
-                lambda *_: self._schedule_height_sync()
+            safe_connect(
+                self._editor.document().documentLayout(),
+                "documentSizeChanged",
+                lambda *_: self._schedule_height_sync(),
+                "question.editor_size",
             )
             # 按键语义走编辑器自己的信号（见 _AutoGrowEditor），不装事件过滤器
-            self._editor.submitRequested.connect(self.commitEdit)
-            self._editor.dismissRequested.connect(self._on_editor_dismissed)
-            self._editor.advanceRequested.connect(self._on_editor_advance)
+            safe_connect(
+                self._editor,
+                "submitRequested",
+                self.commitEdit,
+                "question.editor_submit",
+            )
+            safe_connect(
+                self._editor,
+                "dismissRequested",
+                self._on_editor_dismissed,
+                "question.editor_dismiss",
+            )
+            safe_connect(
+                self._editor,
+                "advanceRequested",
+                self._on_editor_advance,
+                "question.editor_advance",
+            )
             self._texts_layout.addWidget(self._editor)
             if self._pending_editor_text:
                 self._editor.setPlainText(self._pending_editor_text)

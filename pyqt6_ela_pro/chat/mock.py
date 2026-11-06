@@ -11,6 +11,8 @@ from typing import Callable, Optional
 
 from PyQt6.QtCore import QObject, QTimer, pyqtSignal
 
+from .._internal import safe_connect
+
 #: 思考强度档位
 THINK_LEVELS = ("off", "normal", "deep")
 #: 默认每步事件间隔（毫秒）
@@ -112,13 +114,15 @@ class ElaChatMockBackend(QObject):
         self._current_turn = 0
         self._timer = QTimer(self)
         self._timer.setInterval(self._tick_ms)
-        self._timer.timeout.connect(self._on_tick)
+        safe_connect(self._timer, "timeout", self._on_tick, "mock.tick")
         # ready 用挂在 self 上的单次定时器异步发出：对象提前销毁时随父对象
         # 一起析构，避免 singleShot 回调解引用已删除的信号。
         self._ready_timer = QTimer(self)
         self._ready_timer.setSingleShot(True)
         self._ready_timer.setInterval(0)
-        self._ready_timer.timeout.connect(self.ready.emit)
+        safe_connect(
+            self._ready_timer, "timeout", lambda: self.ready.emit(), "mock.ready"
+        )
         self._ready_timer.start()
 
     def thinkLevel(self) -> str:

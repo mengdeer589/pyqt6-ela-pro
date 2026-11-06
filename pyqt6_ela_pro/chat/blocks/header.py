@@ -27,6 +27,7 @@ from PyQt6ElaWidgetTools import (
     eTheme,
 )
 
+from ..._internal import safe_connect
 from ..._motion import idle_loop_running, start_idle_loop
 from ..._styles import ColorText
 from ..._theme import ElaStatusRoleType, statusColor
@@ -234,7 +235,7 @@ class _StatusDot(QWidget):
         self._active = False
         self._phase = False
         self._timer = QTimer(self)
-        self._timer.timeout.connect(self._tick)
+        safe_connect(self._timer, "timeout", self._tick, "header.status_tick")
         self.hide()
 
     def setColor(self, color: QColor) -> None:

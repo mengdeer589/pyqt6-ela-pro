@@ -16,7 +16,7 @@ from PyQt6.QtWidgets import (
 )
 from PyQt6ElaWidgetTools import ElaIconType, ElaThemeType, eTheme
 
-from .._internal import _ThemeAwareMixin
+from .._internal import _ThemeAwareMixin, safe_connect
 from .._styles import elaIconPixmap, paintRoundedCard, setTextColor
 from .._theme import textOnAccent
 from ..ela_button import ElaButton
@@ -151,8 +151,12 @@ class EmptyState(ElaThemeWidget):
         for text in self._suggestions:
             button = ElaButton(text, variant="outlined", parent=self)
             button.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed)
-            button.clicked.connect(
-                lambda _checked=False, value=text: self.suggestionClicked.emit(value)
+            safe_connect(
+                button,
+                "clicked",
+                lambda _checked=False, value=text: self.suggestionClicked.emit(value),
+                "view_parts.suggestion",
+                receiver=button,
             )
             self._suggestions_box.addWidget(button, 0, Qt.AlignmentFlag.AlignHCenter)
         self._suggestions_box.setEnabled(bool(self._suggestions))

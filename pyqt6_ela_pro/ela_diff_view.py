@@ -244,6 +244,8 @@ class _VisibleRow:
     weak: bool = False
     #: 所属文件下标（语法 span 映射用；-1 = 不属于任何文件）
     file_index: int = -1
+    #: 文件头 / 二进制提示行对应的文件路径（``fileClicked`` 用）
+    file_path: str = ""
 
 
 class _LineNumberArea(QWidget):
@@ -303,6 +305,7 @@ class ElaDiffView(_ThemeAwareMixin, QPlainTextEdit):
         self._rows: list[_VisibleRow] = []
         self._spans_by_block: dict = {}
         self._file_spans: list = []
+        self._token_cache: dict = {}
         self._all_runs: set = set()
         self._expanded_runs: set = set()
         self._context_lines = DEFAULT_CONTEXT_LINES
@@ -443,7 +446,12 @@ class ElaDiffView(_ThemeAwareMixin, QPlainTextEdit):
     def fileAt(self, block_number: int) -> Optional[str]:
         """按块号取所属文件路径（用于点击 / 测试）。"""
         row = self._row(block_number)
-        return row[0] if row else None
+        if row is None:
+            return None
+        item = row[0]
+        if 0 <= item.file_index < len(self._files):
+            return self._files[item.file_index].path
+        return None
 
     def _row(self, block_number: int):
         if 0 <= block_number < len(self._rows):
@@ -473,20 +481,36 @@ class ElaDiffView(_ThemeAwareMixin, QPlainTextEdit):
             old_lines = [line.text for line in file.lines if line.old_no is not None]
             new_lines = [line.text for line in file.lines if line.new_no is not None]
             if self._syntax_enabled and file.line_count <= total_limit:
-                old_spans = _tokenize_lines(old_lines, file.path)
-                new_spans = _tokenize_lines(new_lines, file.path)
+                key = hash((file.path, tuple(old_lines), tuple(new_lines)))
+                cached = self._token_cache.get(key)
+                if cached is None:
+                    old_spans = _tokenize_lines(old_lines, file.path)
+                    new_spans = _tokenize_lines(new_lines, file.path)
+                    if len(self._token_cache) >= 32:
+                        self._token_cache.clear()
+                    self._token_cache[key] = (old_spans, new_spans)
+                else:
+                    old_spans, new_spans = cached
             else:
                 old_spans = [[] for _ in old_lines]
                 new_spans = [[] for _ in new_lines]
             file_spans.append((old_spans, new_spans))
             if show_headers and file.path:
-                rows.append(_VisibleRow(text=file.path, kind=DIFF_META, weak=True))
+                rows.append(
+                    _VisibleRow(
+                        text=file.path,
+                        kind=DIFF_META,
+                        weak=True,
+                        file_path=file.path,
+                    )
+                )
             if file.binary:
                 rows.append(
                     _VisibleRow(
                         text=f"{file.path}（二进制文件，无文本 diff）",
                         kind=DIFF_META,
                         weak=True,
+                        file_path=file.path,
                     )
                 )
                 continue
@@ -595,18 +619,31 @@ class ElaDiffView(_ThemeAwareMixin, QPlainTextEdit):
         result: dict = {}
         if not self._syntax_enabled:
             return result
+        index_maps = []
+        for file in self._files:
+            old_map = {}
+            new_map = {}
+            for index, line in enumerate(
+                line for line in file.lines if line.old_no is not None
+            ):
+                old_map[line.old_no] = index
+            for index, line in enumerate(
+                line for line in file.lines if line.new_no is not None
+            ):
+                new_map[line.new_no] = index
+            index_maps.append((old_map, new_map))
         for block, row in enumerate(rows):
             if row.file_index < 0 or row.file_index >= len(file_spans):
                 continue
             if row.kind in (DIFF_META, DIFF_HUNK):
                 continue
             old_spans, new_spans = file_spans[row.file_index]
-            if row.old_no is not None and row.old_no - 1 < len(old_spans):
-                spans = old_spans[row.old_no - 1]
-            elif row.new_no is not None and row.new_no - 1 < len(new_spans):
-                spans = new_spans[row.new_no - 1]
-            else:
-                spans = ()
+            old_index, new_index = index_maps[row.file_index]
+            spans = ()
+            if row.old_no is not None and row.old_no in old_index:
+                spans = old_spans[old_index[row.old_no]]
+            elif row.new_no is not None and row.new_no in new_index:
+                spans = new_spans[new_index[row.new_no]]
             if spans:
                 result[block] = spans
         return result
@@ -742,8 +779,8 @@ class ElaDiffView(_ThemeAwareMixin, QPlainTextEdit):
                     self._rebuild()
                     event.accept()
                     return
-                if item.kind == DIFF_META and item.text:
-                    self.fileClicked.emit(item.text)
+                if item.kind == DIFF_META and item.file_path:
+                    self.fileClicked.emit(item.file_path)
         super().mousePressEvent(event)
 
     def contextMenuEvent(self, event) -> None:  # noqa: N802

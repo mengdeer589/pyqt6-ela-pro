@@ -337,7 +337,7 @@ def _numeric_xy(data):
 
 
 _GRID_EXTENT_CACHE: dict = {}
-_GRID_EXTENT_CACHE_LIMIT = 32
+_GRID_EXTENT_CACHE_LIMIT = 16
 
 
 def _seq_len(value) -> int:

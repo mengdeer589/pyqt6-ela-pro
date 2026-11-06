@@ -184,7 +184,7 @@ class ChatAgentPage(ExamplePage):
                 self._demo_cost,
                 (("累计一轮用量", self._demo_cost),),
                 "cost_usd 跟着 ElaChatStats 走，定价表不烤进库；会话级汇总走 "
-                "view.sessionStats(limit)（计数 / 当前上下文四路词元 / 使用率 / "
+                "view.sessionStats(contextWindow)（计数 / 当前上下文四路词元 / 使用率 / "
                 "累计成本，口径对齐 opencode），把 total_tokens / total_cost_usd "
                 "喂给输入区工具栏的圆环（本页输入区隐藏，看效果去「输入区」工作区）。",
             ),
@@ -495,7 +495,7 @@ class ChatAgentPage(ExamplePage):
     def _demo_cost(self) -> None:
         """成本与上下文占用：数据全由宿主提供，库只给换算规则。
         cost_usd 跟 ElaChatStats 走；定价表不内置，换算口径对齐 opencode；
-        会话级汇总走 view.sessionStats(limit)。
+        会话级汇总走 view.sessionStats(contextWindow)。
         """
         view = self._chat.chatView()
         roundStats = ElaChatStats(

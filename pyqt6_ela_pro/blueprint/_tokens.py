@@ -5,6 +5,7 @@ from __future__ import annotations
 from PyQt6.QtGui import QColor
 from PyQt6ElaWidgetTools import eTheme, ElaThemeType
 
+from .._internal import connect_theme_signal
 from ..charts._tokens import chart_token
 
 __all__ = ["T", "theme_changed_slot", "shadow_md"]
@@ -46,7 +47,7 @@ def theme_changed_slot(widget, slot) -> None:
             "theme_changed_slot 需要 widget 的绑定方法作为槽"
             "（lambda / 普通函数不会随控件销毁自动断连）"
         )
-    eTheme.themeModeChanged.connect(slot)
+    connect_theme_signal(widget, slot)
 
 
 def shadow_md() -> dict:

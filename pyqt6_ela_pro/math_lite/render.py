@@ -95,7 +95,7 @@ def _render(
     # 超过上限按「不支持」返回 None，走调用方既有的降级路径。
     if width > _MAX_DIM or height > _MAX_DIM:
         return None
-    if width * height > _MAX_PIXELS:
+    if (width * _SS) * (height * _SS) > _MAX_PIXELS:
         return None
     image = QImage(width * _SS, height * _SS, QImage.Format.Format_ARGB32_Premultiplied)
     if image.isNull():
@@ -270,13 +270,14 @@ def extract_math(text: str, mark: str, macros: Optional[dict] = None):
         stripped = line.strip()
         if in_fence:
             out.append(line)
-            if stripped.startswith(fence_mark):
+            if stripped.startswith(fence_mark) and not stripped.strip(fence_mark[0]):
                 in_fence = False
             i += 1
             continue
-        if stripped.startswith("```") or stripped.startswith("~~~"):
+        fence_open = re.match(r"^(`{3,}|~{3,})", stripped)
+        if fence_open:
             in_fence = True
-            fence_mark = stripped[:3]
+            fence_mark = fence_open.group(1)
             out.append(line)
             i += 1
             continue

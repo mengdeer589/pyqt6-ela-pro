@@ -7,6 +7,7 @@ from typing import Optional
 from uuid import uuid4
 
 
+from .._internal import safe_connect
 from .blocks import (
     CONTEXT_TOOLS,
     SHELL_TOOLS,
@@ -34,7 +35,13 @@ class _BubbleToolsMixin:
         """确保当前步骤存在工具面板（无则创建），返回该面板。"""
         if self._current_tool_panel is None:
             panel = ToolGroupPanel(self._parts_container or self._content or self)
-            panel.toggled.connect(self._on_tool_card_toggled)
+            safe_connect(
+                panel,
+                "toggled",
+                self._on_tool_card_toggled,
+                "bubble.tool_panel",
+                receiver=panel,
+            )
             self._panels.append(panel)
             self._panel_steps[id(panel)] = self._step_index
             self._panel_calls[id(panel)] = set()
@@ -141,7 +148,13 @@ class _BubbleToolsMixin:
                     container,
                     defaultOpen=self._tool_default_open(name, arguments, not failed),
                 )
-                self._group_card.toggled.connect(self._on_tool_card_toggled)
+                safe_connect(
+                    self._group_card,
+                    "toggled",
+                    self._on_tool_card_toggled,
+                    "bubble.tool_group",
+                    receiver=self._group_card,
+                )
                 panel.toolLayout().addWidget(self._group_card)
             self._group_card.addToolCall(call)
             card = self._group_card
@@ -157,7 +170,13 @@ class _BubbleToolsMixin:
                 ),
             )
             card.setMessageId(self._message_id)
-            card.toggled.connect(self._on_tool_card_toggled)
+            safe_connect(
+                card,
+                "toggled",
+                self._on_tool_card_toggled,
+                "bubble.tool_card",
+                receiver=card,
+            )
             panel.toolLayout().addWidget(card)
         self._tool_cards[callId] = card
         self._panel_calls[id(panel)].add(callId)

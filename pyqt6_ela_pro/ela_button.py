@@ -5,7 +5,16 @@ from __future__ import annotations
 import warnings
 from typing import Literal, Optional
 
-from PyQt6.QtCore import Qt, QPointF, QRect, QRectF, QSize, QTimer, QVariantAnimation
+from PyQt6.QtCore import (
+    Qt,
+    QPointF,
+    QRect,
+    QRectF,
+    QSize,
+    QTimer,
+    QVariantAnimation,
+    QEvent,
+)
 from PyQt6.QtGui import (
     QColor,
     QLinearGradient,
@@ -509,12 +518,30 @@ class ElaButton(_ThemeAwareMixin, QPushButton):
         if loading == self._loading:
             return
         self._loading = loading
-        if loading:
-            start_idle_loop(self._spin_timer, 33)
-        else:
-            self._spin_timer.stop()
+        self._sync_spin_timer()
         self.updateGeometry()
         self.update()
+
+    def _sync_spin_timer(self) -> None:
+        """加载指示器只在「加载中 + 可见 + 可用」时转，避免隐藏页白烧 30fps。"""
+        if self._loading and self.isEnabled():
+            if not self._spin_timer.isActive():
+                start_idle_loop(self._spin_timer, 33)
+        else:
+            self._spin_timer.stop()
+
+    def showEvent(self, event) -> None:  # noqa: N802 (Qt 命名)
+        super().showEvent(event)
+        self._sync_spin_timer()
+
+    def hideEvent(self, event) -> None:  # noqa: N802 (Qt 命名)
+        self._spin_timer.stop()
+        super().hideEvent(event)
+
+    def changeEvent(self, event) -> None:  # noqa: N802 (Qt 命名)
+        super().changeEvent(event)
+        if event.type() == QEvent.Type.EnabledChange:
+            self._sync_spin_timer()
 
     def isLoading(self) -> bool:  # noqa: N802 (Qt 命名)
         return self._loading

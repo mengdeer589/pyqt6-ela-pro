@@ -206,6 +206,7 @@ class ElaChartWidget(
         ``None`` / ``""`` 恢复全局默认主题；未知名称返回 ``False`` 且不改动。
         主题只提供默认色：option 里的显式颜色（``color`` / ``series.color`` /
         """
+        self._ensure_alive()
         if name is None or name == "":
             self._chart_theme = defaultChartTheme()
         elif not isinstance(name, str) or not theme_exists(name):
@@ -581,7 +582,7 @@ class ElaChartWidget(
                 setter(hidden)
             except Exception:
                 pass
-        self._layout_key = None
+        self.invalidateLayout()
         self.update()
         self.legendToggled.emit(name, bool(visible))
 
@@ -615,6 +616,7 @@ class ElaChartWidget(
 
         :param enabled: ``False`` 变为静态图（动画与程序化 API 不受影响）
         """
+        self._ensure_alive()
         self._interactive = bool(enabled)
         if not self._interactive:
             self.tooltip.hide()
@@ -635,6 +637,7 @@ class ElaChartWidget(
         / ``"dataZoom"`` / ``"brush"`` / ``"timeline"`` / ``"toolbox"`` /
         ``"annotations"``。
         """
+        self._ensure_alive()
         key = str(feature)
         if key not in self.INTERACTION_FEATURES:
             raise ValueError(
@@ -691,6 +694,7 @@ class ElaChartWidget(
         option 里配了 ``dataZoom`` 就完全听用户的（本开关不删用户组件）；没配时
         自动挂 ``inside`` 组件（滚轮缩放 + 拖动平移），拖拽模式可把它让给刷选。
         """
+        self._ensure_alive()
         enabled = bool(enabled)
         self._wheel_zoom_enabled = enabled
         if not enabled:
@@ -800,6 +804,7 @@ class ElaChartWidget(
         ``pan`` 平移 / ``zoom`` 框选即缩放（默认）/ ``select`` 矩形框选 /
         ``lasso`` 套索选择。dataZoom 平移与 brush 拖拽互斥，按模式开关。
         """
+        self._ensure_alive()
         key = str(mode or "").strip().lower()
         if key not in self.DRAG_MODES:
             raise ValueError(
@@ -854,6 +859,7 @@ class ElaChartWidget(
 
     def setDoubleClickReset(self, enabled: bool) -> None:
         """双击是否复位视图（默认 **开**，对齐 Plotly ``doubleClick: 'reset'``）。"""
+        self._ensure_alive()
         self._double_click_reset = bool(enabled)
 
     def doubleClickReset(self) -> bool:
@@ -865,6 +871,7 @@ class ElaChartWidget(
 
         只影响视图，不动数据与图例显隐（图例用 ``dispatchAction(legendAllSelect)``）。
         """
+        self._ensure_alive()
         comp = self._component("dataZoom")
         if comp is not None and hasattr(comp, "reset_window"):
             comp.reset_window()
@@ -916,6 +923,7 @@ class ElaChartWidget(
         要跟着 option 重建的组件请用 :func:`registerComponent`。组件按鸭子类型
         实现 ``optionKey`` / ``layout`` / ``paint`` / ``hitTest`` 等钩子。
         """
+        self._ensure_alive()
         if comp is None:
             return
         if any(comp is existing for existing in self._host_components):
@@ -928,6 +936,7 @@ class ElaChartWidget(
 
     def removeComponent(self, comp) -> bool:
         """摘掉宿主注入的组件（并在它实现了 ``dispose`` 时调用它）。"""
+        self._ensure_alive()
         found = None
         for existing in self._host_components:
             if existing is comp:

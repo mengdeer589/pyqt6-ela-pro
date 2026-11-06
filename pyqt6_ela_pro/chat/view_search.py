@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import Optional
 
+from .._internal import safe_connect
 from ..ela_markdown_viewer import ElaMarkdownViewer
 from .message import ElaChatPartKindType, ElaChatRoleType
 from .search import SEARCH_HIT_LIMIT, ElaChatSearchBar, ElaChatSearchHit
@@ -137,10 +138,10 @@ class _ViewSearchMixin:
         if bar is not None:
             return bar
         bar = ElaChatSearchBar(self)
-        bar.queryChanged.connect(self.searchText)
-        bar.nextRequested.connect(self.searchNext)
-        bar.prevRequested.connect(self.searchPrev)
-        bar.closed.connect(self.clearSearch)
+        safe_connect(bar, "queryChanged", self.searchText, "view_search.query")
+        safe_connect(bar, "nextRequested", self.searchNext, "view_search.next")
+        safe_connect(bar, "prevRequested", self.searchPrev, "view_search.prev")
+        safe_connect(bar, "closed", self.clearSearch, "view_search.close")
         layout = self.layout()
         if layout is not None:
             layout.insertWidget(0, bar)

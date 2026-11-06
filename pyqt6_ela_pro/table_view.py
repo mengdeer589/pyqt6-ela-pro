@@ -26,7 +26,7 @@ from PyQt6.QtWidgets import (
 )
 from PyQt6ElaWidgetTools import ElaTableView
 
-from ._internal import load_lazy_pinyin
+from ._internal import load_lazy_pinyin, safe_connect
 
 
 TABLE_MIN_SECTION_SIZE: int = 60
@@ -145,7 +145,9 @@ class ElaDataTable(ElaTableView):
         self.setItemDelegate(self._row_color_delegate)
 
         try:
-            self._tableViewShowSlot = self._apply_column_widths  # 断连要同一对象（lambda / partial 必须存引用）
+            self._tableViewShowSlot = (
+                self._apply_column_widths
+            )  # 断连要同一对象（lambda / partial 必须存引用）
             self.tableViewShow.connect(self._tableViewShowSlot)
         except (TypeError, RuntimeError):
             pass
@@ -157,7 +159,9 @@ class ElaDataTable(ElaTableView):
         self._sorting_enabled = False
         self._current_sort_column = -1
         self._current_sort_order = Qt.SortOrder.AscendingOrder
-        self._headerClickedSlot = self._onHeaderClicked  # 断连要同一对象（lambda / partial 必须存引用）
+        self._headerClickedSlot = (
+            self._onHeaderClicked
+        )  # 断连要同一对象（lambda / partial 必须存引用）
         hh.sectionClicked.connect(self._headerClickedSlot)
 
     def _resolve_column(self, key: int | str) -> Optional[int]:
@@ -362,12 +366,17 @@ class ElaDataTable(ElaTableView):
             return
 
         rows = []
-        while self._model.rowCount() > 0:
-            rows.append(self._model.takeRow(self._model.rowCount() - 1))
-        rows.reverse()  # 尾部取出来是倒序，转回原始下标顺序
+        self._model.blockSignals(True)
+        try:
+            while self._model.rowCount() > 0:
+                rows.append(self._model.takeRow(self._model.rowCount() - 1))
+            rows.reverse()  # 尾部取出来是倒序，转回原始下标顺序
 
-        for original_row in row_order:
-            self._model.appendRow(rows[original_row])
+            for original_row in row_order:
+                self._model.appendRow(rows[original_row])
+        finally:
+            self._model.blockSignals(False)
+        self._model.layoutChanged.emit()
 
     def setSortingEnabled(self, enabled: bool) -> None:
         self._sorting_enabled = enabled
@@ -553,7 +562,13 @@ class ElaDataTable(ElaTableView):
                 callback()
 
         self._load_thread = thread
-        self._load_thread.finished.connect(on_finished)
+        safe_connect(
+            self._load_thread,
+            "finished",
+            on_finished,
+            "table.async_finished",
+            receiver=self,
+        )
         self._isLoadThreadConnected = True
         self._load_thread.start()
 
@@ -675,7 +690,7 @@ class ElaDataTable(ElaTableView):
         if self._load_thread is not None:
             self._retire_thread(self._load_thread)
             self._load_thread = None
-        slot = getattr(self, '_tableViewShowSlot', None)
+        slot = getattr(self, "_tableViewShowSlot", None)
         if slot is not None:
             try:
                 self.tableViewShow.disconnect(slot)

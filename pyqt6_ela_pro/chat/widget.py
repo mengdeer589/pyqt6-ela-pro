@@ -12,6 +12,7 @@ from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import QImage, QKeySequence, QShortcut
 from PyQt6.QtWidgets import QVBoxLayout, QWidget
 
+from .._internal import safe_connect
 from .._ownership import ElaWidgetOwnershipType
 from ..widget_base import ElaThemeWidget
 from .blocks import MessageActions
@@ -161,17 +162,34 @@ class ElaChatWidget(
         self._view.regenerateRequested.connect(self.regenerateRequested)
         self._view.retryRequested.connect(self.retryRequested)
         self._view.retryCancelled.connect(self.retryCancelled)
-        self._view.pendingUserActionRequested.connect(self._on_pending_user_action)
+        safe_connect(
+            self._view,
+            "pendingUserActionRequested",
+            self._on_pending_user_action,
+            "widget.pending_user_action",
+        )
         self._view.permissionRequested.connect(self.permissionRequested)
         self._view.permissionReplied.connect(self.permissionReplied)
         # 审批的交互卡 -> 输入区 dock；落定后撤下并接上下一张待答的
-        self._view.permissionDockRequested.connect(self._on_permission_dock_requested)
-        self._view.permissionSettled.connect(self._on_permission_settled)
+        safe_connect(
+            self._view,
+            "permissionDockRequested",
+            self._on_permission_dock_requested,
+            "widget.permission_dock",
+        )
+        safe_connect(
+            self._view,
+            "permissionSettled",
+            self._on_permission_settled,
+            "widget.permission_settled",
+        )
         self._view.attachmentClicked.connect(self.attachmentClicked)
         self._view.messageActionTriggered.connect(self.messageActionTriggered)
         self._view.batchRenderFinished.connect(self.batchRenderFinished)
-        self._input.submittedFull.connect(self._on_input_submitted)
-        self._input.stopRequested.connect(self.stopGeneration)
+        safe_connect(
+            self._input, "submittedFull", self._on_input_submitted, "widget.submit"
+        )
+        safe_connect(self._input, "stopRequested", self.stopGeneration, "widget.stop")
         self._input.attachmentsChanged.connect(self.attachmentsChanged)
         self._input.mentionSelected.connect(self.mentionSelected)
         self._input.commandSelected.connect(self.commandSelected)
@@ -179,24 +197,65 @@ class ElaChatWidget(
         self._input.selectorChanged.connect(self.selectorChanged)
         self._input.shellSubmitted.connect(self.shellSubmitted)
         self._input.draftChanged.connect(self.draftChanged)
-        self._input.alternateSubmitted.connect(self._on_alternate_submitted)
+        safe_connect(
+            self._input,
+            "alternateSubmitted",
+            self._on_alternate_submitted,
+            "widget.alternate_submit",
+        )
         self._input.imagePasted.connect(self.imagePasted)
         self._input.filesAdded.connect(self.filesAdded)
-        self._input.clearRequested.connect(self._on_clear_requested)
+        safe_connect(
+            self._input,
+            "clearRequested",
+            self._on_clear_requested,
+            "widget.clear",
+        )
         self._input.newTopicRequested.connect(self.newTopicRequested)
         self._input.contextUsageClicked.connect(self.contextUsageClicked)
-        self._input_dock.changed.connect(self._on_input_dock_changed)
-        self._queue_dock.sendRequested.connect(self.sendQueuedNow)
-        self._queue_dock.editRequested.connect(self.editQueuedMessage)
-        self._queue_dock.removeRequested.connect(self.dequeueMessage)
-        self._queue_dock.reorderRequested.connect(self.moveQueued)
-        self._queue_dock.steerRequested.connect(self.steerQueued)
-        self._queue_dock.undoRequested.connect(self.undoQueueChange)
+        safe_connect(
+            self._input_dock,
+            "changed",
+            self._on_input_dock_changed,
+            "widget.input_dock",
+        )
+        safe_connect(
+            self._queue_dock, "sendRequested", self.sendQueuedNow, "widget.queue_send"
+        )
+        safe_connect(
+            self._queue_dock,
+            "editRequested",
+            self.editQueuedMessage,
+            "widget.queue_edit",
+        )
+        safe_connect(
+            self._queue_dock,
+            "removeRequested",
+            self.dequeueMessage,
+            "widget.queue_remove",
+        )
+        safe_connect(
+            self._queue_dock, "reorderRequested", self.moveQueued, "widget.queue_move"
+        )
+        safe_connect(
+            self._queue_dock, "steerRequested", self.steerQueued, "widget.queue_steer"
+        )
+        safe_connect(
+            self._queue_dock,
+            "undoRequested",
+            self.undoQueueChange,
+            "widget.queue_undo",
+        )
 
         # Ctrl+F：打开会话内搜索（焦点在子控件时也生效）
         self._search_shortcut = QShortcut(QKeySequence.StandardKey.Find, self)
         self._search_shortcut.setContext(Qt.ShortcutContext.WidgetWithChildrenShortcut)
-        self._search_shortcut.activated.connect(self._view.showSearchBar)
+        safe_connect(
+            self._search_shortcut,
+            "activated",
+            self._view.showSearchBar,
+            "widget.search",
+        )
 
         self.setAcceptDrops(True)
 

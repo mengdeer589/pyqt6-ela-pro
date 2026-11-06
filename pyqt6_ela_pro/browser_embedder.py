@@ -733,7 +733,6 @@ class _BrowserSession:
             _BrowserSession._instance = None
             _BrowserSession._refcount = 0
 
-
     def request_launch(self, token: Any, launch: Callable[[], None]) -> None:
         """排队启动窗口：前一个实例认领（或超时 / 释放）后才轮到下一个。"""
         self._launch_queue.append((token, launch))
@@ -780,7 +779,9 @@ class _BrowserSession:
             self._process = QProcess()
             self._process.setProgram(str(self._webview_path))
             self._process.setArguments(args)
-            self._process.setProcessChannelMode(QProcess.ProcessChannelMode.SeparateChannels)
+            self._process.setProcessChannelMode(
+                QProcess.ProcessChannelMode.SeparateChannels
+            )
             # **QProcess 启动失败不抛异常**，只发 ``errorOccurred``；只接信号
             # 不够，浏览器路径写错时「等窗口」会空转满 30 秒零反馈
             # （详见 AGENTS.md）。
@@ -887,8 +888,9 @@ class _BrowserSession:
             try:
                 if self._process.state() == QProcess.ProcessState.Running:
                     self._process.terminate()
-                    self._process.waitForFinished(3000)
-                    if self._process.state() == QProcess.ProcessState.Running:
+                    # 最多等 300ms，避免关闭最后一个嵌入器时冻结 GUI 3 秒；
+                    # 超时直接 kill，随后进程会异步退出。
+                    if not self._process.waitForFinished(300):
                         self._process.kill()
                     handled = True
             except Exception:
@@ -1157,11 +1159,11 @@ class ElaBrowserEmbedder(ElaWindowEmbedder):
         """清理 CDP 连接"""
         if self._controller:
             try:
-                                self._controller.cdpReady.disconnect(self._cdpReadySlot)
+                self._controller.cdpReady.disconnect(self._cdpReadySlot)
             except (TypeError, RuntimeError):
                 pass
             try:
-                                self._controller.errorOccurred.disconnect(self._cdpErrorSlot)
+                self._controller.errorOccurred.disconnect(self._cdpErrorSlot)
             except (TypeError, RuntimeError):
                 pass
             try:
@@ -1199,7 +1201,6 @@ class ElaBrowserEmbedder(ElaWindowEmbedder):
             self._controller.close()
             self._controller = None
 
-
     def reload(self, callback: Optional[Callable[[Any], None]] = None) -> None:
         """刷新当前页面（非阻塞）"""
         if self._controller:
@@ -1230,7 +1231,6 @@ class ElaBrowserEmbedder(ElaWindowEmbedder):
             return self._controller.runJS(script, callback=callback)
         return None
 
-
     def _start_cdp_connection(self) -> None:
         """启动 CDP 连接流程（非阻塞）"""
         self._start_debug_url_polling(self._on_debugger_url_obtained)
@@ -1244,7 +1244,9 @@ class ElaBrowserEmbedder(ElaWindowEmbedder):
         self._debug_url_max_retries = int(timeout / 0.5)
 
         self._network_mgr = QNetworkAccessManager(self)
-        self._debugUrlSlot = self._on_debug_url_response  # 断连要同一对象（lambda / partial 必须存引用）
+        self._debugUrlSlot = (
+            self._on_debug_url_response
+        )  # 断连要同一对象（lambda / partial 必须存引用）
         self._network_mgr.finished.connect(self._debugUrlSlot)
 
         self._debug_url_timer = QTimer(self)
@@ -1331,7 +1333,7 @@ class ElaBrowserEmbedder(ElaWindowEmbedder):
             self._debug_url_timer = None
         if self._network_mgr:
             try:
-                                self._network_mgr.finished.disconnect(self._debugUrlSlot)
+                self._network_mgr.finished.disconnect(self._debugUrlSlot)
             except (TypeError, RuntimeError):
                 pass
             self._network_mgr.deleteLater()
@@ -1352,9 +1354,13 @@ class ElaBrowserEmbedder(ElaWindowEmbedder):
         )
         self._controller.set_loadStarted_callback(self.loadStarted.emit)
         self._controller.set_loadFinished_callback(self.loadFinished.emit)
-        self._cdpReadySlot = self._on_cdpReady  # 断连要同一对象（lambda / partial 必须存引用）
+        self._cdpReadySlot = (
+            self._on_cdpReady
+        )  # 断连要同一对象（lambda / partial 必须存引用）
         self._controller.cdpReady.connect(self._cdpReadySlot)
-        self._cdpErrorSlot = self._onCdpError  # 断连要同一对象（lambda / partial 必须存引用）
+        self._cdpErrorSlot = (
+            self._onCdpError
+        )  # 断连要同一对象（lambda / partial 必须存引用）
         self._controller.errorOccurred.connect(self._cdpErrorSlot)
         self._controller.consoleMessage.connect(self.consoleMessage)
         self._controller.domContentReady.connect(self.domContentReady)

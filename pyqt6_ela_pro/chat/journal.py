@@ -10,7 +10,9 @@ import time
 from dataclasses import replace
 from typing import Callable, Optional
 
+from .._internal import guard_callback as _guarded
 from . import _json
+from ._flow import TurnStreamState
 from ._usage import stats_from_usage
 from .message import (
     ElaChatAttachment,
@@ -99,15 +101,8 @@ class ElaChatTurnJournal:
         self._seq = 0
         #: 当前步骤的 stats part id（同一 step 重复上报要覆盖而不是追加）
         self._stats_ids: dict = {}
-        #: 尚未开正文段的纯空白分片（与气泡 ``_pending_text_lead`` 同语义）
-        self._pending_text_lead: list = []
-        #: 回合 / 本轮开始时间（秒）；用于 reasoning 与 stats 的时长
-        self._turn_start = 0.0
-        self._round_start = 0.0
-        #: 已收到的 ``llmStarted`` 次数（第 1 轮不切步，镜像 binder）
-        self._llm_round = 0
-        #: 当前思考段开始时间（秒）
-        self._reasoning_start = 0.0
+        #: 回合 / 轮次 / 推理 / 首段正文的共享状态（与 binder 同一套判定）
+        self._flow = TurnStreamState(self._clock)
 
     def _reset_state(self) -> None:
         """复位累计状态（复用同一实例开始新回合时调用）。"""
@@ -125,12 +120,9 @@ class ElaChatTurnJournal:
         self._rec_compaction = None
         self._rec_stats = 0
         self._seq = 0
+        self._dumped = 0
         self._stats_ids = {}
-        self._pending_text_lead = []
-        self._turn_start = 0.0
-        self._round_start = 0.0
-        self._llm_round = 0
-        self._reasoning_start = 0.0
+        self._flow.reset()
 
     def begin(self, messageId: Optional[int] = None) -> "ElaChatTurnJournal":
         """开始记录一个回合（``messageId`` 省略则沿用构造时的值）。
@@ -142,9 +134,7 @@ class ElaChatTurnJournal:
         if messageId is not None:
             self._message_id = _int(messageId, self._message_id)
         self._open = True
-        self._turn_start = self._clock()
-        self._round_start = self._turn_start
-        self._llm_round = 0
+        self._flow.begin_turn()
         self._push(
             _Ev.Begin,
             id=self._message_id,
@@ -190,7 +180,8 @@ class ElaChatTurnJournal:
             self.endReasoning()
         self.endText()
         self._push(_Ev.Step)
-        self._round_start = self._clock()
+        self._flow.round_start = self._clock()
+        self._flow.round_started = True
         return self
 
     def text(self, chunk: str) -> "ElaChatTurnJournal":
@@ -201,14 +192,11 @@ class ElaChatTurnJournal:
         if not self._open or not chunk:
             return self
         if self._rec_text is None:
-            if not chunk.strip():
-                self._pending_text_lead.append(chunk)
+            text = self._flow.take_text(chunk)
+            if text is None:
                 return self
-            lead = "".join(self._pending_text_lead)
-            self._pending_text_lead.clear()
-            chunk = lead + chunk
             self._rec_text = self._mint()
-            self._push(_Ev.Text, id=self._rec_text, step=self._step, text=chunk)
+            self._push(_Ev.Text, id=self._rec_text, step=self._step, text=text)
         else:
             self._push(_Ev.Text, id=self._rec_text, text=chunk)
         return self
@@ -217,7 +205,7 @@ class ElaChatTurnJournal:
         """结束当前正文段（未开段的纯空白分片一并丢弃）。"""
         if not self._open:
             return self
-        self._pending_text_lead.clear()
+        self._flow.pending_text_lead.clear()
         if self._rec_text is not None:
             self._push(_Ev.TextEnd, id=self._rec_text)
             self._rec_text = None
@@ -229,7 +217,7 @@ class ElaChatTurnJournal:
             return self
         if self._rec_reasoning is None:
             self._rec_reasoning = self._mint()
-            self._reasoning_start = self._clock()
+            self._flow.begin_reasoning()
             self._push(
                 _Ev.Reasoning, id=self._rec_reasoning, step=self._step, text=chunk
             )
@@ -242,16 +230,13 @@ class ElaChatTurnJournal:
         if not self._open:
             return self
         if durationMs is None:
-            elapsed = (
-                max(0.0, (self._clock() - self._reasoning_start) * 1000.0)
-                if self._reasoning_start
-                else 0.0
-            )
+            elapsed = self._flow.end_reasoning()
         else:
             elapsed = _float(durationMs, 0.0)
+            self._flow.reasoning_open = False
+            self._flow.reasoning_start = 0.0
         self._push(_Ev.ReasoningEnd, id=self._rec_reasoning or "", ms=elapsed)
         self._rec_reasoning = None
-        self._reasoning_start = 0.0
         return self
 
     def toolStart(self, callId: str, name: str, arguments="") -> "ElaChatTurnJournal":
@@ -361,8 +346,8 @@ class ElaChatTurnJournal:
         if self._rec_reasoning is not None:
             self.endReasoning()
         self.endText()
-        if not self._duration_ms and self._turn_start:
-            self.setDuration(max(0.0, (self._clock() - self._turn_start) * 1000.0))
+        if not self._duration_ms and self._flow.open:
+            self.setDuration(self._flow.turn_duration_ms())
         self._push(_Ev.End, status=status, error=error or "")
         self._open = False
         return self
@@ -789,14 +774,14 @@ class ElaChatTurnJournal:
         """当前 worker 的 ``(signal, slot)`` 连接表（连 / 断共用同一批对象）。"""
         chunk, toolStart, toolEnd, stats = self._bound_slots()
         pairs = [
-            (worker.chunkReceived, chunk),
-            (worker.toolStarted, toolStart),
-            (worker.toolEnded, toolEnd),
-            (worker.statsReady, stats),
+            (worker.chunkReceived, _guarded(chunk, "journal.chunk")),
+            (worker.toolStarted, _guarded(toolStart, "journal.tool_started")),
+            (worker.toolEnded, _guarded(toolEnd, "journal.tool_ended")),
+            (worker.statsReady, _guarded(stats, "journal.stats")),
         ]
         llmStarted = getattr(worker, "llmStarted", None)
         if llmStarted is not None:
-            pairs.insert(0, (llmStarted, self._on_llm_started))
+            pairs.insert(0, (llmStarted, _guarded(self._on_llm_started, "journal.llm")))
         return pairs
 
     def _bound_slots(self):
@@ -834,9 +819,8 @@ class ElaChatTurnJournal:
         """后端每次 LLM 调用开始：第 2 轮起切步（上一轮没有分段时不切）。"""
         if not self._open:
             return
-        self._round_start = self._clock()
-        self._llm_round += 1
-        if self._llm_round <= 1:
+        self._flow.begin_round()
+        if self._flow.round <= 1:
             return
         if self._rec_reasoning is not None:
             self.endReasoning()
@@ -878,8 +862,8 @@ class ElaChatTurnJournal:
             return
         stats = stats_from_usage(usage, ttftMs, tps)
         duration = 0.0
-        if self._round_start:
-            duration = max(0.0, (self._clock() - self._round_start) * 1000.0)
+        if self._flow.round_started:
+            duration = self._flow.round_duration_ms()
         if duration and not stats.duration_ms:
             stats = replace(stats, duration_ms=duration)
         self.stats(stats)

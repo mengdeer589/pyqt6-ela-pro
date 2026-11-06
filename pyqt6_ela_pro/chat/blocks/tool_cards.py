@@ -180,13 +180,7 @@ class ToolCallCard(_CollapsibleBlock):
 
     def setStatus(self, status: str) -> None:
         """设置调用状态（见 :class:`ElaChatToolStatusType`）。"""
-        self._call = ElaChatToolCall(
-            id=self._call.id,
-            name=self._call.name,
-            arguments=self._call.arguments,
-            result=self._call.result,
-            status=status,
-        )
+        self._call = self._call.withStatus(status)
         self._sync_header()
         # 状态变化也要通知渲染器，否则展开状态下「运行中 -> 完成」会永远停在运行态。
         if self._body_built:

@@ -162,7 +162,7 @@ class ElaChatSessionStats:
     cache_write_tokens: int = 0
     #: 当前上下文词元总数（四路和）
     total_tokens: int = 0
-    #: 上下文占用百分比（``limit <= 0`` 或无数据为 ``None``）
+    #: 上下文占用百分比（``contextWindow <= 0`` 或无数据为 ``None``）
     usage_percent: Optional[int] = None
     #: 全会话累计花费（美元）
     total_cost_usd: float = 0.0
@@ -184,8 +184,9 @@ class ElaChatSessionStats:
     reasoning_ms: float = 0.0
 
     @classmethod
-    def fromMessages(cls, messages, limit: int = 0) -> "ElaChatSessionStats":
-        """从消息快照聚合；``limit`` 是模型上下文上限（词元），``> 0`` 才算 ``usage_percent``。"""
+    def fromMessages(cls, messages, contextWindow: int = 0) -> "ElaChatSessionStats":
+        """从消息快照聚合；``contextWindow`` 是模型上下文上限（词元），``> 0``
+        才算 ``usage_percent``。"""
         items = list(messages or ())
         user_messages = 0
         assistant_messages = 0
@@ -261,7 +262,7 @@ class ElaChatSessionStats:
             break
 
         total = _stats_total(latest) if latest is not None else 0
-        window = max(0, _as_int(limit))
+        window = max(0, _as_int(contextWindow))
         percent = None
         if window > 0 and total > 0:
             percent = max(0, min(100, round(total * 100 / window)))

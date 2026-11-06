@@ -484,9 +484,9 @@ class EmbedPage(ExamplePage):
 
         if not self._browser_available:
             hint = ElaText(
-                "未检测到 ElaBrowserEmbedder 的可选依赖（pywin32 / psutil / "
-                "websocket-client），已跳过控件创建。\n"
-                "安装后即可运行：uv pip install pywin32 psutil websocket-client",
+                "未检测到 ElaBrowserEmbedder 的可选依赖（pywin32 / comtypes），"
+                "已跳过控件创建。\n"
+                "安装后即可运行：uv pip install pywin32 comtypes",
                 self,
             )
             hint.setTextPixelSize(14)
@@ -494,7 +494,7 @@ class EmbedPage(ExamplePage):
             parent_layout.addSpacing(20)
             return
 
-        self._browser = ElaBrowserEmbedder(container)
+        self._browser = ElaBrowserEmbedder(webview_path=BROWSER_PATH, parent=container)
         # 信号全部转成状态文字。错误信号有三个且各司其职：embedError / pageError /
         # consoleMessage；embedCompleted 必须接 —— 浏览器起不来时只发信号不抛异常。
         self._browser.loadStarted.connect(lambda: self._showStatus("loadStarted"))
@@ -528,9 +528,7 @@ class EmbedPage(ExamplePage):
         row_layout.setContentsMargins(0, 0, 0, 0)
         row_layout.setSpacing(10)
         launch_btn = ElaButton("启动浏览器", variant="solid", size="small", parent=row)
-        launch_btn.clicked.connect(
-            lambda: self._browser.load_url("https://example.com")
-        )
+        launch_btn.clicked.connect(lambda: self._browser.embed("https://example.com"))
         row_layout.addWidget(launch_btn)
         reload_btn = ElaButton("刷新", variant="outlined", size="small", parent=row)
         reload_btn.clicked.connect(lambda: self._browser.reload())

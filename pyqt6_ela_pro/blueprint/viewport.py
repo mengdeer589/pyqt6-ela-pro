@@ -106,6 +106,12 @@ class _ViewportMixin:
     def keyReleaseEvent(self, event) -> None:  # noqa: N802
         self._canvas.keyReleaseEvent(event)
 
+    def focusOutEvent(self, event) -> None:  # noqa: N802
+        # 正常焦点在 viewport 上，画布自身的 focusOutEvent 不会触发；这里必须
+        # 转发，否则按住 Space 后切走焦点，回来后左键永远被当成平移。
+        self._canvas.focusOutEvent(event)
+        super().focusOutEvent(event)
+
 
 class _RasterViewport(_ViewportMixin, QWidget):
     """软件回退视口：普通 QWidget，paintEvent 走 CPU raster。

@@ -24,6 +24,7 @@ from PyQt6ElaWidgetTools import (
     ElaScrollArea,
 )
 
+from .._internal import safe_connect
 from ..tooltips import ElaToolTipPositionType, set_tooltip
 from ..widget_base import ElaThemeWidget
 from .blocks import (
@@ -205,16 +206,28 @@ class ElaChatView(
         self._jump_button.setToolTip("回到底部")
         set_tooltip(self._jump_button, "回到底部", ElaToolTipPositionType.Top)
         self._jump_button.hide()
-        self._jump_button.clicked.connect(self._on_jump_clicked)
+        safe_connect(
+            self._jump_button,
+            "clicked",
+            lambda *_: self._on_jump_clicked(),
+            "view.jump",
+        )
 
         self._follow_timer = QTimer(self)
         self._follow_timer.setSingleShot(True)
-        self._follow_timer.timeout.connect(self._scroll_to_bottom_if_sticky)
+        safe_connect(
+            self._follow_timer,
+            "timeout",
+            self._scroll_to_bottom_if_sticky,
+            "view.follow",
+        )
 
         self._follow_hold = False
         self._hold_timer = QTimer(self)
         self._hold_timer.setSingleShot(True)
-        self._hold_timer.timeout.connect(self._release_follow_hold)
+        safe_connect(
+            self._hold_timer, "timeout", self._release_follow_hold, "view.hold"
+        )
 
         self._resize_reflow_deferred = True
         self._resize_reflow_min = _RESIZE_REFLOW_MIN_MESSAGES
@@ -224,7 +237,12 @@ class ElaChatView(
         self._resize_frozen_width = 0
         self._resize_reflow_timer = QTimer(self)
         self._resize_reflow_timer.setSingleShot(True)
-        self._resize_reflow_timer.timeout.connect(self._release_resize_reflow)
+        safe_connect(
+            self._resize_reflow_timer,
+            "timeout",
+            self._release_resize_reflow,
+            "view.resize_reflow",
+        )
 
         self._batch_depth = 0
         #: 批量加载时是否延迟建分段控件（True = 首屏外只存 parts 数据）
@@ -244,7 +262,12 @@ class ElaChatView(
         self._virtual_pending_top: Optional[int] = None
         self._virtual_window_timer = QTimer(self)
         self._virtual_window_timer.setSingleShot(True)
-        self._virtual_window_timer.timeout.connect(self._refresh_virtual_window)
+        safe_connect(
+            self._virtual_window_timer,
+            "timeout",
+            self._refresh_virtual_window,
+            "view.virtual_window",
+        )
         #: 只有占位、尚未建 bubble 的消息（messageId -> 占位控件）
         self._shell_placeholders: dict = {}
         #: 本次批量恢复是否启用了壳虚拟化（滚动时允许把远处气泡收回占位）
@@ -252,7 +275,12 @@ class ElaChatView(
         self._render_queue: deque = deque()
         self._render_timer = QTimer(self)
         self._render_timer.setSingleShot(True)
-        self._render_timer.timeout.connect(self._process_render_queue)
+        safe_connect(
+            self._render_timer,
+            "timeout",
+            self._process_render_queue,
+            "view.render_queue",
+        )
         #: 首屏预算内没渲染完、留给「滚上去再渲染」的消息 id（升序）
         self._lazy_ids: list[int] = []
         #: 首屏已经渲染的消息条数（判定 _BATCH_EAGER_COUNT 预算）
@@ -263,18 +291,40 @@ class ElaChatView(
         self._pending_anchor: Optional[tuple] = None
         self._lazy_timer = QTimer(self)
         self._lazy_timer.setSingleShot(True)
-        self._lazy_timer.timeout.connect(self._load_older_page)
+        safe_connect(
+            self._lazy_timer, "timeout", self._load_older_page, "view.lazy_load"
+        )
 
         self._suspension_enabled = True
         self._suspension_min = _SUSPEND_MIN_MESSAGES
         self._suspended_ids: set = set()
         self._suspension_timer = QTimer(self)
         self._suspension_timer.setSingleShot(True)
-        self._suspension_timer.timeout.connect(self._update_suspension)
+        safe_connect(
+            self._suspension_timer,
+            "timeout",
+            self._update_suspension,
+            "view.suspension",
+        )
 
-        self._scroll.verticalScrollBar().valueChanged.connect(self._on_scrolled)
-        self._scroll.verticalScrollBar().rangeChanged.connect(self._on_range_changed)
-        self._empty.suggestionClicked.connect(self.suggestionClicked)
+        safe_connect(
+            self._scroll.verticalScrollBar(),
+            "valueChanged",
+            self._on_scrolled,
+            "view.scrolled",
+        )
+        safe_connect(
+            self._scroll.verticalScrollBar(),
+            "rangeChanged",
+            self._on_range_changed,
+            "view.range",
+        )
+        safe_connect(
+            self._empty,
+            "suggestionClicked",
+            lambda *args: self.suggestionClicked.emit(*args),
+            "view.suggestion",
+        )
         self._apply_content_margins()
 
     def deleteLater(self) -> None:  # noqa: N802 (Qt 命名)
@@ -516,16 +566,16 @@ class ElaChatView(
         self._flush_pending_syncs()
         return self._messages[-1] if self._messages else None
 
-    def sessionStats(self, limit: int = 0) -> ElaChatSessionStats:
+    def sessionStats(self, contextWindow: int = 0) -> ElaChatSessionStats:
         """会话级用量汇总（计数 / 上下文四路词元 / 使用率 / 成本 / 工具统计）。
 
         当前用量取最后一条有 tokens 的助手消息的最后一步；``total_tokens`` = 四路和，
         成本跨全部消息求和。
 
-        :param limit: 模型上下文上限（词元）；``> 0`` 时才计算 ``usage_percent``
+        :param contextWindow: 模型上下文上限（词元）；``> 0`` 时才计算 ``usage_percent``
         :returns: :class:`ElaChatSessionStats` 快照
         """
-        return ElaChatSessionStats.fromMessages(self.messages(), limit)
+        return ElaChatSessionStats.fromMessages(self.messages(), contextWindow)
 
     def contentWidget(self) -> QWidget:
         """获取滚动区内容容器（高级用法）。"""

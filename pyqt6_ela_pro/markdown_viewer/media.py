@@ -42,9 +42,17 @@ def _decode_data_uri(url: QUrl) -> QByteArray:
         if not _:
             return QByteArray()
         if header.rstrip().lower().endswith(";base64"):
+            # 先按编码长度预检，避免超长 data URI 在解码后才丢弃：
+            # base64 解码后的字节数约为输入长度的 3/4。
+            compact = _safe_b64_text(encoded)
+            if len(compact) > _MAX_DATA_URI_BYTES * 4 // 3 + 4:
+                return QByteArray()
             # validate=True：畸形 base64 直接拒绝，不让QImage 去猜
-            data = base64.b64decode(_safe_b64_text(encoded), validate=True)
+            data = base64.b64decode(compact, validate=True)
         else:
+            # percent-encoding 最坏会把一个字节扩成 3 个字符。
+            if len(encoded) > _MAX_DATA_URI_BYTES * 3 + 16:
+                return QByteArray()
             data = unquote_to_bytes(encoded)
     except Exception:
         return QByteArray()

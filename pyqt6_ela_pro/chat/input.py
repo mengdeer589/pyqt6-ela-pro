@@ -29,7 +29,7 @@ from PyQt6ElaWidgetTools import (
     ElaPlainTextEdit,
 )
 
-from .._internal import system_cjk_font_family
+from .._internal import safe_connect, system_cjk_font_family
 from .._styles import editBorderlessStyle
 from ..ela_button import ElaButton
 from ..tooltips import ElaToolTipPositionType, set_tooltip
@@ -136,7 +136,12 @@ class ElaChatInput(
 
         # 层 0：补全浮层（悬浮在输入卡片上方）
         self._popup = SuggestionPopup(self)
-        self._popup.suggestionActivated.connect(self._on_suggestion_activated)
+        safe_connect(
+            self._popup,
+            "suggestionActivated",
+            self._on_suggestion_activated,
+            "input.suggestion",
+        )
         layout.addWidget(self._popup)
 
         # 层 1：输入卡片（附件条 / 编辑框 / 工具栏都在卡片内）
@@ -149,7 +154,12 @@ class ElaChatInput(
         # 卡片内 ①：附件条
         self._attachments = AttachmentStrip(self._surface)
         self._attachments.setVisible(False)
-        self._attachments.changed.connect(self._on_attachments_changed)
+        safe_connect(
+            self._attachments,
+            "changed",
+            self._on_attachments_changed,
+            "input.attachments",
+        )
         surface_layout.addWidget(self._attachments)
 
         # 卡片内 ②：编辑框（无边框，边框 / 底色 / 聚焦态由卡片统一接管）
@@ -167,12 +177,25 @@ class ElaChatInput(
         # 按键走编辑框自己的 keyPressEvent → 注入的处理器（不装事件过滤器，
         # 见 _ChatPlainTextEdit.setKeyHandler）；组合 / 焦点走信号。
         self._edit.setKeyHandler(self._handle_edit_key)
-        self._edit.preeditChanged.connect(self._on_preedit_changed)
-        self._edit.focusChanged.connect(self._on_edit_focus_changed)
-        self._edit.textChanged.connect(self._on_text_changed)
-        self._edit.imagePasted.connect(self._on_image_pasted)
-        self._edit.filesAdded.connect(self._on_files_added)
-        self._edit.largeTextPasted.connect(self._on_large_text_pasted)
+        safe_connect(
+            self._edit, "preeditChanged", self._on_preedit_changed, "input.preedit"
+        )
+        safe_connect(
+            self._edit, "focusChanged", self._on_edit_focus_changed, "input.focus"
+        )
+        safe_connect(self._edit, "textChanged", self._on_text_changed, "input.text")
+        safe_connect(
+            self._edit, "imagePasted", self._on_image_pasted, "input.image_paste"
+        )
+        safe_connect(
+            self._edit, "filesAdded", self._on_files_added, "input.files_added"
+        )
+        safe_connect(
+            self._edit,
+            "largeTextPasted",
+            self._on_large_text_pasted,
+            "input.large_text",
+        )
         self._normal_font = QFont(self._edit.font())
         self._shell_font = QFont(self._normal_font)
         cjk = system_cjk_font_family()
@@ -183,8 +206,11 @@ class ElaChatInput(
         self._draft_timer = QTimer(self)
         self._draft_timer.setSingleShot(True)
         self._draft_timer.setInterval(300)
-        self._draft_timer.timeout.connect(
-            lambda: self.draftChanged.emit(self.draftState())
+        safe_connect(
+            self._draft_timer,
+            "timeout",
+            lambda: self.draftChanged.emit(self.draftState()),
+            "input.draft",
         )
         surface_layout.addWidget(self._edit)
 
@@ -228,7 +254,7 @@ class ElaChatInput(
         )
         self._button.setFixedSize(_SEND_BUTTON_SIZE, _SEND_BUTTON_SIZE)
         self._button.setBorderRadius(6)
-        self._button.clicked.connect(self._on_button_clicked)
+        safe_connect(self._button, "clicked", self._on_button_clicked, "input.send")
         #: 已写入按钮的图标枚举 —— ``QIcon`` 无值相等语义，每次比较都会重建图标
         self._button_icon = ElaIconType.IconName.ArrowUp
         # 工具栏控件不抢焦点：点按钮时编辑框保持聚焦（卡片维持强调色边框）

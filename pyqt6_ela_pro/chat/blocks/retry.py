@@ -19,7 +19,7 @@ from PyQt6ElaWidgetTools import (
     eTheme,
 )
 
-from ..._internal import _ThemeAwareMixin
+from ..._internal import _ThemeAwareMixin, safe_connect
 from ..._styles import ColorText
 from ..._theme import (
     ElaStatusRoleType,
@@ -83,19 +83,29 @@ class ElaChatRetryCard(_ThemeAwareMixin, ElaScrollPageArea):
         self._retry_button = ElaButton(
             "立即重试", variant="text", size="small", parent=self
         )
-        self._retry_button.clicked.connect(self.retryRequested)
+        safe_connect(
+            self._retry_button,
+            "clicked",
+            lambda *_: self.retryRequested.emit(),
+            "retry.retry",
+        )
         self._cancel_button = ElaIconButton(
             ElaIconType.IconName.Xmark, 12, 18, 18, self
         )
         self._cancel_button.setBorderRadius(4)
         self._cancel_button.setToolTip("取消重试")
-        self._cancel_button.clicked.connect(self.cancelRequested)
+        safe_connect(
+            self._cancel_button,
+            "clicked",
+            lambda *_: self.cancelRequested.emit(),
+            "retry.cancel",
+        )
         layout.addWidget(self._retry_button, 0, Qt.AlignmentFlag.AlignBottom)
         layout.addWidget(self._cancel_button, 0, Qt.AlignmentFlag.AlignBottom)
 
         self._timer = QTimer(self)
         self._timer.setInterval(1000)
-        self._timer.timeout.connect(self._tick)
+        safe_connect(self._timer, "timeout", self._tick, "retry.tick")
 
         self.hide()
         self._apply_theme()

@@ -5,6 +5,7 @@ from __future__ import annotations
 import re
 from typing import Callable, Optional
 
+from .._internal import safe_connect
 from .message import ElaChatMention
 from .selector import ElaChatSelector
 from .suggestions import ElaChatSuggestion
@@ -172,8 +173,12 @@ class _InputCompletionMixin:
         if selector_key in self._selectors:
             raise ValueError(f"addSelector: selector {selector_key!r} 已存在")
         selector = ElaChatSelector(title, items or [], current, self._surface)
-        selector.selectionChanged.connect(
-            lambda itemId, k=selector_key: self.selectorChanged.emit(k, itemId)
+        safe_connect(
+            selector,
+            "selectionChanged",
+            lambda itemId, k=selector_key: self.selectorChanged.emit(k, itemId),
+            "input.selector",
+            receiver=selector,
         )
         self._toolbar.insertWidget(
             self._button, selector, key=f"selector:{selector_key}"

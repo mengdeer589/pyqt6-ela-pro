@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from typing import Optional
 
+from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QColor
 from PyQt6.QtWidgets import QPushButton, QWidget, QVBoxLayout
 from PyQt6ElaWidgetTools import ElaContentDialog, ElaText, eTheme, ElaThemeType
@@ -90,6 +91,7 @@ class ElaDialogBase(ElaContentDialog):
         self._paramLay.setSpacing(2)
         self._titleWidget = ElaText(title, self._paramWidget)
         self._titleWidget.setTextPixelSize(15)
+        self._titleWidget.setTextFormat(Qt.TextFormat.PlainText)
         self._paramLay.addWidget(self._titleWidget)
         self._paramLay.addSpacing(5)
         super().setCentralWidget(self._paramWidget)

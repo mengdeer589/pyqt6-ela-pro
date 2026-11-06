@@ -14,6 +14,7 @@ from PyQt6ElaWidgetTools import (
     ElaIconType,
 )
 
+from ..._internal import safe_connect
 from ..toolbar import ElaChatToolBar
 
 
@@ -32,7 +33,7 @@ class MessageActions(ElaChatToolBar):
     def __init__(self, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent, compact=True)
         self._mouse_transparent = False
-        self.toolTriggered.connect(self._dispatch)
+        safe_connect(self, "toolTriggered", self._dispatch, "actions.tool_triggered")
 
     def setMouseTransparent(self, on: bool) -> None:
         """设置操作栏（含全部子按钮）是否鼠标穿透；隐藏态下避免误点不可见按钮，程序化 ``click()`` 不受影响。"""

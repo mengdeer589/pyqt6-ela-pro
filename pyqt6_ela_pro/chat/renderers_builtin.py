@@ -15,6 +15,7 @@ from PyQt6.QtGui import QPixmap
 from PyQt6.QtWidgets import QLabel, QSizePolicy, QVBoxLayout, QWidget
 
 from .._diff import diffLines, filesFromMetadata
+from .._internal import safe_connect
 from ..terminal_view import ElaTerminalView
 from .blocks.file_changes import ElaChatFileChanges
 from .renderers import (
@@ -54,8 +55,13 @@ class _ShellBody(ElaTerminalView):
         self.setMinimumHeight(48)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         self.setAutoScroll(True)
-        self.linesAppended.connect(self._onLinesAppended)
-        self.cleared.connect(self._sync_height)
+        safe_connect(
+            self,
+            "linesAppended",
+            self._onLinesAppended,
+            "shell.lines_appended",
+        )
+        safe_connect(self, "cleared", self._sync_height, "shell.cleared")
 
     def _content_height(self) -> int:
         edit = getattr(self, "_edit", None)

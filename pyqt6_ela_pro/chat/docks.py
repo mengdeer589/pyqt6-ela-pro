@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Optional
 from uuid import uuid4
 
-from .._internal import is_deleted
+from .._internal import _ThemeAwareMixin, is_deleted, safe_connect
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import QFont
 from PyQt6.QtWidgets import QHBoxLayout, QVBoxLayout, QWidget
@@ -16,7 +16,6 @@ from PyQt6ElaWidgetTools import (
     eTheme,
 )
 
-from .._internal import _ThemeAwareMixin
 from .._ownership import ContentSlot, ElaWidgetOwnershipType
 from .._styles import BareButton, ColorText
 from ..ela_button import ElaButton
@@ -90,7 +89,12 @@ class ElaChatQueueDock(_ThemeAwareMixin, ElaScrollPageArea):
         self._undo_button.setBorderRadius(4)
         self._undo_button.setToolTip("撤销上一次队列操作")
         self._undo_button.hide()
-        self._undo_button.clicked.connect(self.undoRequested)
+        safe_connect(
+            self._undo_button,
+            "clicked",
+            lambda *_: self.undoRequested.emit(),
+            "docks.undo",
+        )
         header_row.addWidget(self._header, 1)
         header_row.addWidget(self._undo_button)
         layout.addLayout(header_row)
@@ -102,7 +106,7 @@ class ElaChatQueueDock(_ThemeAwareMixin, ElaScrollPageArea):
         self._rows.hide()
         layout.addWidget(self._rows)
 
-        self._header.toggled.connect(self._on_toggled)
+        safe_connect(self._header, "toggled", self._on_toggled, "docks.header_toggle")
         self.hide()
         self._apply_theme()
 
@@ -216,19 +220,28 @@ class ElaChatQueueDock(_ThemeAwareMixin, ElaScrollPageArea):
         send.setToolTip(
             "送进当前回合，不打断生成" if self._working else "立即发送这一条"
         )
-        send.clicked.connect(
-            lambda _checked=False, mid=message["id"]: self._activate_row(mid)
+        safe_connect(
+            send,
+            "clicked",
+            lambda _checked=False, mid=message["id"]: self._activate_row(mid),
+            "docks.send",
         )
         row._send_button = send
         edit = ElaButton("编辑", variant="text", size="small", parent=row)
-        edit.clicked.connect(
-            lambda _checked=False, mid=message["id"]: self.editRequested.emit(mid)
+        safe_connect(
+            edit,
+            "clicked",
+            lambda _checked=False, mid=message["id"]: self.editRequested.emit(mid),
+            "docks.edit",
         )
         remove = ElaIconButton(ElaIconType.IconName.Xmark, 12, 18, 18, row)
         remove.setBorderRadius(4)
         remove.setToolTip("移除")
-        remove.clicked.connect(
-            lambda _checked=False, mid=message["id"]: self.removeRequested.emit(mid)
+        safe_connect(
+            remove,
+            "clicked",
+            lambda _checked=False, mid=message["id"]: self.removeRequested.emit(mid),
+            "docks.remove",
         )
         layout.addWidget(send)
         layout.addWidget(edit)
@@ -299,7 +312,12 @@ class ElaChatInputDock(_ThemeAwareMixin, ElaScrollPageArea):
         self._layout.addWidget(self._title_label)
         self._slot = ContentSlot(self, "inputDock")
         # 只在**外部**销毁内容时收尾；显式 setWidget / clear 走各自的路径
-        self._slot.widgetChanged.connect(self._on_slot_changed)
+        safe_connect(
+            self._slot,
+            "widgetChanged",
+            self._on_slot_changed,
+            "docks.slot_changed",
+        )
         self.hide()
         self._apply_theme()
 

@@ -11,37 +11,12 @@ from typing import Optional
 
 from PyQt6.QtCore import QObject, QTimer, pyqtSignal
 
-from .._internal import to_logical_pos  # noqa: F401  （重导出，实现见 _internal）
+from .._internal import safe_connect, to_logical_pos  # noqa: F401  （重导出）
 
 _IS_WINDOWS = sys.platform == "win32"
 
 #: 轮询回调里已告警过的异常（同一异常只提示一次，避免每 15ms 刷屏）
 _warned_poll_errors: set = set()
-
-
-def safe_connect(obj, signal_name: str, slot, label: str = "") -> None:
-    """连接一个**受保护**的槽：槽内异常被捕获并告警，不会杀掉进程。
-
-    PyQt6 中槽抛出的异常不会传播给 ``signal.emit()`` 调用方，而是打印
-    traceback 后直接 ``abort()``（0xC0000409）；在 emit 外面包 ``try/except``
-    无效，唯一防线在槽本身。划词助手的槽会走 ``SendInput``，库内一律用它连接。
-
-    :param obj: 拥有信号的对象
-    :param signal_name: 信号名
-    :param slot: 槽（可调用）
-    :param label: 告警标签
-    """
-    name = label or getattr(slot, "__name__", repr(slot))
-
-    def _guarded(*args):
-        try:
-            return slot(*args)
-        except Exception as exc:  # noqa: BLE001 - 槽内异常绝不能逃逸
-            _warn_once("划词助手槽 %s 抛出异常，已忽略：" % name, exc)
-            return None
-
-    _guarded.__name__ = "guarded_%s" % name
-    getattr(obj, signal_name).connect(_guarded)
 
 
 def _warn_once(prefix: str, exc: BaseException) -> None:

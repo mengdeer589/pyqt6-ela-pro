@@ -30,11 +30,14 @@ def layout_all(chart, force: bool = False) -> None:
     """
     if force:
         chart._layout_key = None
-    elif not chart.anim.isRunning():
-        key = layout_cache_key(chart)
-        if key == chart._layout_key:
+    cache_key = None
+    if not force and not chart.anim.isRunning():
+        cache_key = layout_cache_key(chart)
+        if cache_key == chart._layout_key:
             return
-        chart._layout_key = key
+        # 先清掉旧键：布局中途抛异常时下一帧必须重试，不能把「半套布局」
+        # 当成缓存命中。
+        chart._layout_key = None
     content = chart._content_rect()
     right_reserves = []
     bottom_reserves = []
@@ -160,3 +163,9 @@ def layout_all(chart, force: bool = False) -> None:
                     f"component-layout:{component.__class__.__name__}",
                     f"组件布局异常（{component.__class__.__name__}）: {exc!r}",
                 )
+    if refreshed:
+        chart._layout_key = None
+    elif cache_key is not None:
+        # 只有完整跑完布局才提交缓存键；中途异常时保持旧键 / None，
+        # 下一帧会重新尝试，不会把「布局到一半」当成命中。
+        chart._layout_key = cache_key

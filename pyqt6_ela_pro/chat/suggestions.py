@@ -10,6 +10,7 @@ from PyQt6.QtGui import QStandardItem, QStandardItemModel
 from PyQt6.QtWidgets import QAbstractItemView, QVBoxLayout, QWidget
 from PyQt6ElaWidgetTools import ElaListView, ElaScrollPageArea
 
+from .._internal import safe_connect
 from .message import _as_int
 
 #: 列表项高度
@@ -64,7 +65,7 @@ class SuggestionPopup(ElaScrollPageArea):
         self._view.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self._view.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self._view.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
-        self._view.clicked.connect(self._on_clicked)
+        safe_connect(self._view, "clicked", self._on_clicked, "suggestions.click")
         layout = self.layout()
         if layout is None:
             layout = QVBoxLayout(self)

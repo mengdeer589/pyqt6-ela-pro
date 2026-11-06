@@ -312,7 +312,7 @@ sys.exit(app.exec())
 | **ElaChatToolButton** | 工具栏图标按钮（`ElaIconButton` 子类，可选选中态；带文字的是 `ElaButton`） |
 | **ElaChatPermissionDock** | 输入区**上方**的审批 dock（等待回复时的交互卡；时间线上留的是折叠的记录卡，两者不是同一个 widget） |
 | **ElaChatTurnJournal** | 回合崩溃恢复日志（追加写事件流：`dumpsNewLines` 落盘、`fromLines` 重放并结算残留） |
-| **ElaChatSessionStats** | 会话级用量汇总（`view.sessionStats(limit)`：计数 / 上下文四路词元 / 使用率 / 累计成本 / 工具调用统计（次数 / 轮数 / 按名计数 / 失败与在途）/ 思考耗时合计） |
+| **ElaChatSessionStats** | 会话级用量汇总（`view.sessionStats(contextWindow)`：计数 / 上下文四路词元 / 使用率 / 累计成本 / 工具调用统计（次数 / 轮数 / 按名计数 / 失败与在途）/ 思考耗时合计） |
 
 #### 划词助手
 

@@ -23,7 +23,7 @@ from PyQt6ElaWidgetTools import (
     eTheme,
 )
 
-from ..._internal import _ThemeAwareMixin
+from ..._internal import _ThemeAwareMixin, safe_connect
 from ..._styles import ColorText
 from ...ela_button import ElaButton
 from ...ela_long_press_button import ElaLongPressButton
@@ -151,7 +151,12 @@ class PermissionCard(_ThemeAwareMixin, ElaScrollPageArea):
         self._detail_toggle = ElaButton(
             "展开全部", variant="link", size="small", parent=self
         )
-        self._detail_toggle.clicked.connect(self._toggle_detail)
+        safe_connect(
+            self._detail_toggle,
+            "clicked",
+            lambda *_: self._toggle_detail(),
+            "permission.detail",
+        )
         self._detail_toggle.hide()
         layout.addWidget(self._detail_toggle, 0, Qt.AlignmentFlag.AlignLeft)
 
@@ -191,8 +196,11 @@ class PermissionCard(_ThemeAwareMixin, ElaScrollPageArea):
             size="small",
             parent=self._actions,
         )
-        self._allow_button.clicked.connect(
-            lambda: self._emit_reply(ElaChatPermissionStatusType.Allowed, "", "")
+        safe_connect(
+            self._allow_button,
+            "clicked",
+            lambda *_: self._emit_reply(ElaChatPermissionStatusType.Allowed, "", ""),
+            "permission.allow",
         )
         actions_layout.addWidget(self._allow_button)
         # 「始终允许」是持久授权，误触代价高 —— 按住 700ms 才生效；短按不发 longPressed。
@@ -203,8 +211,11 @@ class PermissionCard(_ThemeAwareMixin, ElaScrollPageArea):
             duration=self.ALWAYS_HOLD_MS,
             parent=self._actions,
         )
-        self._always_button.longPressed.connect(
-            lambda: self._emit_reply(ElaChatPermissionStatusType.Always, "", "")
+        safe_connect(
+            self._always_button,
+            "longPressed",
+            lambda *_: self._emit_reply(ElaChatPermissionStatusType.Always, "", ""),
+            "permission.always",
         )
         set_tooltip(
             self._always_button,
@@ -215,7 +226,12 @@ class PermissionCard(_ThemeAwareMixin, ElaScrollPageArea):
         self._reject_button = ElaButton(
             "拒绝…", variant="text", danger=True, size="small", parent=self._actions
         )
-        self._reject_button.clicked.connect(self._open_feedback)
+        safe_connect(
+            self._reject_button,
+            "clicked",
+            lambda *_: self._open_feedback(),
+            "permission.reject",
+        )
         actions_layout.addWidget(self._reject_button)
         actions_layout.addStretch(1)
         self._actions.hide()
@@ -231,7 +247,12 @@ class PermissionCard(_ThemeAwareMixin, ElaScrollPageArea):
         self._feedback_send = ElaButton(
             "回车提交", size="small", parent=self._feedback_row
         )
-        self._feedback_send.clicked.connect(self._submit_feedback)
+        safe_connect(
+            self._feedback_send,
+            "clicked",
+            lambda *_: self._submit_feedback(),
+            "permission.feedback",
+        )
         feedback_layout.addWidget(self._feedback_send, 0)
         self._feedback_row.hide()
         layout.addWidget(self._feedback_row)
@@ -244,15 +265,20 @@ class PermissionCard(_ThemeAwareMixin, ElaScrollPageArea):
         self._dismiss_button = ElaButton(
             "忽略", variant="text", size="small", parent=self._footer
         )
-        self._dismiss_button.clicked.connect(
-            lambda: self._emit_reply(ElaChatPermissionStatusType.Cancelled, "", "")
+        safe_connect(
+            self._dismiss_button,
+            "clicked",
+            lambda *_: self._emit_reply(ElaChatPermissionStatusType.Cancelled, "", ""),
+            "permission.dismiss",
         )
         footer_layout.addWidget(self._dismiss_button)
         footer_layout.addStretch(1)
         self._back_button = ElaButton(
             "上一步", variant="outlined", size="small", parent=self._footer
         )
-        self._back_button.clicked.connect(self._go_back)
+        safe_connect(
+            self._back_button, "clicked", lambda *_: self._go_back(), "permission.back"
+        )
         footer_layout.addWidget(self._back_button)
         # 主动作 = 实心强调色；快捷键只在键盘上生效、不写在按钮上（内联提示比按钮抢眼）。
         self._next_button = ElaButton(
@@ -262,7 +288,9 @@ class PermissionCard(_ThemeAwareMixin, ElaScrollPageArea):
             size="small",
             parent=self._footer,
         )
-        self._next_button.clicked.connect(self._go_next)
+        safe_connect(
+            self._next_button, "clicked", lambda *_: self._go_next(), "permission.next"
+        )
         footer_layout.addWidget(self._next_button)
         self._footer.hide()
         layout.addWidget(self._footer)
@@ -526,14 +554,50 @@ class PermissionCard(_ThemeAwareMixin, ElaScrollPageArea):
             isCustom=custom,
         )
         row.setRowIndex(index)
-        row.activate.connect(lambda value, q=question: self._on_activate(q, value))
-        row.markClicked.connect(lambda v, q=question: self._on_mark_clicked(q, v))
-        row.editCommitted.connect(lambda text, q=question: self._on_commit(q, text))
-        row.moveFocus.connect(self._move_focus)
-        row.rowFocused.connect(self._on_row_focused)
+        safe_connect(
+            row,
+            "activate",
+            lambda value, q=question: self._on_activate(q, value),
+            "permission.row_activate",
+            receiver=row,
+        )
+        safe_connect(
+            row,
+            "markClicked",
+            lambda v, q=question: self._on_mark_clicked(q, v),
+            "permission.row_mark",
+            receiver=row,
+        )
+        safe_connect(
+            row,
+            "editCommitted",
+            lambda text, q=question: self._on_commit(q, text),
+            "permission.row_edit",
+            receiver=row,
+        )
+        safe_connect(
+            row,
+            "moveFocus",
+            self._move_focus,
+            "permission.row_move",
+            receiver=row,
+        )
+        safe_connect(
+            row,
+            "rowFocused",
+            self._on_row_focused,
+            "permission.row_focus",
+            receiver=row,
+        )
         # 数字键 / Ctrl+⏎ / Alt+← / Esc 由持有全部行的这一层派发：焦点常驻在行上，
         # 键盘事件发给行、不冒泡回卡片。
-        row.globalKey.connect(self._on_global_key)
+        safe_connect(
+            row,
+            "globalKey",
+            self._on_global_key,
+            "permission.row_key",
+            receiver=row,
+        )
         return row
 
     def _clear_options(self) -> None:
@@ -698,7 +762,13 @@ class PermissionCard(_ThemeAwareMixin, ElaScrollPageArea):
         while len(self._segments) < len(questions):
             index = len(self._segments)
             segment = QuestionSegment(index, self._segment_box)
-            segment.jumped.connect(self._goto)
+            safe_connect(
+                segment,
+                "jumped",
+                self._goto,
+                "permission.segment_jump",
+                receiver=segment,
+            )
             self._segment_layout.addWidget(segment)
             self._segments.append(segment)
         for index, segment in enumerate(self._segments):

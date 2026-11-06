@@ -33,6 +33,7 @@ from PyQt6.QtWidgets import QWidget
 from PyQt6ElaWidgetTools import ElaIconType
 
 from ._motion import Duration, start_transition
+from ._internal import is_deleted
 from ._styles import drawElaIcon
 from ._theme import (
     accent,
@@ -489,6 +490,7 @@ class ElaSelectorBar(ElaThemeWidget):
         self._layout_dirty = True
         self._ensureLayout()
         self.updateGeometry()
+        self.update()
 
     def _ensureLayout(self) -> None:
         if not self._layout_dirty:
@@ -726,6 +728,8 @@ class ElaSelectorBar(ElaThemeWidget):
         return ElaHitType.None_, -1
 
     def mousePressEvent(self, event: QMouseEvent) -> None:  # noqa: N802
+        if event.button() != Qt.MouseButton.LeftButton:
+            return
         self._pressed, self._pressed_index = self._hitTest(event.position().toPoint())
         self.update()
 
@@ -736,6 +740,8 @@ class ElaSelectorBar(ElaThemeWidget):
             self.update()
 
     def mouseReleaseEvent(self, event: QMouseEvent) -> None:  # noqa: N802
+        if event.button() != Qt.MouseButton.LeftButton:
+            return
         hit, index = self._hitTest(event.position().toPoint())
         pressed, pressed_index = self._pressed, self._pressed_index
         self._pressed, self._pressed_index = ElaHitType.None_, -1
@@ -821,6 +827,8 @@ class ElaSelectorBar(ElaThemeWidget):
         # **先发 itemActivated 再提交选中** —— 宿主在槽里销毁控件也不会崩。
         # 发的是**副本**：信号参数也是出口，宿主不该有机会改内部状态（与 items() 同理）。
         self.itemActivated.emit(index, self.itemAt(index))
+        if is_deleted(self):
+            return
         self.setSelectedIndex(index)
 
     def _itemTextColor(self, index: int) -> QColor:  # noqa: N802

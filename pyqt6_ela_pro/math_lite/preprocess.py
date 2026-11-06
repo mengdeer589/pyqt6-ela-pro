@@ -131,16 +131,52 @@ def _parse_define(text: str, pos: int):
     return None
 
 
+def _fenced_ranges(text: str) -> list[tuple[int, int]]:
+    """返回 Markdown 围栏代码块的字符区间（含围栏行）。
+
+    围栏内不是 Markdown 正文，宏定义 / 公式都不应被解析；这里只做保守的
+    行级识别：开围栏记录完整标记长度，闭合行必须同字符且不短于开围栏。
+    """
+    ranges: list[tuple[int, int]] = []
+    offset = 0
+    fence = ""
+    start = 0
+    for line in text.splitlines(keepends=True):
+        stripped = line.strip()
+        if fence:
+            if stripped == fence:
+                ranges.append((start, offset + len(line)))
+                fence = ""
+        else:
+            m = re.match(r"^(`{3,}|~{3,})", stripped)
+            if m:
+                fence = m.group(1)
+                start = offset
+        offset += len(line)
+    if fence:
+        ranges.append((start, len(text)))
+    return ranges
+
+
+def _inside_ranges(position: int, ranges: list[tuple[int, int]]) -> bool:
+    for start, end in ranges:
+        if start <= position < end:
+            return True
+    return False
+
+
 def _collect_macros(text: str, macros: Optional[dict] = None) -> tuple[str, dict]:
     """收集文本中的宏定义并从正文移除定义段，返回 ``(移除后的文本, {宏名: (参数个数, 展开体)})``；
     传入的 ``macros`` 是文档级收集结果，优先级更低。
 
     先做触发串检查、再按 ``\\`` 跳着扫（都不命中时整段原样返回）：逐字符
     Python 循环实测 117KB 要 14ms，而正文里宏定义几乎不存在。
+    围栏代码块内的 ``\\newcommand`` 属于示例文本，不能当文档宏收集 / 删除。
     """
     table: dict = dict(macros) if macros else {}
     if not any(trigger in text for trigger in _MACRO_TRIGGERS):
         return text, table
+    fenced = _fenced_ranges(text)
     out: list[str] = []
     total = len(text)
     i = 0
@@ -151,6 +187,10 @@ def _collect_macros(text: str, macros: Optional[dict] = None) -> tuple[str, dict
             break
         out.append(text[i:j])
         i = j
+        if _inside_ranges(j, fenced):
+            out.append("\\")
+            i += 1
+            continue
         if (
             text.startswith(r"\newcommand", i)
             or text.startswith(r"\renewcommand", i)

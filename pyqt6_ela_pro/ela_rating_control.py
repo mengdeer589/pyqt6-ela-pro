@@ -5,11 +5,12 @@ from __future__ import annotations
 from typing import Optional
 
 from PyQt6.QtCore import Qt, QRect, QSize, pyqtSignal, QEvent
-from PyQt6.QtGui import QPainter, QPaintEvent, QMouseEvent, QFont
+from PyQt6.QtGui import QKeyEvent, QPainter, QPaintEvent, QMouseEvent, QFont
 from PyQt6.QtWidgets import QWidget
 
 from PyQt6ElaWidgetTools import eTheme, ElaThemeType, ElaIconType
 
+from ._internal import is_deleted
 from .widget_base import ElaThemeWidget
 
 
@@ -30,6 +31,7 @@ class ElaRatingControl(ElaThemeWidget):
 
         self.setObjectName("ElaRatingControl")
         self.setMouseTracking(True)
+        self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         self.setFixedHeight(self._star_size + 4)
         self._icon_font = QFont("ElaAwesome")
 
@@ -41,6 +43,8 @@ class ElaRatingControl(ElaThemeWidget):
         if clamped != self._rating:
             self._rating = clamped
             self.ratingChanged.emit(self._rating)
+            if is_deleted(self):
+                return
         self.updateGeometry()
         self.update()
 
@@ -55,6 +59,8 @@ class ElaRatingControl(ElaThemeWidget):
             return
         self._rating = n
         self.ratingChanged.emit(n)
+        if is_deleted(self):
+            return
         self.update()
 
     def rating(self) -> float:
@@ -121,9 +127,30 @@ class ElaRatingControl(ElaThemeWidget):
         self.update()
         super().leaveEvent(event)
 
+    def keyPressEvent(self, event: QKeyEvent) -> None:  # noqa: N802 (Qt 命名)
+        if self.isEnabled() and not self._is_read_only:
+            if event.key() in (Qt.Key.Key_Right, Qt.Key.Key_Up):
+                self.setRating(self._rating + 0.5)
+                event.accept()
+                return
+            if event.key() in (Qt.Key.Key_Left, Qt.Key.Key_Down):
+                self.setRating(self._rating - 0.5)
+                event.accept()
+                return
+            if event.key() == Qt.Key.Key_Home:
+                self.setRating(0)
+                event.accept()
+                return
+            if event.key() == Qt.Key.Key_End:
+                self.setRating(self._max_rating)
+                event.accept()
+                return
+        super().keyPressEvent(event)
+
     def paintEvent(self, _event: QPaintEvent) -> None:
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        painter.setOpacity(1.0 if self.isEnabled() else 0.45)
 
         self._icon_font.setPixelSize(self._star_size - 4)
         painter.setFont(self._icon_font)

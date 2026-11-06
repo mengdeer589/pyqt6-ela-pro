@@ -57,8 +57,12 @@ def releaseWidget(  # noqa: N802 (与 Qt 命名一致)
         ownership == ElaWidgetOwnershipType.Reparented
         and restoreParent
         and originalParent is not None
+        and not is_deleted(originalParent)
     ):
-        widget.setParent(originalParent)
+        try:
+            widget.setParent(originalParent)
+        except RuntimeError:
+            widget.setParent(None)
         return
     widget.setParent(None)
 
@@ -94,7 +98,6 @@ class ContentSlot(QObject):
             return None
         return self._host
 
-
     def widget(self) -> Optional[QWidget]:
         """当前内容控件；已被外部销毁时返回 ``None``。"""
         return self._widget
@@ -104,7 +107,6 @@ class ContentSlot(QObject):
 
     def hasWidget(self) -> bool:  # noqa: N802
         return self._widget is not None
-
 
     def setWidget(  # noqa: N802
         self, widget: Optional[QWidget], ownership=ElaWidgetOwnershipType.Borrowed
@@ -117,11 +119,19 @@ class ContentSlot(QObject):
         # isAncestorOf 等会直接抛 AttributeError。
         if widget is not None and not isinstance(widget, QWidget):
             return False
+        if widget is not None and is_deleted(widget):
+            return False
         host = self._aliveHost()
         if host is None:
             return False
-        if widget is host or (widget is not None and widget.isAncestorOf(host)):
+        if widget is host:
             return False
+        if widget is not None:
+            try:
+                if widget.isAncestorOf(host):
+                    return False
+            except RuntimeError:
+                return False
         try:
             ownership = ElaWidgetOwnershipType(ownership)
         except ValueError:
@@ -149,7 +159,9 @@ class ContentSlot(QObject):
 
         self._disconnectDestroyed()
         self._widget = widget
-        self._ownership = ownership if widget is not None else ElaWidgetOwnershipType.Borrowed
+        self._ownership = (
+            ownership if widget is not None else ElaWidgetOwnershipType.Borrowed
+        )
         # 先记原 parent 再 reparent，否则还原不回去。
         self._originalParent = widget.parentWidget() if widget is not None else None
 
@@ -160,14 +172,15 @@ class ContentSlot(QObject):
                 widget.setWindowFlags(widget.windowFlags() | Qt.WindowType.Widget)
             widget.setParent(host)
             widget.show()
-            self._destroyedSlot = self._onWidgetDestroyed  # 断连要同一对象（lambda / partial 必须存引用）
+            self._destroyedSlot = (
+                self._onWidgetDestroyed
+            )  # 断连要同一对象（lambda / partial 必须存引用）
             widget.destroyed.connect(self._destroyedSlot)
 
         self.widgetChanged.emit(widget)
         if widget is not None:
             self.ownershipChanged.emit(self._ownership)
         return True
-
 
     def takeWidget(self) -> Optional[QWidget]:  # noqa: N802
         """交还内容控件：断连、置空、**无父**返回，**从不删除**。"""
@@ -210,7 +223,6 @@ class ContentSlot(QObject):
             restoreParent=restoreParent,
         )
         self.widgetChanged.emit(None)
-
 
     def _disconnectDestroyed(self) -> None:
         widget = self._widget

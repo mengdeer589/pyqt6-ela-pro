@@ -11,6 +11,7 @@ from datetime import datetime
 from typing import Optional
 
 
+from .._internal import safe_connect
 from .bubble import ElaChatBubble
 from .message import (
     ElaChatMessage,
@@ -87,7 +88,7 @@ class _ViewMessagesMixin:
         ``messageId`` 可由调用方指定（乐观 UI 先行渲染）；id 已被占用时抛
         :class:`ValueError`（静默重号会让旧气泡留在界面上却不在索引里）。
         """
-        if messageId is not None and messageId in self._bubbles:
+        if messageId is not None and messageId in self._message_index:
             raise ValueError(
                 f"addMessage: 消息 id {messageId} 已被占用，请换一个 id 或改用既有消息"
             )
@@ -121,7 +122,7 @@ class _ViewMessagesMixin:
         if messageId is None and message.id > 0:
             messageId = message.id
         if messageId is not None:
-            if messageId in self._bubbles:
+            if messageId in self._message_index:
                 raise ValueError(
                     f"addMessageFromDict: 消息 id {messageId} 已被占用，"
                     "请显式传入 messageId 或改用 restoreMessages"
@@ -192,6 +193,7 @@ class _ViewMessagesMixin:
             shell_virtual
             and self._virtual_list_enabled
             and len(rows) >= self._virtual_list_min
+            and self.count() == 0
         )
         if virtual_list:
             self._virtual_list_mode = True
@@ -400,7 +402,11 @@ class _ViewMessagesMixin:
                     f"messageId 必须是 int，收到 {messageId!r}"
                     f"（{type(messageId).__name__}）"
                 )
-            if messageId in self._bubbles or messageId in self._shell_placeholders:
+            if (
+                messageId in self._bubbles
+                or messageId in self._shell_placeholders
+                or messageId in self._message_index
+            ):
                 raise ValueError(f"消息 id {messageId} 已被占用")
             if messageId >= self._next_id:
                 # 外部 id 必须单调推进内部计数器，否则后续自动分配的 id 会撞车
@@ -555,56 +561,114 @@ class _ViewMessagesMixin:
             bubble.setTopSpacing(10)
         for area in bubble.nestedScrollAreas():
             self._guard_message_viewer(messageId, area)
-        bubble.viewerCreated.connect(
-            lambda widget, mid=messageId: self._guard_message_viewer(mid, widget)
+        safe_connect(
+            bubble,
+            "viewerCreated",
+            lambda widget, mid=messageId: self._guard_message_viewer(mid, widget),
+            "view.viewer_created",
+            receiver=bubble,
         )
         if streaming:
             bubble.beginStream()
-        bubble.streamFinished.connect(
-            lambda _=None, mid=messageId: self._on_bubble_stream_finished(mid)
+        safe_connect(
+            bubble,
+            "streamFinished",
+            lambda _=None, mid=messageId: self._on_bubble_stream_finished(mid),
+            "view.stream_finished",
+            receiver=bubble,
         )
-        bubble.copyRequested.connect(
-            lambda mid=messageId: self._on_bubble_action(mid, "copy")
+        safe_connect(
+            bubble,
+            "copyRequested",
+            lambda mid=messageId: self._on_bubble_action(mid, "copy"),
+            "view.copy",
+            receiver=bubble,
         )
-        bubble.undoRequested.connect(
-            lambda mid=messageId: self._on_bubble_action(mid, "undo")
+        safe_connect(
+            bubble,
+            "undoRequested",
+            lambda mid=messageId: self._on_bubble_action(mid, "undo"),
+            "view.undo",
+            receiver=bubble,
         )
-        bubble.regenerateRequested.connect(
-            lambda mid=messageId: self._on_bubble_action(mid, "regenerate")
+        safe_connect(
+            bubble,
+            "regenerateRequested",
+            lambda mid=messageId: self._on_bubble_action(mid, "regenerate"),
+            "view.regenerate",
+            receiver=bubble,
         )
-        bubble.retryRequested.connect(
-            lambda mid=messageId: self.retryRequested.emit(mid)
+        safe_connect(
+            bubble,
+            "retryRequested",
+            lambda mid=messageId: self.retryRequested.emit(mid),
+            "view.retry",
+            receiver=bubble,
         )
-        bubble.retryCancelled.connect(
-            lambda mid=messageId: self.retryCancelled.emit(mid)
+        safe_connect(
+            bubble,
+            "retryCancelled",
+            lambda mid=messageId: self.retryCancelled.emit(mid),
+            "view.retry_cancelled",
+            receiver=bubble,
         )
-        bubble.permissionRequested.connect(
+        safe_connect(
+            bubble,
+            "permissionRequested",
             lambda requestId, mid=messageId: self.permissionRequested.emit(
                 mid, str(requestId)
-            )
+            ),
+            "view.permission_requested",
+            receiver=bubble,
         )
-        bubble.permissionReplied.connect(
+        safe_connect(
+            bubble,
+            "permissionReplied",
             lambda requestId, reply, answer, feedback, mid=messageId: (
                 self.permissionReplied.emit(
                     mid, str(requestId), str(reply), str(answer), str(feedback)
                 )
-            )
+            ),
+            "view.permission_replied",
+            receiver=bubble,
         )
-        bubble.permissionDockRequested.connect(
+        safe_connect(
+            bubble,
+            "permissionDockRequested",
             lambda card, partId, mid=messageId: self.permissionDockRequested.emit(
                 mid, str(partId), card
-            )
+            ),
+            "view.permission_dock",
+            receiver=bubble,
         )
-        bubble.permissionSettled.connect(
-            lambda partId, mid=messageId: self.permissionSettled.emit(mid, str(partId))
+        safe_connect(
+            bubble,
+            "permissionSettled",
+            lambda partId, mid=messageId: self.permissionSettled.emit(mid, str(partId)),
+            "view.permission_settled",
+            receiver=bubble,
         )
-        bubble.actionTriggered.connect(
-            lambda key, mid=messageId: self._on_bubble_action(mid, str(key))
+        safe_connect(
+            bubble,
+            "actionTriggered",
+            lambda key, mid=messageId: self._on_bubble_action(mid, str(key)),
+            "view.action",
+            receiver=bubble,
         )
-        bubble.attachmentClicked.connect(
-            lambda path, mid=messageId: self.attachmentClicked.emit(mid, str(path))
+        safe_connect(
+            bubble,
+            "attachmentClicked",
+            lambda path, mid=messageId: self.attachmentClicked.emit(mid, str(path)),
+            "view.attachment",
+            receiver=bubble,
         )
-        bubble.toolToggled.connect(self._on_tool_toggled)
+        safe_connect(
+            bubble,
+            "toolToggled",
+            self._on_tool_toggled,
+            "view.tool_toggled",
+            receiver=bubble,
+        )
         self._bubbles[messageId] = bubble
         if insert_index is None:
             # spacer 虚拟列表里新气泡必须插在 bottom spacer 前面，否则会落到占位下方。

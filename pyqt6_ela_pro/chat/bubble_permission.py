@@ -6,7 +6,7 @@ from __future__ import annotations
 from typing import Optional
 from uuid import uuid4
 
-from .._internal import is_deleted
+from .._internal import is_deleted, safe_connect
 
 
 from .blocks import (
@@ -60,10 +60,13 @@ class _BubblePermissionMixin:
     def _create_interactive_card(self, partId: str, request: ElaChatPermission):
         """建交互卡并登记（``beginPermission`` 与 ``ensureInteractivePermissionCard`` 共用）。"""
         card = PermissionCard()
-        card.replied.connect(
+        safe_connect(
+            card,
+            "replied",
             lambda reply, answer, feedback, pid=partId: self._on_permission_replied(
                 pid, reply, answer, feedback
-            )
+            ),
+            "bubble_permission.replied",
         )
         card.setPermission(request)
         self._interactive_cards[partId] = card

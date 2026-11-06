@@ -10,6 +10,7 @@ from uuid import uuid4
 from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import QWidget
 
+from .._internal import safe_connect
 from ..ela_button import ElaButton
 from ..ela_markdown_viewer import ElaMarkdownViewer
 from .blocks import (
@@ -358,7 +359,13 @@ class ChatPartTimeline:
             f"展开全部 {len(groups)} 个步骤（当前显示末尾 {STEP_WINDOW_TAIL} 步）",
             parent=self._bubble._parts_container or self._bubble._content or self,
         )
-        button.clicked.connect(self._bubble.expandParts)
+        safe_connect(
+            button,
+            "clicked",
+            self._bubble.expandParts,
+            "timeline.expand",
+            receiver=button,
+        )
         if self._bubble._parts_layout is not None:
             self._bubble._parts_layout.insertWidget(0, button)
         self._bubble._window_button = button

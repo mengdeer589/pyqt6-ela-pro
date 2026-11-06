@@ -189,7 +189,7 @@ class TestFromMessages:
         assert stats.tool_counts == {"read": 1}
         assert stats.reasoning_ms == pytest.approx(12.0)
 
-    def test_percent_needs_limit(self):
+    def test_percent_needs_context_window(self):
         message = _assistant(
             1,
             [
@@ -200,10 +200,15 @@ class TestFromMessages:
             ],
         )
         assert ElaChatSessionStats.fromMessages([message]).usage_percent is None
-        assert ElaChatSessionStats.fromMessages([message], 200_000).usage_percent == 75
+        assert (
+            ElaChatSessionStats.fromMessages(
+                [message], contextWindow=200_000
+            ).usage_percent
+            == 75
+        )
         # 超过上限夹到 100
         assert ElaChatSessionStats.fromMessages([message], 100_000).usage_percent == 100
-        # 非法 limit 视为未提供
+        # 非法 contextWindow 视为未提供
         assert ElaChatSessionStats.fromMessages([message], -5).usage_percent is None
 
     def test_non_finite_tokens_are_guarded(self):
@@ -265,9 +270,11 @@ class TestToolStats:
         assert stats.tool_unsettled == 2
         assert stats.tool_counts == {"read": 2, "grep": 1, "edit": 1, "shell": 2}
         # done 可由差额推得：6 - 1 - 1 - 2
-        assert stats.tool_calls - (
-            stats.tool_errors + stats.tool_aborted + stats.tool_unsettled
-        ) == 2
+        assert (
+            stats.tool_calls
+            - (stats.tool_errors + stats.tool_aborted + stats.tool_unsettled)
+            == 2
+        )
 
     def test_rounds_dedup_by_step_across_messages(self):
         """轮数 = 有工具调用的**步骤数**：同 step 并行多个算一轮、消息内去重。"""
@@ -325,7 +332,9 @@ class TestToolStats:
                 _tool(1, "read"),
                 _step(
                     1,
-                    ElaChatStats(prompt_tokens=100, completion_tokens=10, total_tokens=110),
+                    ElaChatStats(
+                        prompt_tokens=100, completion_tokens=10, total_tokens=110
+                    ),
                 ),
             ],
             created_at=5.0,

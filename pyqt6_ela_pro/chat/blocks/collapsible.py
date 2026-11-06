@@ -5,7 +5,7 @@ from __future__ import annotations
 
 from typing import Optional
 
-from ..._internal import is_deleted
+from ..._internal import _ThemeAwareMixin, is_deleted, safe_connect
 from PyQt6.QtCore import Qt, QTimer, pyqtSignal
 from PyQt6.QtGui import (
     QFont,
@@ -26,7 +26,6 @@ from PyQt6ElaWidgetTools import (
     eTheme,
 )
 
-from ..._internal import _ThemeAwareMixin
 from ..._styles import BareButton, ColorText
 from ...widget_base import ElaThemeWidget
 from .._theme import (
@@ -99,7 +98,7 @@ class _CollapsibleBlock(_ThemeAwareMixin, ElaScrollPageArea):
         layout.addWidget(self._header)
         layout.addWidget(self._body)
 
-        self._header.toggled.connect(self._on_toggled)
+        safe_connect(self._header, "toggled", self._on_toggled, "collapsible.toggled")
         self._sync_chevron()
         self._apply_theme()
 
@@ -267,7 +266,12 @@ class ReasoningBlock(_CollapsibleBlock):
         self._chunks: list = []
         self._flush_timer = QTimer(self)
         self._flush_timer.setSingleShot(True)
-        self._flush_timer.timeout.connect(self._flush_chunks)
+        safe_connect(
+            self._flush_timer,
+            "timeout",
+            self._flush_chunks,
+            "collapsible.flush",
+        )
         self._label = ColorText(self)
         self._label.setTextFormat(Qt.TextFormat.PlainText)
         self._label.setWordWrap(True)

@@ -9,31 +9,16 @@ from typing import TYPE_CHECKING, Callable, Optional
 
 from PyQt6.QtCore import QEvent, QObject
 
+from .._internal import guard_callback as _guarded, is_deleted
 from . import _json
+from ._flow import TurnStreamState
 from ._usage import stats_from_usage
-from .message import ElaChatStatusType, _as_float
+from .message import ElaChatStatusType
 
 if TYPE_CHECKING:
     from .widget import ElaChatWidget
 
 logger = logging.getLogger(__name__)
-
-
-def _guarded(callback: Callable) -> Callable:
-    """把回调包成「抛异常也不会穿过 C++ 边界」的形状（支持带参信号）。
-    Qt 回调里未捕获的异常直接 0xC0000409 静默终止，且槽异常不会传回 ``emit()``；
-    唯一防线是在连接时就把槽包起来。
-    """
-
-    def _run(*args, **kwargs):
-        try:
-            callback(*args, **kwargs)
-        except Exception:
-            # 槽内异常不能穿回 Qt（0xC0000409），但也不该完全静默 ——
-            # 出问题时把 traceback 留在 debug 日志里。
-            logger.debug("binder 回调异常（已忽略）", exc_info=True)
-
-    return _run
 
 
 class _WindowCloseFilter(QObject):
@@ -87,21 +72,13 @@ class ElaChatStreamBinder:
         #: 已连接的 (信号名, 包装后的槽) 列表（断开时按它精确匹配）
         self._worker_slots: list = []
         self._close_filter = None
-        self._round = 0
-        self._turn_start: Optional[float] = None
-        self._round_start: Optional[float] = None
+        self._flow = TurnStreamState(self._clock)
         # 计时值一律不兼作状态布尔：clock 可注入，返回 0.0 的时钟会让状态判错。
-        self._turn_open = False
         # 当前回合操作的助手消息 id（view 层所有消息操作都要显式传它）
         self._message_id: Optional[int] = None
         #: 当前回合的 token（``startTurn`` 取自后端，``beginTurn`` 无 token 时自增）
         self._turn_token: Optional[int] = None
         self._turn_seq = 0
-        self._reasoning_open = False
-        self._reasoning_start = 0.0
-        self._had_text = False
-        self._finish_reason = ""
-        self._cancelled = False
         #: 自动维护时间线活动行（默认开）
         self._auto_activity = True
         self._activity_provider = None
@@ -298,15 +275,7 @@ class ElaChatStreamBinder:
             self._turn_seq += 1
             turn = self._turn_seq
         self._turn_token = turn
-        self._round = 0
-        self._turn_open = True
-        self._turn_start = self._clock()
-        self._round_start = None
-        self._reasoning_open = False
-        self._reasoning_start = 0.0
-        self._had_text = False
-        self._finish_reason = ""
-        self._cancelled = False
+        self._flow.begin_turn()
         if self._message_id is None:
             # 宿主可能自己建好消息再调 beginTurn()（不经 startTurn），接上当前流式消息。
             self._message_id = self._chat.streamingMessageId()
@@ -321,10 +290,9 @@ class ElaChatStreamBinder:
         """
         if not self.isOpen():
             return
-        self._round_start = self._clock()
-        self._round += 1
+        self._flow.begin_round()
         self._set_activity("正在思考…", "thinking")
-        if self._round > 1:
+        if self._flow.round > 1:
             self._endReasoning()
             self._chat.chatView().beginStep(self._target())
             self._drainSteer()
@@ -346,20 +314,19 @@ class ElaChatStreamBinder:
         判据是显式的 ``_turn_open`` 标志，不是 ``_turn_start != 0.0``：``clock``
         可注入，返回 0.0 的假时钟会让整回合被静默丢弃。
         """
-        return self._turn_open and self._message_id is not None
+        return self._flow.open and self._message_id is not None
 
     def roundIndex(self) -> int:
         """当前回合内的 LLM 轮次序号（从 1 开始）。"""
-        return self._round
+        return self._flow.round
 
     def reasoning(self, text: str) -> None:
         """追加推理分片（同一轮复用同一思考段；回合外忽略）。"""
         if not text or not self.isOpen():
             return
         self._set_activity("正在思考…", "thinking")
-        if not self._reasoning_open:
-            self._reasoning_open = True
-            self._reasoning_start = self._clock()
+        if not self._flow.reasoning_open:
+            self._flow.begin_reasoning()
             self._chat.chatView().beginReasoning(self._target())
         self._chat.chatView().appendReasoning(self._target(), text)
 
@@ -370,8 +337,7 @@ class ElaChatStreamBinder:
         """
         if not text or not self.isOpen():
             return
-        if text.strip():
-            self._had_text = True
+        if self._flow.note_content(text):
             self._endReasoning()
             self._clear_retry()
             self._set_activity("", "answer")
@@ -450,8 +416,8 @@ class ElaChatStreamBinder:
             return
         stats = stats_from_usage(usage, ttftMs, tps)
         durationMs = 0.0
-        if self._round_start is not None:
-            durationMs = _as_float((self._clock() - self._round_start) * 1000.0)
+        if self._flow.round_started:
+            durationMs = self._flow.round_duration_ms()
         if durationMs and not stats.duration_ms:
             stats = replace(stats, duration_ms=durationMs)
         self._chat.chatView().setStepStats(self._target(), stats)
@@ -472,14 +438,14 @@ class ElaChatStreamBinder:
         """标记「回合结束但未返回正文」（由 ``finish`` 汇总返回；回合外忽略）。"""
         if not self.isOpen():
             return
-        self._finish_reason = str(finishReason or "")
+        self._flow.finish_reason = str(finishReason or "")
 
     def cancel(self) -> None:
         """停止生成：收尾当前思考段，并让 :meth:`finish` 默认按 ``Stopped`` 收尾。
 
         宿主停止按钮：``binder.cancel()`` + 中止后端（``worker.cancel()``）。
         """
-        self._cancelled = True
+        self._flow.cancelled = True
         self._endReasoning()
 
     def finish(
@@ -499,21 +465,29 @@ class ElaChatStreamBinder:
                 self._turn_token,
             )
             return None
+        if is_deleted(self._chat):
+            self._flow.reset()
+            self._turn_token = None
+            self._message_id = None
+            return None
         if status is None:
             status = (
-                ElaChatStatusType.Stopped if self._cancelled else ElaChatStatusType.Done
+                ElaChatStatusType.Stopped
+                if self._flow.cancelled
+                else ElaChatStatusType.Done
             )
         self._endReasoning()
         self._clear_activity()
         self._clear_retry()
         target = self._target()
-        durationMs = 0.0
-        if self._turn_open and self._turn_start is not None:
-            durationMs = (self._clock() - self._turn_start) * 1000.0
+        durationMs = self._flow.turn_duration_ms()
+        had_text = self._flow.had_text
+        finish_reason = self._flow.finish_reason
+        rounds = self._flow.round
         # 先清本回合状态再触发宿主回调：endAssistantMessage 会同步续发排队消息，
         # 宿主槽里可能立刻 startTurn() 开新回合 —— 晚清会抹掉新回合的落点。
-        self._turn_open = False
-        self._turn_start = None
+        self._flow.reset()
+        self._flow.round = rounds
         self._turn_token = None
         self._message_id = None
         if durationMs and target is not None:
@@ -528,8 +502,8 @@ class ElaChatStreamBinder:
             self._chat.endAssistantMessage(status=status)
         return ElaChatTurnSummary(
             status=status,
-            hadText=self._had_text,
-            finishReason=self._finish_reason,
+            hadText=had_text,
+            finishReason=finish_reason,
             durationMs=durationMs,
         )
 
@@ -557,8 +531,7 @@ class ElaChatStreamBinder:
             self._chat.setAutoSendQueue(autoSend)
 
     def _endReasoning(self) -> None:
-        if not self._reasoning_open:
+        if not self._flow.reasoning_open:
             return
-        elapsed = (self._clock() - self._reasoning_start) * 1000.0
+        elapsed = self._flow.end_reasoning()
         self._chat.chatView().endReasoning(self._target(), elapsed)
-        self._reasoning_open = False

@@ -26,7 +26,7 @@ from PyQt6ElaWidgetTools import (
     ElaPushButton,
 )
 
-from ._internal import _ThemeAwareMixin
+from ._internal import _ThemeAwareMixin, is_deleted
 from ._motion import start_transition_timer
 from ._styles import paintRoundedCard
 from .widget_base import ElaThemeWidget
@@ -226,7 +226,7 @@ class ElaSpotlight(ElaThemeWidget):
             self.next()
 
     def _getTargetRect(self, target: QWidget) -> QRectF:
-        if not target or not self.parent():
+        if target is None or is_deleted(target) or not self.parent():
             return QRectF()
         parent = self.parent()
         assert parent is not None

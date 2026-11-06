@@ -10,6 +10,7 @@ from PyQt6.QtCore import Qt, QRectF, QSize, QVariantAnimation, pyqtSignal
 from PyQt6.QtGui import (
     QColor,
     QFont,
+    QKeyEvent,
     QMouseEvent,
     QPainter,
     QPainterPath,
@@ -93,6 +94,7 @@ class ElaChip(ElaThemeWidget):
 
         self.setObjectName("ElaChip")
         self.setMouseTracking(True)
+        self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
 
         self._hover_anim = QVariantAnimation(self)
         self._hover_anim.valueChanged.connect(self._onHoverValue)
@@ -314,6 +316,8 @@ class ElaChip(ElaThemeWidget):
             return
         self._fade_opacity = 1.0
         self.closed.emit()
+        if is_deleted(self):
+            return
         self.hide()
         self.update()
 
@@ -355,6 +359,26 @@ class ElaChip(ElaThemeWidget):
                 self.update()
         super().mouseMoveEvent(event)
 
+    def keyPressEvent(self, event: QKeyEvent) -> None:  # noqa: N802 (Qt 命名)
+        if self.isEnabled() and event.key() in (
+            Qt.Key.Key_Space,
+            Qt.Key.Key_Return,
+            Qt.Key.Key_Enter,
+        ):
+            if self._is_checkable:
+                self._is_checked = not self._is_checked
+                self._updateGeometry()
+                self.checkedChanged.emit(self._is_checked)
+                if is_deleted(self):
+                    return
+            self.clicked.emit()
+            if is_deleted(self):
+                return
+            self.update()
+            event.accept()
+            return
+        super().keyPressEvent(event)
+
     def mousePressEvent(self, event: QMouseEvent) -> None:
         if event.button() == Qt.MouseButton.LeftButton:
             if self._is_closable and self._close_rect().contains(event.position()):
@@ -366,7 +390,11 @@ class ElaChip(ElaThemeWidget):
                 self._is_checked = not self._is_checked
                 self._updateGeometry()
                 self.checkedChanged.emit(self._is_checked)
+                if is_deleted(self):
+                    return
             self.clicked.emit()
+            if is_deleted(self):
+                return
             self.update()
             event.accept()
             return
@@ -384,7 +412,7 @@ class ElaChip(ElaThemeWidget):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         painter.setRenderHint(QPainter.RenderHint.TextAntialiasing)
-        painter.setOpacity(self._fade_opacity)
+        painter.setOpacity(self._fade_opacity if self.isEnabled() else 0.45)
 
         w = self.width()
         h = self.height()

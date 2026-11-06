@@ -4,8 +4,15 @@ from __future__ import annotations
 
 from PyQt6.QtCore import QEvent, QPointF, Qt
 from PyQt6.QtGui import QKeyEvent, QMouseEvent
+from PyQt6.QtWidgets import QApplication
 
 from pyqt6_ela_pro.charts import ElaChartWidget
+
+
+def _show(chart):
+    """show + 跑一轮事件循环：编辑器 isVisible 依赖父窗口已映射。"""
+    chart.show()
+    QApplication.processEvents()
 
 
 def _chart(make, *, editable=True):
@@ -27,7 +34,7 @@ def _chart(make, *, editable=True):
         }
     )
     chart.setAnnotationEditingEnabled(editable)
-    chart.show()
+    _show(chart)
     chart.anim.setProgress(1.0)
     return chart
 
@@ -70,7 +77,7 @@ def _label_chart(make, *, editable=True):
         }
     )
     chart.setAnnotationEditingEnabled(editable)
-    chart.show()
+    _show(chart)
     chart.anim.setProgress(1.0)
     chart.grab()
     return chart
@@ -165,7 +172,7 @@ class TestAnnotationEditing:
                 ],
             }
         )
-        chart.show()
+        _show(chart)
         chart.anim.setProgress(1.0)
         qapp.processEvents()
         comp = chart._component("markLine")
@@ -202,7 +209,7 @@ class TestHierarchyLabelEditing:
                 ],
             }
         )
-        chart.show()
+        _show(chart)
         chart.anim.setProgress(1.0)
         chart.grab()
         return chart
@@ -226,7 +233,7 @@ class TestHierarchyLabelEditing:
                 ],
             }
         )
-        chart.show()
+        _show(chart)
         chart.anim.setProgress(1.0)
         chart.grab()
         return chart
@@ -288,7 +295,7 @@ class TestHierarchyLabelEditing:
                 ],
             }
         )
-        chart.show()
+        _show(chart)
         chart.anim.setProgress(1.0)
         chart.grab()
         renderer = chart.seriesRenderers[0]
@@ -372,7 +379,7 @@ class TestPointLabelEditing:
                 ],
             }
         )
-        chart.show()
+        _show(chart)
         chart.anim.setProgress(1.0)
         chart.grab()
         qapp.processEvents()

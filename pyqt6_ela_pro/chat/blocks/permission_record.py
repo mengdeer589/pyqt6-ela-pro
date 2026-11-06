@@ -16,6 +16,7 @@ from PyQt6ElaWidgetTools import (
     ElaThemeType,
 )
 
+from ..._internal import safe_connect
 from ..._styles import ColorText
 from ..._theme import ElaStatusRoleType, statusColor
 from ...ela_button import ElaButton
@@ -66,7 +67,12 @@ class PermissionRecord(_CollapsibleBlock):
         self._detail_toggle = ElaButton(
             "展开全部", variant="link", size="small", parent=self._body
         )
-        self._detail_toggle.clicked.connect(self._toggle_detail)
+        safe_connect(
+            self._detail_toggle,
+            "clicked",
+            self._toggle_detail,
+            "permission_record.detail",
+        )
         self._detail_toggle.hide()
         self._body_layout.addWidget(self._detail_toggle, 0, Qt.AlignmentFlag.AlignLeft)
 

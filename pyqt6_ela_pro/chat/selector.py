@@ -8,7 +8,7 @@ from typing import Optional
 from PyQt6.QtCore import pyqtSignal
 from PyQt6ElaWidgetTools import ElaIconType, ElaMenu
 
-from .._internal import is_deleted
+from .._internal import is_deleted, safe_connect
 from ..ela_dropdown_button import ElaDropDownButton
 
 
@@ -111,8 +111,12 @@ class ElaChatSelector(ElaDropDownButton):
             action.setChecked(item.id == self._current)
             if item.description:
                 action.setToolTip(item.description)
-            action.triggered.connect(
-                lambda _checked=False, iid=item.id: self._select(iid)
+            safe_connect(
+                action,
+                "triggered",
+                lambda _checked=False, iid=item.id: self._select(iid),
+                "selector.select",
+                receiver=menu,
             )
             self._actions[item.id] = action
         self._menu = menu

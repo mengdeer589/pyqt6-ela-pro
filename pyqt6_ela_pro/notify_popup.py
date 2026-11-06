@@ -28,7 +28,7 @@ from PyQt6ElaWidgetTools import (
     ElaToolButton,
 )
 
-from ._internal import connect_theme_signal, disconnect_theme
+from ._internal import connect_theme_signal, disconnect_theme, is_deleted
 from ._motion import Duration, start_transition
 from ._styles import SHADOW_MARGIN, paintOverlayShadow
 
@@ -73,6 +73,7 @@ class ElaNotifyPopup(QWidget):
 
         self._title_text = ElaText(self)
         self._title_text.setTextPixelSize(14)
+        self._title_text.setTextFormat(Qt.TextFormat.PlainText)
         self._title_text.setText(self._title)
         header_layout.addWidget(self._title_text, 1)
         header_layout.addStretch()
@@ -80,7 +81,9 @@ class ElaNotifyPopup(QWidget):
         self._close_btn = ElaToolButton(self)
         self._close_btn.setElaIcon(ElaIconType.IconName.Xmark)
         self._close_btn.setFixedSize(24, 24)
-        self._closeSlot = self._on_close  # 断连要同一对象（lambda / partial 必须存引用）
+        self._closeSlot = (
+            self._on_close
+        )  # 断连要同一对象（lambda / partial 必须存引用）
         self._close_btn.clicked.connect(self._closeSlot)
         header_layout.addWidget(self._close_btn)
 
@@ -88,6 +91,7 @@ class ElaNotifyPopup(QWidget):
 
         self._content_text = ElaText(self)
         self._content_text.setTextPixelSize(12)
+        self._content_text.setTextFormat(Qt.TextFormat.PlainText)
         self._content_text.setAlignment(Qt.AlignmentFlag.AlignLeft)
         self._content_text.setWordWrap(True)
         self._content_text.setText(self._content)
@@ -270,6 +274,11 @@ class ElaNotifyManager:
         self, title: str = "", content: str = "", timeout: int = 5000
     ) -> None:
         """创建并显示通知弹窗；多条通知从屏幕右下角向上堆叠避让。"""
+        self._popups = [
+            popup
+            for popup in self._popups
+            if not is_deleted(popup) and popup.isVisible()
+        ]
         y_offset = sum(p.height() + 10 for p in self._popups)
         popup = ElaNotifyPopup(
             title=title, content=content, timeout=timeout, y_offset=y_offset
@@ -281,7 +290,8 @@ class ElaNotifyManager:
     def _onPopupClosed(self, popup: ElaNotifyPopup) -> None:
         if popup in self._popups:
             self._popups.remove(popup)
-        popup.deleteLater()
+        if not is_deleted(popup):
+            popup.deleteLater()
 
 
 def show_notify(title: str = "", content: str = "", timeout: int = 5000) -> None:

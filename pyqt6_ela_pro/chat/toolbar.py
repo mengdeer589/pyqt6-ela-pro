@@ -8,6 +8,7 @@ from PyQt6.QtCore import QSize, Qt, pyqtSignal
 from PyQt6.QtWidgets import QHBoxLayout, QPushButton, QWidget
 from PyQt6ElaWidgetTools import ElaIconButton, ElaIconType, ElaThemeType
 
+from .._internal import safe_connect
 from .._styles import setSolidBackground
 from ..ela_button import ElaButton
 from ..tooltips import ElaToolTipPositionType, set_tooltip
@@ -55,7 +56,7 @@ class ElaChatToolButton(ElaIconButton):
         if tooltip:
             self.setToolTip(tooltip)
             set_tooltip(self, tooltip, ElaToolTipPositionType.Top)
-        self.clicked.connect(self._on_clicked)
+        safe_connect(self, "clicked", lambda *_: self._on_clicked(), "toolbar.button")
 
     def setCheckable(self, on: bool) -> None:
         """设置是否可选中。"""
@@ -168,8 +169,11 @@ class ElaChatToolBar(ElaThemeWidget):
                 set_tooltip(button, tooltip, ElaToolTipPositionType.Top)
             if checkable:
                 button.setCheckable(True)
-                button.toggled.connect(
-                    lambda checked, k=key: self.toolToggled.emit(k, bool(checked))
+                safe_connect(
+                    button,
+                    "toggled",
+                    lambda checked, k=key: self.toolToggled.emit(k, bool(checked)),
+                    "toolbar.toggled",
                 )
         else:
             button = ElaChatToolButton(
@@ -179,12 +183,25 @@ class ElaChatToolBar(ElaThemeWidget):
                 size=size,
                 parent=self,
             )
-            button.toggled.connect(
-                lambda checked, k=key: self.toolToggled.emit(k, bool(checked))
+            safe_connect(
+                button,
+                "toggled",
+                lambda checked, k=key: self.toolToggled.emit(k, bool(checked)),
+                "toolbar.toggled",
             )
-        button.clicked.connect(lambda _checked=False, k=key: self.toolTriggered.emit(k))
+        safe_connect(
+            button,
+            "clicked",
+            lambda _checked=False, k=key: self.toolTriggered.emit(k),
+            "toolbar.triggered",
+        )
         if callback is not None:
-            button.clicked.connect(lambda _checked=False: callback())
+            safe_connect(
+                button,
+                "clicked",
+                lambda _checked=False: callback(),
+                "toolbar.callback",
+            )
         self._items[key] = button
         self._zone_layout(zone).addWidget(button)
         return button

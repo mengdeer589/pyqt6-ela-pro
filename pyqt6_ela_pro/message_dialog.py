@@ -41,6 +41,7 @@ class ElaMessageDialog(ElaDialogBase):
 
         message_widget = ElaText(message, self._paramWidget)
         message_widget.setTextPixelSize(12)
+        message_widget.setTextFormat(Qt.TextFormat.PlainText)
         message_widget.setWordWrap(True)
         self._message_widget = message_widget
         self._paramLay.insertWidget(2, message_widget)

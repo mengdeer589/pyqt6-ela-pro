@@ -645,7 +645,7 @@ binder 和窗口（本页示例里 `worker` 就是这个角色）。
 | `setAvatarVisible(on)` / `setUserBubbleMaxWidth(ratio)` | 全局头像显隐 / 用户气泡最大宽度比例（0.1~1.0） |
 | `scrollToBottom()` / `setStickToBottom(on)` / `setJumpThreshold(px)` | 主动回底 / 自动贴底开关 / 「回到底部」按钮的显示阈值（`None` 恢复动态阈值） |
 | `messages()` / `message(id)` / `lastMessage()` | 读快照（读取时才结算派生字段） |
-| `sessionStats(limit=0)` | 会话级用量汇总（`ElaChatSessionStats`）：计数 / 当前上下文四路词元与合计 / 使用率 / 累计成本 / 最后活动 / **工具调用统计**（`tool_calls` 次数、`tool_rounds` 轮数 = 有工具调用的步骤数、`tool_errors` / `tool_aborted` / `tool_unsettled` 状态分档、`tool_counts` 按名计数）/ `reasoning_ms` 思考耗时合计；口径对齐 opencode `getSessionContext`（最后一条有 tokens 的助手消息的最后一步）。**输入词元不含缓存命中**（OpenAI / DeepSeek 的 `prompt_tokens` 含缓存，binder / journal 落库前已扣掉；Anthropic 的 `input_tokens` 原样），四路互不重叠。`total_tokens` / `total_cost_usd` 可直接喂输入区圆环 |
+| `sessionStats(contextWindow=0)` | 会话级用量汇总（`ElaChatSessionStats`）：计数 / 当前上下文四路词元与合计 / 使用率 / 累计成本 / 最后活动 / **工具调用统计**（`tool_calls` 次数、`tool_rounds` 轮数 = 有工具调用的步骤数、`tool_errors` / `tool_aborted` / `tool_unsettled` 状态分档、`tool_counts` 按名计数）/ `reasoning_ms` 思考耗时合计；口径对齐 opencode `getSessionContext`（最后一条有 tokens 的助手消息的最后一步）。**输入词元不含缓存命中**（OpenAI / DeepSeek 的 `prompt_tokens` 含缓存，binder / journal 落库前已扣掉；Anthropic 的 `input_tokens` 原样），四路互不重叠。`total_tokens` / `total_cost_usd` 可直接喂输入区圆环 |
 | `parts()` / `text()` / `reasoning()` | 纯读取；`part.text` 只含**已落定**内容，可直接序列化落库 |
 
 ## 持久化与崩溃恢复
@@ -663,7 +663,7 @@ binder 和窗口（本页示例里 `worker` 就是这个角色）。
 | `ElaChatStats` | 单次 / 单步用量：`prompt_tokens`（**不含**缓存命中）/ `completion_tokens`（含 reasoning）/ `reasoning_tokens` / `cache_read_tokens` / `cache_write_tokens` / `ttft_ms` / `tps` / `duration_ms` / `cost_usd`；`contextTokens()` 是四路和，`merge()` 合并多步，`tooltip()` 生成悬浮提示文本 |
 | `binder.stats(usage, ttftMs=0.0, tps=0.0)` / `view.setStepStats(messageId, stats)` | 写入单步统计（`statsReady` 自动接线已覆盖；手动驱动回合时才需要直接调） |
 | `chatInput().setContextUsage(stats.contextTokens(), window, stats.cost_usd)` | 喂输入区圆环：used = 四路和、window = 模型上下文窗口、cost = 累计美元 |
-| `view.sessionStats(limit=0)` | 会话级汇总（`ElaChatSessionStats`）；`limit>0` 只看最近 N 条消息 |
+| `view.sessionStats(contextWindow=0)` | 会话级汇总（`ElaChatSessionStats`）；`contextWindow>0` 只看上下文窗口占比（不是消息条数） |
 
 ## Mock 后端（无模型服务跑通全链路）
 

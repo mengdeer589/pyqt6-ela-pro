@@ -10,6 +10,7 @@ from PyQt6.QtWidgets import QWidget
 
 from PyQt6ElaWidgetTools import eTheme, ElaThemeType
 
+from ._internal import is_deleted
 from .widget_base import ElaThemeWidget
 
 ElaStepsOrientation = Literal["horizontal", "vertical"]
@@ -73,6 +74,8 @@ class ElaSteps(ElaThemeWidget):
         self._current_step = max(0, min(n, self.step_count - 1))
         if self._current_step != old:
             self.currentStepChanged.emit(self._current_step)
+            if is_deleted(self):
+                return
         self.update()
 
     def currentStep(self) -> int:
@@ -86,10 +89,15 @@ class ElaSteps(ElaThemeWidget):
     @step_titles.setter
     def step_titles(self, titles: list[str]) -> None:
         """步骤数由此决定；当前步骤超出新范围时自动修正。"""
+        old = self._current_step
         self._step_titles = list(titles)
         if self._current_step >= self.step_count:
             self._current_step = max(0, self.step_count - 1)
         self._sync_geometry()
+        if self._current_step != old:
+            self.currentStepChanged.emit(self._current_step)
+            if is_deleted(self):
+                return
         self.update()
 
     def next(self) -> None:
@@ -97,6 +105,8 @@ class ElaSteps(ElaThemeWidget):
         if self._current_step < self.step_count - 1:
             self._current_step += 1
             self.currentStepChanged.emit(self._current_step)
+            if is_deleted(self):
+                return
             self.update()
 
     def previous(self) -> None:
@@ -104,6 +114,8 @@ class ElaSteps(ElaThemeWidget):
         if self._current_step > 0:
             self._current_step -= 1
             self.currentStepChanged.emit(self._current_step)
+            if is_deleted(self):
+                return
             self.update()
 
     # ── Internal ─────────────────────────────────────────

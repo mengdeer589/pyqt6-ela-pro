@@ -635,6 +635,7 @@ class ElaBlueprintGraph(QObject):
                     raw.to_node,
                     raw.to_pin,
                     edge_id=raw.id,
+                    label=raw.label,
                 )
             except ValueError as exc:
                 logger.warning("跳过非法连线 %r（%s）", raw.id, exc)

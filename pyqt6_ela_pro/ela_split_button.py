@@ -14,6 +14,7 @@ from PyQt6.QtGui import (
     QFontMetrics,
     QPaintEvent,
     QMouseEvent,
+    QKeyEvent,
 )
 from PyQt6.QtWidgets import QWidget
 
@@ -21,7 +22,7 @@ from PyQt6ElaWidgetTools import ElaThemeType, ElaIconType, ElaMenu
 
 from ._colors import state_tint
 from ._internal import is_deleted
-from ._styles import iconGlyph
+from ._styles import coerceElaIcon, iconGlyph
 from ._theme import blend, border, surface, text, textDisabled
 from .widget_base import ElaThemeWidget
 
@@ -49,7 +50,7 @@ class ElaSplitButton(ElaThemeWidget):
         super().__init__(parent)
 
         self._text = text
-        self._icon = icon
+        self._icon = coerceElaIcon(icon)
         self._border_radius = 3
         self._dropdown_width = 30
         self._menu: Optional[ElaMenu] = None
@@ -61,6 +62,7 @@ class ElaSplitButton(ElaThemeWidget):
         self.setObjectName("ElaSplitButton")
         self.setFixedHeight(_HEIGHT)
         self.setMouseTracking(True)
+        self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         self._icon_font = QFont("ElaAwesome")
         self._arrow_font = QFont("ElaAwesome")
 
@@ -79,7 +81,7 @@ class ElaSplitButton(ElaThemeWidget):
         return self._text
 
     def setElaIcon(self, icon: ElaIconType.IconName) -> None:
-        self._icon = icon
+        self._icon = coerceElaIcon(icon)
         self.updateGeometry()
         self.update()
 
@@ -153,12 +155,32 @@ class ElaSplitButton(ElaThemeWidget):
             self.update()
         super().mousePressEvent(event)
 
+    def keyPressEvent(self, event: QKeyEvent) -> None:  # noqa: N802 (Qt 命名)
+        if self.isEnabled() and event.key() in (
+            Qt.Key.Key_Space,
+            Qt.Key.Key_Return,
+            Qt.Key.Key_Enter,
+        ):
+            self.clicked.emit()
+            event.accept()
+            return
+        super().keyPressEvent(event)
+
     def mouseReleaseEvent(self, event: QMouseEvent) -> None:
         if event.button() == Qt.MouseButton.LeftButton:
             split_x = self.width() - self._dropdown_width
-            if self._is_left_pressed and event.position().toPoint().x() < split_x:
-                self.clicked.emit()
-            elif self._is_right_pressed and event.position().toPoint().x() >= split_x:
+            inside = self.rect().contains(event.position().toPoint())
+            hit_left = (
+                inside
+                and self._is_left_pressed
+                and event.position().toPoint().x() < split_x
+            )
+            hit_right = (
+                inside
+                and self._is_right_pressed
+                and event.position().toPoint().x() >= split_x
+            )
+            if hit_right:
                 # **必须判存活**：宿主重建菜单会先删旧菜单，而 ``bool(已删除包装器)``
                 # 仍是 True —— 对死对象调 ``popup()`` 抛 RuntimeError，
                 # 穿出 Qt 回调 = 0xC0000409。
@@ -168,6 +190,12 @@ class ElaSplitButton(ElaThemeWidget):
             self._is_left_pressed = False
             self._is_right_pressed = False
             self.update()
+            super().mouseReleaseEvent(event)
+            # 所有 self 收尾 + super 之后再发信号：宿主在槽里销毁按钮也不会
+            # 回来访问已释放的 C++ 对象。
+            if hit_left and not is_deleted(self):
+                self.clicked.emit()
+            return
         super().mouseReleaseEvent(event)
 
     def mouseMoveEvent(self, event: QMouseEvent) -> None:

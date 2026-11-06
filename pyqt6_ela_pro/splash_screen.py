@@ -220,7 +220,8 @@ class ElaSplashScreen(ElaThemeWidget):
         if screen:
             sg = screen.availableGeometry()
             self.move(
-                (sg.width() - self.width()) // 2, (sg.height() - self.height()) // 2
+                sg.x() + (sg.width() - self.width()) // 2,
+                sg.y() + (sg.height() - self.height()) // 2,
             )
         self._progress_bar.setVisible(self._is_show_progress_bar)
         self._progress_ring.setVisible(self._is_show_progress_ring)
@@ -245,6 +246,7 @@ class ElaSplashScreen(ElaThemeWidget):
         self._fade_timer.stop()
         super().close()
         self.closed.emit()
+
     def finish(self, main_window: QWidget) -> None:
         """淡出关闭并显示主窗口。"""
         if self._fade_timer.isActive() or self._fade_settled:
@@ -297,7 +299,9 @@ class ElaSplashScreen(ElaThemeWidget):
     def mousePressEvent(self, event: QMouseEvent) -> None:
         if event.button() == Qt.MouseButton.LeftButton:
             self._is_dragging = True
-            self._drag_start = event.globalPosition().toPoint() - self.frameGeometry().topLeft()
+            self._drag_start = (
+                event.globalPosition().toPoint() - self.frameGeometry().topLeft()
+            )
             event.accept()
 
     def mouseMoveEvent(self, event: QMouseEvent) -> None:

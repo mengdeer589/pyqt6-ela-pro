@@ -24,6 +24,9 @@ _EXTERNAL_LINK_SCHEMES = frozenset({"http", "https", "mailto"})
 
 _ANCHOR_HISTORY_CAP = 50
 
+#: 文档内搜索命中上限：单字符搜索长文时避免创建数万条 ExtraSelection
+_SEARCH_HIT_LIMIT = 500
+
 
 class _MarkdownInteractionMixin:
     def setOpenExternalLinks(self, on: bool) -> None:
@@ -159,7 +162,7 @@ class _MarkdownInteractionMixin:
         if caseSensitive:
             flags |= QTextDocument.FindFlag.FindCaseSensitively
         cursor = QTextCursor(self.document())
-        while True:
+        while len(self._search_selections) < _SEARCH_HIT_LIMIT:
             found = self.document().find(text, cursor, flags)
             if found.isNull():
                 break
