@@ -142,8 +142,24 @@ class FunnelSeriesRenderer(SeriesRenderer):
                 }
             )
 
+    def labelShown(self) -> bool:
+        """漏斗图 ``label.show`` 默认开（ECharts 语义）。"""
+        return bool(self.labelOption().get("show", True))
+
+    def _label_override(self, index):
+        """双击编辑写入的按点标签覆盖（``None`` = 未覆盖）。"""
+        overrides = self._source_opt.get("labelTexts")
+        if isinstance(overrides, dict):
+            key = str(index)
+            if key in overrides:
+                return str(overrides[key])
+        return None
+
     def _funnel_label(self, layer, pct: str) -> str:
-        """funnel 标签文本：``label.formatter`` 优先，缺省「名称 值 (百分比)」。"""
+        """funnel 标签文本：双击编辑覆盖 → ``label.formatter`` → 默认文本。"""
+        override = self._label_override(layer["index"])
+        if override is not None:
+            return override
         formatter = self.labelOption().get("formatter")
         params = {
             "a": self.name,
@@ -171,6 +187,7 @@ class FunnelSeriesRenderer(SeriesRenderer):
         return f"{name} {formatValue(layer['value'])} ({pct})"
 
     def paint(self, p: QPainter, anim_t: float) -> None:
+        self._label_rects = []
         if not self._layers:
             return
         p.save()
@@ -266,55 +283,143 @@ class FunnelSeriesRenderer(SeriesRenderer):
                         fm.height(),
                     )
                 p.drawText(rect, align, full)
+                self._label_rects.append((layer["index"], rect, full))
             elif pos == "left":
                 p.setPen(c_text)
+                rect = QRectF(0, cy - fm.height() / 2, max(0.0, left - 8), fm.height())
                 p.drawText(
-                    QRectF(0, cy - fm.height() / 2, max(0.0, left - 8), fm.height()),
+                    rect,
                     Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter,
                     full,
+                )
+                tw = fm.horizontalAdvance(full)
+                self._label_rects.append(
+                    (
+                        layer["index"],
+                        QRectF(
+                            max(0.0, left - 8) - tw,
+                            cy - fm.height() / 2,
+                            tw + 4,
+                            fm.height(),
+                        ),
+                        full,
+                    )
                 )
             elif pos == "right":
                 p.setPen(c_text)
+                rect = QRectF(right + 8, cy - fm.height() / 2, 140, fm.height())
                 p.drawText(
-                    QRectF(right + 8, cy - fm.height() / 2, 140, fm.height()),
+                    rect,
                     Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
                     full,
+                )
+                tw = fm.horizontalAdvance(full)
+                self._label_rects.append(
+                    (
+                        layer["index"],
+                        QRectF(
+                            right + 8,
+                            cy - fm.height() / 2,
+                            tw + 4,
+                            fm.height(),
+                        ),
+                        full,
+                    )
                 )
             elif pos == "top":
                 p.setPen(c_text)
+                rect = QRectF(
+                    left,
+                    cy - fm.height() / 2 - fm.height() - 2,
+                    max(8.0, right - left),
+                    fm.height(),
+                )
                 p.drawText(
-                    QRectF(
-                        left,
-                        cy - fm.height() / 2 - fm.height() - 2,
-                        max(8.0, right - left),
-                        fm.height(),
-                    ),
+                    rect,
                     Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignBottom,
                     full,
                 )
+                tw = fm.horizontalAdvance(full)
+                self._label_rects.append(
+                    (
+                        layer["index"],
+                        QRectF(
+                            (left + right) / 2.0 - tw / 2.0 - 2,
+                            rect.top(),
+                            tw + 4,
+                            fm.height(),
+                        ),
+                        full,
+                    )
+                )
             elif pos == "bottom":
                 p.setPen(c_text)
+                rect = QRectF(
+                    left,
+                    cy + fm.height() / 2 + 2,
+                    max(8.0, right - left),
+                    fm.height(),
+                )
                 p.drawText(
-                    QRectF(
-                        left,
-                        cy + fm.height() / 2 + 2,
-                        max(8.0, right - left),
-                        fm.height(),
-                    ),
+                    rect,
                     Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignTop,
                     full,
                 )
+                tw = fm.horizontalAdvance(full)
+                self._label_rects.append(
+                    (
+                        layer["index"],
+                        QRectF(
+                            (left + right) / 2.0 - tw / 2.0 - 2,
+                            rect.top(),
+                            tw + 4,
+                            fm.height(),
+                        ),
+                        full,
+                    )
+                )
             else:  # outer（默认，引擎扩展）：名称居左、数值居右
                 p.setPen(c_text)
-                p.drawText(
-                    QRectF(0, cy - fm.height() / 2, left - 8, fm.height()),
-                    Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter,
-                    name,
+                override = self._label_override(layer["index"])
+                value_text_full = (
+                    override if override is not None else f"{value_text} ({pct})"
                 )
+                name_tw = fm.horizontalAdvance(name)
+                value_tw = fm.horizontalAdvance(value_text_full)
+                if override is None:
+                    p.drawText(
+                        QRectF(0, cy - fm.height() / 2, left - 8, fm.height()),
+                        Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter,
+                        name,
+                    )
+                    self._label_rects.append(
+                        (
+                            layer["index"],
+                            QRectF(
+                                max(0.0, left - 8) - name_tw,
+                                cy - fm.height() / 2,
+                                name_tw + 4,
+                                fm.height(),
+                            ),
+                            full,
+                        )
+                    )
                 p.drawText(
                     QRectF(right + 8, cy - fm.height() / 2, 110, fm.height()),
                     Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
-                    f"{value_text} ({pct})",
+                    value_text_full,
+                )
+                self._label_rects.append(
+                    (
+                        layer["index"],
+                        QRectF(
+                            right + 8,
+                            cy - fm.height() / 2,
+                            value_tw + 4,
+                            fm.height(),
+                        ),
+                        full,
+                    )
                 )
         p.restore()
 

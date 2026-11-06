@@ -795,7 +795,7 @@ class MarkdownPage(ExamplePage):
         self._stream_timer.setInterval(35)
         self._stream_timer.timeout.connect(self._onStreamTick)
         self._reader_view.streamFinished.connect(
-            self._onStreamFinished, Qt.ConnectionType.QueuedConnection
+            self._onStreamFinished, type=Qt.ConnectionType.QueuedConnection
         )
         stream_row.addWidget(self._replay_btn)
         stream_row.addWidget(self._pause_btn)

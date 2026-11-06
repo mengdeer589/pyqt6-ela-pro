@@ -180,6 +180,133 @@ class TestAnnotationEditing:
         assert chart.getOption()["series"][0]["markLine"]["data"][0]["name"] == "mean"
 
 
+class TestHierarchyLabelEditing:
+    """饼图 / 漏斗图的标签也走同一套双击编辑协议。"""
+
+    def _pie(self, make):
+        chart = make(ElaChartWidget)
+        chart.resize(640, 400)
+        chart.setOption(
+            {
+                "animation": False,
+                "series": [
+                    {
+                        "type": "pie",
+                        "name": "P",
+                        "data": [
+                            {"name": "a", "value": 3},
+                            {"name": "b", "value": 2},
+                        ],
+                        "label": {"show": True, "position": "outside"},
+                    }
+                ],
+            }
+        )
+        chart.show()
+        chart.anim.setProgress(1.0)
+        chart.grab()
+        return chart
+
+    def _funnel(self, make):
+        chart = make(ElaChartWidget)
+        chart.resize(640, 400)
+        chart.setOption(
+            {
+                "animation": False,
+                "series": [
+                    {
+                        "type": "funnel",
+                        "name": "F",
+                        "data": [
+                            {"name": "a", "value": 3},
+                            {"name": "b", "value": 2},
+                        ],
+                        "label": {"show": True},
+                    }
+                ],
+            }
+        )
+        chart.show()
+        chart.anim.setProgress(1.0)
+        chart.grab()
+        return chart
+
+    def test_pie_label_edit_writes_override(self, qapp, make):
+        chart = self._pie(make)
+        renderer = chart.seriesRenderers[0]
+        assert renderer._label_rects
+        index, rect, text = renderer._label_rects[0]
+        assert text
+        _double_click(chart, rect.center())
+        qapp.processEvents()
+        editor = chart._annotation_editor
+        assert editor is not None and editor.isVisible()
+        editor.setText("pie override")
+        editor.editingFinished.emit()
+        qapp.processEvents()
+        assert chart.getOption()["series"][0]["labelTexts"] == {
+            str(index): "pie override"
+        }
+        assert (
+            renderer._label_text(renderer._sectors[index], "50%", "default")
+            == "pie override"
+        )
+
+    def test_funnel_label_edit_writes_override(self, qapp, make):
+        chart = self._funnel(make)
+        renderer = chart.seriesRenderers[0]
+        assert renderer._label_rects
+        index, rect, _text = renderer._label_rects[0]
+        _double_click(chart, rect.center())
+        qapp.processEvents()
+        editor = chart._annotation_editor
+        assert editor is not None and editor.isVisible()
+        editor.setText("funnel override")
+        editor.editingFinished.emit()
+        qapp.processEvents()
+        assert chart.getOption()["series"][0]["labelTexts"] == {
+            str(index): "funnel override"
+        }
+        layer = next(item for item in renderer._layers if item["index"] == index)
+        assert renderer._funnel_label(layer, "50%") == "funnel override"
+
+    def test_heatmap_label_edit_writes_override(self, qapp, make):
+        chart = make(ElaChartWidget)
+        chart.resize(640, 400)
+        chart.setOption(
+            {
+                "animation": False,
+                "xAxis": {"type": "category", "data": ["a", "b"]},
+                "yAxis": {"type": "category", "data": ["c", "d"]},
+                "series": [
+                    {
+                        "type": "heatmap",
+                        "name": "H",
+                        "data": [[0, 0, 5], [1, 1, 7]],
+                        "label": {"show": True},
+                    }
+                ],
+            }
+        )
+        chart.show()
+        chart.anim.setProgress(1.0)
+        chart.grab()
+        renderer = chart.seriesRenderers[0]
+        assert renderer._label_rects
+        index, rect, _text = renderer._label_rects[0]
+        _double_click(chart, rect.center())
+        qapp.processEvents()
+        editor = chart._annotation_editor
+        assert editor is not None and editor.isVisible()
+        editor.setText("heat override")
+        editor.editingFinished.emit()
+        qapp.processEvents()
+        assert chart.getOption()["series"][0]["labelTexts"] == {
+            str(index): "heat override"
+        }
+        assert renderer.labelText(index, 5, "a, c") == "heat override"
+
+
 class TestPointLabelEditing:
     def test_double_click_point_label_edits_series_label(self, qapp, make):
         chart = _label_chart(make)

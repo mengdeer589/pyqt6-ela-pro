@@ -1,7 +1,7 @@
 """静态守卫：代码围栏的闭合标记不许用字符串拼接粘上去。
 
 ``ElaMarkdownViewer`` 的围栏解析要求围栏标记是**行首第一个非空白字符**
-（``ela_markdown_viewer.py`` 里 ``not line.startswith((" ", "\\t")) and
+（``markdown_viewer/syntax.py`` 里 ``not line.startswith((" ", "\\t")) and
 stripped.startswith(_FENCE_MARKERS)``）。于是 ``源码 + "```\\n"`` 这种写法在源码
 末行没有换行时会拼出 ``raise SystemExit(main())``` `` —— 闭合标记落到行中间，
 被判成**未闭合围栏**（= 流式中间态）。后果有两条，都很静默：

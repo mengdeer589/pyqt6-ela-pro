@@ -55,11 +55,11 @@ _NUMERIC_CALLS = {
 #: 新增条目前请先确认真的不可达（见模块 docstring）。
 _UNREACHABLE: dict[tuple[str, str], str] = {
     (
-        "ela_markdown_viewer.py",
+        "markdown_viewer/interaction.py",
         "_toggle_code_block_expanded",
     ): "入参标注 str（折叠链接 href 由库自己生成），int(str) 只抛 ValueError/TypeError",
-    ("ela_markdown_viewer.py", "_toggle_fold_expanded"): "同上",
-    ("ela_markdown_viewer.py", "_toggle_task_by_ordinal"): "同上",
+    ("markdown_viewer/interaction.py", "_toggle_fold_expanded"): "同上",
+    ("markdown_viewer/interaction.py", "_toggle_task_by_ordinal"): "同上",
     (
         "example/charts_page.py",
         "_onGenBigData",

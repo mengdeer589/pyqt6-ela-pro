@@ -4,6 +4,8 @@ pyqt6_ela_pro - PyQt6 Extension Widgets Module
 Extension components based on PyQt6ElaWidgetTools with custom styling.
 """
 
+from importlib import import_module
+
 from ._version import __version__
 
 # ── Functions ────────────────────────────────────────────────────────────────
@@ -62,7 +64,12 @@ from .ela_shimmer import (
     ElaShimmerTemplateType,
 )
 from .ela_field import ElaField, ElaFieldStatusType
-from .ela_avatar import ElaAvatarPresenceType, ElaAvatarShapeType, ElaAvatarSizeType, ElaAvatar
+from .ela_avatar import (
+    ElaAvatarPresenceType,
+    ElaAvatarShapeType,
+    ElaAvatarSizeType,
+    ElaAvatar,
+)
 from .ela_selector_bar import (
     ElaSelectorBar,
     SelectorBarItem,
@@ -125,14 +132,6 @@ from .taskbar_progress import ElaTaskbarProgress
 
 from .ela_long_press_button import ElaLongPressButton
 
-from .ela_markdown_viewer import (
-    ElaMarkdownViewer,
-    defaultMarkdownTheme,
-    markdownThemes,
-    registerMarkdownTheme,
-    setDefaultMarkdownTheme,
-    unregisterMarkdownTheme,
-)
 
 from .ela_tag_line_edit import ElaTagLineEdit
 
@@ -182,91 +181,14 @@ from .ela_toast import ElaToast
 
 from .ela_upload_area import ElaUploadArea
 
-from .charts import (
-    ElaChartWidget,
-    chartThemeSpec,
-    chartThemes,
-    defaultChartTheme,
-    registerChartTheme,
-    setDefaultChartTheme,
-    unregisterChartTheme,
-)
 
 from .ela_diff_view import ElaDiffView
 
-from .chat import (
-    AttachmentStrip,
-    ContextToolGroupCard,
-    DEFAULT_TIMELINE_DETAIL,
-    ElaChatAsyncWorker,
-    ElaChatAttachment,
-    ElaChatAvatarSource,
-    ElaChatBubble,
-    ElaChatDetailDepthType,
-    ElaChatDetailPlacementType,
-    ElaChatDetailSection,
-    ElaChatFileChange,
-    ElaChatFileChangeLine,
-    ElaChatFileChanges,
-    ElaChatInput,
-    ElaChatMention,
-    ElaChatNotice,
-    ElaChatNoticeType,
-    ElaChatPromptHistory,
-    ElaChatRetryCard,
-    ElaChatSelector,
-    ElaChatSelectorItem,
-    ElaChatSearchBar,
-    ElaChatSearchHit,
-    ElaChatTimelineDetail,
-    ElaChatWorkingRow,
-    ElaChatInputDock,
-    ElaChatMessage,
-    ElaChatMockBackend,
-    ElaChatMockChunk,
-    ElaChatMockUsage,
-    ElaChatPart,
-    ElaChatPartKindType,
-    ElaChatQueueDock,
-    ElaChatReasoningStyleType,
-    ElaChatRoleType,
-    ElaChatSessionInfo,
-    ElaChatSessionStats,
-    ElaChatStats,
-    ElaChatStatusType,
-    ElaChatStatusBar,
-    ElaChatStreamBinder,
-    ElaChatSuggestion,
-    ElaChatToolBar,
-    ElaChatToolButton,
-    ElaChatToolCall,
-    ElaChatToolStatusType,
-    ElaChatTurnSummary,
-    ElaChatView,
-    ElaChatWidget,
-    ErrorCard,
-    MessageActions,
-    MessageHeader,
-    MessageMeta,
-    ReasoningBlock,
-    StatsBadge,
-    SuggestionPopup,
-    ThinkingRow,
-    ToolCallCard,
-    ToolGroupPanel,
-)
 
 from .menu_item import ElaMenuItem
 
 from .ela_tray_icon import ElaTrayIcon
 
-from .selection_assistant import (
-    ElaClipboardCapture,
-    ElaMouseMonitor,
-    ElaSelectionAssistant,
-    ElaSelectionPopup,
-    ElaSelectionResultDialog,
-)
 
 from .ela_tag_box import ElaTagBox
 
@@ -284,31 +206,140 @@ from .svg_icon import (
 
 from .window_embedder import ElaWindowEmbedder
 
-from .browser_embedder import ElaBrowserEmbedder
 
 from .splitter import ElaSplitter
 
-from .blueprint import (
-    ElaBlueprintCanvas,
-    ElaBlueprintGraph,
-    ElaBlueprintNode,
-    ElaEdge,
-    ElaEdgeContextMenu,
-    ElaExecutionController,
-    ElaNodeContextMenu,
-    ElaNodeCreationMenu,
-    ElaNodeRegistry,
-    ElaNodeSpec,
-    ElaPin,
-    ElaPinDirectionType,
-    PIN_COLORS,
-    gl_available,
-    pin,
-    pin_color,
-    register_node_type,
-    register_pin_type,
-    types_compatible,
-)
+
+#: 重型子系统：首次访问属性时再导入，避免 ``import pyqt6_ela_pro`` 拉起全部 UI。
+_LAZY_MODULES = {
+    "ela_markdown_viewer": (
+        "ElaMarkdownViewer",
+        "defaultMarkdownTheme",
+        "markdownThemes",
+        "registerMarkdownTheme",
+        "setDefaultMarkdownTheme",
+        "unregisterMarkdownTheme",
+    ),
+    "charts": (
+        "ElaChartWidget",
+        "chartThemeSpec",
+        "chartThemes",
+        "defaultChartTheme",
+        "registerChartTheme",
+        "setDefaultChartTheme",
+        "unregisterChartTheme",
+    ),
+    "chat": (
+        "AttachmentStrip",
+        "ContextToolGroupCard",
+        "DEFAULT_TIMELINE_DETAIL",
+        "ElaChatAsyncWorker",
+        "ElaChatAttachment",
+        "ElaChatAvatarSource",
+        "ElaChatBubble",
+        "ElaChatDetailDepthType",
+        "ElaChatDetailPlacementType",
+        "ElaChatDetailSection",
+        "ElaChatFileChange",
+        "ElaChatFileChangeLine",
+        "ElaChatFileChanges",
+        "ElaChatInput",
+        "ElaChatMention",
+        "ElaChatNotice",
+        "ElaChatNoticeType",
+        "ElaChatPromptHistory",
+        "ElaChatRetryCard",
+        "ElaChatSelector",
+        "ElaChatSelectorItem",
+        "ElaChatSearchBar",
+        "ElaChatSearchHit",
+        "ElaChatTimelineDetail",
+        "ElaChatWorkingRow",
+        "ElaChatInputDock",
+        "ElaChatMessage",
+        "ElaChatMockBackend",
+        "ElaChatMockChunk",
+        "ElaChatMockUsage",
+        "ElaChatPart",
+        "ElaChatPartKindType",
+        "ElaChatQueueDock",
+        "ElaChatReasoningStyleType",
+        "ElaChatRoleType",
+        "ElaChatSessionInfo",
+        "ElaChatSessionStats",
+        "ElaChatStats",
+        "ElaChatStatusType",
+        "ElaChatStatusBar",
+        "ElaChatStreamBinder",
+        "ElaChatSuggestion",
+        "ElaChatToolBar",
+        "ElaChatToolButton",
+        "ElaChatToolCall",
+        "ElaChatToolStatusType",
+        "ElaChatTurnSummary",
+        "ElaChatView",
+        "ElaChatWidget",
+        "ErrorCard",
+        "MessageActions",
+        "MessageHeader",
+        "MessageMeta",
+        "ReasoningBlock",
+        "StatsBadge",
+        "SuggestionPopup",
+        "ThinkingRow",
+        "ToolCallCard",
+        "ToolGroupPanel",
+    ),
+    "browser_embedder": ("ElaBrowserEmbedder",),
+    "selection_assistant": (
+        "ElaClipboardCapture",
+        "ElaMouseMonitor",
+        "ElaSelectionAssistant",
+        "ElaSelectionPopup",
+        "ElaSelectionResultDialog",
+    ),
+    "blueprint": (
+        "ElaBlueprintCanvas",
+        "ElaBlueprintGraph",
+        "ElaBlueprintNode",
+        "ElaEdge",
+        "ElaEdgeContextMenu",
+        "ElaExecutionController",
+        "ElaNodeContextMenu",
+        "ElaNodeCreationMenu",
+        "ElaNodeRegistry",
+        "ElaNodeSpec",
+        "ElaPin",
+        "ElaPinDirectionType",
+        "PIN_COLORS",
+        "gl_available",
+        "pin",
+        "pin_color",
+        "register_node_type",
+        "register_pin_type",
+        "types_compatible",
+    ),
+}
+_LAZY_ATTRS = {
+    name: module for module, names in _LAZY_MODULES.items() for name in names
+}
+
+
+def __getattr__(name: str):
+    if name in _LAZY_MODULES:
+        value = import_module(f"{__name__}.{name}")
+        globals()[name] = value
+        return value
+    module_name = _LAZY_ATTRS.get(name)
+    if module_name is None:
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+    value = getattr(import_module(f"{__name__}.{module_name}"), name)
+    globals()[name] = value
+    return value
+
+
+def __dir__():
+    return sorted(set(globals()) | set(_LAZY_ATTRS) | set(_LAZY_MODULES))
 
 
 __all__ = [

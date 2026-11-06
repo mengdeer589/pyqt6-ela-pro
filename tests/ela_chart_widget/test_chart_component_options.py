@@ -107,9 +107,7 @@ class TestComponentArrays:
         assert chart.dragMode() == "select"
 
     def test_toolbox_array(self, make):
-        chart = _chart(
-            make, _base({"toolbox": [{"feature": {"saveAsImage": {}}}]})
-        )
+        chart = _chart(make, _base({"toolbox": [{"feature": {"saveAsImage": {}}}]}))
         assert chart._component("toolbox") is not None
 
 
@@ -220,7 +218,10 @@ class TestDataZoomStyle:
             _base(
                 {
                     "dataZoom": [
-                        {"type": "slider", "textStyle": {"fontSize": 17, "color": "#102030"}}
+                        {
+                            "type": "slider",
+                            "textStyle": {"fontSize": 17, "color": "#102030"},
+                        }
                     ]
                 }
             ),
@@ -446,9 +447,7 @@ class TestGaugeStyle:
         assert renderer._detail_text(66) == "66%"
 
     def test_detail_formatter_callable(self, make):
-        renderer = self._gauge(
-            make, {"detail": {"formatter": lambda v: f"<{v}>"}}
-        )
+        renderer = self._gauge(make, {"detail": {"formatter": lambda v: f"<{v}>"}})
         assert renderer._detail_text(66) == "<66>"
 
 
@@ -720,7 +719,10 @@ class TestVisualMapCalculable:
 
     def test_press_far_away_ignored(self, make):
         _chart_obj, vm = self._vm(make)
-        assert vm.onMousePress(QPointF(vm._bar.center().x(), vm._bar.center().y())) is False
+        assert (
+            vm.onMousePress(QPointF(vm._bar.center().x(), vm._bar.center().y()))
+            is False
+        )
 
 
 class TestDataZoomLockAndFilterMode:
@@ -731,6 +733,20 @@ class TestDataZoomLockAndFilterMode:
         )
         return chart._component("dataZoom")
 
+    def _ten(self, make, extra: dict):
+        cats = [chr(ord("A") + i) for i in range(10)]
+        chart = _chart(
+            make,
+            {
+                "animation": False,
+                "xAxis": {"type": "category", "data": cats},
+                "yAxis": {"type": "value"},
+                "series": [{"type": "line", "data": list(range(10))}],
+                "dataZoom": [{"type": "inside", **extra}],
+            },
+        )
+        return chart, chart.coords[0].x_axis
+
     def test_zoom_lock(self, make):
         zoom = self._zoom(make, {"zoomLock": True})
         assert zoom.zoom_lock is True
@@ -740,12 +756,48 @@ class TestDataZoomLockAndFilterMode:
     def test_zoom_lock_default_off(self, make):
         assert self._zoom(make, {}).zoom_lock is False
 
-    def test_filter_mode_default_and_none(self, make):
+    def test_filter_mode_all_modes_accepted(self, make):
         assert self._zoom(make, {}).filter_mode == "filter"
-        # "none" 未实现 → 留告警并按 filter 处理（这里只钉解析结果与告警路径）
         assert self._zoom(make, {"filterMode": "none"}).filter_mode == "none"
+        assert (
+            self._zoom(make, {"filterMode": "weakFilter"}).filter_mode == "weakfilter"
+        )
+        assert self._zoom(make, {"filterMode": "empty"}).filter_mode == "empty"
         # 非法值回退 filter
         assert self._zoom(make, {"filterMode": "weird"}).filter_mode == "filter"
+
+    def test_filter_mode_drops_partial_categories(self, make):
+        # 序号取样：窗口 [25, 75] 覆盖 10 个类目的中心 3..6。
+        chart, axis = self._ten(make, {"start": 25, "end": 75})
+        assert chart._component("dataZoom").filter_mode == "filter"
+        assert axis.categories == ["D", "E", "F", "G"]
+
+    def test_none_mode_keeps_banded_categories(self, make):
+        # 只改显示范围：与窗口相交的半格类目（C / H）也留下。
+        _chart_, axis = self._ten(make, {"start": 25, "end": 75, "filterMode": "none"})
+        assert axis.categories == ["C", "D", "E", "F", "G", "H"]
+
+    def test_weak_filter_matches_filter_for_single_dimension(self, make):
+        # 类目轴上是单维数据；弱过滤「跨窗口保留」在本库天然成立（不删数据）。
+        chart, axis = self._ten(
+            make, {"start": 25, "end": 75, "filterMode": "weakFilter"}
+        )
+        assert chart._component("dataZoom").filter_mode == "weakfilter"
+        assert axis.categories == ["D", "E", "F", "G"]
+
+    def test_empty_mode_clears_axis_on_collapsed_window(self, make):
+        chart, axis = self._ten(make, {"start": 50, "end": 50, "filterMode": "empty"})
+        zoom = chart._component("dataZoom")
+        assert (zoom.start, zoom.end) == (50.0, 50.0)
+        assert axis.categories == []
+        assert not [p for p in chart.seriesRenderers[0]._points if p is not None]
+        # 回到全量窗口后类别恢复
+        chart.dispatchAction({"type": "dataZoom", "start": 0, "end": 100})
+        assert axis.categories == [chr(ord("A") + i) for i in range(10)]
+
+    def test_non_empty_mode_snaps_collapsed_window(self, make):
+        _chart_, axis = self._ten(make, {"start": 50, "end": 50})
+        assert len(axis.categories) == 1
 
 
 class TestMultiInstance:
@@ -840,7 +892,9 @@ class TestMultiInstance:
         assert grids[0].y_axis.vmax < 100
         # 柱几何落在自己的网格里
         bar = chart.seriesRenderers[1]
-        assert all(grids[1].plot.adjusted(-1, -1, 1, 1).contains(b["rect"]) for b in bar._bars)
+        assert all(
+            grids[1].plot.adjusted(-1, -1, 1, 1).contains(b["rect"]) for b in bar._bars
+        )
         chart._render_to_painter()
 
     def test_single_grid_default(self, make):
@@ -1080,8 +1134,10 @@ class TestVisualMapPiecewise:
     def test_out_of_range_color(self, make):
         _chart_obj, vm = self._vm(
             make,
-            {"pieces": [{"min": 0, "max": 50, "color": "#aaaaaa"}],
-             "outOfRange": {"color": "#123123"}},
+            {
+                "pieces": [{"min": 0, "max": 50, "color": "#aaaaaa"}],
+                "outOfRange": {"color": "#123123"},
+            },
         )
         assert vm.mapColor(10).name() == "#aaaaaa"
         assert vm.mapColor(90).name() == "#123123"
@@ -1120,9 +1176,7 @@ class TestAxisPointerStyle:
         assert tooltip.axisLabelText() == "2026-10 月"
 
     def test_label_formatter_callable(self, make):
-        tooltip = self._tooltip(
-            make, {"label": {"formatter": lambda v: f"[{v}]"}}
-        )
+        tooltip = self._tooltip(make, {"label": {"formatter": lambda v: f"[{v}]"}})
         assert tooltip.axisLabelText() == "[2026-10]"
 
     def test_label_hidden(self, make):

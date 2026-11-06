@@ -225,6 +225,7 @@ class PieSeriesRenderer(SeriesRenderer):
         return rebuilt
 
     def paint(self, p: QPainter, anim_t: float) -> None:
+        self._label_rects = []
         if not self._sectors:
             return
         p.save()
@@ -265,8 +266,17 @@ class PieSeriesRenderer(SeriesRenderer):
         self._paint_labels(p, sectors, anim_t)
         p.restore()
 
+    def labelShown(self) -> bool:
+        """饼图 ``label.show`` 默认开（ECharts 语义）。"""
+        return bool(self.labelOption().get("show", True))
+
     def _label_text(self, sec, pct: str, default_text: str) -> str:
-        """饼图标签文本：``label.formatter``（callable / ``{b} {c} {d}`` 模板）优先。"""
+        """饼图标签文本：双击编辑覆盖 → ``label.formatter`` → 默认文本。"""
+        overrides = self._source_opt.get("labelTexts")
+        if isinstance(overrides, dict):
+            key = str(sec["index"])
+            if key in overrides:
+                return str(overrides[key])
         formatter = self.labelOption().get("formatter")
         params = {
             "a": self.name,
@@ -329,6 +339,19 @@ class PieSeriesRenderer(SeriesRenderer):
                     Qt.AlignmentFlag.AlignCenter,
                     text,
                 )
+                tw = fm.horizontalAdvance(text)
+                self._label_rects.append(
+                    (
+                        sec["index"],
+                        QRectF(
+                            pt.x() - tw / 2.0 - 2,
+                            pt.y() - fm.height() / 2,
+                            tw + 4,
+                            fm.height(),
+                        ),
+                        text,
+                    )
+                )
             else:  # outside：引线 + 名称（含百分比）
                 pt1 = self._pt(mid, sec["r1"] + 2)
                 pt2 = self._pt(mid, sec["r1"] + 14)
@@ -360,6 +383,7 @@ class PieSeriesRenderer(SeriesRenderer):
                         Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter,
                         text,
                     )
+                self._label_rects.append((sec["index"], tr, text))
         # 环形中心孔总计
         if self._r_in > 4 and bool(
             dict(self.opt.get("totalLabel") or {}).get("show", False)

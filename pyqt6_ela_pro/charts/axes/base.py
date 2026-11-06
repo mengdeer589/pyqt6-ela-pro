@@ -537,6 +537,9 @@ class AxisModel:
             if value is None:
                 return float("nan")
         if self.type == "category":
+            if not self.categories:
+                # dataZoom.filterMode="empty" 的清空态：没有类目可映射。
+                return float("nan")
             if (
                 local
                 and isinstance(value, (int, float))

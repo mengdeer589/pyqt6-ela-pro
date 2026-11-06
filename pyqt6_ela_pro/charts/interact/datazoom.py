@@ -23,6 +23,39 @@ from ..axes import GridCoord, chartFont
 from ._shared import _axis_index_list
 
 
+def _category_window(n: int, start: float, end: float, mode: str) -> tuple[int, int]:
+    """0-100 窗口 → 类目下标区间 ``[i0, i1)``。
+
+    ``filter`` / ``weakFilter`` / ``empty`` 按**序号**取样（类目中心在窗外就整项
+    剔除）；``none`` 按 **band** 取样（与窗口相交的类目保留半格，视觉上更接近
+    ECharts 的「只改显示范围」）。``empty`` 的零宽窗口返回空区间，其余模式吸附
+    到最近的一个类目。
+    """
+    if n <= 0:
+        return 0, 0
+    if mode == "none":
+        # ``i/n*100`` 再乘回去常有 1ulp 误差（n=3、i0=1 得 0.9999…），补 epsilon。
+        i0 = int(math.floor(start / 100.0 * n + 1e-9))
+        i1 = int(math.ceil(end / 100.0 * n - 1e-9))
+        i0 = _clamp(i0, 0, n - 1)
+        i1 = _clamp(max(i1, i0 + 1), 1, n)
+        return i0, i1
+    last = n - 1
+    if mode == "empty" and abs(end - start) <= 1e-9:
+        return 0, 0
+    lo = _clamp(start, 0.0, 100.0) / 100.0 * last
+    hi = _clamp(end, 0.0, 100.0) / 100.0 * last
+    i0 = int(math.ceil(lo - 1e-9))
+    i1 = int(math.floor(hi + 1e-9)) + 1
+    i0 = _clamp(i0, 0, n)
+    i1 = _clamp(i1, 0, n)
+    if i0 >= i1:
+        # filter / weakFilter 至少保留离窗口中心最近的类目。
+        idx = _clamp(int(round((lo + hi) / 2.0)), 0, n - 1)
+        return idx, idx + 1
+    return i0, i1
+
+
 class DataZoomComponent(QObject):
     """区域缩放：inside（滚轮 + 拖拽平移）/ slider（底部双把手滑块）。
 
@@ -68,14 +101,16 @@ class DataZoomComponent(QObject):
         self._y_zoom_allowed = first.get("yZoom", True) is not False
         #: ``zoomLock``：锁定窗口大小（滚轮不缩放，只能平移）
         self.zoom_lock = first.get("zoomLock") is True
-        #: ``filterMode``：``"filter"`` / ``"none"`` 都只改轴窗口、不删系列数据
-        #: （category 轴靠 ``_all_categories`` + ``windowOffset`` 保留全局下标）；
-        #: 未实现的模式按 filter 处理并留一条告警。
+        #: ``filterMode``：只影响类目轴取样方式，不删系列数据（``_all_categories``
+        #: + ``windowOffset`` 保留全局下标）：
+        #: ``filter`` / ``weakFilter`` 按序号严格取样（中心在窗外的类目整项剔除），
+        #: ``none`` 按 band 取样（与窗口相交的类目保留半格），
+        #: ``empty`` 同 filter 且零宽窗口不再吸附到最近类目（轴为空）。
         mode = str(first.get("filterMode") or "filter").strip().lower()
-        if mode not in ("filter", "none"):
+        if mode not in ("filter", "weakfilter", "empty", "none"):
             warn_once(
                 "datazoom-filter-mode",
-                f"dataZoom.filterMode={mode!r} 暂未实现，按 filter 处理",
+                f"dataZoom.filterMode={mode!r} 无效，按 filter 处理",
             )
             mode = "filter"
         self.filter_mode = mode
@@ -291,6 +326,7 @@ class DataZoomComponent(QObject):
         full_cats: dict,
         full_range: dict,
         applied_cats: dict,
+        mode: str = "filter",
     ) -> None:
         """把 0-100 窗口写到单根轴（category 切片 / value-log 重算刻度）。"""
         if axis.type == "category":
@@ -298,12 +334,13 @@ class DataZoomComponent(QObject):
             n = len(full)
             if n == 0:
                 return
-            # 百分比 → 下标要带 epsilon：``i0/n*100`` 再乘回去常有 1ulp 误差
-            # （n=3、i0=1 得 0.9999999999999999，int() 退一格）。
-            i0 = int(math.floor(start / 100.0 * n + 1e-9))
-            i1 = int(math.ceil(end / 100.0 * n - 1e-9))
-            i0 = _clamp(i0, 0, n - 1)
-            i1 = _clamp(max(i1, i0 + 1), 1, n)
+            i0, i1 = _category_window(n, float(start), float(end), mode)
+            if i0 >= i1:
+                # ``empty``：窗口内没有任何类目 → 轴清空（图表留白）。
+                if axis.categories:
+                    axis.categories = []
+                applied_cats[index] = (0, 0)
+                return
             # 幂等快速路径：窗口没变且轴内容仍是上次写的窗口时跳过 —— 重建
             # 1M 类别列表是 O(n) 复制，是 category 1M 帧的头号开销。
             if (i0, i1) != applied_cats.get(index) or len(axis.categories) != i1 - i0:
@@ -327,6 +364,7 @@ class DataZoomComponent(QObject):
                 self._full_cats,
                 self._full_range,
                 self._applied_cats_window,
+                self.filter_mode,
             )
         if not self._y_zoom_enabled:
             return
@@ -340,6 +378,7 @@ class DataZoomComponent(QObject):
                 self._full_y_cats,
                 self._full_y_range,
                 self._applied_y_cats_window,
+                self.filter_mode,
             )
 
     def restore(self) -> None:
@@ -450,7 +489,9 @@ class DataZoomComponent(QObject):
             )
             p.setFont(font)
             fm = QFontMetricsF(font)
-            p.setPen(parse_color(style.get("color") or T("color.text.tertiary", self.chart)))
+            p.setPen(
+                parse_color(style.get("color") or T("color.text.tertiary", self.chart))
+            )
             ly = self._track.bottom() + 1
             p.drawText(
                 QRectF(self._track.left(), ly, 40, fm.height()),
@@ -563,7 +604,9 @@ class DataZoomComponent(QObject):
             span = min_span
         if max_span is not None and span > max_span:
             span = max_span
-        span = _clamp(span, 1.0, 100.0)
+        # ``empty`` 允许零宽窗口（用「窗口内无数据 → 留白」语义），其余模式至少 1%。
+        min_allowed = 0.0 if self.filter_mode == "empty" else 1.0
+        span = _clamp(span, min_allowed, 100.0)
         center = (float(start) + float(end)) / 2.0
         start = _clamp(center - span / 2.0, 0.0, max(0.0, 100.0 - span))
         return start, start + span
@@ -675,7 +718,8 @@ class DataZoomComponent(QObject):
                     y_end = self.y_end
                 if y_end < y_start:
                     y_start, y_end = y_end, y_start
-                span = _clamp(float(y_end) - float(y_start), 1.0, 100.0)
+                min_span = 0.0 if self.filter_mode == "empty" else 1.0
+                span = _clamp(float(y_end) - float(y_start), min_span, 100.0)
                 center = (float(y_start) + float(y_end)) / 2.0
                 y_start = _clamp(center - span / 2.0, 0.0, 100.0 - span)
                 self.y_start, self.y_end = y_start, y_start + span

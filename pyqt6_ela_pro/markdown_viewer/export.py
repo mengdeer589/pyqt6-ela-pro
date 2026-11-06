@@ -99,7 +99,7 @@ class _MarkdownExportMixin:
         else:
             try:
                 values = [float(value) for value in marginsMm]
-            except (TypeError, ValueError):
+            except (TypeError, ValueError, OverflowError):
                 values = [15.0] * 4
             if len(values) == 2:
                 values = [values[0], values[1], values[0], values[1]]

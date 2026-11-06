@@ -13,7 +13,7 @@ from PyQt6.QtGui import (
 
 from .._tokens import T, theme_ramp
 from .._utils import parse_color, ramp_color, to_float as _to_float
-from ..axes import CalendarCoord, GridCoord, formatValue
+from ..axes import CalendarCoord, GridCoord
 from ..core import SeriesRenderer
 from ._shared import (
     _axis_label,
@@ -223,6 +223,7 @@ class HeatmapSeriesRenderer(SeriesRenderer):
             )
 
     def paint(self, p: QPainter, anim_t: float) -> None:
+        self._label_rects = []
         if not self._cells:
             return
         p.save()
@@ -264,20 +265,21 @@ class HeatmapSeriesRenderer(SeriesRenderer):
             else:
                 p.drawRect(cell["rect"])
             if show_label and cell["value"] is not None:
-                text = formatValue(cell["value"])
+                text = self.labelText(cell["index"], cell["value"], cell.get("label"))
                 rect = cell["rect"]
                 if (
                     rect.width() >= fm.horizontalAdvance(text) + 4
                     and rect.height() >= fm.height()
                 ):
                     p.setPen(label_color)
-                    paint_label_in(
+                    hit = paint_label_in(
                         p,
                         rect,
                         text,
                         label_rotate_angle,
                         Qt.AlignmentFlag.AlignCenter,
                     )
+                    self._label_rects.append((cell["index"], hit, text))
         p.restore()
 
     def _cell_fill_color(self, cell: dict, hovered, anim_t: float) -> QColor:

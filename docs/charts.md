@@ -157,10 +157,13 @@ chart.setAxisLabelStyle("both", fontFamily="Microsoft YaHei")  # x + y 一次改
 - `series.label.rotate`（度，绕文字中心旋转）与 `label.align`（`left` /
   `center` / `right`，按数据点调整水平锚点）已在直角系列（line / bar /
   scatter / heatmap）生效；旋转后的命中框取外接矩形。
-- `dataZoom.filterMode` 支持 `"filter"` / `"none"`：本库两条路径都**只改轴窗口、
-  不物理删除系列数据**（类目轴用 `_all_categories` + `windowOffset` 保留全局
-  下标）—— 这正是 `"none"` 的语义；`"weakFilter"` / `"empty"` 未实现，按
-  filter 处理并留一条告警。
+- `dataZoom.filterMode` 支持 `"filter"` / `"weakFilter"` / `"empty"` / `"none"`：
+  本库**不物理删除系列数据**（类目轴用 `_all_categories` + `windowOffset` 保留
+  全局下标），模式只决定类目轴的取样方式 —— `"filter"` / `"weakFilter"` 按
+  类目序号严格取样（类目中心落在窗口外就整项剔除），`"weakFilter"` 对跨窗口
+  的多值数据项同样保留（本库不删数据，天然满足）；`"none"` 按 band 取样
+  （与窗口相交的半格类目保留）；`"empty"` 同 `"filter"`，但零宽窗口不再吸附
+  到最近类目，轴清空、图表留白。连续数值轴在各模式下都只改显示范围。
 
 **组件数组写法（单实例 / 多实例）**
 
@@ -334,12 +337,14 @@ chart.setChartTheme("brand")
 - **仪表盘中心数值**：`gauge.detail.fontSize` 显式优先；默认同样随表盘半径
   自适应（12–22px），不再固定 17px。
 - **dataZoom**：`textStyle`（滑块两端文案）、`zoomLock`（锁定窗口大小，滚轮
-  不缩放、仍可平移）、`filterMode`（`"filter"` / `"none"`，见上）。
+  不缩放、仍可平移）、`filterMode`（`"filter"` / `"weakFilter"` / `"empty"` /
+  `"none"`，见上）。
 - **轴名**：`xAxis` / `yAxis` 的 `nameGap` 与 `nameTextStyle`（`color` /
   `fontSize` / `fontWeight`）生效。
 - **通用键**：`itemStyle`（`color` / `opacity` / `borderColor` / `borderWidth` /
-  `borderRadius`）、直角系列 `label`（`show` / `formatter` 模板或回调 /
-  `fontSize` / `color` / `position`；`show: true` 的数据点标签可双击编辑，
+  `borderRadius`）、`label`（`show` / `formatter` 模板或回调 /
+  `fontSize` / `color` / `position`；直角系列 + 饼图 / 漏斗图 / 热力图的
+  `show: true` 数据点标签可双击编辑，
   编辑结果存 `series.labelTexts[str(index)]`，`label.editable: false` 可关；
   运行时用 `setSeriesLabelText(...)` 改单点、`updateSeries({"label": ...})` 改整体系列）、
   `line.stack` + `areaStyle.color`（渐变

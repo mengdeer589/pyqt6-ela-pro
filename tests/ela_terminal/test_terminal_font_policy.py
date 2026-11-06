@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import pytest
 
-from pyqt6_ela_pro import terminal_view as terminal_module
+from pyqt6_ela_pro.terminal_view import theme as theme_module
 from pyqt6_ela_pro.terminal_view import ElaTerminalView
 
 _CJK = "Microsoft YaHei"
@@ -17,13 +17,13 @@ _CJK = "Microsoft YaHei"
 
 @pytest.fixture
 def cjk_system(monkeypatch):
-    monkeypatch.setattr(terminal_module, "system_cjk_font_family", lambda: _CJK)
+    monkeypatch.setattr(theme_module, "system_cjk_font_family", lambda: _CJK)
     return _CJK
 
 
 @pytest.fixture
 def non_cjk_system(monkeypatch):
-    monkeypatch.setattr(terminal_module, "system_cjk_font_family", lambda: None)
+    monkeypatch.setattr(theme_module, "system_cjk_font_family", lambda: None)
     return None
 
 

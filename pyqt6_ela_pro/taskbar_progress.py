@@ -200,7 +200,7 @@ class ElaTaskbarProgress(QObject):
             if handle is None:
                 return 0
             return int(handle.winId())
-        except (RuntimeError, TypeError, ValueError):  # 窗口正在销毁
+        except (RuntimeError, TypeError, ValueError, OverflowError):  # 窗口正在销毁
             return 0
 
     def _ensure_attached(self) -> None:
