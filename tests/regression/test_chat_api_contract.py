@@ -26,14 +26,12 @@ from __future__ import annotations
 
 import ast
 import inspect
-from pathlib import Path
+import textwrap
 
 import pytest
 
 from pyqt6_ela_pro.chat import ElaChatInput, ElaChatView, ElaChatWidget
 from pyqt6_ela_pro.chat.message import ElaChatStats, ElaChatStatusType
-
-_WIDGET_SOURCE = Path(inspect.getfile(ElaChatWidget)).with_suffix(".py")
 
 
 def _chat(qapp) -> ElaChatWidget:
@@ -45,33 +43,43 @@ def _chat(qapp) -> ElaChatWidget:
 
 
 def _pure_forwarders(cls) -> list:
-    """找出「只把参数转发给 ``self._view.<同名>()``」的方法。"""
-    tree = ast.parse(inspect.getsource(cls))
-    node = next(
-        n
-        for n in ast.walk(tree)
-        if isinstance(n, ast.ClassDef) and n.name == cls.__name__
-    )
+    """找出「只把参数转发给 ``self._view.<同名>()``」的方法。
+
+    逐个方法解析源码而不是只看 ``cls`` 的类体：方法可能拆到 mixin，
+    只看类体会让这条架构守卫静默失效。
+    """
     found = []
-    for func in node.body:
-        if not isinstance(func, ast.FunctionDef) or func.name.startswith("_"):
+    for name, func in inspect.getmembers(cls, inspect.isfunction):
+        if name.startswith("_") or not getattr(func, "__module__", "").startswith(
+            "pyqt6_ela_pro.chat."
+        ):
+            continue
+        try:
+            source = textwrap.dedent(inspect.getsource(func))
+        except (OSError, TypeError):
+            continue
+        node = next(
+            (n for n in ast.walk(ast.parse(source)) if isinstance(n, ast.FunctionDef)),
+            None,
+        )
+        if node is None:
             continue
         # 有控制流 / 抛错 / 循环 => 有自身逻辑
         if any(
             isinstance(n, (ast.Raise, ast.Try, ast.While, ast.For, ast.If))
-            for n in ast.walk(func)
+            for n in ast.walk(node)
         ):
             continue
         calls = [
             c
-            for c in ast.walk(func)
+            for c in ast.walk(node)
             if isinstance(c, ast.Call)
             and isinstance(c.func, ast.Attribute)
             and isinstance(c.func.value, ast.Attribute)
             and c.func.value.attr == "_view"
         ]
-        if len(calls) == 1 and calls[0].func.attr == func.name:
-            found.append(func.name)
+        if len(calls) == 1 and calls[0].func.attr == name:
+            found.append(name)
     return found
 
 

@@ -8,7 +8,7 @@ from _qthelpers import wait_until as _wait_until
 from PyQt6.QtCore import QMimeData, QPoint, QPointF, Qt, QUrl
 from PyQt6.QtGui import QColor, QDragEnterEvent, QDropEvent, QImage
 
-import pyqt6_ela_pro.chat.widget as widget_mod
+import pyqt6_ela_pro.chat.widget_turn as turn_mod
 from pyqt6_ela_pro.chat import (
     ElaChatRoleType,
     ElaChatStats,
@@ -153,7 +153,7 @@ class TestInputBarClearButton:
                 calls.append((parent, title, message, position))
                 return result
 
-        monkeypatch.setattr(widget_mod, "ElaConfirmDialog", _Fake)
+        monkeypatch.setattr(turn_mod, "ElaConfirmDialog", _Fake)
 
     def test_button_exists_and_visible_by_default(self, qapp, make):
         chat = make(ElaChatWidget)

@@ -4,6 +4,7 @@
 
 from .canvas import ElaBlueprintCanvas
 from .execution import ElaExecutionController
+from .node_widget import ElaNodeWidget, ElaPinHandle
 from .menu import ElaEdgeContextMenu, ElaNodeContextMenu, ElaNodeCreationMenu
 from .model import (
     ElaBlueprintGraph,
@@ -42,6 +43,8 @@ __all__ = [
     "pin_color",
     # canvas
     "ElaBlueprintCanvas",
+    "ElaNodeWidget",
+    "ElaPinHandle",
     # menus
     "ElaNodeCreationMenu",
     "ElaNodeContextMenu",

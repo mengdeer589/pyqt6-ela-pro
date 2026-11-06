@@ -15,7 +15,7 @@ from PyQt6ElaWidgetTools import ElaIconType
 
 from pyqt6_ela_pro.chat import ElaChatInput, ElaChatToolBar
 from pyqt6_ela_pro.chat._theme import accent_color, card_border_color
-from pyqt6_ela_pro.chat.input import _MENTION_TAIL
+from pyqt6_ela_pro.chat.input_completion import _MENTION_TAIL
 
 
 class TestSubmit:
@@ -600,7 +600,7 @@ class TestMentionTail:
 class TestLargePasteToAttachment:
     """大段粘贴转附件：临时文件走附件管线；写盘失败回退直插。
 
-    阈值见 ``chat.input`` 的 ``_LARGE_PASTE_CHARS``(8000) / ``_LARGE_PASTE_LINES``(120)。
+    阈值见 ``chat.input_parts`` 的 ``_LARGE_PASTE_CHARS``(8000) / ``_LARGE_PASTE_LINES``(120)。
     """
 
     @staticmethod
@@ -621,7 +621,9 @@ class TestLargePasteToAttachment:
         assert widget.attachmentCount() == 1
         path = widget.attachmentPaths()[0]
         assert Path(path).read_text(encoding="utf-8") == big, "临时文件内容要逐字节一致"
-        assert added and added[0] == [path], "要经 filesAdded 通知宿主（宿主零改动可用）"
+        assert added and added[0] == [path], (
+            "要经 filesAdded 通知宿主（宿主零改动可用）"
+        )
 
     def test_small_paste_stays_inline(self, qapp, make):
         widget = make(ElaChatInput)

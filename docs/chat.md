@@ -36,6 +36,7 @@
   `queueChanged` / `mentionSelected` / `imagePasted` / `filesAdded` /
   `clearRequested` / `newTopicRequested` / `cleared` / `sessionChanged` /
   `batchRenderFinished` / `suggestionClicked`
+- **模块分工（`chat/`）** — `widget*.py`：宿主组装 / 队列 / 插话 / 回合；`input*.py`：输入区（`input_parts` 内部控件、`input_completion` 补全 / 命令 / 选择器、`input_attachments` 附件 / 拖放、`input_history` 历史草稿、`input_toolbar` 工具栏 / 占用环）；`view*.py`：消息列表 / 虚拟化 / 搜索；`bubble*.py`：单条消息；`blocks/`：可复用块；`message` / `store` / `timeline`：数据层；`binder` / `worker` / `journal`：后端接入。
 - **工具结果富渲染（`registerToolRenderer`）** — 宿主按工具名注册渲染器，库只
   替换工具卡的**内容区**（头部 / 折叠 / 错误竖线 / 忙碌环 / 展开策略仍由
   `ToolCallCard` 负责，故现有工具卡回归行为不变）：

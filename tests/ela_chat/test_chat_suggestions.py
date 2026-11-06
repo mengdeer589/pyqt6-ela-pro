@@ -253,7 +253,7 @@ class TestPasteAndAttachments:
         qapp.processEvents()
 
     def test_large_paste_becomes_attachment(self, qapp, make):
-        """大段粘贴转附件（阈值见 ``chat.input``）：不再把几百行塞进编辑框。"""
+        """大段粘贴转附件（阈值见 ``chat.input_parts``）：不再把几百行塞进编辑框。"""
         widget = make(ElaChatInput)
         widget.show()
         qapp.processEvents()

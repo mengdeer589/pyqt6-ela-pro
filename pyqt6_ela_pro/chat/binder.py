@@ -5,14 +5,16 @@ from __future__ import annotations
 import logging
 import time
 from dataclasses import dataclass, replace
-from typing import Callable, Optional
+from typing import TYPE_CHECKING, Callable, Optional
 
 from PyQt6.QtCore import QEvent, QObject
 
 from . import _json
 from ._usage import stats_from_usage
 from .message import ElaChatStatusType, _as_float
-from .widget import ElaChatWidget
+
+if TYPE_CHECKING:
+    from .widget import ElaChatWidget
 
 logger = logging.getLogger(__name__)
 
