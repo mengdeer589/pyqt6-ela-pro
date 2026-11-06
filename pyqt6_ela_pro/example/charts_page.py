@@ -53,6 +53,14 @@ _WAVELET_DEFAULT_SIZE = (512, 4096)
 _WAVELET_SCROLL_STEP = 8
 _WAVELET_DEFAULT_INTERVAL_MS = 80
 
+#: 实时工作区：1 kHz 采集 / 1M 环形缓冲 / 2000 显示点 / 10 Hz 刷新
+_REALTIME_SAMPLE_HZ = 1000.0
+_REALTIME_CAPACITY = 1_000_000
+_REALTIME_DISPLAY_POINTS = 2000
+_REALTIME_INTERVAL_MS = 100
+_REALTIME_WINDOWS = (("10 秒", 10.0), ("60 秒", 60.0), ("全量", 0.0))
+_REALTIME_SEED_SECONDS = 10.0
+
 
 def _daily_labels(count: int, start=(2025, 1, 1)) -> list:
     """连续日期标签（``category`` 轴用；点数多时库内按像素自动抽稀刻度）。"""
@@ -85,6 +93,113 @@ def _wavy_values(
         )
         for i in range(count)
     ]
+
+
+class _RealtimeRing:
+    """定长环形缓冲：绝对样本序号 + 多通道 float32 值。
+
+    1M × (int64 + 2×float32) ≈ 16 MB；回绕不扩容，窗口切片返回副本。
+    """
+
+    def __init__(self, capacity: int, channels: int, sample_hz: float) -> None:
+        self.capacity = int(capacity)
+        self.channels = int(channels)
+        self.sample_hz = float(sample_hz)
+        self.indices = np.empty(self.capacity, dtype=np.int64)
+        self.values = np.empty((self.capacity, self.channels), dtype=np.float32)
+        self.head = 0
+        self.count = 0
+        self.next_index = 0
+
+    def clear(self) -> None:
+        self.head = 0
+        self.count = 0
+        self.next_index = 0
+
+    def append(self, values) -> None:
+        """追加 ``(n, channels)`` 样本；超出容量时保留最后 capacity 个。"""
+        arr = np.asarray(values, dtype=np.float32)
+        if arr.ndim != 2 or arr.shape[1] != self.channels:
+            raise ValueError("values 必须是 (n, channels)")
+        n = len(arr)
+        if n <= 0:
+            return
+        if n >= self.capacity:
+            arr = arr[-self.capacity :]
+            self.values[:] = arr
+            self.indices[:] = np.arange(
+                self.next_index + n - self.capacity,
+                self.next_index + n,
+                dtype=np.int64,
+            )
+            self.head = 0
+            self.count = self.capacity
+            self.next_index += n
+            return
+
+        first = min(n, self.capacity - self.head)
+        index_chunk = np.arange(self.next_index, self.next_index + n, dtype=np.int64)
+        self.values[self.head : self.head + first] = arr[:first]
+        self.indices[self.head : self.head + first] = index_chunk[:first]
+        rest = n - first
+        if rest:
+            self.values[:rest] = arr[first:]
+            self.indices[:rest] = index_chunk[first:]
+        self.head = (self.head + n) % self.capacity
+        self.count = min(self.capacity, self.count + n)
+        self.next_index += n
+
+    def window(self, seconds: float = 0.0):
+        """取最近 ``seconds`` 秒的 ``(indices, values)``；``0`` = 全部。"""
+        n = self.count
+        if seconds and seconds > 0:
+            n = min(n, max(1, int(seconds * self.sample_hz)))
+        if n <= 0:
+            return (
+                np.empty(0, dtype=np.int64),
+                np.empty((0, self.channels), dtype=np.float32),
+            )
+        start = (self.head - n) % self.capacity
+        if start + n <= self.capacity:
+            return self.indices[start : start + n].copy(), self.values[
+                start : start + n
+            ].copy()
+        first = self.capacity - start
+        indices = np.concatenate((self.indices[start:], self.indices[: n - first]))
+        values = np.concatenate((self.values[start:], self.values[: n - first]))
+        return indices, values
+
+    @property
+    def memory_mb(self) -> float:
+        return (self.indices.nbytes + self.values.nbytes) / 1024 / 1024
+
+
+def _decimate_minmax(times, values, points: int):
+    """按桶取 min/max（保留尖峰），输出最多 ``points`` 个 ``(x, y)``。"""
+    n = len(times)
+    if n <= points:
+        return times, values
+    buckets = max(1, int(points) // 2)
+    xs = []
+    ys = []
+    for bucket in range(buckets):
+        start = bucket * n // buckets
+        stop = (bucket + 1) * n // buckets
+        if stop <= start:
+            continue
+        segment = values[start:stop]
+        first = int(segment.argmin())
+        last = int(segment.argmax())
+        if first == last:
+            picks = (first,)
+        elif first < last:
+            picks = (first, last)
+        else:
+            picks = (last, first)
+        for offset in picks:
+            xs.append(times[start + offset])
+            ys.append(segment[offset])
+    return np.asarray(xs, dtype=np.float64), np.asarray(ys, dtype=np.float32)
 
 
 #: 画廊小图的紧凑绘图区（默认边距是按整宽大图定的，小格里太浪费）
@@ -190,7 +305,7 @@ def _token_activity_series(rows: list, mode: str) -> list:
 
 
 class ChartsPage(ExamplePage):
-    """ElaChartWidget 图表工作台：概览 / 系列画廊 / 交互 / 大数据 / 高级 / 主题 / 小波。"""
+    """ElaChartWidget 图表工作台：概览 / 系列画廊 / 交互 / 大数据 / 高级 / 主题 / 小波 / 实时。"""
 
     PAGE_TITLE = "ElaChartWidget 图表工作台"
 
@@ -234,6 +349,12 @@ class ChartsPage(ExamplePage):
             "缩放 / 平移不重建，色带固定、主题只换外框。",
             "_buildWorkspaceWavelet",
         ),
+        (
+            "实时",
+            "1 kHz / 1M 环形缓冲：每 100 ms 取窗口、min/max 降采样到 2000 点后"
+            "一次 setOption；采集与 UI 分离，不把原始百万点塞进图表。",
+            "_buildWorkspaceRealtime",
+        ),
     )
 
     def __init__(self, parent=None):
@@ -256,6 +377,18 @@ class ChartsPage(ExamplePage):
             index
             for index, (name, _desc, _builder) in enumerate(self.WORKSPACES)
             if name == "小波"
+        )
+        #: 实时工作区（惰性构建；1 kHz 模拟采集 + 1M 环形缓冲）
+        self._realtime_chart = None
+        self._realtime_timer = None
+        self._realtime_running = False
+        self._realtime_ring = None
+        self._realtime_rng = None
+        self._realtime_window_seconds = _REALTIME_WINDOWS[0][1]
+        self._realtime_workspace_index = next(
+            index
+            for index, (name, _desc, _builder) in enumerate(self.WORKSPACES)
+            if name == "实时"
         )
         super().__init__(parent)
 
@@ -398,6 +531,7 @@ class ChartsPage(ExamplePage):
                 self._pivot_syncing = False
         self._apply_workspace_text(index)
         self._set_wavelet_workspace_active(index == self._wavelet_workspace_index)
+        self._set_realtime_workspace_active(index == self._realtime_workspace_index)
 
     def _active_charts(self):
         """当前工作区里的全部图表（全局控制按钮按工作区生效）。"""
@@ -457,6 +591,8 @@ class ChartsPage(ExamplePage):
             label.setText(f"当前：{name}")
 
     def _onRandomWorkspace(self):
+        if self._active_workspace == self._realtime_workspace_index:
+            return
         for chart in self._active_charts():
             self._onRandomChart(chart)
 
@@ -473,6 +609,8 @@ class ChartsPage(ExamplePage):
         self._anim_enabled = not self._anim_enabled
         self._anim_btn.setText("动效: 开" if self._anim_enabled else "动效: 关")
         for chart in self._active_charts():
+            if getattr(chart, "_realtime_animation_locked", False):
+                continue
             chart.setOption({"animation": self._anim_enabled})
 
     # ── 工作区构建 ──────────────────────────────────────────────────────
@@ -1613,6 +1751,7 @@ class ChartsPage(ExamplePage):
 
     def hideEvent(self, event) -> None:
         self._set_wavelet_workspace_active(False)
+        self._set_realtime_workspace_active(False)
         super().hideEvent(event)
 
     def showEvent(self, event) -> None:
@@ -1620,6 +1759,226 @@ class ChartsPage(ExamplePage):
         self._set_wavelet_workspace_active(
             self._active_workspace == self._wavelet_workspace_index
         )
+        self._set_realtime_workspace_active(
+            self._active_workspace == self._realtime_workspace_index
+        )
+
+    def _buildWorkspaceRealtime(self, parent_layout):
+        parent_layout.addLayout(
+            self._createHeaderRow(
+                "01. 实时折线：1 kHz 采集 / 1M 环形缓冲",
+                self._buildWorkspaceRealtime,
+            )
+        )
+        self._addInfoText(
+            "1 kHz 样本先写入 1M 点环形缓冲，不直接进图表；每 100 ms 取窗口、"
+            "min/max 降采样到 2000 点后一次 setOption。采集模拟按帧批量生成；"
+            "真实设备采集应放到工作线程。",
+            parent_layout,
+        )
+        if not _HAS_NUMPY:
+            self._addInfoText("需要 numpy 才能运行本示例。", parent_layout)
+            return
+
+        self._realtime_rng = np.random.default_rng(7)
+        self._realtime_ring = _RealtimeRing(_REALTIME_CAPACITY, 2, _REALTIME_SAMPLE_HZ)
+        self._seed_realtime(_REALTIME_SEED_SECONDS)
+
+        chart = ElaChartWidget(self)
+        chart.setMinimumHeight(520)
+        chart._realtime_animation_locked = True
+        chart.setOption(
+            {
+                "animation": False,
+                "tooltip": {"trigger": "axis"},
+                "legend": {"top": 4, "textStyle": {"fontSize": 12}},
+                "grid": {"top": 44, "left": 64, "right": 24, "bottom": 42},
+                "xAxis": {
+                    "type": "value",
+                    "name": "时间（秒）",
+                    "min": 0,
+                    "max": 10,
+                    "axisLabel": {"formatter": "{value}s"},
+                },
+                "yAxis": {
+                    "type": "value",
+                    "name": "幅值",
+                    "min": -4,
+                    "max": 4,
+                },
+                "series": [
+                    {
+                        "type": "line",
+                        "name": "原始",
+                        "data": [],
+                        "sampling": False,
+                        "showSymbol": False,
+                        "lineStyle": {"width": 1.2},
+                    },
+                    {
+                        "type": "line",
+                        "name": "趋势",
+                        "data": [],
+                        "sampling": False,
+                        "showSymbol": False,
+                        "lineStyle": {"width": 2.0},
+                    },
+                ],
+            }
+        )
+        self._realtime_chart = chart
+
+        controls = QHBoxLayout()
+        controls.setSpacing(8)
+        self._realtime_toggle_btn = ElaPushButton("开始实时", self)
+        self._realtime_toggle_btn.setFixedWidth(100)
+        self._realtime_toggle_btn.clicked.connect(self._toggle_realtime)
+        controls.addWidget(self._realtime_toggle_btn)
+        reset_btn = ElaPushButton("重置", self)
+        reset_btn.setFixedWidth(70)
+        reset_btn.clicked.connect(self._reset_realtime)
+        controls.addWidget(reset_btn)
+
+        window_label = ElaText("窗口", self)
+        window_label.setTextPixelSize(13)
+        controls.addWidget(window_label)
+        self._realtime_window_combo = ElaComboBox(self)
+        for label, _seconds in _REALTIME_WINDOWS:
+            self._realtime_window_combo.addItem(label)
+        self._realtime_window_combo.setFixedWidth(100)
+        self._realtime_window_combo.currentIndexChanged.connect(
+            self._on_realtime_window_changed
+        )
+        controls.addWidget(self._realtime_window_combo)
+
+        self._realtime_stat_label = ElaText("", self)
+        self._realtime_stat_label.setTextPixelSize(13)
+        self._realtime_stat_label.setTextFormat(Qt.TextFormat.PlainText)
+        controls.addWidget(self._realtime_stat_label)
+        controls.addStretch()
+        parent_layout.addLayout(controls)
+        parent_layout.addWidget(chart)
+
+        self._realtime_timer = QTimer(self)
+        self._realtime_timer.setInterval(_REALTIME_INTERVAL_MS)
+        self._realtime_timer.timeout.connect(self._tick_realtime)
+        self._refresh_realtime_chart()
+
+    def _seed_realtime(self, seconds: float) -> None:
+        if self._realtime_ring is None:
+            return
+        self._realtime_ring.clear()
+        count = max(1, int(seconds * _REALTIME_SAMPLE_HZ))
+        self._realtime_ring.append(self._make_realtime_batch(count))
+
+    def _make_realtime_batch(self, count: int):
+        """生成 1 kHz 模拟样本：高频原始信号 + 低频趋势 + 周期尖峰。"""
+        ring = self._realtime_ring
+        start = ring.next_index
+        indices = np.arange(start, start + count, dtype=np.int64)
+        times = indices.astype(np.float64) / _REALTIME_SAMPLE_HZ
+        raw = (
+            1.1 * np.sin(times * math.tau * 0.8)
+            + 0.3 * np.sin(times * math.tau * 13.0)
+            + 0.06 * np.sin(times * math.tau * 47.0)
+            + self._realtime_rng.normal(0.0, 0.04, count)
+        )
+        trend = 0.9 * np.sin(times * math.tau * 0.12) + 0.1 * np.sin(
+            times * math.tau * 0.5
+        )
+        phase = indices % 2000
+        raw[phase == 0] += 3.0
+        raw[phase == 1000] -= 2.5
+        return np.column_stack((raw, trend))
+
+    def _tick_realtime(self) -> None:
+        if self._realtime_ring is None or self._realtime_chart is None:
+            return
+        interval = (
+            self._realtime_timer.interval()
+            if self._realtime_timer is not None
+            else _REALTIME_INTERVAL_MS
+        )
+        count = max(1, int(_REALTIME_SAMPLE_HZ * interval / 1000.0))
+        self._realtime_ring.append(self._make_realtime_batch(count))
+        self._refresh_realtime_chart()
+
+    def _refresh_realtime_chart(self) -> None:
+        ring = self._realtime_ring
+        chart = self._realtime_chart
+        if ring is None or chart is None:
+            return
+        started = time.perf_counter()
+        indices, values = ring.window(self._realtime_window_seconds)
+        if len(indices) == 0:
+            return
+        times = indices.astype(np.float64) / _REALTIME_SAMPLE_HZ
+        series = []
+        display = 0
+        for channel, name in enumerate(("原始", "趋势")):
+            x, y = _decimate_minmax(times, values[:, channel], _REALTIME_DISPLAY_POINTS)
+            series.append({"name": name, "data": np.column_stack((x, y))})
+            display = max(display, len(x))
+        decimate_ms = (time.perf_counter() - started) * 1000.0
+
+        xmin = float(times[0])
+        xmax = float(times[-1])
+        if xmax <= xmin:
+            xmax = xmin + 1.0 / _REALTIME_SAMPLE_HZ
+        chart.setOption({"xAxis": {"min": xmin, "max": xmax}, "series": series})
+        if chart.isVisible():
+            chart.repaint()
+        update_ms = (time.perf_counter() - started) * 1000.0
+        self._update_realtime_stat(display, decimate_ms, update_ms)
+
+    def _update_realtime_stat(
+        self, display: int, decimate_ms: float, update_ms: float
+    ) -> None:
+        label = getattr(self, "_realtime_stat_label", None)
+        ring = self._realtime_ring
+        if label is None or ring is None:
+            return
+        label.setText(
+            f"原始 {_format_tokens(ring.count)} 点 · 显示 {display} 点 · "
+            f"降采样 {decimate_ms:.1f} ms · 更新 {update_ms:.1f} ms · "
+            f"缓冲 {ring.memory_mb:.0f} MB"
+        )
+
+    def _toggle_realtime(self) -> None:
+        timer = self._realtime_timer
+        if timer is None:
+            return
+        if self._realtime_running:
+            self._realtime_running = False
+            timer.stop()
+            self._realtime_toggle_btn.setText("开始实时")
+        else:
+            self._realtime_running = True
+            if self._active_workspace == self._realtime_workspace_index:
+                timer.start()
+            self._realtime_toggle_btn.setText("暂停实时")
+
+    def _reset_realtime(self) -> None:
+        if self._realtime_ring is None or self._realtime_chart is None:
+            return
+        self._seed_realtime(_REALTIME_SEED_SECONDS)
+        self._refresh_realtime_chart()
+
+    def _on_realtime_window_changed(self, index: int) -> None:
+        if not 0 <= index < len(_REALTIME_WINDOWS):
+            return
+        self._realtime_window_seconds = _REALTIME_WINDOWS[index][1]
+        self._refresh_realtime_chart()
+
+    def _set_realtime_workspace_active(self, active: bool) -> None:
+        timer = self._realtime_timer
+        if timer is None:
+            return
+        if active:
+            if self._realtime_running and not timer.isActive():
+                timer.start()
+        elif timer.isActive():
+            timer.stop()
 
     def _demoLineModes(self, parent_layout):
         parent_layout.addLayout(
@@ -1993,8 +2352,7 @@ class ChartsPage(ExamplePage):
                         out.append(
                             {
                                 **d,
-                                "value": [v[0], random.randint(0, vmax)]
-                                + list(v[2:]),
+                                "value": [v[0], random.randint(0, vmax)] + list(v[2:]),
                             }
                         )
                     else:
@@ -3096,10 +3454,7 @@ class ChartsPage(ExamplePage):
                         "name": "标量矩阵",
                         "cmap": "viridis",
                         "data": [
-                            [
-                                math.sin(r / 3.0) * math.cos(c / 4.0)
-                                for c in range(32)
-                            ]
+                            [math.sin(r / 3.0) * math.cos(c / 4.0) for c in range(32)]
                             for r in range(24)
                         ],
                     }
@@ -3120,8 +3475,7 @@ class ChartsPage(ExamplePage):
                         "type": "image",
                         "name": "RGB",
                         "data": [
-                            [[r * 30, c * 20, 128] for c in range(12)]
-                            for r in range(8)
+                            [[r * 30, c * 20, 128] for c in range(12)] for r in range(8)
                         ],
                     }
                 ],

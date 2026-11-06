@@ -386,7 +386,7 @@ chart.setChartTheme("brand")
 
 ---
 
-**可运行示例**：`example/charts_page.py`（概览 / 系列画廊 / 交互 / 大数据 / 高级 / 主题 / 小波七个工作区；小波页为滚动矩阵 + 固定 cmap + 主题外框切换）；`ElaChartWidget` 的能力速览（22 系列 / 交互 / 大数据 / 主题）见 README「核心能力」。
+**可运行示例**：`example/charts_page.py`（概览 / 系列画廊 / 交互 / 大数据 / 高级 / 主题 / 小波 / 实时八个工作区；小波页为滚动矩阵 + 固定 cmap + 主题外框切换；实时页为 1 kHz / 1M 环形缓冲 + 2000 显示点 / 10 Hz）；`ElaChartWidget` 的能力速览（22 系列 / 交互 / 大数据 / 主题）见 README「核心能力」。
 
 ---
 
@@ -427,6 +427,27 @@ chart.setChartTheme("brand")
 | `saveImage("x.svg")` / `saveImage(format="svg")` / `getDataURL({"type": "svg"})` | 模式条导出 SVG | 走 `QSvgGenerator` 的同一绘制链（矢量图元 + 位图符号内嵌） |
 | `toolbox.feature` | 模式条按钮 | `saveAsImage` / **`saveAsSvg`** / `dataZoom` / `restore` / **`zoomIn`** / **`zoomOut`** |
 | 图例悬停 | 悬停图例高亮 trace | 系列名悬停时该系列正常绘制、其余降到 35% 不透明度；**饼 / 漏斗的图例条目是数据项名，只高亮对应扇区 / 层，不压暗整图**；提示框让位 |
+
+---
+
+## 实时数据（1 kHz / 百万点）
+
+`ElaChartWidget` 适合做**显示层**，不适合直接把原始高频点每帧送进来：
+
+```text
+采集线程 → 1M 环形缓冲（numpy） → 窗口选择 → min/max 降采样（≤2000 点）
+        → 5–10 Hz setOption → 图表
+```
+
+- `appendData()` 是增量接口，但每次仍要 **O(n) 物化 + 全量布局**；100k 点约
+  40 ms/次，不适合 1 kHz 长期逐点追加；固定窗口 / 环形缓冲更稳。
+- 1M 点只进环形缓冲，图表每帧只接收降采样后的几千点；min/max 保留尖峰。
+- 开发机实测（2 系列）：1000/2000/5000 显示点更新 + 重绘约
+  `12 / 20 / 36 ms` 每帧；1M → 4k 的 min/max 降采样约 `0.33 ms`。
+- 采集与 UI 分离：采集线程只写缓冲，UI 定时器取快照；不要在 1 ms 定时器里碰控件。
+- 动画关闭、`showSymbol=False`；实时窗口小可关闭 sampling。
+- 完整示例见 `example/charts_page.py` 的「实时」工作区（1M 环形缓冲 /
+  2000 显示点 / 10 Hz / 窗口 10 秒、60 秒、全量）。
 
 ---
 

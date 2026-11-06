@@ -72,7 +72,7 @@ tests/                     回归测试（按组件 / 家族目录组织；`-m "
   斜体，组件级优先、顶层 `textStyle` 兜底；轴标签另有
   `setAxisLabelStyle` 便捷接口，含加粗 / 颜色 / 居中 / 间距）；**矩阵图像**
   （`series.type: "image"`：2D 标量 + colormap / RGB(A)、`extent` / `origin` /
-  dataZoom 裁切；实时小波 scalogram 见 `example/charts_page.py` 的「小波」工作区）；折线 / 散点支持 Plotly 三模式
+  dataZoom 裁切；实时小波 scalogram 见 `example/charts_page.py` 的「小波」工作区；1 kHz / 1M 环形缓冲 + min/max 降采样的实时折线见「实时」工作区）；折线 / 散点支持 Plotly 三模式
   `mode: "lines" / "lines+markers" / "markers"`（line 默认只有线）；百万点级数据有系列层位图缓存与降采样 —— 折线 / 散点 100 万点稳态帧
   ~9ms、悬停 <1ms、进入新窗口 ~12ms；显式时间戳数据的**记录中断自动断开**（`addGaps`，
   `connectNulls` 可关）；`tools/perf/bench_charts.py`（含 `zoom新窗口` / `缩回全景` 两列）

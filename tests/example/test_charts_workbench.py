@@ -1,7 +1,7 @@
 """图表工作台：工作区懒构建 / 切换 / 全局控制。
 
-页面从「一条 2400 行的长滚动」改成「概览 / 系列画廊 / 交互 / 大数据 / 高级 / 主题 / 小波」
-七个工作区：首屏只建概览，其余首次切换时才建（27 张画廊图 + 大数据图一起
+页面从「一条 2400 行的长滚动」改成「概览 / 系列画廊 / 交互 / 大数据 / 高级 / 主题 / 小波 / 实时」
+八个工作区：首屏只建概览，其余首次切换时才建（27 张画廊图 + 大数据图一起
 eager 构建会把首次显示拖慢）。
 """
 
@@ -11,9 +11,14 @@ import pytest
 from PyQt6.QtCore import QRect, Qt
 from PyQt6ElaWidgetTools import ElaText
 
+from _qthelpers import wait_until as _wait_until
 from pyqt6_ela_pro import ElaChartWidget
 from pyqt6_ela_pro.charts import colormapColors
-from pyqt6_ela_pro.example.charts_page import ChartsPage
+from pyqt6_ela_pro.example.charts_page import (
+    ChartsPage,
+    _REALTIME_DISPLAY_POINTS,
+    _RealtimeRing,
+)
 
 
 def _page(make) -> ChartsPage:
@@ -33,6 +38,7 @@ class TestWorkspaceShell:
             "高级",
             "主题",
             "小波",
+            "实时",
         ]
 
     def test_lazy_build(self, make):
@@ -64,6 +70,7 @@ class TestWorkspaceShell:
         assert counts[4] >= 5
         assert counts[5] >= 7  # 主题：2 张切换演示 + 6 张主题画廊
         assert counts[6] >= 1  # 小波：1 张实时 scalogram
+        assert counts[7] >= 1  # 实时：1 张 1 kHz / 1M 环形缓冲折线
 
     def test_switch_back_keeps_built_state(self, make):
         page = _page(make)
@@ -262,6 +269,85 @@ class TestWaveletWorkspace:
         assert page._wavelet_chart.chartTheme() == "matlab"
         option = page._wavelet_chart.getOption()
         assert option["visualMap"]["inRange"]["colors"] == colormapColors("viridis")
+
+
+class TestRealtimeWorkspace:
+    def _realtime_page(self, make):
+        pytest.importorskip("numpy")
+        page = _page(make)
+        page._activate_workspace(page._realtime_workspace_index)
+        return page
+
+    def test_initial_state(self, make):
+        page = self._realtime_page(make)
+        assert page._realtime_chart is not None
+        assert page._realtime_timer.interval() == 100
+        assert page._realtime_timer.isActive() is False
+        assert page._realtime_ring.count == 10_000
+        assert len(page._realtime_chart.seriesRenderers[0].data()) <= (
+            _REALTIME_DISPLAY_POINTS
+        )
+        assert "原始" in page._realtime_stat_label.text()
+
+    def test_start_pause_ticks_and_caps_display(self, make, qapp):
+        page = self._realtime_page(make)
+        before = page._realtime_ring.count
+        page._toggle_realtime()
+        try:
+            assert _wait_until(
+                qapp,
+                lambda: page._realtime_ring.count > before,
+                timeout_ms=2000,
+                use_qwait=True,
+            )
+            assert page._realtime_timer.isActive() is True
+            for renderer in page._realtime_chart.seriesRenderers:
+                assert len(renderer.data()) <= _REALTIME_DISPLAY_POINTS
+        finally:
+            page._toggle_realtime()
+        assert page._realtime_timer.isActive() is False
+
+    def test_switch_away_stops_and_back_resumes(self, make, qapp):
+        page = self._realtime_page(make)
+        page._toggle_realtime()
+        assert _wait_until(
+            qapp, page._realtime_timer.isActive, timeout_ms=2000, use_qwait=True
+        )
+        page._activate_workspace(0)
+        assert page._realtime_timer.isActive() is False
+        page._activate_workspace(page._realtime_workspace_index)
+        assert page._realtime_timer.isActive() is True
+        page._toggle_realtime()
+
+    def test_window_switch_keeps_display_cap(self, make):
+        page = self._realtime_page(make)
+        page._realtime_window_combo.setCurrentIndex(1)
+        assert page._realtime_window_seconds == 60.0
+        assert len(page._realtime_chart.seriesRenderers[0].data()) <= (
+            _REALTIME_DISPLAY_POINTS
+        )
+
+    def test_reset_restores_seed(self, make):
+        page = self._realtime_page(make)
+        page._tick_realtime()
+        page._reset_realtime()
+        assert page._realtime_ring.count == 10_000
+        assert len(page._realtime_chart.seriesRenderers[0].data()) <= (
+            _REALTIME_DISPLAY_POINTS
+        )
+
+    def test_ring_wraps_chronologically(self):
+        np = pytest.importorskip("numpy")
+        ring = _RealtimeRing(100, 2, 1000.0)
+        values = np.column_stack(
+            (np.arange(150, dtype=np.float32), np.arange(150, dtype=np.float32))
+        )
+        ring.append(values)
+        assert ring.count == 100
+        indices, stored = ring.window(0)
+        assert indices[0] == 50
+        assert indices[-1] == 149
+        assert stored[:, 0].tolist() == list(range(50, 150))
 
 
 class TestTileTitles:
