@@ -21,7 +21,7 @@ from .toolbox import (
     ToolboxComponent,
 )
 
-from ..core import registerComponent
+from ..core._shared import registerComponent
 
 registerComponent("dataZoom", DataZoomComponent)
 registerComponent("brush", BrushComponent)

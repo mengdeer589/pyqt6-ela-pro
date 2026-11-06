@@ -19,7 +19,7 @@ from .._utils import clamp as _clamp
 from .._utils import to_float as _to_float
 from .._utils import parse_color
 from ..axes import GridCoord
-from ..core import parseDataPoint
+from ..core._shared import parseDataPoint
 
 
 class BrushComponent(QObject):

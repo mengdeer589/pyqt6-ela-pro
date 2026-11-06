@@ -12,9 +12,7 @@ from .._utils import dist_point_segment
 from .._utils import merged_text_style, parse_color, text_italic, text_weight
 from .._utils import to_float as _to_float
 from ..axes import GridCoord, chartFont, formatValue
-from ..core import (
-    parseDataPoint,
-)
+from ..core._shared import parseDataPoint
 
 
 class _SeriesMarkBase:

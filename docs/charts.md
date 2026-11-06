@@ -4,6 +4,8 @@
 统一 **camelCase** 命名；`ElaChartWidget` 的实例接口与 **ECharts 对齐**，
 配置 / 控制 / 事件三层如下。
 
+**模块分工**：`core/` = 主控件 / option 合并 / 绘制 / 查询 / 事件；`axes/` = 坐标与轴模型；`components/` = 标注 / markPoint 等组件；`interact/` = dataZoom / brush / visualMap / timeline / toolbox；`series_cartesian/` 与 `series_hierarchy/` = 系列渲染器；`layout.py` / `interaction.py` / `exporter.py` = 布局 / 宿主交互 / 导出。
+
 **配置与查询**
 
 | 方法 | 说明 |

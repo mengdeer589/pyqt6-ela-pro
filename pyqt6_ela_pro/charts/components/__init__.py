@@ -15,7 +15,7 @@ from .graphic import (
 )
 from .annotation import AnnotationComponent
 
-from ..core import registerComponent
+from ..core._shared import registerComponent
 
 registerComponent("markPoint", MarkPointComponent)
 registerComponent("markLine", MarkLineComponent)

@@ -892,6 +892,30 @@ class _ChartOptionMixin:
         self._hide_annotation_editor()
         opt = self._option
         self._layout_key = None
+        legend_opts = self._rebuild_header(opt)
+        series_opts = [s for s in (opt.get("series") or []) if isinstance(s, dict)]
+        self._rebuild_coords(opt, series_opts)
+        self._rebuild_series(series_opts)
+        self._rebuild_components(opt, series_opts)
+
+        # 显式配置 brush = 用户要框选数据；未显式 setDragMode 时默认走 select
+        if not self._drag_mode_explicit and self._drag_mode == self.DRAG_MODE_DEFAULT:
+            if isinstance(opt.get("brush"), (dict, list)):
+                self._drag_mode = "select"
+        elif (
+            not self._drag_mode_explicit
+            and self._drag_mode == "select"
+            and not isinstance(opt.get("brush"), (dict, list))
+        ):
+            self._drag_mode = self.DRAG_MODE_DEFAULT
+        # 默认左键框选：dataZoom / brush 的拖拽接管按当前模式重放
+        self._apply_drag_mode()
+
+        self._rebuild_legend_items(opt, legend_opts)
+        self._layout_all(force=True)
+
+    def _rebuild_header(self, opt: dict) -> list:
+        """重建标题 / 图例 / tooltip，并应用图例初始显隐。"""
         title_opts = _component_options(opt.get("title"), "show")
         if len(title_opts) != len(self.titles):
             self.titles = [Title(self) for _ in title_opts]
@@ -911,7 +935,6 @@ class _ChartOptionMixin:
         self.legend = self.legends[0]
 
         self.tooltip.setOption(_component_opt(opt.get("tooltip"), "show", "tooltip"))
-        series_opts = [s for s in (opt.get("series") or []) if isinstance(s, dict)]
 
         # 图例 selected：初始显隐状态（ECharts ``legend.selected``，多图例逐个应用）
         for legend_opt in legend_opts:
@@ -920,7 +943,10 @@ class _ChartOptionMixin:
                 for name, visible in selected.items():
                     self._series_state[str(name)] = bool(visible)
                     self._item_state[str(name)] = bool(visible)
+        return legend_opts
 
+    def _rebuild_coords(self, opt: dict, series_opts: list) -> None:
+        """重建坐标系并同步轴域；随后让常驻组件重捕 dataZoom 全量范围。"""
         # 坐标系：calendar > polar > singleAxis > grid。grid 仅在 option 显式给出
         # xAxis/yAxis/grid，或存在落在 grid 的系列时创建。
         self._coords = []
@@ -971,7 +997,8 @@ class _ChartOptionMixin:
                     f"重捕轴范围失败（{comp.__class__.__name__}）: {exc!r}",
                 )
 
-        # 系列渲染器
+    def _rebuild_series(self, series_opts: list) -> None:
+        """重建系列渲染器，并迁移选中态。"""
         self._series = []
         for i, s in enumerate(series_opts):
             type_name = str(s.get("type") or "line")
@@ -1029,6 +1056,8 @@ class _ChartOptionMixin:
                 data_len = len(r.data())
                 self._selection[r.name] = {i for i in seeds if 0 <= i < data_len}
 
+    def _rebuild_components(self, opt: dict, series_opts: list) -> None:
+        """重建交互 / 表达组件，并恢复 dataZoom 窗口与默认滚轮缩放。"""
         # 丢弃旧组件前先 dispose（解挂事件过滤器 / 定时器），否则旧实例会继续
         # 拦截输入并用陈旧状态改坐标轴。
         old_zoom = self._component("dataZoom")
@@ -1071,19 +1100,9 @@ class _ChartOptionMixin:
                     comp.apply()
                 except Exception:
                     pass
-        # 显式配置 brush = 用户要框选数据；未显式 setDragMode 时默认走 select
-        if not self._drag_mode_explicit and self._drag_mode == self.DRAG_MODE_DEFAULT:
-            if isinstance(opt.get("brush"), (dict, list)):
-                self._drag_mode = "select"
-        elif (
-            not self._drag_mode_explicit
-            and self._drag_mode == "select"
-            and not isinstance(opt.get("brush"), (dict, list))
-        ):
-            self._drag_mode = self.DRAG_MODE_DEFAULT
-        # 默认左键框选：dataZoom / brush 的拖拽接管按当前模式重放
-        self._apply_drag_mode()
 
+    def _rebuild_legend_items(self, opt: dict, legend_opts: list) -> None:
+        """把当前系列的图例条目推给所有图例。"""
         # 图例条目：饼 / 漏斗按数据项，其余按系列名。图例隐藏时不构建条目
         # （饼图 legendItems 会遍历全部数据项，百万级纯浪费）。
         show_legend = any(bool(opt.get("show", True)) for opt in legend_opts)
@@ -1107,7 +1126,6 @@ class _ChartOptionMixin:
                 items.append((r.name, self.colorForSeries(r)))
         for legend in self.legends:
             legend.setItems(items)
-        self._layout_all(force=True)
 
     def _make_coord(self, cls, kind: str, *args):
         """构造单个坐标系：失败降级为 None 并记录一次（不拖垮整图）。"""
