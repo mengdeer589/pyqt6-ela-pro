@@ -57,7 +57,8 @@ viewer.missingGlyphFallbackEnabled()           # 查询
 排版 token 除了标题 / 正文行高 / 引用 / 表格 / 代码外，还支持：
 
 - `body_font_family`：`""` 继承控件默认，`"serif"` 在中文系统优先宋体系、
-  其它系统回退 Georgia 等衬线字体，也可以直接写字体族名；
+  其它系统回退 Georgia 等衬线字体，也可以直接写字体族名；实例 / 进程级
+  `setBodyFontFamily` 优先于主题设置（见下）；
 - `content_max_width`：独立查看器的最大正文宽度（px，`0` = 不限）；居中留白，
   嵌入聊天模式忽略，由聊天列控制；
 - `surface`：`{"light": ..., "dark": ...}`，覆盖查看器页面底色（`None` =
@@ -75,6 +76,40 @@ viewer.setMarkdownTheme("lark")              # 切换当前实例
 registerMarkdownTheme("mine", light=..., dark=..., layout=...)   # 注册自定义
 setDefaultMarkdownTheme("typo")              # 改「之后新建实例」的默认主题
 ```
+
+### 正文字体族
+
+库**不内置字体**。用户系统里装了字体时直接指定：
+
+```python
+from pyqt6_ela_pro import isFontFamilyAvailable
+
+viewer.setBodyFontFamily("LXGW WenKai")   # 单族；"" 恢复主题默认
+viewer.bodyFontFamily()                    # 当前实际生效的族名
+isFontFamilyAvailable("LXGW WenKai")       # 设置界面可用它判断是否安装
+```
+
+宿主应用自带 TTF 时，先注册再指定（不需要用户安装）：
+
+```python
+from PyQt6.QtGui import QFontDatabase
+
+font_id = QFontDatabase.addApplicationFont(r"assets\LXGWWenKai-Regular.ttf")
+family = QFontDatabase.applicationFontFamilies(font_id)[0]  # "LXGW WenKai"
+viewer.setBodyFontFamily(family)
+```
+
+宿主随包分发字体时请遵守字体的 OFL 许可（附带 `OFL.txt`，不得单独售卖字体文件）。
+
+规则：
+
+- 单族；传 `"A, B"` 只取第一个并告警（Win7 多族是慢 shaping 路径）；
+- 只影响正文和标题；代码块仍走 `setCodeFontFamily()`，公式走 `math_lite`；
+- 字体不存在时实际回退到可用字体（进程默认 → 主题字体），`bodyFontFamily()`
+  返回回退后的族名；
+- `setDefaultMarkdownBodyFontFamily("LXGW WenKai")` 只影响**之后新建**的实例
+  （chat 气泡在创建时读取），已有实例用 `setBodyFontFamily()`；
+- 切换 Markdown 主题不会覆盖显式指定的正文字体。
 
 ## GFM 与扩展语法
 

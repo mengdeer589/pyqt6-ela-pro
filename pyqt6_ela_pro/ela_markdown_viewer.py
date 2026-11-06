@@ -2,15 +2,19 @@
 
 from .markdown_viewer import (
     ElaMarkdownViewer,
+    defaultMarkdownBodyFontFamily,
     defaultMarkdownTheme,
+    isFontFamilyAvailable,
     markdownThemes,
     registerMarkdownTheme,
+    setDefaultMarkdownBodyFontFamily,
     setDefaultMarkdownTheme,
     unregisterMarkdownTheme,
 )
 from .markdown_viewer import appearance as _appearance
 from .markdown_viewer import code as _code
 from .markdown_viewer import export as _export
+from .markdown_viewer import fonts as _fonts
 from .markdown_viewer import interaction as _interaction
 from .markdown_viewer import media as _media
 from .markdown_viewer import mermaid as _mermaid
@@ -38,15 +42,19 @@ _MODULES = (
     _text_browser,
     _themes,
     _code,
+    _fonts,
     _tokens,
     _export,
 )
 
 __all__ = [
     "ElaMarkdownViewer",
+    "defaultMarkdownBodyFontFamily",
     "defaultMarkdownTheme",
+    "isFontFamilyAvailable",
     "markdownThemes",
     "registerMarkdownTheme",
+    "setDefaultMarkdownBodyFontFamily",
     "setDefaultMarkdownTheme",
     "unregisterMarkdownTheme",
 ]

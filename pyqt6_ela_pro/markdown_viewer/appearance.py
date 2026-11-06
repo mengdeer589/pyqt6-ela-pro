@@ -28,6 +28,7 @@ from .code import (
     _default_latin_code_font_family,
     _font_family_available,
 )
+from .fonts import _normalize_font_family, _warn_once, isFontFamilyAvailable
 from .preprocess import _CALLOUT_CAUTION_COLORS, _CALLOUT_WARNING_COLORS
 from .themes import _md_layout_spec, _md_theme_spec
 
@@ -101,6 +102,32 @@ class _MarkdownAppearanceMixin:
     def zoomOut(self, step: float = 0.1) -> None:
         """缩小一级。"""
         self.setZoomFactor(self._zoom_factor - step)
+
+    def setBodyFontFamily(self, family: str) -> None:
+        """设置 Markdown 正文字体族（单族；空字符串恢复主题默认）。
+
+        只影响正文 / 标题，代码块仍走 :meth:`setCodeFontFamily`，公式走
+        ``math_lite``。字体不存在时仍保存设置，实际渲染回退到可用字体。
+        """
+        name = _normalize_font_family(family)
+        if name and not isFontFamilyAvailable(name):
+            _warn_once(
+                "markdown-font:missing",
+                f"Markdown 正文字体 {name!r} 未安装，实际渲染将回退到可用字体",
+            )
+        self._body_font_family_override = name
+        self._apply_body_font()
+        if self._source:
+            if self._is_on_screen():
+                self._render()
+            else:
+                # 隐藏 / 滚出视口：只标记，可见时由 showEvent / 绘制补齐。
+                self._needs_render = True
+        self.update()
+
+    def bodyFontFamily(self) -> str:
+        """当前正文实际使用的字体族（未安装时是回退后的族名）。"""
+        return self.document().defaultFont().family()
 
     def setCodeFontFamily(self, family: str) -> None:
         """代码字体族；空字符串恢复默认（CJK 安全字体 + 纯 ASCII Latin 字体）。"""
@@ -227,12 +254,24 @@ class _MarkdownAppearanceMixin:
         self._sync_viewport_mask()
 
     def _apply_body_font(self, document: Optional[QTextDocument] = None) -> None:
-        """按当前主题应用正文 / 标题字体族（保留字号与 zoom）。"""
+        """按当前主题应用正文 / 标题字体族（保留字号与 zoom）。
+
+        优先级：实例覆盖 > 进程默认 > 主题 ``body_font_family`` > 控件默认。
+        """
         doc = document if document is not None else self.document()
         layout = getattr(self, "_md_layout", None) or {}
-        family = _resolve_body_font_family(
-            layout.get("body_font_family", ""), self._base_font_family
-        )
+        family = ""
+        for candidate in (
+            self._body_font_family_override,
+            self._body_font_family_default,
+        ):
+            if candidate and _font_family_available(candidate):
+                family = candidate
+                break
+        if not family:
+            family = _resolve_body_font_family(
+                layout.get("body_font_family", ""), self._base_font_family
+            )
         if not family:
             return
         font = doc.defaultFont()

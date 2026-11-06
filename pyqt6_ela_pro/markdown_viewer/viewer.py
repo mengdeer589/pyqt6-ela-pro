@@ -54,6 +54,7 @@ from .preprocess import (
     _DEFAULT_REASONING_TAG,
     _MarkdownPreprocessMixin,
 )
+from .fonts import defaultMarkdownBodyFontFamily
 from .render import _MarkdownRenderMixin
 from .selection import _MarkdownSelectionMixin
 from .stream import _LARGE_RENDER_CHARS, _MarkdownStreamMixin
@@ -352,6 +353,9 @@ class ElaMarkdownViewer(
         if self._base_font_point_size <= 0:
             pixel = base_font.pixelSize()
             self._base_font_point_size = pixel * 0.75 if pixel > 0 else 10.0
+        #: 进程默认 / 实例覆盖的正文族（空 = 跟随主题 ``body_font_family``）
+        self._body_font_family_default = defaultMarkdownBodyFontFamily()
+        self._body_font_family_override = ""
 
         # 布局刷新（滚动/尺寸变化后重排代码复制按钮与图片宽度）
         self._layout_timer = QTimer(self)
