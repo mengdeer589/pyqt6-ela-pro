@@ -11,7 +11,6 @@ from PyQt6.QtGui import (
     QFont,
     QFontMetrics,
     QPainter,
-    QPainterPath,
     QPen,
     QPixmap,
 )
@@ -68,25 +67,50 @@ def _transparent(widget: QWidget) -> None:
     widget.setAutoFillBackground(False)
 
 
+#: hex → QColor 缓存（主题切换后新 hex 自然换键；容量封顶时整体清空）。
+_COLOR_CACHE = {}
+_COLOR_CACHE_MAX = 64
+#: 对比度选色缓存：键为 (强调色, 两个候选前景色) 的 RGBA。
+_TEXT_ON_CACHE = {}
+_TEXT_ON_CACHE_MAX = 64
+
+
+def _cached_qcolor(value) -> QColor:
+    """按颜色字符串缓存 QColor 并返回副本（绘制期不再重复解析 hex）。"""
+    key = str(value)
+    color = _COLOR_CACHE.get(key)
+    if color is None:
+        color = QColor(key)
+        if len(_COLOR_CACHE) >= _COLOR_CACHE_MAX:
+            _COLOR_CACHE.clear()
+        _COLOR_CACHE[key] = color
+    return QColor(color)
+
+
+def _token_color(key: str) -> QColor:
+    """读取主题令牌并返回缓存的 QColor 副本。"""
+    return _cached_qcolor(str(T(key)))
+
+
 def _resolve_color(value, fallback_key: str) -> QColor:
     """把令牌键 / 颜色字面量 / None 解析为 QColor（实时取色，主题感知）。
     非法值降级成 ``fallback_key``，不抛也不返回无效色 —— ``QColor`` 不解析
     ``rgb(...)`` 函数记法，原样交给它会得到无效色并静默绘制成黑色。
     """
     if not value:
-        return QColor(str(T(f"color.{fallback_key}")))
+        return _token_color(f"color.{fallback_key}")
     text = str(value)
     try:
         resolved = str(T(f"color.{text}"))
     except KeyError:
         resolved = None
     if resolved is not None:
-        return QColor(resolved)
+        return _cached_qcolor(resolved)
     color = QColor(text)
     if color.isValid():
-        return color
+        return _cached_qcolor(color.name())
     logger.warning("配色 %r 无法解析，回退到 color.%s", text, fallback_key)
-    return QColor(str(T(f"color.{fallback_key}")))
+    return _token_color(f"color.{fallback_key}")
 
 
 def _relative_luminance(color: QColor) -> float:
@@ -115,9 +139,16 @@ def _text_on(color: QColor) -> QColor:
     两个 token 的语义随主题翻转（亮色主题 ``text.primary``=黑、
     ``on.primary``=白，深色相反），所以不能按亮度写死分支；直接比较两者
     """
-    c1 = QColor(str(T("color.text.primary")))
-    c2 = QColor(str(T("color.on.primary")))
-    return c1 if _contrast_ratio(color, c1) >= _contrast_ratio(color, c2) else c2
+    c1 = _token_color("color.text.primary")
+    c2 = _token_color("color.on.primary")
+    key = (color.rgba(), c1.rgba(), c2.rgba())
+    chosen = _TEXT_ON_CACHE.get(key)
+    if chosen is None:
+        chosen = c1 if _contrast_ratio(color, c1) >= _contrast_ratio(color, c2) else c2
+        if len(_TEXT_ON_CACHE) >= _TEXT_ON_CACHE_MAX:
+            _TEXT_ON_CACHE.clear()
+        _TEXT_ON_CACHE[key] = chosen
+    return QColor(chosen)
 
 
 def format_elapsed(ms) -> str:
@@ -197,6 +228,13 @@ class ElaNodeWidget(QFrame):
         # 未显示时 isVisible() 恒为 False，会把「没显示」误判成「体该隐藏」
         # 而每次 apply_view 都触发一次全量重排。
         self._body_shown = False
+        # 绘制期字体 / 度量缓存（主题或字号变化时 _reset_paint_caches）
+        self._title_font_obj = None
+        self._pin_font_obj = None
+        self._badge_font_obj = None
+        self._title_metrics = None
+        self._pin_metrics = None
+        self._badge_metrics = None
         _transparent(self)
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, False)
         self.setMouseTracking(True)
@@ -231,15 +269,38 @@ class ElaNodeWidget(QFrame):
 
     # 布局（逻辑坐标）
     def _title_font(self) -> QFont:
-        f = QFont(self.font())
-        f.setPixelSize(int(T("font.sm")))
-        f.setWeight(QFont.Weight.DemiBold)
-        return f
+        if self._title_font_obj is None:
+            f = QFont(self.font())
+            f.setPixelSize(int(T("font.sm")))
+            f.setWeight(QFont.Weight.DemiBold)
+            self._title_font_obj = f
+            self._title_metrics = QFontMetrics(f)
+        return self._title_font_obj
 
     def _pin_font(self) -> QFont:
-        f = QFont(self.font())
-        f.setPixelSize(int(T("font.xs")))
-        return f
+        if self._pin_font_obj is None:
+            f = QFont(self.font())
+            f.setPixelSize(int(T("font.xs")))
+            self._pin_font_obj = f
+            self._pin_metrics = QFontMetrics(f)
+        return self._pin_font_obj
+
+    def _badge_font(self) -> QFont:
+        if self._badge_font_obj is None:
+            f = QFont(self.font())
+            f.setPixelSize(int(T("font.xs")))
+            self._badge_font_obj = f
+            self._badge_metrics = QFontMetrics(f)
+        return self._badge_font_obj
+
+    def _reset_paint_caches(self) -> None:
+        """主题 / 字号变化后丢弃字体与度量缓存。"""
+        self._title_font_obj = None
+        self._pin_font_obj = None
+        self._badge_font_obj = None
+        self._title_metrics = None
+        self._pin_metrics = None
+        self._badge_metrics = None
 
     def _body_visible(self) -> bool:
         """当前缩放下节点体是否可见（低于 ``BODY_MIN_ZOOM`` 隐藏）。"""
@@ -268,10 +329,10 @@ class ElaNodeWidget(QFrame):
 
     def _relayout(self) -> None:
         """按内容重算逻辑尺寸并写回 ``node.size``，再重排子控件。"""
-        title_font = self._title_font()
-        tw = QFontMetrics(title_font).horizontalAdvance(self.node.title) + 64.0
-        pin_font = self._pin_font()
-        pfm = QFontMetrics(pin_font)
+        self._title_font()
+        tw = self._title_metrics.horizontalAdvance(self.node.title) + 64.0
+        self._pin_font()
+        pfm = self._pin_metrics
         rows = max(len(self.node.inputs), len(self.node.outputs))
         pin_w = 0.0
         for i in range(rows):
@@ -535,9 +596,8 @@ class ElaNodeWidget(QFrame):
         text = self.elapsed_text()
         if not text:
             return QRectF()
-        f = QFont(self.font())
-        f.setPixelSize(int(T("font.xs")))
-        tw = QFontMetrics(f).horizontalAdvance(text)
+        self._badge_font()
+        tw = self._badge_metrics.horizontalAdvance(text)
         bw, bh = tw + 14.0, 18.0
         return QRectF(self.node.size.width() - bw - 6.0, (TITLE_H - bh) / 2, bw, bh)
 
@@ -551,7 +611,8 @@ class ElaNodeWidget(QFrame):
         """标题栏实际绘制的文本：按可用宽度省略，长标题不压到右侧徽标上。"""
         if available is None:
             available = self.node.size.width() - PAD_X - self._title_reserve()
-        return QFontMetrics(self._title_font()).elidedText(
+        self._title_font()
+        return self._title_metrics.elidedText(
             self.node.title,
             Qt.TextElideMode.ElideRight,
             max(10, int(available)),
@@ -611,7 +672,9 @@ class ElaNodeWidget(QFrame):
         self.update()
 
     def _on_theme_changed(self) -> None:
-        """主题切换：外观全部实时取色，直接触发重绘。"""
+        """主题切换：丢弃字体 / 颜色 / 位图缓存后重绘。"""
+        self._reset_paint_caches()
+        self._invalidate_cache()
         self.update()
 
     # 绘制
@@ -634,22 +697,19 @@ class ElaNodeWidget(QFrame):
 
         # 底
         rect = QRectF(1.0, 1.0, w - 2.0, h - 2.0)
-        path = QPainterPath()
-        path.addRoundedRect(rect, radius, radius)
         p.setPen(Qt.PenStyle.NoPen)
-        p.setBrush(QColor(str(T("color.bg.elevated"))))
-        p.drawPath(path)
+        p.setBrush(_token_color("color.bg.elevated"))
+        p.drawRoundedRect(rect, radius, radius)
 
-        # 标题栏（accent 色带，上圆角）
-        band = QPainterPath()
-        band.addRoundedRect(QRectF(1.0, 1.0, w - 2.0, TITLE_H + radius), radius, radius)
-        clip = QPainterPath()
-        clip.addRect(QRectF(1.0, 1.0, w - 2.0, TITLE_H))
+        # 标题栏（accent 色带，上圆角；裁剪下半段保留圆角）
+        p.save()
+        p.setClipRect(QRectF(1.0, 1.0, w - 2.0, TITLE_H))
         p.setPen(Qt.PenStyle.NoPen)
         p.setBrush(accent)
-        p.drawPath(band.intersected(clip))
+        p.drawRoundedRect(QRectF(1.0, 1.0, w - 2.0, TITLE_H + radius), radius, radius)
+        p.restore()
         # 标题栏分隔线
-        p.setPen(QPen(QColor(str(T("color.border"))), 1.0))
+        p.setPen(QPen(_token_color("color.border"), 1.0))
         p.drawLine(QPointF(1.0, TITLE_H), QPointF(w - 1.0, TITLE_H))
 
         # 标题文本（按右侧状态徽标 / 图标预留宽度，过长省略）
@@ -669,18 +729,16 @@ class ElaNodeWidget(QFrame):
             if text:
                 br = self.badge_rect()
                 p.setPen(Qt.PenStyle.NoPen)
-                p.setBrush(QColor(str(T("color.bg.muted"))))
+                p.setBrush(_token_color("color.bg.muted"))
                 p.drawRoundedRect(br, br.height() / 2, br.height() / 2)
-                f = QFont(self.font())
-                f.setPixelSize(int(T("font.xs")))
-                p.setFont(f)
-                p.setPen(QColor(str(T("color.text.secondary"))))
+                p.setFont(self._badge_font())
+                p.setPen(_token_color("color.text.secondary"))
                 p.drawText(br, Qt.AlignmentFlag.AlignCenter, text)
         elif status == "error":
             cx = w - 6.0 - SPINNER_SIZE / 2
             cy = TITLE_H / 2
             r = SPINNER_SIZE / 2
-            danger = QColor(str(T("color.danger")))
+            danger = _token_color("color.danger")
             p.setPen(Qt.PenStyle.NoPen)
             p.setBrush(danger)
             p.drawEllipse(QPointF(cx, cy), r, r)
@@ -711,7 +769,7 @@ class ElaNodeWidget(QFrame):
                 + 4.0
             )
             for k, v in self.node.properties.items():
-                p.setPen(QColor(str(T("color.text.tertiary"))))
+                p.setPen(_token_color("color.text.tertiary"))
                 p.drawText(
                     QRectF(PAD_X, y, w - 2 * PAD_X, BODY_LINE_H),
                     Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft,
@@ -724,7 +782,7 @@ class ElaNodeWidget(QFrame):
         if progress is not None:
             bar = QRectF(6.0, h - 6.0, max(1.0, w - 12.0), 3.0)
             p.setPen(Qt.PenStyle.NoPen)
-            p.setBrush(QColor(str(T("color.bg.muted"))))
+            p.setBrush(_token_color("color.bg.muted"))
             p.drawRoundedRect(bar, 1.5, 1.5)
             if progress > 0.0:
                 fill = QRectF(bar)
@@ -733,13 +791,13 @@ class ElaNodeWidget(QFrame):
                 p.drawRoundedRect(fill, 1.5, 1.5)
 
         # 描边（选中 > 状态 > 普通）
-        border_color = QColor(str(T("color.border")))
+        border_color = _token_color("color.border")
         border_w = 1.2
         if status == "done":
-            border_color = QColor(str(T("color.success")))
+            border_color = _token_color("color.success")
             border_w = 2.0
         elif status == "error":
-            border_color = QColor(str(T("color.danger")))
+            border_color = _token_color("color.danger")
             border_w = 2.0
         elif status == "running":
             # 脉冲周期 = PULSE_MS
@@ -750,21 +808,21 @@ class ElaNodeWidget(QFrame):
             border_color.setAlpha(int(120 + 135 * pulse))
             border_w = 2.0
         if self._selected:
-            border_color = QColor(str(T("color.primary")))
+            border_color = _token_color("color.primary")
             border_w = 2.0
         p.setPen(QPen(border_color, border_w))
         p.setBrush(Qt.BrushStyle.NoBrush)
-        p.drawPath(path)
+        p.drawRoundedRect(rect, radius, radius)
 
     def _draw_pins(self, p: QPainter) -> None:
         """绘制引脚行：彩色圆点（multi 双环）+ 名称。"""
         f = self._pin_font()
         p.setFont(f)
         w = self.node.size.width()
-        text_color = QColor(str(T("color.text.secondary")))
+        text_color = _token_color("color.text.secondary")
         for pin in self.node.inputs:
             c = self.pin_logical_center(pin)
-            color = QColor(pin_color(pin.data_type))
+            color = _cached_qcolor(pin_color(pin.data_type))
             p.setPen(Qt.PenStyle.NoPen)
             p.setBrush(color)
             p.drawEllipse(c, PIN_DOT_R, PIN_DOT_R)
@@ -780,7 +838,7 @@ class ElaNodeWidget(QFrame):
             )
         for pin in self.node.outputs:
             c = self.pin_logical_center(pin)
-            color = QColor(pin_color(pin.data_type))
+            color = _cached_qcolor(pin_color(pin.data_type))
             p.setPen(Qt.PenStyle.NoPen)
             p.setBrush(color)
             p.drawEllipse(c, PIN_DOT_R, PIN_DOT_R)
@@ -798,6 +856,7 @@ class ElaNodeWidget(QFrame):
     # 事件
     def refresh_theme(self) -> None:
         """主题切换时重排并重绘（画布 / 测试可直接调用）。"""
+        self._reset_paint_caches()
         self._invalidate_cache()
         self._relayout()
         self.update()

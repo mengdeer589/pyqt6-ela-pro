@@ -55,13 +55,26 @@ canvas.show()
 - 编辑：网格吸附、框选、复制 / 粘贴、方向键微调；
 - 连线：从输出引脚拖到输入引脚，非法连接抛 `ValueError`（原因可读）。
 
-## GL 视口
+## GL 视口与性能
 
 `ElaBlueprintCanvas` 保持 `QWidget` 基类与全部公共 API 不变，自绘内容可由私有视口
-承载。设置 `ELABLUEPRINT_GL=on` 时使用 `QOpenGLWidget`，与软件路径共用同一份绘制
-代码；默认是软件视口（raster）。
+承载。默认是软件视口（raster）；设置 `ELABLUEPRINT_GL=on` 或构造时传
+`use_gl=True` 使用 `QOpenGLWidget`，与软件路径共用同一份绘制代码：
 
-原生子窗口（GL 视口）必须在 `window.show()` 之前构建，否则会重建顶层 HWND。
+```python
+canvas = ElaBlueprintCanvas(use_gl=True)    # 优先 GL，不可用自动回退软件
+canvas = ElaBlueprintCanvas(use_gl=False)   # 强制软件视口
+canvas.is_using_gl()                         # 查询实际使用的视口
+```
+
+`use_gl=None`（默认）按环境变量 / GL 探测结果选择。原生子窗口（GL 视口）必须在
+`window.show()` 之前构建，否则会重建顶层 HWND；`example/blueprint_page.py` 已用
+`PRE_SHOW_BUILD = True` 处理。
+
+选中节点的外发光按节点尺寸 / 缩放档位缓存为位图，并按当前视口裁剪；大图全选后
+平移 / 缩放不会逐节点重画多层圆角描边。节点绘制的字体 / 颜色解析也做了缓存，
+主题切换由 `_reset_paint_caches()` 统一失效。50 节点 / 70 连线（1200×700）的
+示例页在软件视口与 GL 视口下都能维持约 60fps；如果目标机器允许 GL，建议优先开启。
 
 ## 移植说明
 

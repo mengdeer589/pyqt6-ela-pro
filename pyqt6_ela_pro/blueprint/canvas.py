@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 import logging
+from collections import OrderedDict
 
 from PyQt6.QtCore import (
     QPoint,
@@ -50,6 +51,10 @@ logger = logging.getLogger(__name__)
 EDGE_FLOW_TICK_MS = 50
 #: 背景网格点半径（视图像素）
 GRID_DOT_R = 1.3
+#: 选中发光缓存：zoom 档位 / 条目上限 / 字节上限
+GLOW_ZOOM_BUCKET = 0.25
+GLOW_CACHE_MAX_ITEMS = 64
+GLOW_CACHE_MAX_BYTES = 16 * 1024 * 1024
 
 
 def _glow_steps(blur: float) -> tuple[int, float]:
@@ -103,12 +108,20 @@ class ElaBlueprintCanvas(QWidget):
     edge_removed = pyqtSignal(str)
     selection_changed = pyqtSignal(list)
 
-    def __init__(self, graph: ElaBlueprintGraph = None, parent=None, owner: str = None):
+    def __init__(
+        self,
+        graph: ElaBlueprintGraph = None,
+        parent=None,
+        owner: str = None,
+        *,
+        use_gl: bool | None = None,
+    ):
         super().__init__(parent)
         if graph is None:
             graph = ElaBlueprintGraph()
         self.graph = graph
         self._owner = owner
+        self._use_gl = use_gl
         self._zoom = 1.0
         self._offset = QPointF(0.0, 0.0)
         # 拖动吸附：基础间距 24（场景单位），屏幕间距随缩放按 2 的幂自适应
@@ -122,6 +135,11 @@ class ElaBlueprintCanvas(QWidget):
         # 网格平铺纹理缓存（键：间距档位 / 颜色 / DPR）
         self._grid_tile_cache = None
         self._grid_tile_key = None
+
+        # 选中发光位图缓存（键：节点像素尺寸 / zoom 档 / DPR / 主题版本）
+        self._glow_cache: OrderedDict = OrderedDict()
+        self._glow_cache_bytes = 0
+        self._glow_theme_rev = 0
 
         # 交互状态
         self._panning = False
@@ -165,7 +183,7 @@ class ElaBlueprintCanvas(QWidget):
 
         # 绘制视口：GL 可用时为 QOpenGLWidget（GPU 加速），否则软件回退；
         # 与画布 1:1 重合（resizeEvent 同步几何），节点控件挂在其下。
-        self._viewport = create_viewport(self)
+        self._viewport = create_viewport(self, use_gl=use_gl)
         self._viewport.setGeometry(self.rect())
         self._viewport.show()
 
@@ -245,6 +263,10 @@ class ElaBlueprintCanvas(QWidget):
     def zoom(self) -> float:
         """当前缩放系数。"""
         return self._zoom
+
+    def is_using_gl(self) -> bool:
+        """当前绘制视口是否使用 GL（否则为软件 raster 视口）。"""
+        return bool(getattr(self._viewport, "is_gl_viewport", False))
 
     def set_grid_snap(self, on: bool) -> None:
         """拖节点时是否吸附到点阵网格（默认关）。
@@ -570,6 +592,9 @@ class ElaBlueprintCanvas(QWidget):
 
     def _retheme(self) -> None:
         self._settle_view_gesture()
+        self._glow_cache.clear()
+        self._glow_cache_bytes = 0
+        self._glow_theme_rev += 1
         for widget in self._node_widgets.values():
             widget.refresh_theme()
         # 边基础色按引脚类型惰性缓存，主题切换后须失效重建（实时取色）
@@ -848,7 +873,12 @@ class ElaBlueprintCanvas(QWidget):
         """
         p.fillRect(self.rect(), QColor(str(T("color.bg.base"))))
         self._draw_grid(p)
-        self._draw_selection_glow(p)
+        glow_rect = (
+            QRectF(dirty_view)
+            if dirty_view is not None and not dirty_view.isNull()
+            else QRectF(self.rect())
+        )
+        self._draw_selection_glow(p, glow_rect)
         if dirty_view is not None and not dirty_view.isNull():
             tl = self.view_to_scene(QPointF(dirty_view.topLeft()))
             br = self.view_to_scene(QPointF(dirty_view.bottomRight()))
@@ -925,41 +955,88 @@ class ElaBlueprintCanvas(QWidget):
         pad = _selection_glow_pad()
         return self._node_view_rect(node).adjusted(-pad, -pad, pad, pad)
 
-    def _draw_selection_glow(self, p: QPainter) -> None:
-        """选中节点的外发光（画布层自绘，替代 QGraphicsEffect）。
+    def _glow_zoom_bucket(self) -> float:
+        """发光位图的缩放档位（连续缩放时复用最接近的一档）。"""
+        bucket = round(self._zoom / GLOW_ZOOM_BUCKET) * GLOW_ZOOM_BUCKET
+        return max(ZOOM_MIN, min(ZOOM_MAX, bucket))
 
-        以多层递增外扩的圆角描边逼近高斯模糊：透明度由近及远递减。
-        """
-        if not self._selected_nodes:
-            return
+    def _glow_pixmap(self, node, bucket: float) -> QPixmap:
+        """单个节点尺寸对应的发光位图（按尺寸 / 档位 / DPR / 主题缓存）。"""
+        dpr = self.devicePixelRatioF()
+        w = max(1, int(round(node.size.width() * bucket)))
+        h = max(1, int(round(node.size.height() * bucket)))
+        key = (w, h, round(bucket, 3), dpr, self._glow_theme_rev)
+        cached = self._glow_cache.get(key)
+        if cached is not None:
+            self._glow_cache.move_to_end(key)
+            return cached
+        pad = _selection_glow_pad()
+        pm = QPixmap(
+            max(1, int(round((w + 2.0 * pad) * dpr))),
+            max(1, int(round((h + 2.0 * pad) * dpr))),
+        )
+        pm.setDevicePixelRatio(dpr)
+        pm.fill(Qt.GlobalColor.transparent)
+        painter = QPainter(pm)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        self._paint_node_glow(painter, QRectF(pad, pad, w, h), bucket)
+        painter.end()
+        self._glow_cache[key] = pm
+        self._glow_cache_bytes += pm.width() * pm.height() * 4
+        while self._glow_cache and (
+            len(self._glow_cache) > GLOW_CACHE_MAX_ITEMS
+            or self._glow_cache_bytes > GLOW_CACHE_MAX_BYTES
+        ):
+            _, old = self._glow_cache.popitem(last=False)
+            self._glow_cache_bytes -= old.width() * old.height() * 4
+        return pm
+
+    @staticmethod
+    def _paint_node_glow(p: QPainter, rect: QRectF, scale: float) -> None:
+        """把单个节点的多层发光画进 ``rect``（``scale`` 是缓存渲染时的缩放）。"""
         spec = shadow_md()
         r, g, b, a = spec["color"]
         blur = float(spec["blur"])
         ox, oy = spec["offset"]
         steps, pen_w = _glow_steps(blur)
-        base_radius = float(T("radius.lg")) * self._zoom
+        base_radius = float(T("radius.lg")) * scale
+        p.setBrush(Qt.BrushStyle.NoBrush)
+        rect = QRectF(rect).translated(float(ox), float(oy))
+        for i in range(steps):
+            t = (i + 0.5) / steps
+            grow = t * blur * 0.75
+            alpha = int(a * (1.0 - t) * 0.9)
+            if alpha <= 0:
+                continue
+            p.setPen(QPen(QColor(r, g, b, alpha), pen_w))
+            rr = rect.adjusted(-grow, -grow, grow, grow)
+            rad = base_radius + grow
+            p.drawRoundedRect(rr, rad, rad)
+
+    def _draw_selection_glow(self, p: QPainter, view_rect: QRectF = None) -> None:
+        """选中节点的外发光（画布层自绘，位图缓存 + 视口裁剪）。"""
+        if not self._selected_nodes:
+            return
+        if view_rect is None:
+            view_rect = QRectF(self.rect())
+        pad = _selection_glow_pad()
+        bucket = self._glow_zoom_bucket()
         p.setBrush(Qt.BrushStyle.NoBrush)
         for nid in self._selected_nodes:
             node = self.graph.node(nid)
             if node is None:
                 continue
-            tl = self.scene_to_view(node.pos)
-            rect = QRectF(
-                tl,
-                QSizeF(node.size.width() * self._zoom, node.size.height() * self._zoom),
+            rect = self._node_view_rect(node)
+            target = QRectF(
+                rect.left() - pad,
+                rect.top() - pad,
+                rect.width() + 2.0 * pad,
+                rect.height() + 2.0 * pad,
             )
-            rect.translate(float(ox), float(oy))
-            for i in range(steps):
-                t = (i + 0.5) / steps
-                grow = t * blur * 0.75
-                alpha = int(a * (1.0 - t) * 0.9)
-                if alpha <= 0:
-                    continue
-                pen = QPen(QColor(r, g, b, alpha), pen_w)
-                p.setPen(pen)
-                rr = rect.adjusted(-grow, -grow, grow, grow)
-                rad = base_radius + grow
-                p.drawRoundedRect(rr, rad, rad)
+            if not target.intersects(view_rect):
+                continue
+            pm = self._glow_pixmap(node, bucket)
+            p.drawPixmap(target, pm, QRectF(pm.rect()))
 
     # 网格（平铺纹理缓存）
     def _grid_tile(self, step_px: float) -> QPixmap:

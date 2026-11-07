@@ -33,7 +33,7 @@ def gl_available() -> bool:
     return _GL_STATE
 
 
-def _probe_gl() -> bool:
+def _probe_gl(force: bool = False) -> bool:
     """实际探测：环境变量 → 平台名 → 试探创建 GL 上下文。
     **默认软件渲染**（``ELABLUEPRINT_GL`` 未设）：GL 视口是原生子窗口，挂到已显示的
     窗口上会让 Windows/Qt 重建顶层 HWND（窗口闪一下）；想要 GPU 加速请显式
@@ -43,7 +43,7 @@ def _probe_gl() -> bool:
         .strip()
         .lower()
     )
-    if env == "off":
+    if env == "off" and not force:
         return False
     app = QGuiApplication.instance()
     if app is None:
@@ -121,6 +121,8 @@ class _RasterViewport(_ViewportMixin, QWidget):
 
     #: 不支持节点位图代理（节点自行 paintEvent）
     supports_node_proxy = False
+    #: 当前是软件视口
+    is_gl_viewport = False
 
     def __init__(self, canvas) -> None:
         super().__init__(canvas)
@@ -146,6 +148,8 @@ class _GLViewport(_ViewportMixin, QOpenGLWidget):
 
     #: 支持节点位图代理绘制
     supports_node_proxy = True
+    #: 当前是 GL 视口
+    is_gl_viewport = True
 
     def __init__(self, canvas) -> None:
         super().__init__(canvas)
@@ -209,9 +213,21 @@ def _warnLateNativeAttach(canvas) -> None:
         pass
 
 
-def create_viewport(canvas) -> QWidget:
-    """按 GL 可用性为画布创建绘制视口（调用方负责铺满与 show）。"""
-    if gl_available():
+def create_viewport(canvas, use_gl: bool | None = None) -> QWidget:
+    """按 GL 可用性为画布创建绘制视口（调用方负责铺满与 show）。
+
+    :param use_gl: ``None`` 按环境变量 / 探测结果；``True`` 强制尝试 GL（失败
+        回退软件）；``False`` 强制软件视口。
+    """
+    if use_gl is False:
+        return _RasterViewport(canvas)
+    if use_gl is True:
+        ok = _probe_gl(force=True)
+        if not ok:
+            logger.warning("use_gl=True 但当前环境不可用 GL，回退软件渲染")
+    else:
+        ok = gl_available()
+    if ok:
         try:
             _warnLateNativeAttach(canvas)
             return _GLViewport(canvas)

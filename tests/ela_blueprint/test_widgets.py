@@ -236,5 +236,26 @@ class TestViewport:
         finally:
             vp_mod._GL_STATE = None
 
+    def test_use_gl_false_forces_raster(self, qapp, monkeypatch):
+        monkeypatch.setenv("ELABLUEPRINT_GL", "on")
+        vp_mod._GL_STATE = None
+        try:
+            c = ElaBlueprintCanvas(use_gl=False)
+            assert isinstance(c._viewport, vp_mod._RasterViewport)
+            assert c.is_using_gl() is False
+            c.deleteLater()
+            qapp.processEvents()
+        finally:
+            vp_mod._GL_STATE = None
+
+    def test_use_gl_true_falls_back_without_gl(self, qapp):
+        if qapp.platformName() not in ("offscreen", "minimal", "minimalegl"):
+            pytest.skip("只在无 GL 的离屏平台验证回退路径")
+        c = ElaBlueprintCanvas(use_gl=True)
+        assert isinstance(c._viewport, vp_mod._RasterViewport)
+        assert c.is_using_gl() is False
+        c.deleteLater()
+        qapp.processEvents()
+
     def test_viewport_mirrors_canvas(self, canvas):
         assert canvas._viewport.size() == canvas.size()

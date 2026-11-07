@@ -7,7 +7,7 @@
 from __future__ import annotations
 
 import pytest
-from PyQt6.QtCore import QCoreApplication, QEvent, QPointF, QRectF
+from PyQt6.QtCore import QPointF, QRectF
 from PyQt6ElaWidgetTools import ElaSpinBox
 
 from pyqt6_ela_pro.blueprint import (
@@ -76,15 +76,11 @@ class TestCreateNodeErgonomics:
         _register_batch_types()
         canvas = make(ElaBlueprintCanvas)
         node = canvas.create_node("batch_dst", (120, 80), {"batch": 256})
-        try:
-            node.set_properties({"batch": 64})
-            qapp.processEvents()
-            QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
-            widget = canvas.node_widget(node)
-            spins = widget._body.findChildren(ElaSpinBox)
-            assert [s.value() for s in spins] == [64]
-        finally:
-            canvas.deleteLater()
+        node.set_properties({"batch": 64})
+        qapp.processEvents()
+        widget = canvas.node_widget(node)
+        spins = widget._body.findChildren(ElaSpinBox)
+        assert [s.value() for s in spins] == [64]
 
 
 class TestObjectThreading:
