@@ -1,4 +1,4 @@
-"""[pyqt6_ela_pro] 聊天组件总览页?"""
+"""[pyqt6_ela_pro] 聊天组件总览页。"""
 
 from PyQt6.QtWidgets import QHBoxLayout, QVBoxLayout
 
@@ -15,7 +15,6 @@ from ._step_player import _ScriptPlayer
 from .chat_demo_kit import note, readonly_chat, replay_section, set_note
 
 
-#: 下拉的初始选中项（用来给菜单项打勾）
 _INITIAL = {
     "推理形态：折叠": ElaChatReasoningStyleType.Collapse,
     "工具：分组": "group",
@@ -64,7 +63,6 @@ class ChatOverviewPage(ExamplePage):
 
         main_layout.addLayout(self._section_appearance())
 
-        # 页面构造完就有内容（零延迟跑完同一份脚本）
         self._player.play_now(self._script_full_turn())
 
     def _player_for(self) -> _ScriptPlayer:
@@ -77,10 +75,7 @@ class ChatOverviewPage(ExamplePage):
         self._sync_chat_height()
 
     def _sync_chat_height(self):
-        """总览页要让**底部行与统计徽标**也落在首屏里，所以给足高度。
-
-        头部两行说明 + 外观开关那排控件是固定开销，聊天的份额按剩下的算。
-        """
+        """总览页要让**底部行与统计徽标**也落在首屏里，所以给足高度。"""
         if self._chat is None:
             return
         target = max(460, self.height() - 300)
@@ -89,10 +84,7 @@ class ChatOverviewPage(ExamplePage):
         self._chat.setFixedHeight(target)
 
     def _script_full_turn(self):
-        """一整轮回答的脚本 —— 每一步都是 ``chatView()`` 上的公开 API。
-        这条链路就是 ``ElaChatStreamBinder`` 内部做的事（把后端事件映射到这些
-        调用），所以读懂它就等于读懂了 binder。真实接入时不需要自己写这一串，
-        """
+        """一整轮回答的脚本 —— 每一步都是 ``chatView()`` 上的公开 API。"""
         view = self._chat.chatView()
         steps = []
         userId = {}
@@ -318,10 +310,7 @@ class ChatOverviewPage(ExamplePage):
         return box
 
     def _demo_appearance(self) -> None:
-        """外观：推理形态 / 工具分组 / 统计模式 / 免责声明 / 复制提示 / 等待骨架 / 头像 / 限宽。
-        对应 setter 都立即重建已有消息的对应区块，不丢内容；「思考行」与「工具面板
-        标题」共用同一纯文本色，不叠强调色。
-        """
+        """外观：推理形态 / 工具分组 / 统计模式 / 免责声明 / 复制提示 / 等待骨架 / 头像 / 限宽。"""
         view = self._chat.chatView()
         view.setReasoningStyle(ElaChatReasoningStyleType.Inline)
         view.setToolGrouping(True)
@@ -333,13 +322,9 @@ class ChatOverviewPage(ExamplePage):
         view.setStickToBottom(True)
 
     def _dropdown(self, label, tip, choices, callback):
-        """下拉：选中即调 ``callback(value)``。
+        """下拉：选中调 ``callback(value)``；返回 ``(按钮, {值: action}, {值: 短文案})``。
 
-        ``choices`` 是 ``(值, 菜单文案, 按钮短文案)``；返回
-        ``(按钮, {值: action}, {值: 短文案})``。返回 actions 是必需的：
-        **checkable 项自己没有互斥** —— 点已选项会取消勾选，点另一项两项同时
-        勾上。回调必须拿它做全量 ``setChecked`` 同步（见 :func:`_select`），
-        只改 view 与按钮文案的话菜单勾选态会一直错。
+        ``choices`` 是 ``(值, 菜单文案, 按钮短文案)``；checkable 项没有互斥，回调要全量同步。
         """
         button = ElaDropDownButton(label, ElaIconType.IconName.Sliders, parent=self)
         button.setFixedHeight(28)
@@ -434,10 +419,7 @@ class ChatOverviewPage(ExamplePage):
 
 
 def _select(button, prefix, actions, labels, value) -> None:
-    """全量同步勾选态 + 按钮文案。
-    checkable 项没有互斥（再点已选项会取消勾选、点另一项会两项同时勾上），
-    每次选择都必须把所有项重刷一遍。
-    """
+    """全量同步勾选态 + 按钮文案。"""
     for item, action in actions.items():
         action.setChecked(item == value)
     text = f"{prefix}：{labels.get(value, value)}"

@@ -1,4 +1,4 @@
-"""[pyqt6_ela_pro] 动画与图标组件页面?"""
+"""[pyqt6_ela_pro] 动画与图标组件页面。"""
 
 import os
 
@@ -38,8 +38,6 @@ from .es_icon_model import EsIconModel
 from .es_icon_delegate import EsIconDelegate
 
 
-#: 本页演示用的内联 SVG。本库不再自带图标集，宿主用 setPackageDirectory +
-#: loadFromPackage / loadFromFile 换成自己的图标包。
 _SVG_BODY = {
     "ic_demo_circle": '<circle cx="12" cy="12" r="8"/>',
     "ic_demo_square": '<rect x="5" y="5" width="14" height="14" rx="2"/>',
@@ -87,14 +85,13 @@ class _AnimatedDemoDialog(ElaAnimatedMixin, ElaDialogBase):
 
 
 class AnimationIconPage(ExamplePage):
-    """动画与图标组件页面"""
+    """动画与图标组件页面。"""
 
     PAGE_TITLE = "动画与图标"
 
     def __init__(self, parent=None):
         self._svg_loader = None
-        # 浏览器段的模型 / 视图句柄：加载图标包的回调要用（列表是在
-        # _addDemoContent 里才建的，所以这里必须先给默认值）
+        # 浏览器段句柄先给默认值：列表在 _addDemoContent 里才建，回调要用。
         self._svgModel = None
         self._svgView = None
         self._spinner = None
@@ -212,7 +209,11 @@ class AnimationIconPage(ExamplePage):
         )
         btn_layout = QHBoxLayout()
         btn_layout.setSpacing(15)
-        for mode in (ElaMotionModeType.Full, ElaMotionModeType.Reduced, ElaMotionModeType.Disabled):
+        for mode in (
+            ElaMotionModeType.Full,
+            ElaMotionModeType.Reduced,
+            ElaMotionModeType.Disabled,
+        ):
             btn = ElaPushButton(mode.name, self)
             btn.setFixedWidth(100)
             btn.clicked.connect(lambda _checked=False, m=mode: self._onModeClicked(m))
@@ -248,13 +249,10 @@ class AnimationIconPage(ExamplePage):
         parent_layout.addWidget(label)
 
     def _onModeClicked(self, mode):
-        # 宿主可以随时覆盖系统设置（测试也是靠它拿确定性）。
         motion.setOverrideSystem(True)
         motion.setMode(mode)
         if self._motion_state is not None:
             self._motion_state.setText(self._motionStateText())
-        # 持续动效循环由 start_idle_loop 托管：切到 Reduced/Disabled 会自动停掉并
-        # 落到静态基态，切回 Full 需要调用方自己再 start_idle_loop 一次。
         if self._spinner is not None:
             self._spinner.start()
         self._onPolicyFade()
@@ -263,8 +261,6 @@ class AnimationIconPage(ExamplePage):
         w = self.window()
         if w is None:
             return
-        # 在 Reduced/Disabled 下这段代码完全不变：策略只改实际时长与是否同步落终值，
-        # 收尾回调照常触发。宿主不需要为动效策略写任何分支。
         fade_out(w, on_finished=lambda: fade_in(w, duration=Duration.Normal))
 
     def _demoIconBrowser(self, parent_layout):
@@ -361,10 +357,7 @@ class AnimationIconPage(ExamplePage):
         parent_layout.addLayout(btn_layout)
 
     def _getSvgLoader(self):
-        """本页的 loader —— 先塞几个内联图标，让下面两节有东西可演示。
-        真实宿主走 ``setPackageDirectory()`` + ``loadFromPackage()`` 加载自己的
-        ``.icons`` 包（见第 01 节底部的加载入口）。
-        """
+        """本页的 loader —— 先塞几个内联图标，让下面两节有东西可演示。"""
         if self._svg_loader is None:
             self._svg_loader = ElaSvgIconLoader()
             for name, body in _SVG_BODY.items():
@@ -379,10 +372,7 @@ class AnimationIconPage(ExamplePage):
         self._onLoadIconPackage(path, view)
 
     def _onLoadIconPackage(self, path: str, view) -> None:
-        """按路径加载宿主的 ``.icons`` 图标包并刷新浏览器。
-        ``setPackageDirectory`` 是关键：不设的话 ``loadFromPackage`` 会去库内置
-        管理员权限，所以包目录必须由宿主给。
-        """
+        """按路径加载宿主的 ``.icons`` 图标包并刷新浏览器。"""
         from PyQt6ElaWidgetTools import ElaMessageBar, ElaMessageBarType
 
         text = path.strip()
@@ -393,7 +383,6 @@ class AnimationIconPage(ExamplePage):
             loader.setPackageDirectory(text)
             loader.loadFromPackage(os.path.basename(text))
         except FileNotFoundError as exc:
-            # 传进来的可能是完整文件路径，退一步按文件直接读
             try:
                 loader.loadFromFile(text)
             except FileNotFoundError:
@@ -443,7 +432,6 @@ class AnimationIconPage(ExamplePage):
         )
         parent_layout.addSpacing(10)
 
-        # 宿主图标包加载入口：setPackageDirectory + loadFromPackage
         pack_row = QHBoxLayout()
         pack_row.setSpacing(8)
         pack_edit = ElaLineEdit(self)
@@ -480,7 +468,6 @@ class AnimationIconPage(ExamplePage):
         svg_list_view.clicked.connect(
             lambda index: self._onSvgIconClicked(index, loader)
         )
-        # 存句柄给上面的加载回调用（此时列表还没建，回调里可能还是 None）
         self._svgModel = svg_model
         self._svgView = svg_list_view
         svg_search_edit = ElaLineEdit(self)
@@ -566,7 +553,6 @@ class AnimationIconPage(ExamplePage):
             names = loader.iconNames()
             if names:
                 # 首参是 **SVG 源码**，不是图标名 —— 直接喂名字会渲染出空图
-                # （QSvgRenderer 解析失败且不报错），这坑 README 的 API 表记着
                 icon = svg_to_icon(loader.getSvgData(names[0]), size=48)
                 from PyQt6ElaWidgetTools import ElaMessageBar, ElaMessageBarType
 

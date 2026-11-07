@@ -1,4 +1,4 @@
-"""[pyqt6_ela_pro] Fluent 风格与补充组件示例页。?"""
+"""[pyqt6_ela_pro] Fluent 风格与补充组件示例页。"""
 
 from PyQt6.QtWidgets import QHBoxLayout
 from PyQt6ElaWidgetTools import (

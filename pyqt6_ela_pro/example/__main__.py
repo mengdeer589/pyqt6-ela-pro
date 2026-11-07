@@ -1,4 +1,4 @@
-"""[pyqt6_ela_pro] 模块示例脚本?"""
+"""[pyqt6_ela_pro] 模块示例脚本。"""
 
 import os
 import sys
@@ -87,9 +87,7 @@ _NAV_MODES = (
 )
 _NAV_MODE_TEXTS = ("自动", "最大", "紧凑", "最小")
 _MOTION_TEXTS = ("完整", "精简", "关闭")
-#: 示例启动默认主题（工具栏 / AppBar 的「切换主题」随时可切回浅色）
 _DEFAULT_THEME_MODE = ElaThemeType.ThemeMode.Dark
-#: 外壳设置「窗口背景渐变」的启动默认值（设置弹框里可关，即时生效）
 _DEFAULT_BACKGROUND_ENABLED = True
 #: ``ElaDialogBase`` 中间按钮的 ``done`` 码（`middleButtonClicked` → `done(2)`）
 _DIALOG_MIDDLE_BUTTON = 2
@@ -102,12 +100,9 @@ class ExampleWindow(ElaWindow):
         super().__init__()
         self.setWindowTitle("pyqt6_ela_pro 组件示例")
         self.resize(1280, 820)
-        # 显式最小尺寸不能省：切导航栏模式时上游会对导航栏做 255ms 的 setFixedWidth
-        # 动画，布局最小宽度逐帧变大，Qt 会不断改窗口尺寸并刷 setGeometry 警告。
-        # 页面都在滚动区里，缩到 800 宽布局也不坏。
+        # 显式最小尺寸不能省：导航栏切换动画会让布局最小宽度逐帧变大（setGeometry 警告）。
         self.setMinimumSize(800, 560)
 
-        # 左侧导航切页统一用翻转动画（示例主窗口；window_shell_page 可逐档切换对比）
         self.setStackSwitchMode(ElaWindowType.StackSwitchMode.Flip)
 
         self.setUserInfoCardTitle("组件演示")
@@ -133,21 +128,15 @@ class ExampleWindow(ElaWindow):
         self._buildStatusBar()
         self._buildAppBarMenu()
         self._installCloseGuard()
-        # 外壳设置里的「窗口背景渐变」默认开：在窗口显示前就把亮 / 暗两张位图装好，
-        # 首帧即是渐变（设置弹框里仍可随时关掉）。
         self._set_background_enabled(self._background_enabled)
         self.navigationNodeClicked.connect(self._on_navigation_node_clicked)
-        # Python 页面无法被 C++ ``QMetaObject::newInstance()`` 复制：
-        # 右键「在新窗口中打开」改发请求信号，由宿主建窗（见 ``page_window.py``）。
         self.pageOpenInNewWindowRequested.connect(self._open_page_in_new_window)
         self._sync_page_nav()
         self.moveToCenter()
 
-    # ── 侧边栏 ────────────────────────────────────────────────────────
     def _buildSidebar(self) -> None:
         icon = ElaIconType.IconName
 
-        # ── 基础组件：按「用户会怎么找」分，不按「控件 vs 容器」分 ──
         _, basic = self.addExpanderNode("基础组件", icon.List)
         self._addPage("基础组件", "输入与选择", InputSelectPage(self), basic, icon.Pen)
         self._addPage("基础组件", "下拉框组件", ComboBoxPage(self), basic, icon.ListUl)
@@ -168,7 +157,6 @@ class ExampleWindow(ElaWindow):
         )
         self.expandNavigationNode(basic)
 
-        # ── 数据与图表：绑数据源的东西都归这里 ──
         _, data = self.addExpanderNode("数据与图表", icon.ChartLine)
         self._addPage("数据与图表", "表格", DataTablePage(self), data, icon.Table)
         self._addPage(
@@ -183,14 +171,12 @@ class ExampleWindow(ElaWindow):
         )
         self.expandNavigationNode(data)
 
-        # ── 内容渲染 ──
         _, render = self.addExpanderNode("内容渲染", icon.FileCode)
         self._addPage(
             "内容渲染", "Markdown 渲染", MarkdownPage(self), render, icon.FileCode
         )
         self.expandNavigationNode(render)
 
-        # AI 对话工作台：顶部 ElaPivot 切七个工作区，首次切换才构建。
         _, chat = self.addExpanderNode("AI 对话", icon.Comments)
         self._addPage(
             "AI 对话",
@@ -199,10 +185,8 @@ class ExampleWindow(ElaWindow):
             chat,
             icon.Comments,
         )
-        # 默认展开：这是本示例的重点组件，收起来等于把它藏了
         self.expandNavigationNode(chat)
 
-        # ── 窗口与应用外壳 ──
         _, shell = self.addExpanderNode("窗口与应用外壳", icon.WindowRestore)
         self._addPage(
             "窗口与应用外壳",
@@ -219,7 +203,6 @@ class ExampleWindow(ElaWindow):
         )
         self.expandNavigationNode(shell)
 
-        # ── 系统交互与嵌入 ──
         _, system = self.addExpanderNode("系统交互与嵌入", icon.Terminal)
         self._addPage(
             "系统交互与嵌入", "外部内容嵌入", EmbedPage(self), system, icon.Globe
@@ -236,7 +219,6 @@ class ExampleWindow(ElaWindow):
         )
         self.expandNavigationNode(system)
 
-        # ── 动效与图形 ──
         _, motion_expander = self.addExpanderNode("动效与图形", icon.Play)
         self._addPage(
             "动效与图形",
@@ -254,14 +236,12 @@ class ExampleWindow(ElaWindow):
         )
         self.expandNavigationNode(motion_expander)
 
-        # ── 参考文档：纯文档页（表格 + 代码块），和可交互 demo 不是一回事 ──
         _, docs = self.addExpanderNode("参考文档", icon.BookOpen)
         self._addPage(
             "参考文档", "聊天组件 API 指南", ChatGuidePage(self), docs, icon.BookOpen
         )
         self.expandNavigationNode(docs)
 
-        # ── 页脚节点：固定在导航栏底部（不受分组影响）──
         # ``addFooterNode`` 与 ``addExpanderNode`` 同款：key 由**返回值**给出
         result, self._about_key = self.addFooterNode("关于", 0, icon.CircleInfo)
         self._check_node(result, "页脚节点「关于」")
@@ -290,12 +270,8 @@ class ExampleWindow(ElaWindow):
         if shell is not None:
             self._page_windows.append(shell)
 
-    # ── DockWidget 停靠面板 ────────────────────────────────────────────
     def _buildDocks(self) -> None:
-        """右侧停靠区：页面导航（真实清单）/ 运行日志 / 说明。
-        导航在上、日志在下（``splitDockWidget``），说明与日志 tab 化 —— 默认只占
-        一列宽度，拖出去 / 换位置后布局由 QMainWindow 记忆（``saveState``）。
-        """
+        """右侧停靠区：页面导航（真实清单）/ 运行日志 / 说明。"""
         right = Qt.DockWidgetArea.RightDockWidgetArea
 
         self._nav_dock = nav_dock = ElaDockWidget("页面导航", self)
@@ -313,9 +289,7 @@ class ExampleWindow(ElaWindow):
         self.addDockWidget(right, nav_dock)
 
         self._log_dock = log_dock = ElaDockWidget("运行日志", self)
-        # 用 ElaPlainTextEdit 而不是 ElaTerminalView：日志只要「一行一条」，
-        # 终端视图的 append 是「写入当前行」（没有 \n 就并进上一行）且自带一整条
-        # 工具栏，放在 dock 里既费高度又容易误用。
+        # 用 ElaPlainTextEdit：终端视图的 append 写当前行且自带整条工具栏，塞进 dock 又费高度又容易误用。
         self._log_view = ElaPlainTextEdit()
         self._log_view.setReadOnly(True)
         self._log_view.setFrameShape(QPlainTextEdit.Shape.NoFrame)
@@ -340,7 +314,7 @@ class ExampleWindow(ElaWindow):
         self.splitDockWidget(nav_dock, log_dock, Qt.Orientation.Vertical)
         self.tabifyDockWidget(log_dock, info_dock)
         log_dock.raise_()
-        # 一列宽（否则 dock 会按 list view 的 sizeHint 吃掉半个窗口）+ 上下高度
+        # dock 默认只占一列宽（否则 sizeHint 会吃掉半个窗口），上下高度交给 splitDockWidget。
         self.resizeDocks([nav_dock], [260], Qt.Orientation.Horizontal)
         self.resizeDocks([nav_dock, log_dock], [300, 260], Qt.Orientation.Vertical)
 
@@ -352,10 +326,7 @@ class ExampleWindow(ElaWindow):
             self._navigate_page(self._page_entries[row][2])
 
     def _sync_page_nav(self, page_key: str | None = None) -> None:
-        """把页面导航 dock 的高亮对到 ``page_key``（缺省取当前页）。
-        别用「当前 widget 的 key」兜底导航时的同步：``setStackSwitchMode`` 的
-        ~180ms），信号发出这一刻读到的还是上一页。
-        """
+        """把页面导航 dock 的高亮对到 ``page_key``（缺省取当前页）。"""
         key = page_key or self.getCurrentNavigationPageKey()
         model = self._nav_list.model()
         if model is None:
@@ -365,7 +336,6 @@ class ExampleWindow(ElaWindow):
                 self._nav_list.setCurrentIndex(model.index(row, 0))
                 return
 
-    # ── 工具栏 / 状态栏 ───────────────────────────────────────────────
     def _buildToolBar(self) -> None:
         icon = ElaIconType.IconName
         bar = ElaToolBar("示例工具栏", self)
@@ -404,8 +374,7 @@ class ExampleWindow(ElaWindow):
         self._status_page.setWordWrap(False)
         status.addWidget(self._status_page)
 
-        # 提示要**短且不折行**：``ElaText`` 默认 wordWrap=True，折行的第二行会被
-        # 状态栏的固定高度裁掉（dock 区占宽后尤其明显）。
+        # 提示要短且不折行：ElaText 默认 wordWrap，第二行会被状态栏固定高裁掉。
         hint = ElaText("右键 AppBar 打开菜单", status)
         hint.setTextPixelSize(13)
         hint.setTextFormat(Qt.TextFormat.PlainText)
@@ -417,7 +386,6 @@ class ExampleWindow(ElaWindow):
         title = self.getNavigationNodeTitle(key) if key else ""
         self._status_page.setText(f"当前页面：{title}" if title else "就绪")
 
-    # ── AppBar 自定义右键菜单 ─────────────────────────────────────────
     def _buildAppBarMenu(self) -> None:
         """AppBar 右键 / Alt+Space 弹出的菜单（替换原生系统菜单）。"""
         menu = self._app_bar_menu = ElaMenu(self)
@@ -452,7 +420,6 @@ class ExampleWindow(ElaWindow):
 
         self.setCustomMenu(menu)
 
-    # ── 内容区顶栏（setCentralCustomWidget）：页面搜索 ────────────────
     def _buildSearchBar(self) -> None:
         """内容区顶栏：页面搜索（数据来自 ``getNavigationSuggestDataList``）+ 回首页。"""
         container = QWidget(self)
@@ -470,8 +437,7 @@ class ExampleWindow(ElaWindow):
         home_button.clicked.connect(self._goto_home)
         layout.addWidget(home_button)
 
-        # ``ElaSuggestBox`` 的建议数据与导航同源：窗口把导航节点导成 SuggestData
-        # 列表，点击后从 ``getSuggestData()`` 取回 ``ElaPageKey`` 再 navigation。
+        # ElaSuggestBox 与导航同源：导航节点导成 SuggestData，点击取回 ElaPageKey 再 navigation。
         box = self._search_box = ElaSuggestBox(container)
         box.setPlaceholderText("搜索页面：输入分组名或页面名")
         box.setFixedHeight(32)
@@ -488,17 +454,13 @@ class ExampleWindow(ElaWindow):
         if key:
             self.navigation(key)
 
-    # ── 关闭确认 ──────────────────────────────────────────────────────
     def _installCloseGuard(self) -> None:
         """拦截 AppBar 关闭按钮（``setIsDefaultClosed(False)`` + ``closeButtonClicked``）。"""
         self.setIsDefaultClosed(False)
         self.closeButtonClicked.connect(self._on_close_requested)
 
     def _on_close_requested(self) -> None:
-        """AppBar 关闭按钮：二次确认（可关，见「设置」）。
-        用 ``ElaContentDialog`` 系的 ``ElaDialogBase``（= 上游示例拦截关闭时用的
-        那个组件）：**居中卡片 + 整窗遮罩**，还自带「最小化」中键。
-        """
+        """AppBar 关闭按钮：二次确认（可关，见「设置」）。"""
         if not self._close_confirm_enabled:
             self.close()
             return
@@ -521,7 +483,6 @@ class ExampleWindow(ElaWindow):
         elif result == _DIALOG_MIDDLE_BUTTON:
             self.showMinimized()
 
-    # ── 页脚节点：关于 / 设置 ─────────────────────────────────────────
     @staticmethod
     def _readonly_dialog(title: str, parent: QWidget) -> ElaDialogBase:
         """只读信息弹框：隐藏「确定」，只留「关闭」。"""
@@ -555,10 +516,7 @@ class ExampleWindow(ElaWindow):
         dialog.exec()
 
     def _open_settings(self) -> None:
-        """外壳设置：导航栏模式 / 背景图 / 动效策略 / 关闭确认。
-        控件用**上游现成的**：分段用 ``ElaPivot``、开关用 ``ElaToggleSwitch``；
-        **主题不在这里** —— AppBar 右上角与工具栏都有主题按钮，在模态弹框里切主题
-        """
+        """外壳设置：导航栏模式 / 背景图 / 动效策略 / 关闭确认。"""
         dialog = self._readonly_dialog("外壳设置", self)
         panel = QWidget()
         layout = QVBoxLayout(panel)
@@ -628,10 +586,7 @@ class ExampleWindow(ElaWindow):
         policy_pivot: ElaPivot,
         confirm: ElaToggleSwitch,
     ) -> None:
-        """恢复默认 + **把弹框里的控件一起同步**。
-        只改窗口状态不同步控件，会出现「界面说深色、实际已经浅色」这种自相矛盾的
-        中间态（用户报的「恢复默认后不对」就是这类）。
-        """
+        """恢复默认 + **把弹框里的控件一起同步**。"""
         self.setNavigationBarDisplayMode(ElaNavigationType.NavigationDisplayMode.Auto)
         self._set_background_enabled(False)
         motion.setMode(ElaMotionModeType.Full)
@@ -642,7 +597,6 @@ class ExampleWindow(ElaWindow):
         confirm.setIsToggled(True)
         self._log("外壳设置已恢复默认")
 
-    # ── 外壳动作 ──────────────────────────────────────────────────────
     def _log(self, text: str) -> None:
         view = getattr(self, "_log_view", None)
         if view is not None:
@@ -685,10 +639,7 @@ class ExampleWindow(ElaWindow):
         self._log("关闭二次确认：" + ("开" if on else "关"))
 
     def _set_background_enabled(self, on: bool) -> None:
-        """窗口背景：``setWindowPixmap`` + ``setWindowPaintMode``（亮 / 暗各一张）。
-        仓库不带图片资源，示例用 QPainter 现画一张渐变（页面区不透明，实际可见
-        的是导航栏与应用栏那一带 —— 与上游示例同款效果）。
-        """
+        """窗口背景：``setWindowPixmap`` + ``setWindowPaintMode``（亮 / 暗各一张）。"""
         self._background_enabled = bool(on)
         if on:
             for mode in (ElaThemeType.ThemeMode.Light, ElaThemeType.ThemeMode.Dark):
@@ -714,7 +665,6 @@ class ExampleWindow(ElaWindow):
         painter.end()
         return pixmap
 
-    # ── 导航联动（状态栏 / dock / 日志都挂在这一条信号上）─────────────
     def _on_navigation_node_clicked(self, node_type, node_key: str) -> None:
         if node_key == self._about_key:
             self._open_about()
@@ -758,17 +708,13 @@ if __name__ == "__main__":
     _prepare_qpa_platform()
     app = QApplication(sys.argv)
     eApp.init()
-    # 示例默认深色；再早于 splash，启动屏也是同一套配色。
     _apply_default_theme()
-    #
     splash = ElaSplashScreen()
     splash.setTitle("pyqt6_ela_pro")
     splash.setSubTitle("组件示例")
     splash.show()
 
-    # 注意：不能在 QTimer 事件回调中 show() 顶层窗口（多页面窗口首帧渲染
-    # 与回调上下文产生竞态导致 Qt 崩溃），故 splash 展示用 processEvents
-    # 手动驱动，窗口在事件循环开始前的主路径构建 / 显示。
+    # 不能在 QTimer 回调中 show() 顶层窗口（首帧渲染会竞态崩溃）；splash 用 processEvents 驱动。
     messages = [
         "正在加载组件...",
         "正在初始化主题...",
@@ -780,9 +726,7 @@ if __name__ == "__main__":
     t_start = _time.monotonic()
     step = [0]
     while _time.monotonic() - t_start < 0.5:
-        # splash 的职责就是遮住启动期工作：``ElaSplashScreen`` 会在自己出现后自动付掉
-        # Qt6 的一次性字体引擎解析（~190ms）、首个图标字体（~30ms）与 Pygments 导入
-        # （~35ms，见 splash_screen._warmTextStack），这里只需要驱动事件循环 + 更新进度文案。
+        # splash 自动付掉字体引擎（~190ms）、图标字体（~30ms）与 Pygments 导入（~35ms）；这里只驱动事件循环。
         app.processEvents()
         _time.sleep(0.02)
         if step[0] < len(messages):
@@ -799,8 +743,7 @@ if __name__ == "__main__":
             _page.buildDemoContent()
     window.show()
 
-    # 启动后逐页预热：每 tick 只建一页（内容惰性构建，见 ``ExamplePage._setupUI``），
-    # 避免长阻塞；用户已经打开过的页会跳过。定时器是 window 的子对象（随窗口销毁）。
+    # 启动后逐页预热（每 tick 一页，跳过已打开页）；定时器是 window 的子对象。
     _pages = list(window.findChildren(ExamplePage))
     _cursor = [0]
 

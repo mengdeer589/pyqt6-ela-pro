@@ -1,4 +1,4 @@
-"""输入与选择?"""
+"""输入与选择。"""
 
 from PyQt6.QtWidgets import QHBoxLayout
 from PyQt6ElaWidgetTools import (
@@ -331,13 +331,11 @@ class InputSelectPage(ExamplePage):
         titled.setFixedWidth(200)
         edit_layout.addWidget(titled)
 
-        # 无标题 + 无清空按钮：退化成普通输入框的样子
         plain = ElaTagLineEdit(self)
         plain.setPlaceholderText("无标题、无清空按钮")
         plain.setFixedWidth(200)
         edit_layout.addWidget(plain)
 
-        # 校验态：notifyInvalidInput() 上红、clearError() 撤销
         checked = ElaTagLineEdit(self, "错误态演示")
         checked.setText("invalid")
         checked.setFixedWidth(200)

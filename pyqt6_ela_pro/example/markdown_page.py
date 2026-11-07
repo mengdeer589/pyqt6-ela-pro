@@ -1,4 +1,4 @@
-"""[pyqt6_ela_pro] ElaMarkdownViewer Markdown 渲染页面?"""
+"""[pyqt6_ela_pro] ElaMarkdownViewer Markdown 渲染页面。"""
 
 import os
 import tempfile
@@ -152,7 +152,6 @@ _MARKDOWN_TEXT = r"""# 文本与排版
 
 """
 
-#: 代码块样例（语言标签 / 行号 / 折叠 / 复制 / diff 着色）
 _MARKDOWN_CODE = r"""# 代码块
 
 代码卡片：语言标签、行号（示例开启）、超长折叠（超过 12 行）、悬停右上角复制按钮；
@@ -219,7 +218,6 @@ uv run python -m pyqt6_ela_pro.example
 ```
 """
 
-#: 数学公式样例（行内 / 矩阵 / 环境 / boxed / 极限算子 / 宏 / 容错）
 _MARKDOWN_MATH = r"""# 数学公式
 
 行内：质能方程 $E=mc^2$、欧拉恒等式 $e^{i\pi}+1=0$、
@@ -284,7 +282,6 @@ $$
 $\unknowncmd$），结构性错误（如缺少 `\right`）才回退源码。
 """
 
-#: Mermaid 图样例（flowchart / sequence）
 _MARKDOWN_MERMAID = r"""# Mermaid 图（可选依赖 mermaidx）
 
 安装 `pyqt6_ela_pro[all]` 后自动渲染为图片；未安装时回退为代码卡片；主题随亮/暗模式切换。
@@ -312,12 +309,10 @@ sequenceDiagram
 > 以上内容由一次 `setMarkdown()` 渲染；右侧「阅读设置」抽屉提供搜索高亮、
 > 缩放、主题切换与流式重放。"""
 
-#: 全量静态示例（四块拼接，供示例与流式演示共用）
 _MARKDOWN_ALL = "\n\n".join(
     (_MARKDOWN_TEXT, _MARKDOWN_CODE, _MARKDOWN_MATH, _MARKDOWN_MERMAID)
 )
 
-#: 阅读器开场白（正文只留阅读内容，操作收进右侧抽屉）
 _READER_INTRO = r"""# 大文档渲染长文
 
 > 这是一篇用于观察**大文档渲染**的长文示例：标题、正文、代码卡、表格、公式与
@@ -336,7 +331,6 @@ viewer.setMarkdown("正文里的代码卡片会自动预留行号槽")
 ```
 """
 
-#: 长文附录（补充滚动长度与更多块级语法组合）
 _READER_APPENDIX = r"""
 ## 9. 长文滚动与排版节奏
 
@@ -455,10 +449,8 @@ flowchart TB
 [^reader]: 阅读设置抽屉里的所有操作都对应 `ElaMarkdownViewer` 的公开 API。
 """
 
-#: 阅读器正文（开场 + 四类能力 + 长文附录）
 _MARKDOWN_READER = "\n\n".join((_READER_INTRO, _MARKDOWN_ALL, _READER_APPENDIX))
 
-#: 聊天式演示的预置回答（覆盖主要块级语法，真实场景可替换为模型输出）
 _MARKDOWN_ANSWER = r"""<think>
 先拆解问题：流式渲染的关键在于稳定段与增量段的边界处理，
 确定思路后再组织回答结构。
@@ -501,10 +493,7 @@ $$
 
 
 def _ensure_demo_image() -> str:
-    """生成超宽演示图片（1600×520），返回所在目录。
-    放在临时目录而非仓库内，避免示例产物污染工作区；
-    图片宽度大于查看器宽度，可直观看到 ``setBaseUrl()`` 后的自动缩放。
-    """
+    """生成超宽演示图片（1600×520），返回所在目录。"""
     directory = os.path.join(tempfile.gettempdir(), "pyqt5_ela_md_demo")
     os.makedirs(directory, exist_ok=True)
     path = os.path.join(directory, "ela_markdown_demo.png")

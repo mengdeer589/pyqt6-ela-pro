@@ -1,4 +1,4 @@
-"""[pyqt6_ela_pro] ElaBlueprintCanvas 节点图编辑器页面?"""
+"""[pyqt6_ela_pro] ElaBlueprintCanvas 节点图编辑器页面。"""
 
 import json
 import os
@@ -54,7 +54,6 @@ _TRAIN_ORDER = (
     "ckpt",
     "eval",
 )
-#: 演示 epoch 数 / 每个 epoch 展示的指标
 _EPOCHS = 2
 _LOSS = ("1.680", "1.430")
 _ACC = ("42.0%", "58.0%")
@@ -71,7 +70,6 @@ class BlueprintPage(ExamplePage):
 
     PAGE_TITLE = "ElaBlueprintCanvas 节点图编辑器"
 
-    #: 指标面板的标题
     METRIC_TITLES = {
         "epoch": "Epoch",
         "loss": "Loss",
@@ -131,8 +129,7 @@ class BlueprintPage(ExamplePage):
             play = ElaButton("播放", variant="text", color="primary", parent=self)
             play.setFixedWidth(60)
             play.clicked.connect(lambda: self._safe_call(on_play))
-            # 标题占满剩余宽度（不给 stretch 时 ElaText 只拿 sizeHint，
-            # 长标题会被折成两行 —— 右侧明明还有大片空白）
+            # 标题占满剩余宽度：不给 stretch 时 ElaText 只拿 sizeHint，长标题会折行。
             row.setStretch(1, 1)
             row.addWidget(play)
         return row
@@ -482,7 +479,6 @@ class BlueprintPage(ExamplePage):
             ("det_head", "logits", "det_loss", "logits", ""),
             ("contrast_head", "logits", "contrast_loss", "logits", ""),
             ("pref_head", "logits", "pref_loss", "logits", ""),
-            # 标签源统一扇出到 5 个损失（与总损失扇入对称）
             ("labels", "data", "lm_loss", "labels", "labels"),
             ("labels", "data", "cls_loss", "labels", ""),
             ("labels", "data", "det_loss", "labels", ""),
@@ -567,7 +563,6 @@ class BlueprintPage(ExamplePage):
         self._train_note.setTextPixelSize(12)
         main_layout.addWidget(self._train_note)
 
-        # 预填一轮完成态：打开页面就能看到状态描边 / 耗时徽标 / 进度条
         self._prefill_training_state()
 
         self._train_player = _ScriptPlayer(self)

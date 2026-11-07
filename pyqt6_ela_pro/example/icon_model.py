@@ -1,4 +1,4 @@
-"""图标浏览器示例的数据模型（PyQt6 版）。?"""
+"""图标浏览器示例的数据模型（PyQt6 版）。"""
 
 from __future__ import annotations
 

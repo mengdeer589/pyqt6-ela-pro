@@ -1,4 +1,4 @@
-"""托盘常驻宿主骨架（``pyqt6_ela_pro.example``）。?"""
+"""托盘常驻宿主骨架（``pyqt6_ela_pro.example``）。"""
 
 from __future__ import annotations
 
@@ -15,20 +15,15 @@ from ..menu_item import ElaMenuItem
 #: 分隔符哨兵（``setItems`` 里识别，作用于菜单项之间的空位）
 SEPARATOR = "-"
 
-#: 「显隐主窗口」菜单项的 id
 TOGGLE_WINDOW_ID = "toggleWindow"
-#: 「退出」菜单项的 id
 QUIT_ID = "quit"
 
 
 class ElaTrayHost(QObject):
     """托盘常驻宿主：托盘图标 + 菜单 + 主窗口显隐 + 退出。"""
 
-    #: 自定义菜单项被点击（参数：项 id）
     actionTriggered = pyqtSignal(str)
-    #: 请求显示 / 隐藏主窗口（参数：``True`` 显示 / ``False`` 隐藏）
     windowVisibilityRequested = pyqtSignal(bool)
-    #: 请求退出（真退出前宿主有机会拦）
     quitRequested = pyqtSignal()
 
     def __init__(
@@ -71,8 +66,7 @@ class ElaTrayHost(QObject):
     def setItems(self, items: Sequence) -> None:  # noqa: N802 (Qt 命名)
         """整体替换托盘菜单项（``"-"`` 为分隔符）。
 
-        :param items: :class:`~pyqt6_ela_pro.menu_item.ElaMenuItem` 列表，
-            元素为 ``"-"`` 时插入分隔线
+        :param items: :class:`~pyqt6_ela_pro.menu_item.ElaMenuItem` 列表。
         """
         self._items = list(items or [])
         self._rebuild()
@@ -111,14 +105,11 @@ class ElaTrayHost(QObject):
                 continue
             if not item.enabled:
                 continue
-            # 不用 checkable：ElaMenu 的图标列与勾选框互斥，
-            # checkable 会让所有项的 ElaIconType 图标消失
             if item.icon is None:
-                # addElaIconAction 不接受 None，退回纯文字项
                 action = menu.addAction(item.label)
             else:
                 action = menu.addElaIconAction(item.icon, item.label)
-            action.setData(item.id)  # 便于调试 / 日志定位是哪一项
+            action.setData(item.id)
             if item.tooltip and item.tooltip != item.label:
                 action.setToolTip(item.tooltip)
             action.triggered.connect(
@@ -175,7 +166,6 @@ class ElaTrayHost(QObject):
 
     def _on_activated(self, reason) -> None:  # noqa: ANN001
         if reason == QSystemTrayIcon.ActivationReason.Trigger:
-            # 单击托盘 = 显隐主窗口（与菜单项同一路径，状态也会同步回文案）
             self.toggleWindow()
 
 

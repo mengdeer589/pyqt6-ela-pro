@@ -1,7 +1,4 @@
-"""AI 组件工作台：ElaPivot 切七个工作区，首次切换才构建。
-
-各工作区仍是独立 ``ExamplePage``（自带滚动区），工作台只负责切换。
-"""
+"""AI 组件工作台：ElaPivot 切七个工作区，首次切换才构建。 各工作区仍是独立 ``ExamplePage``（自带滚动区），工作台只负责切换。"""
 
 from __future__ import annotations
 
@@ -27,7 +24,6 @@ class ChatWorkbenchPage(ExamplePage):
 
     PAGE_TITLE = "AI 组件工作台"
 
-    #: 工作区：(名称, 说明, 页面类)
     WORKSPACES = (
         (
             "概览",
@@ -78,8 +74,6 @@ class ChatWorkbenchPage(ExamplePage):
         self._active_workspace = 0
         self._pivot_syncing = False
         super().__init__(parent)
-
-    # ── 工作台外壳 ──────────────────────────────────────────────────────
 
     def _setupUI(self):
         super()._setupUI()
@@ -174,8 +168,7 @@ class ChatWorkbenchPage(ExamplePage):
             placeholder.deleteLater()
             workspace["page"] = page
             workspace["placeholder"] = None
-            # 页面自带滚动区，内容在首次 show 时构建；这里先建好，
-            # 避免切过去的第一帧是空页。
+            # 页面首次 show 才建内容；这里先建好，避免首帧空白。
             page.buildDemoContent()
         self._stack.setCurrentIndex(index)
         if self._pivot.getCurrentIndex() != index:

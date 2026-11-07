@@ -1,4 +1,4 @@
-"""表格?"""
+"""表格。"""
 
 import random
 from PyQt6.QtWidgets import QFileDialog, QHBoxLayout
@@ -153,9 +153,6 @@ class DataTablePage(ExamplePage):
                     self._styleTable.setItemForeground(row, 3, QColor(76, 175, 80))
                 else:
                     self._styleTable.setItem(row, 3, "🟡 正常", center=True)
-        # 行高亮用**半透明**色调：自动与深浅两种主题的底混合，黑字 / 白字都可读。
-        # 实心浅色只适合浅色主题 —— 深色主题下白字压在浅底上直接看不清。
-        # 色相刻意避开状态列的红 / 绿（前景色生效后同色相底会把文字糊掉）。
         self._styleTable.setRowBackground(1, QColor(64, 158, 255, 51))
         self._styleTable.setRowBackground(4, QColor(147, 112, 219, 51))
         bold_font = QFont()
@@ -219,7 +216,9 @@ class DataTablePage(ExamplePage):
         btn_layout.addWidget(self._alignLabel)
         align_left_btn = ElaPushButton("靠左", self)
         align_left_btn.setFixedWidth(60)
-        align_left_btn.clicked.connect(lambda: self._onSetAlignment(0, Qt.AlignmentFlag.AlignLeft))
+        align_left_btn.clicked.connect(
+            lambda: self._onSetAlignment(0, Qt.AlignmentFlag.AlignLeft)
+        )
         btn_layout.addWidget(align_left_btn)
         align_center_btn = ElaPushButton("居中", self)
         align_center_btn.setFixedWidth(60)
@@ -229,7 +228,9 @@ class DataTablePage(ExamplePage):
         btn_layout.addWidget(align_center_btn)
         align_right_btn = ElaPushButton("靠右", self)
         align_right_btn.setFixedWidth(60)
-        align_right_btn.clicked.connect(lambda: self._onSetAlignment(0, Qt.AlignmentFlag.AlignRight))
+        align_right_btn.clicked.connect(
+            lambda: self._onSetAlignment(0, Qt.AlignmentFlag.AlignRight)
+        )
         btn_layout.addWidget(align_right_btn)
         btn_layout.addStretch()
         parent_layout.addWidget(self._sortTable)

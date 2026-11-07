@@ -1,4 +1,4 @@
-"""[pyqt6_ela_pro] 会话管理页（多话题，架构 B）?"""
+"""[pyqt6_ela_pro] 会话管理页（多话题，架构 B）。"""
 
 from PyQt6.QtCore import QPoint
 from PyQt6.QtWidgets import QHBoxLayout, QStackedWidget, QVBoxLayout, QWidget
@@ -37,7 +37,6 @@ class ChatSessionPage(ExamplePage):
         self._sessions: dict[str, ElaChatSessionInfo] = {}
         self._pages: dict[str, _TopicPage] = {}
         self._bundles: dict[str, dict] = {}
-        #: 标签下标 → 话题 id（ElaTabBar 可拖动换序，靠它保持映射）
         self._tab_ids: list[str] = []
         self._seq = 0
         self._tabs = None
@@ -47,7 +46,6 @@ class ChatSessionPage(ExamplePage):
         self._style_button = None
         self._reasoning_style = ElaChatReasoningStyleType.Collapse
         super().__init__(parent)
-
 
     def _addDemoContent(self, main_layout):
         self._addInfoText(
@@ -86,8 +84,7 @@ class ChatSessionPage(ExamplePage):
         self._restore_button.clicked.connect(self._on_restore_clicked)
         controls.addWidget(archive_button)
         controls.addWidget(self._restore_button)
-        # 外观偏好是**宿主的全局设置**（架构 B：每页一个 widget，得显式传播，
-        # 否则切话题会看到不同形态）；这里用一个开关演示「改了要应用到所有页」
+        # 外观偏好是宿主全局设置；每页一个 widget，必须显式传播到所有页。
         self._reasoning_style = "collapse"
         style_button = ElaButton("思考形态：折叠", variant="outlined", parent=self)
         style_button.setFixedWidth(140)
@@ -127,7 +124,6 @@ class ChatSessionPage(ExamplePage):
             return
         self._stack.setFixedHeight(target)
 
-
     def _createTopic(self, title=None, bundle=None, activate=True) -> str:
         """新建话题（可带归档 bundle）；返回话题 id。"""
         self._seq += 1
@@ -158,15 +154,12 @@ class ChatSessionPage(ExamplePage):
 
         mock = ElaChatMockBackend(container, tickMs=28)
         binder = ElaChatStreamBinder(chat, worker=mock)
-        # 用 Full 变体：多带一份附件，重新生成 / 重试时宿主才拿得到它
         chat.messageSubmittedFull.connect(
             lambda text, attachments: binder.startTurn(text, attachments=attachments)
         )
         mock.turnFinished.connect(binder.finish)
-        # 输入区工具栏自带的「新建话题」按钮 → 宿主建新话题并切过去
         chat.newTopicRequested.connect(lambda: self._createTopic(activate=True))
         chat.cleared.connect(lambda: self._status.setStatus("当前话题上下文已清空"))
-        # 标签上的条数跟着消息走（宿主列表的最简接线）
         chat.chatView().messageAdded.connect(
             lambda *_args, tid=topicId: self._refreshTab(tid)
         )
@@ -181,13 +174,10 @@ class ChatSessionPage(ExamplePage):
             draft = (bundle.get("extra") or {}).get("draft", "")
             if draft:
                 chat.chatInput().setText(draft)
-        # 外观偏好（宿主全局设置）在导入之后统一 apply —— 话题切换要看起来一致，
-        # 不能让每个话题各带一套（bundle 里的 view 段是「导出那一刻」的快照）
+        # 导入后统一 apply 外观偏好：不能让每个话题各带一套快照。
         self._applyAppearance(topic)
-        # 组件侧记录「本页属于哪个话题」（宿主标签栏才是权威，这里保持一致）
         chat.setCurrentSessionId(topicId)
         return topic
-
 
     def _applyAppearance(self, topic: _TopicPage) -> None:
         """把宿主的全局外观偏好应用到某个话题页。"""
@@ -201,7 +191,9 @@ class ChatSessionPage(ExamplePage):
             else ElaChatReasoningStyleType.Collapse
         )
         label = (
-            "内联" if self._reasoning_style == ElaChatReasoningStyleType.Inline else "折叠"
+            "内联"
+            if self._reasoning_style == ElaChatReasoningStyleType.Inline
+            else "折叠"
         )
         self._style_button.setText(f"思考形态：{label}")
         for topic in self._pages.values():
@@ -216,7 +208,7 @@ class ChatSessionPage(ExamplePage):
         topic = self._pageFor(topicId)
         index = self._tab_ids.index(topicId) if topicId in self._tab_ids else -1
         if index >= 0 and self._tabs.currentIndex() != index:
-            self._tabs.setCurrentIndex(index)  # 触发 _on_tab_changed 切页
+            self._tabs.setCurrentIndex(index)
         self._stack.setCurrentWidget(topic.container)
         self._refreshTab(topicId)
         self._status.setStatus(f"已切换到「{self._sessions[topicId].title}」")
@@ -231,8 +223,7 @@ class ChatSessionPage(ExamplePage):
             extra={"draft": topic.chat.chatInput().text()},
         )
         self._bundles[topicId] = bundle
-        # 关键：先作废回合，再让页面消失 —— 否则旧回合的迟到分片会落进
-        # 恢复出来的同 id 消息（importSession 保留消息 id）
+        # 先作废回合再销毁页面：否则旧回合的迟到分片会落进恢复出的同 id 消息。
         topic.binder.abortTurn()
         topic.mock.shutdown()
         if topicId in self._tab_ids:
@@ -262,7 +253,6 @@ class ChatSessionPage(ExamplePage):
         self._activateTopic(topicId)
         self._status.setStatus(f"已恢复「{session.title}」（含草稿，消息 id 保持稳定）")
         return True
-
 
     def _on_new_topic_clicked(self):
         """新建话题：新页面 + 切过去；上一个话题的生成继续在后台跑。"""
@@ -335,7 +325,6 @@ class ChatSessionPage(ExamplePage):
             self._activateTopic(remaining[-1])
         else:
             self._createTopic(activate=True, title="话题 1")
-
 
     def _currentTopicId(self):
         index = self._tabs.currentIndex() if self._tabs is not None else -1

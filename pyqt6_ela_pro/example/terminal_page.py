@@ -1,4 +1,4 @@
-"""[pyqt6_ela_pro] 终端输出展示示例页?"""
+"""[pyqt6_ela_pro] 终端输出展示示例页。"""
 
 import random
 
@@ -73,14 +73,8 @@ class TerminalPage(ExamplePage):
     def _addDemoContent(self, main_layout):
         self._demoTerminal(main_layout)
 
-    # ── 单输出框 + 场景按钮 ────────────────────────────────────────
     def _demoTerminal(self, main_layout):
-        """终端输出：一个 ``ElaTerminalView`` + 底部场景触发按钮。
-
-        每个按钮把一种场景喂进同一个输出框；进度条按真实终端的方式用 ``\\r``
-        反复重画**同一行**（只有结束才 ``\\n`` 收口），流式输出逐行追加，
-        调色板按钮直接切换这个实例的配色。
-        """
+        """终端输出：一个 ``ElaTerminalView`` + 底部场景触发按钮。"""
         main_layout.addLayout(
             self._createHeaderRow(
                 "ElaTerminalView - 终端输出（单输出框 + 场景按钮）",
@@ -100,7 +94,6 @@ class TerminalPage(ExamplePage):
         view.append(SAMPLE_ANSI)
         main_layout.addWidget(view)
 
-        # 场景按钮行
         row = QWidget(self)
         row_layout = QHBoxLayout(row)
         row_layout.setContentsMargins(0, 0, 0, 0)
@@ -139,7 +132,6 @@ class TerminalPage(ExamplePage):
         row_layout.addStretch(1)
         main_layout.addWidget(row)
 
-        # 调色板按钮行（作用于同一个输出框）
         palette_row = QWidget(self)
         palette_layout = QHBoxLayout(palette_row)
         palette_layout.setContentsMargins(0, 0, 0, 0)
@@ -158,7 +150,6 @@ class TerminalPage(ExamplePage):
         palette_layout.addStretch(1)
         main_layout.addWidget(palette_row)
 
-        # ── 场景实现（闭包；</> 代码 按钮展示的就是本方法自身）────────
         progress_state = {"percent": 0}
         stream_state = {"index": 0}
 
@@ -175,7 +166,6 @@ class TerminalPage(ExamplePage):
             bar = (
                 "\x1b[36m" + "━" * filled + "\x1b[90m" + "━" * (20 - filled) + "\x1b[0m"
             )
-            # \r 整行重绘：不追加 \n，当前行实时上屏；只有结束才收口
             view.append(f"\r{bar} {percent:3d}%")
             if percent >= 100:
                 stop_timers()
@@ -219,8 +209,6 @@ class TerminalPage(ExamplePage):
         progress_btn.clicked.connect(start_progress)
         stream_btn.clicked.connect(start_stream)
         stop_btn.clicked.connect(stop_timers)
-
-    # ── 清理 ──────────────────────────────────────────────────────
 
     def closeEvent(self, event):  # noqa: N802 (Qt 命名)
         for timer in self._timers:

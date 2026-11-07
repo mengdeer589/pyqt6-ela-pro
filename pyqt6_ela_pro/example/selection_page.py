@@ -29,10 +29,8 @@ from pyqt6_ela_pro import (
 
 from .base_page import ExamplePage
 
-#: 日志最大行数
 _MAX_LOG_LINES = 200
 
-#: 假后端按动作 id 给的流式分片（本页没有真模型，纯演示对话框的显示契约）
 _FAKE_REPLIES = {
     "translate": (
         "## 翻译\n\n",
@@ -58,7 +56,6 @@ class SelectionAssistantPage(ExamplePage):
 
     PAGE_TITLE = "[ela_ext] 划词助手"
 
-    #: 助手启用状态变化（供托盘菜单等外部入口回写文案用）
     assistantStateChanged = pyqtSignal(bool)
 
     def _addDemoContent(self, main_layout):
@@ -140,8 +137,6 @@ class SelectionAssistantPage(ExamplePage):
         layout.addWidget(self._length_combo)
         layout.addSpacing(12)
 
-        # 取词范围：拖选要向前台注入 Ctrl+C（终端里等于 SIGINT），默认用
-        # 内置启发式过滤器把跨窗口 / 窗口边框 / 超长拖拽挡掉。
         scope_label = ElaText("拖选取词", row)
         scope_label.setTextPixelSize(14)
         layout.addWidget(scope_label)
@@ -180,8 +175,7 @@ class SelectionAssistantPage(ExamplePage):
     def toggleAssistantFromTray(self) -> bool:
         """供托盘菜单等外部入口调用的开关入口（与页面内开关双向同步）。
 
-        :returns: 切换后的**实际**启用状态（启用失败时为 ``False``，
-            此时页面开关已自动回滚）
+        :returns: 切换后的实际状态；失败为 ``False``，此时页面开关已回滚。
         """
         assistant = self._ensure_assistant()
         target = not assistant.isEnabled()
@@ -197,13 +191,11 @@ class SelectionAssistantPage(ExamplePage):
 
     def _on_compact_toggled(self, checked: bool) -> None:
         if self._assistant is not None:
-            # 外观配置走 popup() 句柄，助手只负责手势编排
             self._assistant.popup().setCompactMode(checked)
         self._log_line(f"紧凑模式：{checked}")
 
     def _on_restore_toggled(self, checked: bool) -> None:
         if self._assistant is not None:
-            # 取词参数走 capture() 句柄（注入自定义后端时同样有效）
             self._assistant.capture().setRestoreClipboard(checked)
         self._log_line(f"恢复剪贴板：{checked}")
 
@@ -214,10 +206,7 @@ class SelectionAssistantPage(ExamplePage):
         self._log_line(f"最小长度：{length}")
 
     def _apply_scope(self, assistant: ElaSelectionAssistant) -> None:
-        """按「拖选取词」下拉框配置取词闸门。
-        拖选取词要向前台窗口注入 ``Ctrl+C``，而拖选与「拖窗口 / 拖滚动条 /
-        信号。所以默认用**内置启发式过滤器**（跨窗口 / 窗口边框 / 超长拖拽
-        """
+        """按「拖选取词」下拉框配置取词闸门。"""
         scope = self._scope_combo.currentData() or "builtin"
         if scope == "all":
             assistant.setCaptureFilter(None)
@@ -371,20 +360,10 @@ class SelectionAssistantPage(ExamplePage):
             QApplication.clipboard().setText(text)
             self._log_line("  宿主实现：已写入剪贴板")
         elif actionId in _FAKE_REPLIES:
-            # 需要跑模型的动作：开结果对话框（对话流式显示模型返回的 Markdown）。
-            # ``_start_action`` 是第 04 节 demo 方法里定义的闭包，存了一份到实例上
             self._start_action(actionId, text)
 
     def _demoResultDialog(self, main_layout):
-        """结果对话框：宿主推进流式内容，取消接 ``stopRequested`` 自己中止。
-
-        对话框（``ElaSelectionResultDialog``）**只管显示，不碰网络** —— 本页没有
-        真模型，所以用一个挂在页面上的 ``QTimer`` 逐段吐字当假后端。
-
-        本节的接入代码**刻意全部写在这个方法体内**（含下面几个局部闭包），因为
-        每节标题的「</> 代码」按钮展示的就是本方法的源码 —— 拆到 ``_`` 开头的
-        helper 里等于把读者要学的东西藏起来了。
-        """
+        """结果对话框：宿主推进流式内容，取消接 ``stopRequested`` 自己中止。"""
         self._addInfoText(
             "点下面的按钮会在光标附近弹出结果对话框，逐段显示 Markdown。"
             "对话框只负责显示，不发网络请求：内容由本页的假后端用 QTimer 逐段推进，"
@@ -398,10 +377,7 @@ class SelectionAssistantPage(ExamplePage):
         timer_box = {"timer": None}
 
         def abort(actionId):
-            """``stopRequested`` 的处理：停掉本页的假后端。
-            真实宿主在这里 abort 自己的 HTTP 请求 / 取消 worker —— 对话框管不了
-            也不该管网络。不接这一条，面板关了模型还在烧 token。
-            """
+            """``stopRequested`` 的处理：停掉本页的假后端。"""
             timer = timer_box["timer"]
             if timer is not None:
                 timer.stop()
@@ -411,7 +387,7 @@ class SelectionAssistantPage(ExamplePage):
 
         def drive(source):
             """假后端：开一个回合，把 ``source`` 逐段推进进去直到落定。"""
-            turn = dialog.beginStream()  # ← turn token，挡掉迟到分片
+            turn = dialog.beginStream()
             index = 0
 
             def tick():
@@ -421,7 +397,7 @@ class SelectionAssistantPage(ExamplePage):
                     index += 1
                     return
                 timer.stop()
-                dialog.endStream(turn)  # 落定 → 发 finished → 复制按钮可用
+                dialog.endStream(turn)
 
             # 定时器必须是页面的子对象（QTimer.singleShot 是无主的，页面销毁后
             # 照样在 T+ms 触发，去摸已释放的控件 = 0xC0000409 静默终止）
@@ -435,7 +411,7 @@ class SelectionAssistantPage(ExamplePage):
             actionId, text="Hello world, this is a sample selection for the demo."
         ):
             """**新划词**：开窗 + 按落点定位 + 跑一个回合。"""
-            abort(actionId)  # 顶掉上一回合（会先发一次 stopRequested）
+            abort(actionId)
             dialog.openFor(
                 actionId,
                 {"translate": "翻译", "explain": "解释", "summary": "总结"}[actionId],
@@ -446,10 +422,7 @@ class SelectionAssistantPage(ExamplePage):
             drive(_FAKE_REPLIES[actionId])
 
         def regenerate(actionId):
-            """**重新生成**：只重开一个回合。
-            刻意**不调** ``openFor`` —— 重新生成是同一次划词的重跑，标题 / 原文 /
-            位置全是现成的，而 ``openFor`` 会按选区落点重新定位，用户刚把窗口挪到
-            """
+            """重新生成：只重开一个回合，不调 ``openFor``。"""
             abort(actionId)
             drive(_FAKE_REPLIES[actionId])
 
@@ -477,8 +450,7 @@ class SelectionAssistantPage(ExamplePage):
             )
             dialog.setError("连接模型服务失败：请求超时（演示）")
 
-        # ★ 取消的唯一钩子：关窗 / 停止 / 流式中 Esc 都会发 stopRequested，
-        # 宿主必须在这里真的 abort 后端。
+        # 取消的唯一钩子：关窗 / 停止 / Esc 都会发 stopRequested，宿主在这里真的 abort 后端。
         dialog.stopRequested.connect(abort)
 
         # 重新生成 = 同一次划词的重跑，重开一个回合即可（regenerate 刻意不走
@@ -492,8 +464,6 @@ class SelectionAssistantPage(ExamplePage):
             )
         )
 
-        # 闭包 start 要给真实划词路径（``_on_action_triggered``）也用，存一份到
-        # 实例上 —— 比让那条路径复制一遍 openFor 好
         self._start_action = start
 
         row = QWidget(self)
@@ -547,7 +517,6 @@ class SelectionAssistantPage(ExamplePage):
             self._assistant.setEnabled(False)
         # 结果对话框是无父顶层窗：必须显式 close + deleteLater，光靠父窗口
         # 析构带不走它，会留在屏幕上（测试 tests/selection_assistant 守着同一条）。
-        # 先 close() 让它走完 closeEvent → 发 stopRequested，再收尾
         if self._result_dialog is not None:
             self._result_dialog.close()
             self._result_dialog.deleteLater()

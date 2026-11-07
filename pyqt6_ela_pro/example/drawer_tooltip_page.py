@@ -1,4 +1,4 @@
-"""[pyqt6_ela_pro] 弹窗与提示页面?"""
+"""[pyqt6_ela_pro] 弹窗与提示页面。"""
 
 import traceback
 from PyQt6.QtGui import QColor
@@ -25,7 +25,7 @@ from .base_page import ExamplePage
 
 
 class DrawerTooltipPage(ExamplePage):
-    """抽屉与提示组件页面"""
+    """抽屉与提示组件页面。"""
 
     PAGE_TITLE = "弹窗与提示"
 
@@ -71,7 +71,9 @@ class DrawerTooltipPage(ExamplePage):
         btn2 = ElaPushButton("删除", self)
         btn2.setFixedWidth(100)
         set_tooltip(
-            btn2, "删除选中项目\n（此操作不可撤销）", position=ElaToolTipPositionType.Right
+            btn2,
+            "删除选中项目\n（此操作不可撤销）",
+            position=ElaToolTipPositionType.Right,
         )
         btn_layout.addWidget(btn2)
         btn3 = ElaPushButton("关于", self)
@@ -137,7 +139,9 @@ class DrawerTooltipPage(ExamplePage):
         def _show_tooltip_direct():
             _dispose_tip(self._direct_tip)
             self._direct_tip = ElaToolTip("手动定位的提示框", self.window())
-            self._direct_tip.showAt(show_tip_btn, position=ElaToolTipPositionType.TopRight)
+            self._direct_tip.showAt(
+                show_tip_btn, position=ElaToolTipPositionType.TopRight
+            )
 
         def _show_custom_tooltip_direct():
             """提示内容换成任意控件（对齐上游 ElaToolTip.setCustomWidget）。"""
@@ -486,7 +490,6 @@ class DrawerTooltipPage(ExamplePage):
         main_layout.addWidget(self._color_swatch)
         main_layout.addSpacing(20)
 
-
     def _onOpenColorDialog(self):
         dlg = ElaColorDialog(self)
         dlg.setWindowTitle("选择颜色")
@@ -496,7 +499,6 @@ class DrawerTooltipPage(ExamplePage):
         self._recent_colors = dlg.getCustomColorList()
 
     def _onColorSelected(self, color):
-        # colorSelected 给的是 ElaColorDialog 内部维护的 QColor
         self._current_color = color
         self._color_swatch.setText(f"当前色：{color.name()}")
 

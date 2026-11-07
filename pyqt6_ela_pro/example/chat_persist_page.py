@@ -1,4 +1,4 @@
-"""[pyqt6_ela_pro] 持久化与性能页?"""
+"""[pyqt6_ela_pro] 持久化与性能页。"""
 
 from PyQt6.QtWidgets import QHBoxLayout, QVBoxLayout
 
@@ -14,7 +14,6 @@ from .base_page import ExamplePage
 from ._step_player import _ScriptPlayer
 from .chat_demo_kit import note, readonly_chat
 
-#: 这一轮的提问（journal 只记**助手**那条，用户那条由宿主自己存）
 _PROMPT = "把这次压缩的判据写清楚"
 
 
@@ -62,7 +61,6 @@ class ChatPersistPage(ExamplePage):
 
         self._run_round()
 
-
     def _column(self, title, key):
         box = QVBoxLayout()
         box.setSpacing(4)
@@ -72,10 +70,7 @@ class ChatPersistPage(ExamplePage):
         return box
 
     def _say(self, key, text):
-        """更新某一节的说明行。
-        前缀取自 ``self._titles``（固定标题），**不能拿当前文本切前缀** ——
-        说明文字里没有冒号时切出来还是整段，于是每次追加都把上一条又带一遍。
-        """
+        """更新某一节的说明行。"""
         label = self._notes.get(key)
         if label is not None:
             label.setText(f"{self._titles.get(key, '')}：{text}")
@@ -98,10 +93,7 @@ class ChatPersistPage(ExamplePage):
         self._chat.setFixedHeight(target)
 
     def _run_round(self):
-        """跑一轮**带日志**的回答：左边实时显示，右边留待重放。
-        走 widget 层入口（``sendUserMessage`` + ``beginAssistantMessage``），
-        别直接 ``view.beginMessage`` —— 否则 widget 不知道当前流式消息是哪条，
-        """
+        """跑一轮**带日志**的回答：左边实时显示，右边留待重放。"""
         self._chat.sendUserMessage(_PROMPT)
         messageId = self._chat.beginAssistantMessage()
         self._journal = ElaChatTurnJournal()
@@ -186,14 +178,11 @@ class ChatPersistPage(ExamplePage):
         return box
 
     def _demo_journal(self) -> None:
-        """``ElaChatTurnJournal``：把一轮回答记成追加写事件流。
-        记录与重放共用一条路径，``message()`` 随时给出已收到部分；浮点在记录端洗掉；
-        ``loadsLine`` 对截断 / 非法 JSON 返回 ``None``，``fromLines`` 跳过未知事件。
-        """
+        """``ElaChatTurnJournal``：把一轮回答记成追加写事件流。"""
         journal = ElaChatTurnJournal(messageId=self._chat.beginAssistantMessage())
         journal.text("增量分片")
         journal.end("done")
-        lines = journal.dumps().splitlines()  # 一行一条，可直接落盘
+        lines = journal.dumps().splitlines()
         recovered = ElaChatTurnJournal.fromLines(lines)
         return recovered.message()
 
@@ -202,13 +191,11 @@ class ChatPersistPage(ExamplePage):
             self._say("journal", "还没有记录，先跑一轮")
             return
         view = self._chat.chatView()
-        lines = self._journal.dumps().splitlines()  # dumps() 是一个字符串，一行一条
+        lines = self._journal.dumps().splitlines()
         journal = ElaChatTurnJournal.fromLines(lines)
-        # **先清空**：journal 里记的是**记录时的 messageId**，直接重放会和
-        # 现有的那条撞 id（addMessageFromDict 抛 ValueError）。这正好也是
-        # 崩溃恢复的真实场景 —— 进程重启后本来就没有旧消息。
+        # 先清空：journal 记录的是记录时的 messageId，直接重放会撞 id（这也正是崩溃恢复的场景）。
         view.clear()
-        self._chat.sendUserMessage(_PROMPT)  # 用户那条不在 journal 里
+        self._chat.sendUserMessage(_PROMPT)
         journal.replayInto(view)
         self._chat.setGenerating(False)
         self._say(
@@ -232,8 +219,8 @@ class ChatPersistPage(ExamplePage):
             self._say("journal", "还没有记录")
             return
         lines = self._journal.dumps().splitlines()
-        lines.append(lines[-1][: len(lines[-1]) // 2])  # 截断
-        lines.append('{"t":"完全未知的未来事件"}')  # 未知事件
+        lines.append(lines[-1][: len(lines[-1]) // 2])
+        lines.append('{"t":"完全未知的未来事件"}')
         journal = ElaChatTurnJournal.fromLines(lines)
         message = journal.message()
         self._say(
@@ -276,19 +263,13 @@ class ChatPersistPage(ExamplePage):
         return box
 
     def _demo_session(self) -> None:
-        """整会话导出 / 导入，以及按条恢复。
-        ``exportSession`` / ``importSession`` 的 bundle 含元数据、消息与外观段；
-        ``restoreMessages`` 先全量校验再写入，撞 id 抛 ValueError；助手派生字段
-        """
+        """整会话导出 / 导入；按条恢复时 ``preserveIds=True`` 必须先 ``clear()``。"""
         view = self._chat.chatView()
         bundle = view.exportSession(ElaChatSessionInfo(id="s1", title="话题"))
 
-        # 路径 A：整会话替换（clear=True 先清空，再按原 id 恢复）
         view.importSession(bundle)
 
         # 路径 B：按条恢复。preserveIds=True 必须先 clear，否则与现有消息撞 id
-        # view.clear()
-        # view.restoreMessages(bundle["messages"], preserveIds=True)
 
     def _on_export(self):
         view = self._chat.chatView()
@@ -357,17 +338,7 @@ class ChatPersistPage(ExamplePage):
         return box
 
     def _demo_perf(self) -> None:
-        """三条开关分别解决什么：
-
-        1. **交互 resize 默认延迟重排**（阈值 50 条 / 延迟 120ms）——
-           拖窗口时每来一条消息就重排一次会明显卡；
-        2. **历史加载用 ``beginBatch()`` / ``endBatch()``** —— 骨架先建 + 时间片
-           渐进渲染，排空发 ``batchRenderFinished``。**延迟期间 ``parts`` 是空的**，
-           读内容的代码要能扛住；
-        3. **视口外消息默认挂起重型查看器**（``setViewportSuspension``）——
-           挂起时 ``bubble.markdownViewer()`` 返回 ``None``，数据要用
-           ``message()`` 的快照读。
-        """
+        """三条开关分别解决什么： 1. **交互 resize 默认延迟重排**（阈值 50 条 / 延迟 120ms）——。"""
         view = self._chat.chatView()
         view.setResizeReflowDeferred(True, minMessages=50, delayMs=120)
         view.beginBatch()
@@ -420,7 +391,9 @@ class ChatPersistPage(ExamplePage):
         box = QVBoxLayout()
         box.setSpacing(6)
         box.addLayout(
-            self._createHeaderRow("04. 密度 / 披露 / 草稿的持久化", self._demo_view_state)
+            self._createHeaderRow(
+                "04. 密度 / 披露 / 草稿的持久化", self._demo_view_state
+            )
         )
         label = note(
             self,

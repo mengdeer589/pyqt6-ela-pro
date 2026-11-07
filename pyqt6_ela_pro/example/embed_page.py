@@ -1,4 +1,4 @@
-"""外部内容嵌入?"""
+"""外部内容嵌入。"""
 
 from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import (
@@ -39,7 +39,7 @@ TEST_URLS = [
 
 
 class _BrowserPanel(QWidget):
-    """单个浏览器面板"""
+    """单个浏览器面板。"""
 
     def __init__(
         self, title: str, url: str, browser_path: Path, debug_port: int, parent=None
@@ -126,7 +126,6 @@ class _BrowserPanel(QWidget):
         self._browser.pageError.connect(
             lambda url, text: self._on_event(f"[CDP] JS 异常: {url} {text}")
         )
-        # 网络请求日志太嘈杂，默认不显示；需要时接 networkRequest / networkResponse。
         self._browser.consoleMessage.connect(
             lambda level, text: self._on_event(f"[CDP] 控制台 [{level}]: {text}")
         )
@@ -135,7 +134,6 @@ class _BrowserPanel(QWidget):
         self._browser.credentialDetected.connect(self._on_credential)
 
     def _on_event(self, msg: str):
-        # print(msg)
         self._append_log(msg)
 
     def _append_log(self, msg: str):
@@ -227,18 +225,12 @@ class EmbedPage(ExamplePage):
             self._browser_available = True
         except ImportError:
             self._browser_available = False
-        # 缺 pywin32 时整套控件都不建，``_showStatus`` 会摸到它 —— 先置 None 并判空
         self._infoText = None
-        # 浏览器嵌入控件延后到 _addDemoContent 里建：ElaBrowserEmbedder 的构造在
-        # 依赖不全时会抛 ImportError，而示例页是被主窗口逐个构造的
         self._browser = None
         super().__init__(parent)
 
     def _addDemoContent(self, main_layout):
-        """缺可选依赖时**降级**，不要让整页崩掉。
-        ``ElaWindowEmbedder.__init__`` / ``ElaBrowserEmbedder._checkDependencies()``
-        在没有 pywin32 时抛 ``ImportError``。示例页是被主窗口**逐个构造**的，
-        """
+        """缺可选依赖时**降级**，不要让整页崩掉。"""
         if _win32gui is None:
             hint = ElaText(
                 "本页功能需要可选依赖 pywin32（窗口枚举 / SetParent / CDP）。\n"
@@ -280,10 +272,7 @@ class EmbedPage(ExamplePage):
                 self._embedder.embedByClass(class_name)
 
     def _getAllWindows(self):
-        """枚举可嵌入的顶层窗口。
-        **用库里的 ``window_embedder.win32gui``（没装 pywin32 时是 ``None``），
-        不要裸 ``import win32gui``**：示例在缺可选依赖的环境里必须**降级**，
-        """
+        """枚举可嵌入的顶层窗口（用 ``window_embedder.win32gui``，缺失时降级）。"""
         self._windowsList = []
         if _win32gui is None:
             self._windowCombo.clear()
@@ -418,9 +407,7 @@ class EmbedPage(ExamplePage):
 
         self._embedderContainer = QFrame(self)
         self._embedderContainer.setFrameShape(QFrame.Shape.NoFrame)
-        # 嵌入区是「外部窗口落地的洞」：底色压到 PopupBase 让它与页面底色分开，
-        # 1px 描边用 PopupBorder。**取 eTheme 令牌而不是写死 #2b2b2b / #444**
-        # —— 写死的话深色主题下会变成一块比页面还亮的补丁（主题切换也不跟随）。
+        # 嵌入区底色压到 PopupBase（否则外部窗口白底会和页面融成一片），描边用 PopupBorder（取 eTheme 令牌）。
         _mode = eTheme.getThemeMode()
         setPlainFrame(
             self._embedderContainer,
@@ -441,7 +428,6 @@ class EmbedPage(ExamplePage):
             lambda path: self._showStatus(f"文件拖入: {path}")
         )
         _embedderContainerLay.addWidget(self._embedder)
-        # ElaText 上不了非主题色（paintEvent 会重置 palette），占位文案要用 ColorText
         self._infoText = ColorText(
             '嵌入区域 - 从下拉框选择窗口后点击"嵌入窗口"',
             self._embedderContainer,
@@ -468,8 +454,7 @@ class EmbedPage(ExamplePage):
             parent_layout,
         )
 
-        # 构造与信号接线就写在方法体内：每节的「</> 代码」按钮展示本方法源码，
-        # 拆出去会藏起读者要学的东西；降级分支只跳过实例化。
+        # 构造与信号接线留在方法体内（「</> 代码」展示本方法源码，拆出去会藏起读者要学的东西）。
         mode = eTheme.getThemeMode()
         container = QFrame(self)
         container.setFrameShape(QFrame.Shape.NoFrame)

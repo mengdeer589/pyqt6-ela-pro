@@ -1,4 +1,4 @@
-"""[pyqt6_ela_pro] 示例页面模块?"""
+"""[pyqt6_ela_pro] 示例页面模块。"""
 
 from .animation_icon_page import AnimationIconPage
 from .app_shell_page import AppShellPage
@@ -32,7 +32,6 @@ from .window_shell_page import WindowShellPage
 
 __all__ = [
     "ExamplePage",
-    # 基础组件
     "InputSelectPage",
     "ComboBoxPage",
     "ContainerLayoutPage",
@@ -40,13 +39,10 @@ __all__ = [
     "ButtonsMenusPage",
     "ProgressFeedbackPage",
     "FluentPage",
-    # 数据与图表
     "DataTablePage",
     "ChartLibPage",
     "ChartsPage",
-    # 内容渲染
     "MarkdownPage",
-    # AI 对话（工作台；各工作区类单独导出，供测试与宿主复用）
     "ChatWorkbenchPage",
     "ChatOverviewPage",
     "ChatInputPage",
@@ -55,17 +51,13 @@ __all__ = [
     "ChatTimelinePage",
     "ChatSessionPage",
     "ChatPersistPage",
-    # 窗口与应用外壳
     "WindowShellPage",
     "DrawerTooltipPage",
     "AppShellPage",
-    # 系统交互与嵌入
     "EmbedPage",
     "TerminalPage",
     "SelectionAssistantPage",
-    # 动效与图形
     "AnimationIconPage",
     "BlueprintPage",
-    # 参考文档
     "ChatGuidePage",
 ]

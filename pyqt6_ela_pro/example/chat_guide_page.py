@@ -1,4 +1,4 @@
-"""[pyqt6_ela_pro] 聊天组件指南（ElaChatWidget 怎么用）。?"""
+"""[pyqt6_ela_pro] 聊天组件指南（ElaChatWidget 怎么用）。"""
 
 from __future__ import annotations
 
@@ -6,7 +6,6 @@ from pyqt6_ela_pro import ElaMarkdownViewer
 
 from .base_page import ExamplePage
 
-#: 快照：llm_test/main.py
 LLM_TEST_MAIN_SOURCE = r'''"""llm_test 最小示例：ElaChatWidget + 假 / 真后端（默认无需模型服务）。
 
 宿主接入就四步（见 ``DemoWindow``）：摆组件 → 选后端 → 接信号 → 宿主行为。
@@ -262,7 +261,6 @@ if __name__ == "__main__":
     raise SystemExit(main())
 '''
 
-#: 快照：llm_test/agent_demo.py
 LLM_TEST_AGENT_DEMO_SOURCE = r'''"""真实后端最小示例：把假后端换成 AgentWorker（本地 agents/ 副本 + 本地模型）。
 
 窗口复用 ``main.DemoWindow``（只认 worker 信号，不认具体后端）；
@@ -455,10 +453,7 @@ class ChatGuidePage(ExamplePage):
 
     @staticmethod
     def _code_block(source: str, lang: str = "python") -> str:
-        """代码围栏。**闭合围栏必须独占一行**：贴到源码末行（快照常量常无尾换行）
-        会被解析成未闭合围栏（= 流式中间态），超过 4096 字符时静默丢掉全部 pygments
-        着色，同一 viewer 里后续内容还会被吞进代码块。
-        """
+        """代码围栏：闭合 ``` 必须独占一行（贴在源码末行会被判成未闭合围栏）。"""
         return f"```{lang}\n{source.rstrip()}\n```\n"
 
     def _demoOverview(self, main_layout):

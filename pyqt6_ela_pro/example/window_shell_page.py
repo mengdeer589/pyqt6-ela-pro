@@ -1,4 +1,4 @@
-"""[pyqt6_ela_pro] 「ElaWindow 应用外壳」演示页?"""
+"""[pyqt6_ela_pro] 「ElaWindow 应用外壳」演示页。"""
 
 from __future__ import annotations
 
@@ -58,12 +58,8 @@ class WindowShellPage(ExamplePage):
         self._demoOpenInNewWindow(main_layout)
         self._demoCloseChain(main_layout)
 
-    # ── 公共小工具 ─────────────────────────────────────────────────────
     def _host_window(self) -> ElaWindow | None:
-        """宿主 ElaWindow；没有（守卫测试 / 单页预览）时返回 ``None``。
-
-        页面必须在没有宿主时也能构造 —— ``tests/example/`` 的守卫会单独构造每一页。
-        """
+        """宿主 ElaWindow；没有（守卫测试 / 单页预览）时返回 ``None``。"""
         window = self.window()
         return window if isinstance(window, ElaWindow) else None
 
@@ -103,13 +99,9 @@ class WindowShellPage(ExamplePage):
 
     @staticmethod
     def _flag_on(flags, flag) -> bool:
-        """位测试 ``getWindowButtonFlags()``。
-        它返回的是**普通 Enum 的伪成员**（组合值如 255）：``&`` / ``|`` / ``int()``
-        在这个绑定里都不可用，只有 ``.value`` 能读；组合值要回传时也用
-        """
+        """位测试 ``getWindowButtonFlags()``：只有 ``.value`` 可读；组合值用 ``ElaAppBarType.ButtonType(...)`` 回传。"""
         return bool(getattr(flags, "value", 0) & getattr(flag, "value", 0))
 
-    # ── 01 外壳总览 ────────────────────────────────────────────────────
     def _demoOverview(self, parent_layout):
         parent_layout.addLayout(
             self._createHeaderRow("01. ElaWindow - 外壳总览", self._demoOverview)
@@ -168,7 +160,6 @@ class WindowShellPage(ExamplePage):
             if key:
                 yield key
 
-    # ── 02 导航栏 ──────────────────────────────────────────────────────
     def _demoNavigationBar(self, parent_layout):
         parent_layout.addLayout(
             self._createHeaderRow(
@@ -237,7 +228,6 @@ class WindowShellPage(ExamplePage):
         )
         parent_layout.addSpacing(20)
 
-    # ── 03 AppBar 按钮 / 窗口状态 ──────────────────────────────────────
     def _demoAppBarButtons(self, parent_layout):
         parent_layout.addLayout(
             self._createHeaderRow(
@@ -302,7 +292,6 @@ class WindowShellPage(ExamplePage):
         parent_layout.addWidget(row)
         parent_layout.addSpacing(20)
 
-    # ── 04 窗口背景与绘制模式 ──────────────────────────────────────────
     def _demoWindowBackground(self, parent_layout):
         parent_layout.addLayout(
             self._createHeaderRow(
@@ -331,10 +320,7 @@ class WindowShellPage(ExamplePage):
         parent_layout.addSpacing(20)
 
     def _apply_background(self, window: ElaWindow, on: bool) -> None:
-        """应用 / 恢复渐变背景。
-        宿主自己带开关时（示例主窗口的 ``_set_background_enabled``）**走宿主的**，
-        否则两处各自记状态、界面立刻自相矛盾；没有该钩子（普通 ElaWindow）就
-        """
+        """应用 / 恢复渐变背景；宿主有开关钩子时走宿主的。"""
         host_toggle = getattr(window, "_set_background_enabled", None)
         if callable(host_toggle):
             host_toggle(on)
@@ -348,14 +334,12 @@ class WindowShellPage(ExamplePage):
             painter = QPainter(pixmap)
             painter.fillRect(pixmap.rect(), gradient)
             painter.end()
-            # 亮 / 暗各一张，切主题时 ElaWindow 自己取对应那张
             for mode in (ElaThemeType.ThemeMode.Light, ElaThemeType.ThemeMode.Dark):
                 window.setWindowPixmap(mode, pixmap)
             window.setWindowPaintMode(ElaWindowType.PaintMode.Pixmap)
         else:
             window.setWindowPaintMode(ElaWindowType.PaintMode.Normal)
 
-    # ── 05 内容堆栈 ────────────────────────────────────────────────────
     def _demoContentStack(self, parent_layout):
         parent_layout.addLayout(
             self._createHeaderRow(
@@ -429,7 +413,6 @@ class WindowShellPage(ExamplePage):
             if widget is None:
                 return
 
-    # ── 06 DockWidget ──────────────────────────────────────────────────
     def _demoDockWidgets(self, parent_layout):
         parent_layout.addLayout(
             self._createHeaderRow(
@@ -489,7 +472,6 @@ class WindowShellPage(ExamplePage):
             dock.deleteLater()
         self._demo_docks = []
 
-    # ── 07 页面在新窗口打开 ────────────────────────────────────────────
     def _demoOpenInNewWindow(self, parent_layout):
         parent_layout.addLayout(
             self._createHeaderRow(
@@ -522,10 +504,7 @@ class WindowShellPage(ExamplePage):
         parent_layout.addSpacing(20)
 
     def _on_page_open_in_new_window(self, node_key: str) -> None:
-        """两条信号（自动开窗 / 宿主开窗）都只是「页面已在新窗口打开」的通知。
-        计数用本页自己的字典：C++ 的 ``getPageOpenInNewWindowCount`` 只统计
-        ``QMetaObject`` 复制出来的窗口，Python 页面走宿主建窗不会进它。
-        """
+        """两条信号（自动开窗 / 宿主开窗）都只是「页面已在新窗口打开」的通知。"""
         window = self._host_window()
         if window is None:
             return
@@ -535,7 +514,6 @@ class WindowShellPage(ExamplePage):
             f"已打开的新窗口：{count}（上次：{window.getNavigationNodeTitle(node_key)}）"
         )
 
-    # ── 08 关闭链路 ────────────────────────────────────────────────────
     def _demoCloseChain(self, parent_layout):
         parent_layout.addLayout(
             self._createHeaderRow(

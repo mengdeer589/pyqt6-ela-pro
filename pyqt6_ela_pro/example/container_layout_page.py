@@ -1,4 +1,4 @@
-"""容器与布局?"""
+"""容器与布局。"""
 
 from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import QApplication, QHBoxLayout, QVBoxLayout, QWidget
@@ -75,7 +75,6 @@ class ContainerLayoutPage(ExamplePage):
                 self._drawer_area.collapse()
 
         def on_expand_state_changed(is_expand):
-            # 点击标题栏切换时，回向同步开关与文字（setIsToggled 值不变时不发信号，无循环）
             self._drawer_switch_text.setText("开" if is_expand else "关")
             self._drawer_switch.setIsToggled(is_expand)
 
@@ -134,7 +133,6 @@ class ContainerLayoutPage(ExamplePage):
         page.setPageTitleSpacing(12)
         for index in range(3):
             block = ElaThemeWidget()
-            # 段标题 = 这段的 windowTitle（空的话 C++ 会自动命名成 Page_N）
             block.setWindowTitle(f"第 {index + 1} 段")
             block_layout = QVBoxLayout(block)
             block_layout.setContentsMargins(10, 10, 10, 10)
@@ -209,12 +207,13 @@ class ContainerLayoutPage(ExamplePage):
         text3.setTextPixelSize(14)
         layout3.addWidget(text3)
 
-        splitter = create_ela_splitter([widget1, widget2, widget3], Qt.Orientation.Horizontal)
+        splitter = create_ela_splitter(
+            [widget1, widget2, widget3], Qt.Orientation.Horizontal
+        )
         splitter.setMinimumHeight(80)
         parent_layout.addWidget(splitter)
         parent_layout.addSpacing(12)
 
-        # Vertical splitter
         v1 = ElaThemeWidget(self)
         v1.setMinimumSize(50, 50)
         l1 = QVBoxLayout(v1)
@@ -392,8 +391,7 @@ class ContainerLayoutPage(ExamplePage):
             )
         )
         self._addInfoText("SiliconUI 风格抽屉，支持上下左右四个方向滑入", parent_layout)
-        # PyQt6/Qt6：``QFont().defaultFamily()`` 首次调用要 190ms（会去解析系统默认字体，
-        # 触发字体引擎初始化）；应用字体的族名是零成本的（0.01ms）且就是同一个意图。
+        # 不要 QFont().defaultFamily()（首次 ~190ms）；用 QApplication.font().family()（0.01ms）。
         default_font_family = QApplication.font().family()
         for name, pos, size in [
             ("左侧抽屉", ElaDrawerPositionType.Left, 300),

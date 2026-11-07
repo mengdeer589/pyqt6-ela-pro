@@ -1,4 +1,4 @@
-"""启动与托盘?"""
+"""启动与托盘。"""
 
 from __future__ import annotations
 
@@ -28,8 +28,6 @@ from .tray_host import ElaTrayHost, QUIT_ID, SEPARATOR, TOGGLE_WINDOW_ID
 
 
 #: 托盘三态的形状，坐标按 24x24 坐标系给、渲染时按目标尺寸缩放。
-#: 元素是 ``("path", d)``（只支持 M / L / Z 绝对指令）或 ``("circle", cx, cy, r)``。
-#: 用绝对指令而不是 SVG 那套 ``h`` / ``v`` 相对简写：少一套语法要解析。
 _TRAY_SHAPES = {
     # 九宫格式方块
     "normal": [
@@ -61,7 +59,6 @@ _TRAY_ICON_WARNING = "warning"
 _TRAY_ICON_CRITICAL = "critical"
 _TRAY_ICON_HOST = "host"
 
-#: 托盘图标名 → 演示色（托盘由 Explorer 绘制，``QIcon`` 不吃 ``eTheme``）
 _TRAY_COLORS = {
     "normal": "#4f9dff",
     "warning": "#f0a13a",
@@ -71,14 +68,7 @@ _TRAY_COLORS = {
 
 
 def _scaled_path(d: str, scale: float) -> QPainterPath:
-    """把 24x24 坐标系的 ``M`` / ``L`` / ``Z`` 绝对路径按 ``scale`` 放大。
-
-    刻意不实现 SVG 的相对指令（``h`` / ``v`` / ``a`` …）—— 那些是弧线与相对
-    偏移，手写解析器在缩放下容易走样，而示例只需要直线段。
-
-    词法切分必须把「指令字母」与「紧跟的数字」分开（``"M4 5"`` → ``M`` / ``4``
-    / ``5``），直接 ``str.split()`` 会拿到 ``"M4"`` 这种粘连 token。
-    """
+    """把 24x24 坐标系的 ``M`` / ``L`` / ``Z`` 绝对路径按 ``scale`` 放大。"""
     tokens = re.findall(r"[MLZ]|-?\d+(?:\.\d+)?", d)
     path = QPainterPath()
     i = 0
@@ -100,15 +90,7 @@ def _scaled_path(d: str, scale: float) -> QPainterPath:
 
 
 def _tray_icon(name: str, color: str | None = None) -> QIcon:
-    """按名字画托盘图标（示例不依赖外部资源文件）。
-
-    托盘由 Explorer 绘制、``QIcon`` 不吃 ``eTheme``，所以颜色由宿主显式给。
-    **多尺寸渲染（16~64）适配不同 DPI 与任务栏缩放** —— 只给一个尺寸，
-    Explorer 按 2x 缩放时会插值发虚。
-
-    这里用 ``QPainterPath`` 自绘而不是图标包：托盘图标属于**宿主资产**，示例
-    该证明的是「多尺寸 + 显式配色」这两条契约，而不是自带一套图标集。
-    """
+    """按名字画托盘图标；多尺寸渲染（16~64）适配 DPI 与任务栏缩放。"""
     shapes = _TRAY_SHAPES[name]
     color = color or _TRAY_COLORS[name]
     icon = QIcon()
@@ -144,7 +126,6 @@ class AppShellPage(ExamplePage):
     PAGE_TITLE = "启动与托盘"
 
     def __init__(self, parent=None):
-        # 托盘 / 宿主 / 日志在 demo 方法里延迟创建；先给 None，让 _log_line 能提前判空。
         self._tray = None
         self._host = None
         self._log = None
@@ -344,10 +325,7 @@ class AppShellPage(ExamplePage):
         parent_layout.addSpacing(20)
 
     def _buildTrayMenu(self):
-        """裸 ElaMenu 直接 setContextMenu 即可（托盘菜单只认原生 QMenu 体系）。
-        注意 ElaMenu 的父对象必须是 **QWidget**（ElaTrayIcon 是 QObject，不行），
-        所以挂到页面自身。
-        """
+        """裸 ElaMenu 直接 setContextMenu 即可（托盘菜单只认原生 QMenu 体系）。"""
         menu = ElaMenu(self)
         menu.setMenuItemHeight(28)
         menu.addElaIconAction(ElaIconType.IconName.Gear, "设置…")
@@ -362,10 +340,7 @@ class AppShellPage(ExamplePage):
         self._log.appendPlainText(f"[{stamp}] {text}")
 
     def _ensure_tray_visible(self):
-        """首次交互时把裸托盘图标显示出来。
-        本页第 03 节的 ``ElaTrayIcon`` 演示对象默认**不占**系统托盘（第 04 节的
-        宿主演示已经有一个图标在托盘里）。不显示的话三态切换 / 气泡通知都没有
-        """
+        """首次交互时把裸托盘图标显示出来。"""
         if self._tray is None or self._tray.isVisible():
             return
         self._tray.show()
@@ -473,10 +448,7 @@ class AppShellPage(ExamplePage):
         main_layout.addWidget(row)
 
     def _find_selection_page(self):
-        """定位划词助手页面。
-        ``ElaWindow`` **没有**「按 widget 查页面」的 API（只有
-        ``navigation(pageKey)``），但 ``addPageNode`` 会把页面 reparent 进
-        """
+        """定位划词助手页面。"""
         window = self.window()
         if window is None:
             return None
@@ -488,8 +460,6 @@ class AppShellPage(ExamplePage):
             self._host.toggleWindow()
         elif actionId == "selection":
             # 页面提供的对外入口（复用页面内开关那条路径，失败回滚只写一处）。
-            # 注意**不是** setAssistantEnabled —— 划词页没这个方法，
-            # 外部入口是 toggleAssistantFromTray()。
             page = self._find_selection_page()
             if page is None:
                 return
@@ -499,9 +469,7 @@ class AppShellPage(ExamplePage):
             self._log_line(f"未处理的动作：{actionId}")
 
     def _on_quit_requested(self):
-        """退出**交给宿主**：``ElaTrayHost.shutdown()`` 自己管窗口与进程，
-        页面只发信号 + 记日志（直接 ``QApplication.quit()`` 会跳过宿主的
-        清理顺序，托盘图标会留一个点不动的灰图标）。"""
+        """退出**交给宿主**：``ElaTrayHost.shutdown()`` 自己管窗口与进程， 页面只发信号 + 记日志（直接 ``QApplication.quit()`` 会跳过宿主的。"""
         self._log_line("宿主请求退出")
         self._host.shutdown()
 
@@ -517,7 +485,6 @@ class AppShellPage(ExamplePage):
         )
 
     def _on_selection_state_changed(self, enabled):
-        # 划词页开关 -> 托盘文案（双向同步的另一半）
         self._sync_selection_item(enabled)
 
     def _on_window_visibility(self, visible):
@@ -556,11 +523,9 @@ class AppShellPage(ExamplePage):
         self._host.windowVisibilityRequested.connect(self._on_window_visibility)
         self._host.quitRequested.connect(self._on_quit_requested)
         self._host.show()
-        # 初始文案对齐划词页的真实状态（不预设为「开」——助手可能尚未创建）
         page = self._find_selection_page()
         self._sync_selection_item(page.isAssistantEnabled() if page else False)
         if page is not None:
-            # 页面内开关变化时同步回来（双向同步的另一半）
             page.assistantStateChanged.connect(self._on_selection_state_changed)
 
         row = QWidget(self)
@@ -590,9 +555,3 @@ class AppShellPage(ExamplePage):
         self._log.setReadOnly(True)
         self._log.setMinimumHeight(140)
         main_layout.addWidget(self._log)
-
-    # 依赖闭包只认 `self._x(...)`；`btn.clicked.connect(self._on_x)` 这种
-    # 裸引用不匹配，早期版本漏掉它们，症状是运行期 AttributeError 而 lint 全绿。
-
-    # 依赖闭包只认 `self._x(...)`；`btn.clicked.connect(self._on_x)` 这种
-    # 裸引用不匹配，早期版本漏掉它们，症状是运行期 AttributeError 而 lint 全绿。

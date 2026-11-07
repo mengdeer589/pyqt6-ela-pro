@@ -1,4 +1,4 @@
-"""按钮与菜单?"""
+"""按钮与菜单。"""
 
 from functools import partial
 
@@ -32,9 +32,7 @@ from pyqt6_ela_pro import (
 )
 from pyqt6_ela_pro.svg_icon import svg_icon_loader
 
-#: 演示用的内联 SVG（24x24 描边风格）。
-#: ``<<<COLOR_CODE>>>`` 会被 :meth:`ElaButton.setSvgIcon` 替换成**当前主题文字色**
-#: —— 这就是 SVG 图标能跟随深浅色主题与禁用态的原理：宿主不用为两套主题各画一份。
+#: 演示用的内联 SVG（24x24 描边风格）；<COLOR_CODE> 会被替换成当前主题文字色。
 _SVG_BODY = {
     "search": '<circle cx="11" cy="11" r="7"/><path d="M16 16l4 4"/>',
     "plus": '<path d="M12 5v14M5 12h14"/>',
@@ -52,7 +50,6 @@ def _stroke_svg(body: str) -> str:
     )
 
 
-#: 强调色预设。第一个是上游出厂值，其余用来演示「换色后 hover/press 跟着变」。
 _ACCENT_PRESETS = [
     ("出厂蓝", "#0067c0"),
     ("赤陶红", "#c0392b"),
@@ -108,8 +105,6 @@ class ButtonsMenusPage(ExamplePage):
         for name, hexColor in _ACCENT_PRESETS:
             btn = ElaPushButton(name, self)
             btn.setFixedWidth(110)
-            # 用 partial 而不是 lambda：后者在循环里会闭包捕获循环变量，
-            # 且 PyQt6 的 connect(slot, arg) 不是有效重载。
             btn.clicked.connect(partial(self._onAccentPreset, hexColor))
             row.addWidget(btn)
         reset_btn = ElaPushButton("还原", self)
@@ -396,7 +391,6 @@ class ButtonsMenusPage(ExamplePage):
         )
         parent_layout.addSpacing(10)
 
-        # ① SVG 源码直传 —— 最常见的一次调用搞定
         source_row = QHBoxLayout()
         source_row.setSpacing(15)
         for label, key in (("搜索", "search"), ("添加", "plus"), ("下载", "download")):
@@ -410,7 +404,6 @@ class ButtonsMenusPage(ExamplePage):
         disabled.setEnabled(False)
         source_row.addWidget(disabled)
 
-        # 纯图标按钮（无文字）—— 图标单独居中
         icon_only = ElaButton(parent=self)
         icon_only.setSvgIcon(_stroke_svg(_SVG_BODY["close"]), 16)
         icon_only.setToolTip("clearSvgIcon 可退回纯图标状态")
@@ -419,8 +412,6 @@ class ButtonsMenusPage(ExamplePage):
         parent_layout.addLayout(source_row)
         parent_layout.addSpacing(10)
 
-        # ② 图标名形态：先 append 进 loader，再按名字取 —— 适合图标来自
-        #    宿主自己的 .icons 图标包的场景
         loader = svg_icon_loader()
         for key in _SVG_BODY:
             loader.append(f"demo_{key}", _stroke_svg(_SVG_BODY[key]))
@@ -434,7 +425,6 @@ class ButtonsMenusPage(ExamplePage):
                 color="primary",
                 parent=self,
             )
-            # 返回 False 表示图标包里没这个名字（只画文字并 warn 一次）
             assert btn.setSvgIcon(f"demo_{key}", 16) is True
             name_row.addWidget(btn)
 
@@ -478,7 +468,6 @@ class ButtonsMenusPage(ExamplePage):
             "lime",
             "gold",
         ]
-        # Display labels for colors
         color_labels = {
             "default": "Default",
             "primary": "Primary",
@@ -501,7 +490,6 @@ class ButtonsMenusPage(ExamplePage):
         grid = QGridLayout()
         grid.setSpacing(8)
 
-        # Header row
         corner = ElaText("颜色\\变体", self)
         corner.setTextPixelSize(12)
         grid.addWidget(corner, 0, 0, Qt.AlignmentFlag.AlignCenter)
@@ -510,7 +498,6 @@ class ButtonsMenusPage(ExamplePage):
             lbl.setTextPixelSize(12)
             grid.addWidget(lbl, 0, j + 1, Qt.AlignmentFlag.AlignCenter)
 
-        # Data rows
         for i, c in enumerate(colors):
             clbl = ElaText(color_labels[c], self)
             clbl.setTextPixelSize(12)
@@ -522,7 +509,6 @@ class ButtonsMenusPage(ExamplePage):
         parent_layout.addLayout(grid)
         parent_layout.addSpacing(12)
 
-        # ── Extra: danger, disabled, sizes, icons ──
         row = QHBoxLayout()
         row.setSpacing(12)
         for label, v, c, d in [
@@ -544,7 +530,6 @@ class ButtonsMenusPage(ExamplePage):
         parent_layout.addLayout(row)
         parent_layout.addSpacing(8)
 
-        # ── Icon buttons ──
         row = QHBoxLayout()
         row.setSpacing(12)
         for text, icon, v, c in [
@@ -560,7 +545,6 @@ class ButtonsMenusPage(ExamplePage):
         parent_layout.addLayout(row)
         parent_layout.addSpacing(8)
 
-        # ── Loading 态（点「切换加载态」看指示器）──
         row = QHBoxLayout()
         row.setSpacing(12)
         loading_btn = ElaButton("加载中", variant="solid", color="primary", parent=self)

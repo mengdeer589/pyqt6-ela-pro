@@ -1,4 +1,4 @@
-"""图表（第三方库）?"""
+"""图表（第三方库）。"""
 
 import random
 import math
@@ -141,12 +141,10 @@ class ChartLibPage(ExamplePage):
         self._pg_index = 0
         self._pg_curve = self._pg_plot.plot([], [], pen="b")
 
-        # 数据生成 timer
         self._pg_sim_timer = QTimer(self)
         self._pg_sim_timer.setInterval(1)
         self._pg_sim_timer.timeout.connect(self._onPgGenerateData)
 
-        # UI 刷新 timer
         self._pg_ui_timer = QTimer(self)
         self._pg_ui_timer.setInterval(30)
         self._pg_ui_timer.timeout.connect(self._onPgUpdatePlot)
@@ -283,12 +281,10 @@ class ChartLibPage(ExamplePage):
         self._mpl_t = 0.0
         self._mpl_index = 0
 
-        # 数据生成 timer（高频）
         self._mpl_sim_timer = QTimer(self)
         self._mpl_sim_timer.setInterval(1)
         self._mpl_sim_timer.timeout.connect(self._onMplGenerateData)
 
-        # UI 刷新 timer（低频）
         self._mpl_ui_timer = QTimer(self)
         self._mpl_ui_timer.setInterval(30)
         self._mpl_ui_timer.timeout.connect(self._onMplUpdatePlot)

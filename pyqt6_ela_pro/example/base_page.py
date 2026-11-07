@@ -1,4 +1,4 @@
-"""[pyqt6_ela_pro] 示例页面基类"""
+"""[pyqt6_ela_pro] 示例页面基类。"""
 
 import os
 import inspect
@@ -44,7 +44,7 @@ def _res(filename):
 
 
 class ExamplePage(ElaThemeWidget):
-    """示例页面基类，提供通用布局结构"""
+    """示例页面基类，提供通用布局结构。"""
 
     PAGE_TITLE = "[ela_ext] 示例页面"
 
@@ -57,19 +57,16 @@ class ExamplePage(ElaThemeWidget):
         super().__init__(parent)
         self._demo_built = False
         self._setupUI()
-        # 侧边栏收缩/展开是上游 4 条并发的 255ms 属性动画：每帧都会 resize 本页 → 内容
-        # 每帧重排/重绘（单帧 8.6ms，慢机掉帧）。库里的 setResizeReflowDeferred 在
-        # 连续 resize 期间把本页钉住，静止 120ms 后一次性放开（单帧 → 0.0ms）。
+        # 侧边栏 255ms 动画期间每帧 resize：setResizeReflowDeferred 钉住尺寸，静止 120ms 后放开。
         setResizeReflowDeferred(self)
 
     def _setupUI(self):
         self._scrollArea = ElaScrollArea(self)
         self._scrollArea.setWidgetResizable(True)
-        self._scrollArea.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOn)
+        self._scrollArea.setVerticalScrollBarPolicy(
+            Qt.ScrollBarPolicy.ScrollBarAlwaysOn
+        )
 
-        # 脚手架先建、内容惰性构建：24 页全量 eager 构造要 1.2s 且全压在启动路径上
-        # （耗时基线是 PySide6 时代测的；「少建控件 = 少付构造开销」与绑定无关）。
-        # 内容改为首次显示时构建（``buildDemoContent``），启动后由宿主后台逐页预热。
         self._scrollWidget = ElaThemeWidget()
         self._mainLayout = QVBoxLayout(self._scrollWidget)
         self._mainLayout.setContentsMargins(20, 20, 20, 20)
@@ -80,7 +77,7 @@ class ExamplePage(ElaThemeWidget):
         containerLayout.addWidget(self._scrollArea)
 
     def buildDemoContent(self):
-        """构建页面内容（幂等）。``showEvent`` 会调用，宿主也可在空闲时提前预热。"""
+        """构建页面内容（幂等）。"""
         if self._demo_built:
             return
         self._demo_built = True
@@ -134,8 +131,7 @@ class ExamplePage(ElaThemeWidget):
             if btn.text() == "确定":
                 btn.hide()
                 break
-        # 用 ElaPlainTextEdit：右键菜单与滚动条都换成 Ela 控件，跟随主题；
-        # 但背景由主题决定、盖不住，所以高亮配色分亮 / 暗两套（见 _STYLE_DARK/_STYLE_LIGHT）。
+        # 用 ElaPlainTextEdit：右键菜单与滚动条跟随主题；背景由主题决定，高亮配色分亮 / 暗两套。
         edit = ElaPlainTextEdit()
         edit.setReadOnly(True)
         edit.setLineWrapMode(QPlainTextEdit.LineWrapMode.NoWrap)
@@ -144,8 +140,7 @@ class ExamplePage(ElaThemeWidget):
         font.setStyleHint(QFont.StyleHint.Monospace)
         edit.setFont(font)
         edit.document().setDefaultFont(font)
-        # 逐 token 显式上色，**不依赖 Palette.Text**：主题切换会把 Text 刷回
-        # 主题 BasicText（themeModeChanged → onThemeChanged）
+        # 逐 token 显式上色，不依赖 Palette.Text（主题切换会把它刷回 BasicText）。
         _insert_colored_code(edit.document(), source)
         container = QWidget()
         container_layout = QVBoxLayout(container)
@@ -175,17 +170,13 @@ class ExamplePage(ElaThemeWidget):
         container_layout.addWidget(copy_btn)
         dlg._paramLay.setContentsMargins(15, 25, 15, 2)
         dlg.setParamWidget(container)
-        # 关掉 autoFit 再定尺寸：它会在 showEvent 里把宽度夹到 620px、高度按内容
-        # 撑（代码框 sizeHint 很矮），resize() 写了也白写 —— 这是「弹框太小」的根因。
+        # 关掉 autoFit 再定尺寸：它会把宽度夹到 620px、高度按内容撑（代码框会太小）。
         dlg.setAutoFit(False)
         dlg.resize(*self._code_dialog_size())
         return dlg
 
     def _code_dialog_size(self):
-        """代码对话框尺寸：跟随宿主窗口按比例放大，再夹到窗口与屏幕可用区内。
-        ``ElaContentDialog`` 的遮罩只覆盖宿主窗口、弹框居中其上，所以尺寸不能超过
-        窗口（会压到桌面上）；屏幕再小也只能取可用区。
-        """
+        """代码对话框尺寸：跟随宿主窗口按比例放大，再夹到窗口与屏幕可用区内。"""
         owner = self.window()
         screen = owner.screen() or QApplication.primaryScreen()
         width = max(900, round(owner.width() * 0.86))
@@ -198,8 +189,6 @@ class ExamplePage(ElaThemeWidget):
             height = min(height, available.height() - 80)
         return max(640, width), max(480, height)
 
-
-# ── 彩色代码插入到 QTextDocument ──────────────────────────────
 
 _KEYWORDS = {
     "and",
@@ -309,9 +298,6 @@ _TOKEN_RE = _re.compile(
     r"""|(?P<other>.)"""
 )
 
-#: 代码高亮配色：kind -> (前景色, 粗体, 斜体)。
-#: 代码区底色由主题决定、改不了，一套中调色无法在亮 / 暗下都达标，
-#: 因此按主题各一套，并按 WCAG 4.5:1 校验。
 _STYLE_DARK = {
     "comment": ("#8CC06E", False, True),
     "decorator": ("#DCDCAA", False, False),
@@ -381,9 +367,7 @@ def _insert_colored_line(cur, raw, style):
         if kind == "ident":
             fmt = _make_fmt(*style[_ident_type(i, matches, raw)])
         elif kind == "other":
-            # 空白也要**显式上色**：主题切换会把 Palette.Text 刷回主题
-            # BasicText（themeModeChanged → onThemeChanged），依赖它的话
-            # 亮色主题下缩进会变成近黑
+            # 空白也要显式上色：主题切换会把 Palette.Text 刷回 BasicText，缩进会变近黑。
             cur.insertText(text, _make_fmt(*style["default"]))
             last = m.end()
             continue

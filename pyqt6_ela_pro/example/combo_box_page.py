@@ -1,4 +1,4 @@
-"""[pyqt6_ela_pro] 下拉框组件页面?"""
+"""[pyqt6_ela_pro] 下拉框组件页面。"""
 
 from PyQt6.QtWidgets import QHBoxLayout
 
@@ -43,7 +43,7 @@ COMBO_BOX_ITEMS = [
 
 
 class ComboBoxPage(ExamplePage):
-    """下拉框组件页面"""
+    """下拉框组件页面。"""
 
     PAGE_TITLE = "下拉框组件"
 
@@ -357,31 +357,24 @@ class ComboBoxPage(ExamplePage):
             parent_layout,
         )
         row = self._createRowLayout(parent_layout)
-        # ElaSearchBox (empty)
         empty_search = ElaSearchBox(self)
         empty_search.setFixedWidth(180)
         row.addWidget(empty_search)
-        # ElaSearchMultiBox (empty)
         empty_search_multi = ElaSearchMultiBox(self)
         empty_search_multi.setFixedWidth(180)
         row.addWidget(empty_search_multi)
-        # ElaTagBox (empty)
         empty_tag = ElaTagBox(title="单选", parent=self)
         empty_tag.setFixedWidth(150)
         row.addWidget(empty_tag)
-        # ElaTagMultiBox (empty)
         empty_tag_multi = ElaTagMultiBox(title="多选", parent=self)
         empty_tag_multi.setFixedWidth(150)
         row.addWidget(empty_tag_multi)
-        # ElaTagSearchBox (empty)
         empty_tag_search = ElaTagSearchBox(title="搜索", parent=self)
         empty_tag_search.setFixedWidth(150)
         row.addWidget(empty_tag_search)
-        # ElaTagSearchMultiBox (empty)
         empty_tag_search_multi = ElaTagSearchMultiBox(title="搜索多选", parent=self)
         empty_tag_search_multi.setFixedWidth(150)
         row.addWidget(empty_tag_search_multi)
-        # ElaGhostBox (empty)
         empty_ghost = ElaGhostBox(self)
         empty_ghost.setPlaceholderText("选择模型")
         empty_ghost.setFixedWidth(150)

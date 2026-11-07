@@ -1,4 +1,4 @@
-"""[pyqt6_ela_pro] 示例：把页面在独立窗口里打开。?"""
+"""[pyqt6_ela_pro] 示例：把页面在独立窗口里打开。"""
 
 from __future__ import annotations
 
@@ -22,10 +22,7 @@ def findPageByKey(window: QWidget, nodeKey: str) -> QWidget | None:
 
 
 def openPageInNewWindow(window: QWidget, nodeKey: str) -> ElaWidget | None:
-    """为 ``nodeKey`` 对应的页面开一个独立 ``ElaWidget`` 窗口。
-    只处理 ``ExamplePage`` 子类（构造签名已知是 ``(parent)``）；其它页面
-    返回 ``None``，由宿主自己决定怎么建。
-    """
+    """为 ``nodeKey`` 对应的页面开一个独立 ``ElaWidget`` 窗口。"""
     origin = findPageByKey(window, nodeKey)
     if origin is None or not isinstance(origin, ExamplePage):
         return None
@@ -53,8 +50,6 @@ def openPageInNewWindow(window: QWidget, nodeKey: str) -> ElaWidget | None:
     if getattr(page, "PRE_SHOW_BUILD", False):
         page.buildDemoContent()
 
-    # 无父布局先设边距再 setLayout：QLayout.setContentsMargins 会写回控件，
-    # 在 ElaAppBar 之后调用会清掉标题栏让出的上边距。
     layout = QVBoxLayout()
     layout.setContentsMargins(0, 0, 0, 0)
     layout.addWidget(page)

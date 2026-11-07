@@ -1,4 +1,4 @@
-"""[pyqt6_ela_pro] ElaChartWidget 图表工作台?"""
+"""[pyqt6_ela_pro] ElaChartWidget 图表工作台。"""
 
 import math
 import random
@@ -44,16 +44,13 @@ except ImportError:  # pragma: no cover - 可选依赖
 
 _WEEKS = ["周一", "周二", "周三", "周四", "周五", "周六", "周日"]
 
-#: GitHub 绿 5 档色带（visualMap.inRange.colors 示例）
 _GITHUB_GREENS = ["#ebedf0", "#9be9a8", "#40c463", "#30a14e", "#216e39"]
 
-#: 小波工作区：矩阵尺寸 / 滚动步长 / 默认刷新间隔
 _WAVELET_SIZES = ((256, 2048), (512, 4096), (1024, 8192))
 _WAVELET_DEFAULT_SIZE = (512, 4096)
 _WAVELET_SCROLL_STEP = 8
 _WAVELET_DEFAULT_INTERVAL_MS = 80
 
-#: 实时工作区：1 kHz 采集 / 1M 环形缓冲 / 2000 显示点 / 10 Hz 刷新
 _REALTIME_SAMPLE_HZ = 1000.0
 _REALTIME_CAPACITY = 1_000_000
 _REALTIME_DISPLAY_POINTS = 2000
@@ -78,10 +75,7 @@ def _wavy_values(
     noise: float = 10.0,
     seed: int = 0,
 ) -> list:
-    """周期起伏 + 噪声的平滑序列（折线 / 面积示例；几百到几千点都是 O(n)）。
-    ``period`` 是起伏周期（点数）：小图里的高密度曲线用更长周期，否则会挤成
-    一条实心带子（7 天周期在 400px 宽、2000 点的格子里每周期只有 1.4px）。
-    """
+    """周期起伏 + 噪声的平滑序列；``period`` 是起伏周期（点数）。"""
     rng = random.Random(seed)
     return [
         round(
@@ -96,10 +90,7 @@ def _wavy_values(
 
 
 class _RealtimeRing:
-    """定长环形缓冲：绝对样本序号 + 多通道 float32 值。
-
-    1M × (int64 + 2×float32) ≈ 16 MB；回绕不扩容，窗口切片返回副本。
-    """
+    """定长环形缓冲：绝对样本序号 + 多通道 float32 值。"""
 
     def __init__(self, capacity: int, channels: int, sample_hz: float) -> None:
         self.capacity = int(capacity)
@@ -202,7 +193,6 @@ def _decimate_minmax(times, values, points: int):
     return np.asarray(xs, dtype=np.float64), np.asarray(ys, dtype=np.float32)
 
 
-#: 画廊小图的紧凑绘图区（默认边距是按整宽大图定的，小格里太浪费）
 _MINI_GRID = {"top": 28, "bottom": 24, "left": 44, "right": 14}
 
 
@@ -252,12 +242,7 @@ def _build_token_activity(year: int = 2026) -> list:
 
 
 def _token_activity_series(rows: list, mode: str) -> list:
-    """活动数据 → heatmap data（每日 / 每周汇总 / 累计）。
-
-    - 绘图值用「万 tokens」为单位（视觉映射标签更紧凑），tooltip 显示完整单位；
-    - weekly：按自然周（周日为一周起点）汇总，值放在该周周日格；
-    - cumulative：前缀和（token 与轮数均累计）。
-    """
+    """活动数据 → heatmap data（每日 / 每周汇总 / 累计）。"""
     if mode == "weekly":
         weekly: dict = {}
         for day, tokens, rounds in rows:
@@ -309,7 +294,6 @@ class ChartsPage(ExamplePage):
 
     PAGE_TITLE = "ElaChartWidget 图表工作台"
 
-    #: 工作区：(名称, 说明, 构建方法名)
     WORKSPACES = (
         (
             "概览",
@@ -362,7 +346,6 @@ class ChartsPage(ExamplePage):
         self._active_workspace = 0
         self._anim_enabled = True
         self._pivot_syncing = False
-        #: 顶部「全局主题」当前选择（新建工作区也继承）
         self._global_chart_theme = defaultChartTheme()
         #: 小波工作区（惰性构建；定时器只在当前工作区运行）
         self._wavelet_chart = None
@@ -378,7 +361,6 @@ class ChartsPage(ExamplePage):
             for index, (name, _desc, _builder) in enumerate(self.WORKSPACES)
             if name == "小波"
         )
-        #: 实时工作区（惰性构建；1 kHz 模拟采集 + 1M 环形缓冲）
         self._realtime_chart = None
         self._realtime_timer = None
         self._realtime_running = False
@@ -391,8 +373,6 @@ class ChartsPage(ExamplePage):
             if name == "实时"
         )
         super().__init__(parent)
-
-    # ── 工作台外壳 ──────────────────────────────────────────────────────
 
     def _setupUI(self):
         super()._setupUI()
@@ -515,10 +495,8 @@ class ChartsPage(ExamplePage):
             workspace["built"] = True
             getattr(self, workspace["builder"])(workspace["layout"])
             workspace["layout"].addStretch()
-            # 新建工作区继承顶部「全局主题」（主题画廊的固定对比图不参与）
             self._apply_global_theme_to_page(self._stack.widget(index))
-            # 惰性新建的工作区要继承全局「动效」开关（否则在概览里关掉后
-            # 切到尚未构建的画廊，29 张图仍照常播入场动画）。
+            # 惰性新建的工作区要继承全局「动效」开关，否则切过去仍会播入场动画。
             if not self._anim_enabled:
                 for chart in self._active_charts():
                     chart.setOption({"animation": False})
@@ -550,8 +528,6 @@ class ChartsPage(ExamplePage):
             self._interact_btn.setText(
                 "交互: 开" if charts[0].interactiveEnabled() else "交互: 关"
             )
-
-    # ── 全局配色主题 ────────────────────────────────────────────────────
 
     def _onGlobalThemeChanged(self, index: int):
         if index < 0:
@@ -613,17 +589,13 @@ class ChartsPage(ExamplePage):
                 continue
             chart.setOption({"animation": self._anim_enabled})
 
-    # ── 工作区构建 ──────────────────────────────────────────────────────
-
     def _buildWorkspaceOverview(self, layout):
         self._createSectionHeader("=== 概览 ===").hide()
         self._demoOverview(layout)
 
     def _buildWorkspaceGallery(self, layout):
         self._createSectionHeader("=== 系列画廊 ===").hide()
-        # 显式逐个调用（不要用元组 + for 循环）：示例页的「节标题守卫」只沿
-        # Call 节点展开，元组里的 bound method 不是 Call，六个节标题会整段
-        # 漏检（重复 / 撞号都发现不了）。
+        # 显式逐个调用：节标题守卫只沿 Call 展开，元组里的 bound method 会漏检。
         self._demoGalleryCartesian(layout)
         layout.addSpacing(24)
         self._demoGalleryPoints(layout)
@@ -684,8 +656,6 @@ class ChartsPage(ExamplePage):
         self._buildWorkspaceThemes(main_layout)
         self._buildWorkspaceWavelet(main_layout)
 
-    # ── 工作区 0：概览 ──────────────────────────────────────────────────
-
     def _overviewCard(self, title, chart, caption):
         card = QVBoxLayout()
         card.setSpacing(4)
@@ -714,7 +684,6 @@ class ChartsPage(ExamplePage):
         grid.setColumnStretch(0, 1)
         grid.setColumnStretch(1, 1)
 
-        # 365 天日数据：密集折线（轴标签按像素自动抽稀），拖动 / 滚轮能看出真实密度
         days = _daily_labels(365)
         revenue = _wavy_values(365, base=190, weekly=45, drift=0.18, seed=7)
 
@@ -901,7 +870,6 @@ class ChartsPage(ExamplePage):
         row = QHBoxLayout()
         row.setSpacing(12)
         charts = []
-        # 181 天日数据（1/1 ~ 6/30）：时间轴按日期自动选刻度，「追加一天」续 7/1
         interaction_days = _daily_labels(181, start=(2026, 1, 1))
         temperature = _wavy_values(181, base=20, weekly=6, drift=0.05, noise=2, seed=71)
         humidity = _wavy_values(181, base=52, weekly=9, drift=0.08, noise=4, seed=73)
@@ -1013,7 +981,6 @@ class ChartsPage(ExamplePage):
         labels.setOption(
             {
                 "animation": False,
-                # 顶层 textStyle 是**兜底**：组件自己的 textStyle 同名键优先
                 "textStyle": {"fontSize": 12},
                 "title": {"text": "标签位置 / 重叠隐藏", "left": "left"},
                 "legend": {
@@ -1063,7 +1030,6 @@ class ChartsPage(ExamplePage):
                                 24, base=9, weekly=4, noise=2, seed=53
                             )
                         ],
-                        # rotate 绕文字中心旋转；align 按数据点调水平锚点
                         "label": {
                             "show": True,
                             "position": "right",
@@ -1075,11 +1041,9 @@ class ChartsPage(ExamplePage):
                 ],
             }
         )
-        # 运行时改标签：轴 formatter / 单点覆盖 / 系列 patch，都不必重写整个 option
         labels.setAxisLabelFormatter("y", lambda value, index: f"{value} 件")
         labels.setSeriesLabelText(seriesIndex=0, dataIndex=3, text="峰值")
         labels.updateSeries({"label": {"fontSize": 10}}, seriesIndex=1)
-        # 逐组件改字重（fontWeight 收数字或 "bold" 等关键字）
         labels.setOption({"legend": {"textStyle": {"fontWeight": "bold"}}})
         # 全图字体族：只接受**单个**族名（含中文时别用 Consolas 这类纯 Latin 字体）
         labels.setFontFamily("Microsoft YaHei")
@@ -1301,8 +1265,6 @@ class ChartsPage(ExamplePage):
         chart.setFontFamily("Microsoft YaHei")
         parent_layout.addWidget(chart)
 
-    # ── 工作区 5：主题 ──────────────────────────────────────────────────
-
     def _demoThemeSwitch(self, parent_layout):
         parent_layout.addLayout(
             self._createHeaderRow("01. 内置主题实时切换", self._demoThemeSwitch)
@@ -1452,7 +1414,7 @@ class ChartsPage(ExamplePage):
             chart = ElaChartWidget(self)
             chart.setMinimumHeight(190)
             chart.setChartTheme(name)
-            chart._theme_pinned = True  # 主题画廊固定展示，不参与全局切换
+            chart._theme_pinned = True
             chart.setOption(
                 {
                     "animation": False,
@@ -1486,8 +1448,6 @@ class ChartsPage(ExamplePage):
             )
             tiles.append((name, chart))
         self._theme_gallery_charts = self._addGallery(parent_layout, tiles, columns=3)
-
-    # ── 工作区 6：小波 ──────────────────────────────────────────────────
 
     def _demoWaveletScalogram(self, parent_layout):
         parent_layout.addLayout(
@@ -2129,7 +2089,6 @@ class ChartsPage(ExamplePage):
         )
         parent_layout.addWidget(chart)
 
-        # 多网格：xAxis[i].gridIndex 决定轴属于哪块网格，系列用 xAxisIndex 选轴
         multi_grid = ElaChartWidget(self)
         multi_grid.setMinimumHeight(300)
         multi_grid.setOption(
@@ -2183,8 +2142,6 @@ class ChartsPage(ExamplePage):
         )
         parent_layout.addWidget(status)
 
-    # ── 图表容器 ────────────────────────────────────────────────────────
-
     def _chartTile(self, title, chart, stretch=1, controls=True):
         """带标题的图表容器（纵向：标题 + 图表 + 控制行）。"""
         tile = QVBoxLayout()
@@ -2192,7 +2149,6 @@ class ChartsPage(ExamplePage):
         title_label = ElaText(title, self)
         title_label.setTextPixelSize(14)
         # 带 AlignLeft 时布局只给最小高度（一行）：wordWrap 的第二行会被裁掉。
-        # 整格宽 + 两行高度（与 _addGallery 同口径），窄窗口折行也完整。
         title_label.setFixedHeight(title_label.fontMetrics().height() * 2)
         tile.addWidget(title_label)
         tile.addWidget(chart, stretch)
@@ -2224,18 +2180,13 @@ class ChartsPage(ExamplePage):
         row.addStretch()
         tile.addLayout(row)
 
-    # ── 随机数据 ────────────────────────────────────────────────────────
-
     def _onRandomChart(self, chart):
         """按各系列类型随机化 data 并播放过渡插值动画（setOption 合并语义）。"""
-        # 大数据图有自己的生成 / 降采样控制；`getOption()` 会把百万点物化
-        # 一遍（5M 点约十几秒），这里直接跳过。小波 scalogram 同理（8M 格）。
         if chart is getattr(self, "_bigChart", None):
             return
         if chart is getattr(self, "_wavelet_chart", None):
             return
         opt = chart.getOption()
-        # 带标注的图不随机：标注锚定的是数据坐标，换数据后箭头会指向旧值。
         if opt.get("annotations"):
             return
         series = opt.get("series") or []
@@ -2346,7 +2297,6 @@ class ChartsPage(ExamplePage):
             out = []
             for d in data:
                 if isinstance(d, dict):
-                    # 日历热力的 {value: [日期, 值]}：只重掷值，保留日期与样式
                     v = d.get("value")
                     if isinstance(v, (list, tuple)) and len(v) >= 2:
                         out.append(
@@ -2362,7 +2312,6 @@ class ChartsPage(ExamplePage):
             if out:
                 s["data"] = out
         elif t == "lines":
-            # 线图数据是 {coords: [[x, y], [x, y]]}：按原坐标数量重新掷点
             out = []
             for item in data:
                 coords = item.get("coords") if isinstance(item, dict) else None
@@ -2399,30 +2348,17 @@ class ChartsPage(ExamplePage):
             s["data"] = [random.randint(5, 100) for _ in data]
         # 认不出的结构化数据（自定义字段 / 新系列形状）保持原样 —— 别把形状换成数字
 
-    # ── 鼠标交互开关 ────────────────────────────────────────────────────
-
     def _toggleInteraction(self, chart, btn):
-        """切换鼠标交互（提示框 / 图例 / 缩放 / 刷选 / 时间轴 / 工具箱）。
-
-        走 ``chart.setInteractive`` 总开关：数据与绘制不变，仅鼠标交互失效。
-        **状态源是图表本身**（不是按钮文案）—— 按文案取反时，初始文案写反会让
-        第一次点击把交互关掉、文案还不变（表现成「交互坏了」）。
-        **打开 = 全开**：总开关置 True 会清空逐功能覆盖，所以交互组件那节的
-        逐功能勾选框要同步回勾上，否则界面与真实状态不符。
-        """
+        """切换鼠标交互（提示框 / 图例 / 缩放 / 刷选 / 时间轴 / 工具箱）。"""
         on = bool(chart.interactiveEnabled())
         chart.setInteractive(not on)
         btn.setText("交互: 关" if on else "交互: 开")
-        # 同一工作区里点某张图的按钮时，顶部总开关也要跟着同步（它读的是
-        # charts[0] 的状态；只在切工作区时刷新会不同步）。
         charts = self._active_charts()
         if charts and chart is charts[0]:
             self._interact_btn.setText("交互: 关" if on else "交互: 开")
         if not on and chart is getattr(self, "_interactChart", None):
             for _key, box in getattr(self, "_feature_boxes", ()):
                 box.setChecked(True)
-
-    # ══ 系列画廊（紧凑网格：一屏看清多种系列）═══════════════════════════
 
     #: 画廊每格图表高度（网格里高度必须一致才能对齐）
     GALLERY_H = 232
@@ -2443,9 +2379,7 @@ class ChartsPage(ExamplePage):
             tile.setSpacing(4)
             label = ElaText(title, self)
             label.setTextPixelSize(13)
-            # ElaText 默认 wordWrap=True：带 AlignLeft 时宽度只有 sizeHint（很窄）→
-            # 长标题会在窄框里折成多行再被固定高裁掉。给整格宽度 + 两行高度：
-            # 正常一行显示，窄窗口折成两行也完整。
+            # 标题给整格宽度 + 两行高度（AlignLeft 会让宽度只剩 sizeHint，长标题被裁）。
             label.setFixedHeight(label.fontMetrics().height() * 2)
             tile.addWidget(label)
             tile.addWidget(chart, 1)
@@ -2457,10 +2391,7 @@ class ChartsPage(ExamplePage):
         return [chart for _title, chart in tiles]
 
     def _attachGalleryControls(self, parent_layout, charts):
-        """画廊统一控制行：整节「随机数据」+ 整节交互开关。
-
-        画廊一格只有 ~230px 高，逐图摆两个按钮会把画面淹掉，所以按节控制。
-        """
+        """画廊统一控制行：整节「随机数据」+ 整节交互开关。"""
         row = QHBoxLayout()
         row.setSpacing(8)
         rand_btn = ElaPushButton(f"随机数据（{len(charts)} 张）", self)
@@ -2486,8 +2417,6 @@ class ChartsPage(ExamplePage):
         state = charts[0].interactiveEnabled()
         for chart in charts[1:]:
             chart.setInteractive(state)
-
-    # ── 01 画廊 · 直角坐标 ───────────────────────────────────────────────
 
     def _demoGalleryCartesian(self, parent_layout):
         parent_layout.addLayout(
@@ -2656,8 +2585,6 @@ class ChartsPage(ExamplePage):
         charts = self._addGallery(parent_layout, tiles)
         self._attachGalleryControls(parent_layout, charts)
 
-    # ── 02 画廊 · 数据点 ─────────────────────────────────────────────────
-
     def _demoGalleryPoints(self, parent_layout):
         parent_layout.addLayout(
             self._createHeaderRow(
@@ -2699,7 +2626,6 @@ class ChartsPage(ExamplePage):
         )
         tiles.append(("散点 · 300 点 / 大小随值（scatter）", scatter_chart))
 
-        # 让散点图随机化时不至于把尺寸维度也换掉：随机数据按钮走 _randomizeSeries。
         bubble = self._galleryChart()
         bubble.setOption(
             {
@@ -2765,7 +2691,6 @@ class ChartsPage(ExamplePage):
         )
         tiles.append(("涟漪散点 · effectScatter（30 点）", ripple))
 
-        # 400 天折线 + 3 处断点：connectNulls 把断点连起来
         gap_values = _wavy_values(
             400, base=120, weekly=28, period=45, drift=0.1, seed=23
         )
@@ -2805,8 +2730,6 @@ class ChartsPage(ExamplePage):
 
         charts = self._addGallery(parent_layout, tiles, columns=2)
         self._attachGalleryControls(parent_layout, charts)
-
-    # ── 03 画廊 · 分布与金融 ─────────────────────────────────────────────
 
     def _demoGalleryDistribution(self, parent_layout):
         parent_layout.addLayout(
@@ -2929,8 +2852,6 @@ class ChartsPage(ExamplePage):
         charts = self._addGallery(parent_layout, tiles, columns=2)
         self._attachGalleryControls(parent_layout, charts)
 
-    # ── 04 画廊 · 占比与仪表 ─────────────────────────────────────────────
-
     def _demoGalleryProportion(self, parent_layout):
         parent_layout.addLayout(
             self._createHeaderRow(
@@ -3046,8 +2967,6 @@ class ChartsPage(ExamplePage):
 
         charts = self._addGallery(parent_layout, tiles, columns=2)
         self._attachGalleryControls(parent_layout, charts)
-
-    # ── 05 画廊 · 层级与关系 ─────────────────────────────────────────────
 
     def _demoGalleryHierarchy(self, parent_layout):
         parent_layout.addLayout(
@@ -3216,8 +3135,6 @@ class ChartsPage(ExamplePage):
         charts = self._addGallery(parent_layout, tiles)
         self._attachGalleryControls(parent_layout, charts)
 
-    # ── 06 画廊 · 特殊坐标与日历 ─────────────────────────────────────────
-
     def _demoGalleryCoordinates(self, parent_layout):
         parent_layout.addLayout(
             self._createHeaderRow(
@@ -3344,7 +3261,6 @@ class ChartsPage(ExamplePage):
         charts = self._addGallery(parent_layout, tiles, columns=2)
         self._attachGalleryControls(parent_layout, charts)
 
-        # 日历热力：宽格 + 模式切换（每日 / 每周 / 累计）与配色开关
         self._calendar_data = _build_token_activity()
         self._calendar_mode = "daily"
         self._calendar_green = False
@@ -3406,8 +3322,7 @@ class ChartsPage(ExamplePage):
         }
 
     def _applyCalendarOption(self):
-        """整份重建（``notMerge=True``）：关配色时 option 里没有 ``inRange``，
-        默认合并会保留旧色带 —— 条件键消失的场景不能走合并。"""
+        """整份重建（``notMerge=True``）：关配色时 option 里没有 ``inRange``， 默认合并会保留旧色带 —— 条件键消失的场景不能走合并。"""
         self._calendar_chart.setOption(
             self._buildCalendarHeatmapOption(), notMerge=True
         )
@@ -3421,8 +3336,6 @@ class ChartsPage(ExamplePage):
     def _onCalendarPaletteToggled(self, checked: bool):
         self._calendar_green = bool(checked)
         self._applyCalendarOption()
-
-    # ── 07 画廊 · 矩阵图像（imshow） ──────────────────────────────────────
 
     def _demoGalleryMatrix(self, parent_layout):
         parent_layout.addLayout(
@@ -3485,8 +3398,6 @@ class ChartsPage(ExamplePage):
 
         charts = self._addGallery(parent_layout, tiles, columns=2)
         self._attachGalleryControls(parent_layout, charts)
-
-    # ── 07 大数据动态采样 ───────────────────────────────────────────────
 
     def _demoBigData(self, parent_layout):
         parent_layout.addLayout(
@@ -3581,7 +3492,6 @@ class ChartsPage(ExamplePage):
         for s in opt["series"]:
             if isinstance(s, dict):
                 s["sampling"] = sopt
-                # 形状开关：关时只画线（默认），开时 lines+markers
                 s["showSymbol"] = self._big_symbol_on
         return opt
 
@@ -3611,8 +3521,6 @@ class ChartsPage(ExamplePage):
             w1 = random.uniform(120, 260)
             a2 = random.uniform(40, 120)
             w2 = random.uniform(25, 60)
-            # 显式时间戳（0.1s 间隔）+ 一处 10 分钟记录中断：中断在可见处自动
-            # 断开；纯 Python 生成，不强依赖 numpy。
             data = [
                 [
                     i * 0.1 if i < half else i * 0.1 + 600.0,
@@ -3622,8 +3530,7 @@ class ChartsPage(ExamplePage):
             ]
             series.append({"type": "line", "name": f"曲线{j + 1}", "data": data})
         self._big_series = series
-        # **必须 notMerge**：合并语义会保留未匹配的旧系列（3 条改 1 条后
-        # 另外两条仍在），而这里 `_bigOption()` 是自包含的整份配置。
+        # 必须 notMerge：合并会保留未匹配的旧系列（3 条改 1 条后另两条还在）。
         self._bigChart.setOption(self._bigOption(), notMerge=True)
         self._updateBigStatus()
 
@@ -3641,7 +3548,6 @@ class ChartsPage(ExamplePage):
             if callable(get_stats)
             else {"dataLen": 0, "drawn": 0, "sampled": False}
         )
-        # 当前 x 轴显示范围（真实值域）与 dataZoom 百分比窗口
         coord = self._bigChart.primaryCoord()
         range_text = ""
         if coord is not None and hasattr(coord, "x_axis"):
@@ -3668,8 +3574,6 @@ class ChartsPage(ExamplePage):
         if self._big_series:
             self._bigChart.setOption(self._bigOption())
             self._updateBigStatus()
-
-    # ── 08 交互组件 ─────────────────────────────────────────────────────
 
     def _demoInteractComponents(self, parent_layout):
         parent_layout.addLayout(
@@ -3763,7 +3667,6 @@ class ChartsPage(ExamplePage):
                     "min": 0,
                     "max": 260,
                     "orient": "horizontal",
-                    # calculable：拖动两端把手收窄映射范围（带外区间加暗色遮罩）
                     "calculable": True,
                 },
                 "toolbox": {"feature": ["saveAsImage", "restore", "dataZoom"]},
@@ -3773,7 +3676,6 @@ class ChartsPage(ExamplePage):
         )
         self._addChartWithControls(parent_layout, self._interactChart)
 
-        # 分段型 visualMap：pieces 命中即上色（不在任何分段走中性色）
         piecewise = ElaChartWidget(self)
         piecewise.setMinimumHeight(250)
         piecewise.setOption(
@@ -3804,7 +3706,6 @@ class ChartsPage(ExamplePage):
         )
         parent_layout.addWidget(piecewise)
 
-        # ECharts 实例 API 演示：dispatchAction / on / showLoading / getDataURL
         api_row = QHBoxLayout()
         api_row.setSpacing(8)
         api_label = ElaText("ECharts API：", self)
@@ -3833,14 +3734,11 @@ class ChartsPage(ExamplePage):
         api_row.addStretch()
         parent_layout.addLayout(api_row)
 
-        # 逐功能交互开关（setInteractionEnabled）
         feature_row = QHBoxLayout()
         feature_row.setSpacing(12)
         feature_label = ElaText("交互开关：", self)
         feature_label.setTextPixelSize(14)
         feature_row.addWidget(feature_label)
-        # 逐功能勾选框登记起来：总开关「交互: 开」是全开（清空逐功能覆盖），
-        # 勾选框要跟着回到勾上，界面才与真实状态一致
         self._feature_boxes = []
         for key, label in (
             ("tooltip", "提示框"),
@@ -3861,7 +3759,6 @@ class ChartsPage(ExamplePage):
         feature_row.addStretch()
         parent_layout.addLayout(feature_row)
 
-        # 图表级事件（统一事件接口）：Qt 信号 + ECharts on() 双通道
         signal_status = ElaText(
             "事件：—（图例切换 / 缩放 / 帧切换 / 数据点点击 / toolbox / 刷选）", self
         )
@@ -3890,7 +3787,6 @@ class ChartsPage(ExamplePage):
         self._interactChart.brushChanged.connect(
             lambda items: signal_status.setText(f"brushChanged: 选中 {len(items)} 个点")
         )
-        # ECharts 事件名（on/off）：click / datazoom / legendselectchanged / finished
         self._interactChart.on(
             "click",
             lambda params: signal_status.setText(
@@ -3940,8 +3836,7 @@ class ChartsPage(ExamplePage):
         buffer.close()
         if image.isNull():
             return
-        # 写到临时目录（进程 CWD 可能只读）；save 的返回值必须判，
-        # 失败不能谎报「已保存」。
+        # 写临时目录（CWD 可能只读）；save 失败不能谎报「已保存」。
         target = os.path.join(tempfile.gettempdir(), "chart_dataurl.png")
         try:
             saved = image.save(target, "PNG")
@@ -3951,8 +3846,6 @@ class ChartsPage(ExamplePage):
             self._interactChart.setToolTip("getDataURL 保存失败（目标目录不可写）")
             return
         self._interactChart.setToolTip(f"getDataURL 已保存：{target}")
-
-    # ── 09 Plotly 对齐的交互 ─────────────────────────────────────────────
 
     def _demoPlotlyInteractions(self, parent_layout):
         parent_layout.addLayout(
@@ -4034,7 +3927,7 @@ class ChartsPage(ExamplePage):
             }
         )
         parent_layout.addWidget(chart)
-        chart.setDragMode("zoom")  # 初始：左键框选缩放 + 滚轮缩放
+        chart.setDragMode("zoom")
 
         status = ElaText("事件：—（拖拽 / 双击 / 图例悬停 / 刷选 / 空区点击）", self)
         status.setTextPixelSize(13)

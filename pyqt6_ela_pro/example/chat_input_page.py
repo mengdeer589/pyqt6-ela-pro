@@ -1,4 +1,4 @@
-"""[pyqt6_ela_pro] 聊天输入区能力页?"""
+"""[pyqt6_ela_pro] 聊天输入区能力页。"""
 
 from datetime import datetime
 
@@ -62,7 +62,6 @@ graph TD
 > 工程实现中通常随机选择基准，避免有序输入退化为 $O(n^2)$。
 """
 
-#: 关键词匹配的回答
 _ANSWERS = [
     (
         ("公式", "数学", "latex"),
@@ -91,7 +90,6 @@ $$
     ),
 ]
 
-#: 输入模板
 _TEMPLATE = "请从以下三个方面分析这段代码：\n1. 时间复杂度\n2. 潜在缺陷\n3. 改进建议\n"
 
 
@@ -194,7 +192,6 @@ class ChatInputPage(ExamplePage):
         self._chat.newTopicRequested.connect(self._on_new_topic_requested)
         self._chat.contextUsageClicked.connect(self._on_context_usage_clicked)
 
-
     def resizeEvent(self, event):  # noqa: N802 (Qt 命名)
         super().resizeEvent(event)
         self._sync_chat_height()
@@ -239,10 +236,7 @@ class ChatInputPage(ExamplePage):
         return box
 
     def _demo_toolbar(self) -> None:
-        """``chat.toolBar()`` 的三个入口：``addButton`` / ``addWidget`` / ``addSeparator``。
-        ``addButton`` 的 ``key`` 用于 ``toolToggled`` 回调（别用闭包捕获文案）；
-        ``addWidget`` 放任意控件；组件只管摆放与状态回传，点了干什么归宿主。
-        """
+        """``chat.toolBar()`` 的三个入口：``addButton`` / ``addWidget`` / ``addSeparator``。"""
         toolbar = self._chat.toolBar()
         toolbar.addButton(
             icon=ElaIconType.IconName.Bolt,
@@ -397,10 +391,7 @@ class ChatInputPage(ExamplePage):
         return box
 
     def _demo_attachment(self) -> None:
-        """附件：``chatInput().addAttachment(name, path, size)``。
-        拖放与粘贴由库内 ``chat/_mime.py`` 统一处理，宿主只需接 ``attachmentClicked``。
-        大段粘贴（≥8000 字符或 ≥120 行）自动转附件。
-        """
+        """附件：``chatInput().addAttachment(name, path, size)``。"""
         self._chat.chatInput().addAttachment("blocks.py", "src/chat/blocks.py", 48_120)
         self._chat.sendUserMessage(
             "这两个文件一起看", attachments=[{"name": "notes.md", "size": 1_204}]
@@ -440,10 +431,7 @@ class ChatInputPage(ExamplePage):
         return box
 
     def _demo_mention(self) -> None:
-        """``setMentionProvider(callable)``：给关键词，返回候选列表。
-        provider 收到的是「用户已经敲的那段关键词」，返回
-        不要用「返回上一次结果」来保活，用户会觉得幽灵条目在乱跳。
-        """
+        """``setMentionProvider(callable)``：给关键词，返回候选列表。"""
         self._chat.setMentionProvider(self._mention_suggestions)
         self._chat.chatInput().openMentionPopup()
         self._chat.mentionSelected.connect(
@@ -478,17 +466,9 @@ class ChatInputPage(ExamplePage):
         return box
 
     def _demo_clear(self) -> None:
-        """清空上下文：``requestClear()`` → 确认 → ``cleared``。
-
-        - **空会话直接 return**，不弹框也不发信号 —— 否则宿主埋点里的
-          「等待确认…」提示会一直挂着；
-        - **别接 ``clearRequested`` 当清空入口**，它是确认**之前**的钩子，
-          用户点「取消」也会先响一次；
-        - **清空分两半**：组件清界面，后端会话历史归宿主 —— 在 ``cleared``
-          里调 ``worker.reset()``，少这一步模型还记得上文。
-        """
-        self._chat.clearRequested.connect(self._on_clear_requested)  # 确认之前
-        self._chat.cleared.connect(self._on_context_cleared)  # 确认之后
+        """清空上下文：``requestClear()`` → 确认 → ``cleared``。"""
+        self._chat.clearRequested.connect(self._on_clear_requested)
+        self._chat.cleared.connect(self._on_context_cleared)
         self._chat.requestClear()
 
     def _on_clear_requested(self):
@@ -515,15 +495,7 @@ class ChatInputPage(ExamplePage):
         return box
 
     def _demo_new_topic(self) -> None:
-        """新建话题：组件只发信号，宿主做四件事。
-
-        1. ``view.clear()`` 清界面；
-        2. ``worker.reset()`` 清后端会话；
-        3. 新建一条 ``ElaChatSessionInfo``；
-        4. ``setCurrentSessionId(id)``（纯标记，库不据此做任何事）。
-
-        组件**故意不清草稿 / 附件** —— 用户正在打的那半句话不该被系统动作吃掉。
-        """
+        """新建话题：组件只发信号，宿主做四件事。"""
         self._chat.newTopicRequested.connect(self._on_new_topic_requested)
         self._chat.chatView().clear()
         self._mock.reset()
@@ -559,21 +531,11 @@ class ChatInputPage(ExamplePage):
         return box
 
     def _demo_turn_control(self) -> None:
-        """一轮对话的四种干预：
+        """一轮对话的四种干预： - ``stopGeneration`` 停当前轮，保留已输出内容；"""
+        self._chat.enqueueMessage("排队中的一条", messageId=42)
+        self._chat.stopGeneration()
 
-        - ``stopGeneration`` 停当前轮，保留已输出内容；
-        - ``undoLastUserMessage`` 撤回最后一条用户消息并回填输入框
-          （``undoMessage(id)`` 只对用户消息生效）；
-        - ``regenerateFrom(id)`` 删掉该回答重发；``retryMessage(id)`` 原地重试；
-        - ``enqueueMessage`` 排队，等整轮结束自动续发。
-        """
-        self._chat.enqueueMessage("排队中的一条", messageId=42)  # 生成中提交 → 排队
-        self._chat.stopGeneration()  # 停当前轮（保留已输出内容）
-
-        # 「撤回最后一条」= 撤回最后一条用户消息（不是最后一条消息）
         self._chat.undoLastUserMessage()
-
-        # 显式 id：undoMessage(用户消息) / regenerateFrom 或 retryMessage(助手消息)。
 
     def _on_enqueue(self) -> None:
         self._chat.enqueueMessage("（排队中）这一条等上一轮跑完再发")
@@ -582,8 +544,6 @@ class ChatInputPage(ExamplePage):
         )
 
     def _on_undo_last(self) -> None:
-        # 「撤回最后一条」= 撤回最后一条**用户消息**（不是最后一条消息 ——
-        # 最后一条通常是助手回答，拿它的 id 去撤会被 undoMessage 拒绝）
         target = self._chat.undoLastUserMessage()
         if target is None:
             self._say(6, "还没有用户消息可撤回")
@@ -633,8 +593,7 @@ class ChatInputPage(ExamplePage):
 
     def _start_answer(self) -> None:
         """开始一轮 mock 生成（binder 负责建消息 / 步骤 / 思考 / 工具 / 统计）。"""
-        # 附件必须走 startTurn(attachments=...) 送进后端；mock 后端只收不留用，
-        # 真实后端在这里就能拿到用户上传的文件
+        # 附件必须走 startTurn(attachments=...)：真实后端只在这里拿得到上传文件。
         self._binder.startTurn(self._question, attachments=self._question_attachments)
         self._question_attachments = []
         self._status.setStatus("生成中…", level="busy")
@@ -642,7 +601,7 @@ class ChatInputPage(ExamplePage):
     def _on_turn_finished(self, turn) -> None:
         summary = self._binder.finish(turn)
         if summary is None:
-            return  # 迟到的旧回合收尾（已开新回合），不动状态栏
+            return
         if summary.status == ElaChatStatusType.Stopped:
             self._status.setStatus("已停止（保留已输出内容）")
         elif summary.isEmptyReply():
@@ -658,7 +617,7 @@ class ChatInputPage(ExamplePage):
             )
 
     def _on_stop_requested(self) -> None:
-        self._binder.cancel()  # 记录停止，finish 自动按 Stopped 收尾
+        self._binder.cancel()
         self._mock.cancel()
         self._status.setStatus("已停止生成（保留已输出内容）")
 
@@ -749,15 +708,12 @@ class ChatInputPage(ExamplePage):
         return box
 
     def _demo_usage(self) -> None:
-        """上下文占用圆环：数据全由宿主提供，按百分比三档配色。
-        chatInput().setContextUsage(used, window, costUsd)；window <= 0 按 0% 显示。
-        三档：<60% 弱化 / 60-85% 警示 / >=85% 危险；圆环可点击，行为归宿主。
-        """
+        """上下文占用圆环：数据全由宿主提供，按百分比三档配色。"""
         states = (
-            (18_000, 200_000, 0.0900),  # 9%  弱化
-            (144_000, 200_000, 0.3500),  # 72% 警示
-            (184_000, 200_000, 0.6200),  # 92% 危险（tooltip 追加建议）
-            (0, 0, 0.0),  # 归零：空底环（0%，圆环默认常驻）
+            (18_000, 200_000, 0.0900),
+            (144_000, 200_000, 0.3500),
+            (184_000, 200_000, 0.6200),
+            (0, 0, 0.0),
         )
         used, window, cost = states[self._usage_step % len(states)]
         self._usage_step += 1
@@ -810,7 +766,9 @@ class ChatInputPage(ExamplePage):
         )
         self._chat.chatInput().setText("/")
         self._chat.chatInput().textEdit().setFocus()
-        self._say(8, "已注册 / 命令；输入 `/` 打开列表，选中后只插入文本并发 commandSelected")
+        self._say(
+            8, "已注册 / 命令；输入 `/` 打开列表，选中后只插入文本并发 commandSelected"
+        )
 
     def _demo_selector(self) -> None:
         """模型 / agent 下拉选择器（``ElaChatSelectorItem``）。"""
@@ -853,7 +811,8 @@ class ChatInputPage(ExamplePage):
         chat_input.setShellMode(not chat_input.shellMode())
         self._say(
             9,
-            "shell 模式已" + ("开启（输入命令，Esc 退出）" if chat_input.shellMode() else "关闭"),
+            "shell 模式已"
+            + ("开启（输入命令，Esc 退出）" if chat_input.shellMode() else "关闭"),
         )
 
     def _demo_history(self) -> None:

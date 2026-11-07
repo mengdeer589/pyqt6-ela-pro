@@ -10,11 +10,7 @@ from PyQt6.QtCore import QTimer
 class _ScriptPlayer:
     """按脚本逐步驱动公开 API 的播放器（单个 ``QTimer``，无线程）。
 
-    脚本是 ``[(延迟ms, 可调用对象), ...]``。``play`` 按 ``interval`` 节奏走，
-    ``play_now`` 同步跑完（示例页「预填」用）。
-
-    **回调里必须 try/except**：这些函数跑在 ``QTimer`` 回调链上，
-    任何未捕获异常穿过 C++ 边界都是 0xC0000409 **静默终止**（无 traceback）。
+    回调里必须 try/except：异常穿过 C++ 边界 = 0xC0000409 静默终止。
     """
 
     def __init__(self, parent=None):
@@ -31,7 +27,7 @@ class _ScriptPlayer:
         return bool(self._steps)
 
     def play(self, steps, on_done=None, interval: int = 40) -> None:
-        """从头播一遍 ``steps``。``interval`` 是**每步之间**的默认节奏。"""
+        """从头播一遍 ``steps``；``interval`` 是每步之间的默认节奏。"""
         self.stop()
         self._steps = list(steps)
         self._index = 0
@@ -41,10 +37,7 @@ class _ScriptPlayer:
             self._timer.start(0)
 
     def play_now(self, steps) -> None:
-        """**预填**：同步跑完整个脚本，函数返回时内容已经在界面上。
-        刻意**同步**而不是「按 0 延迟排队」—— 预填的全部意义就是「读者打开
-        页面就看到内容」。排队到事件循环里的后果是：页面刚建好、还没跑过第一帧
-        """
+        """**预填**：同步跑完整个脚本，函数返回时内容已经在界面上。"""
         self.stop()
         self._interval = 0
         for _delay, fn in steps:

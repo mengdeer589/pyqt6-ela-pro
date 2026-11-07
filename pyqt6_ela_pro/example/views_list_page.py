@@ -1,4 +1,4 @@
-"""视图与列表?"""
+"""视图与列表。"""
 
 from PyQt6.QtCore import QSize, Qt
 from PyQt6.QtWidgets import QHBoxLayout, QWidget

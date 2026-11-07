@@ -1,4 +1,4 @@
-"""[pyqt6_ela_pro] 聊天组件的 Agent 能力演示页。?"""
+"""[pyqt6_ela_pro] 聊天组件的 Agent 能力演示页。"""
 
 import traceback
 
@@ -32,7 +32,6 @@ _DEMO_PRICING = ModelPricing(
     input_per_m=3.0,
     output_per_m=15.0,
     cache_read_per_m=0.3,
-    # 上下文超 200k 的部分按贵档计（对齐 opencode 的 tier 语义）
     tiers=((200_000, ModelPricing(input_per_m=6.0, output_per_m=22.5)),),
 )
 
@@ -41,16 +40,12 @@ _DEMO_WINDOW = 200_000
 
 
 class _DiffView(QWidget):
-    """假的 diff 视图（真宿主会换成自己的 unified-diff 控件）。
-    实现可选的 ``updateToolResult(result, status)``；卡片有它就推送结果。
-    每个 ``ColorText`` 都必须显式 ``setTextPixelSize``，否则默认字号会撑坏卡片比例。
-    """
+    """假的 diff 视图（真宿主换成自己的 unified-diff 控件；ColorText 须显式设字号）。"""
 
     #: 文件路径字号（与卡片头部的副标题同级）
     PATH_PX = 12
     #: 增删行数字号（与参数摘要同级）
     COUNT_PX = 11
-    #: 工具返回原文（等宽，与审批卡的 diff 详情同级）
     BODY_PX = 11
 
     def __init__(self, entries, parent=None):
@@ -121,7 +116,6 @@ class ChatAgentPage(ExamplePage):
         self._chat.setGenerating(False)
         self._chat.chatInput().setVisible(False)
 
-        # 接线：审批 / 重试 / steer 三个宿主行为信号
         self._chat.permissionRequested.connect(self._on_permission_requested)
         self._chat.permissionReplied.connect(self._on_permission_replied)
         self._chat.retryRequested.connect(self._on_retry_requested)
@@ -233,7 +227,7 @@ class ChatAgentPage(ExamplePage):
     def _fire(self, label, callback):
         """把按钮回调绑到「它属于哪一节」，这样 ``_note()`` 知道写哪一行。
 
-        顺带 catch：这些都跑在 Qt 回调链上，未捕获异常会 0xC0000409 静默终止。
+        这些回调在 Qt 回调链上，未捕获异常会 0xC0000409 静默终止。
         """
 
         def run():
@@ -255,7 +249,6 @@ class ChatAgentPage(ExamplePage):
 
     def _button(self, text, callback):
         btn = ElaButton(text, variant="outlined", size="small", parent=self)
-        # 标题行后面有 stretch，不限宽的话按钮会被拉成一整条
         btn.setFixedWidth(max(96, 13 * len(text) + 26))
         btn.clicked.connect(callback)
         return btn
@@ -277,10 +270,7 @@ class ChatAgentPage(ExamplePage):
             card.setOpened(True)
 
     def _demo_renderer(self) -> None:
-        """工具结果富渲染：把 ``demo_patch`` / ``demo_edit`` 的内容区换成 diff 视图。
-        渲染器只接管内容区，卡片 chrome 保留；``subtitle`` 返回 ``(键, 值)``，
-        该键会从参数摘要里排除；上下文工具默认退出分组；widget 由卡片持引用。
-        """
+        """工具结果富渲染：把 ``demo_patch`` / ``demo_edit`` 的内容区换成 diff 视图。"""
         if self._renderers_registered:
             return
 
@@ -300,16 +290,13 @@ class ChatAgentPage(ExamplePage):
             count = len(files) if isinstance(files, list) else 0
             return ("files", f"{count} 个文件" if count else "")
 
-        # 用演示专用工具名，不覆盖内置的 edit / patch：工作台里「文件与 Diff」
-        # 工作区还在用内置渲染器，同名注册会跨工作区串味。
+        # 用演示专用工具名，不覆盖内置 edit / patch（工作台其它工作区还在用内置渲染器）。
         registerToolRenderer("demo_patch", build, subtitle=subtitle)
         registerToolRenderer("demo_edit", build, subtitle=subtitle)
         self._renderers_registered = True
 
         view = self._chat.chatView()
-        # 走 **widget 层**的回合入口（`sendUserMessage` + `beginAssistantMessage`），
-        # 别直接 `view.beginMessage` —— 那样 widget 不知道当前流式消息是哪条，
-        # steer 回执就找不到落点（`drainSteer` 靠 `streamingMessageId()`）。
+        # 走 widget 层入口（sendUserMessage + beginAssistantMessage）；直接 view.beginMessage 会让 steer 回执找不到落点。
         self._chat.sendUserMessage("给 patch 加 diff 渲染")
         messageId = self._chat.beginAssistantMessage()
         view.beginStep(messageId)
@@ -337,10 +324,7 @@ class ChatAgentPage(ExamplePage):
         self._note("已注销渲染器（已有卡片不受影响，新建卡片回落纯文本）")
 
     def _demo_permission(self) -> None:
-        """工具审批（批准型）：组件画卡 + 发信号，不阻塞。
-        真实链路：beginPermission 插卡 → permissionRequested → 宿主挂起后端 →
-        用户点按钮 → permissionReplied → 宿主恢复 / 中止。始终允许是长按 700ms，
-        """
+        """工具审批（批准型）：组件画卡 + 发信号，不阻塞。"""
         view = self._chat.chatView()
         messageId = view.beginMessage("assistant")
         view.beginStep(messageId)
@@ -357,10 +341,7 @@ class ChatAgentPage(ExamplePage):
         self._note("已插入审批卡（不阻塞：组件不会等你的点击）")
 
     def _demo_question(self) -> None:
-        """工具审批（问答型）：逐题向导，对齐 opencode 的 question dock。
-        与批准型共用 permissionRequested / permissionReplied；questions 非空时渲染成
-        逐题向导，回复走 answer（JSON）。候选项带 description，多题逐题答，最后一项
-        """
+        """工具审批（问答型）：逐题向导，对齐 opencode 的 question dock。"""
         view = self._chat.chatView()
         self._chat.sendUserMessage("这批未提交的改动你想怎么处理？")
         messageId = self._chat.beginAssistantMessage()
@@ -426,8 +407,8 @@ class ChatAgentPage(ExamplePage):
         self, messageId: int, requestId: str, reply: str, answer: str, feedback: str
     ) -> None:
         """宿主侧：收到回复 —— 恢复 / 中止后端，并把 feedback 喂回模型。
-        问答型的 ``answer`` 是 ``json.dumps({key: str | [str, ...]})``：单选塌缩成
-        标量、多选发整个数组、**未答题整条不进 payload**（不是空串）。宿主按
+
+        问答型的 ``answer`` 是 ``json.dumps({key: str | [str, ...]})``；未答题不进 payload。
         """
         detail = answer or feedback
         self._note(
@@ -436,19 +417,9 @@ class ChatAgentPage(ExamplePage):
         )
 
     def _demo_steer(self) -> None:
-        """steer 插话：生成中把新指令送进**正在跑的这一轮**。
-
-        与「排队」的区别是时序：排队要等整轮跑完，steer 在**下一个 step 安全
-        边界**（``binder.beginRound()`` 里 ``beginStep()`` 之后）就投递 ——
-        agent 场景下模型可能连跑十几次工具调用，用户想纠偏却只能干等。
-
-        组件只负责「在同一条助手消息里留一行 ``↳`` 回执 + 发 ``steerReady``」；
-        把文本送进后端是宿主的事。回执刻意**不插用户气泡**：助手消息正在流式
-        输出，中途冒出一条用户消息视觉上很怪。
-        """
+        """steer 插话：生成中把新指令送进**正在跑的这一轮**。"""
         view = self._chat.chatView()
-        # 必须是**真正流式中**的一条助手消息：回执行靠
-        # ``drainSteer()`` 里的 ``streamingMessageId()`` 找落点
+        # 必须是真正流式中的助手消息：drainSteer 靠 streamingMessageId() 找落点。
         self._chat.sendUserMessage("看看 blocks.py 的布局")
         messageId = self._chat.beginAssistantMessage()
         view.beginStep(messageId)
@@ -456,10 +427,8 @@ class ChatAgentPage(ExamplePage):
         view.appendText(messageId, "我先看看 `blocks.py` 的布局……")
         view.endText(messageId)
 
-        # 入队一条插话，然后手动走一次 step 边界（真实链路里这一步由
-        # ElaChatStreamBinder 在 beginRound 之后自动触发）
         steerId = self._chat.steerMessage("等等，先别动 _column")
-        self._chat.setSteerEnabled(False)  # 本页手动驱动，关掉自动投递
+        self._chat.setSteerEnabled(False)
         view.beginStep(messageId)
         payload = self._chat.drainSteer()
         self._chat.setSteerEnabled(True)
@@ -475,10 +444,7 @@ class ChatAgentPage(ExamplePage):
         self._note(f"steerReady：{payload['text']}")
 
     def _demo_compaction(self) -> None:
-        """上下文压缩：**库只做「表达」，不做压缩算法**。
-        摘要模板、``SHRINK_STEPS`` 收缩循环、词元估算、transcript 边界全都依赖
-        provider 侧能力，不在 UI 库范围。库负责的是「能表达 + 能持久化」——
-        """
+        """上下文压缩：**库只做「表达」，不做压缩算法**。"""
         view = self._chat.chatView()
         messageId = view.beginMessage("assistant")
         partId = view.beginCompaction(messageId, "auto")
@@ -493,10 +459,7 @@ class ChatAgentPage(ExamplePage):
         self._note("已插入压缩分隔卡（展开看摘要；它不并入正文 text）")
 
     def _demo_cost(self) -> None:
-        """成本与上下文占用：数据全由宿主提供，库只给换算规则。
-        cost_usd 跟 ElaChatStats 走；定价表不内置，换算口径对齐 opencode；
-        会话级汇总走 view.sessionStats(contextWindow)。
-        """
+        """成本与上下文占用：数据全由宿主提供，库只给换算规则。"""
         view = self._chat.chatView()
         roundStats = ElaChatStats(
             prompt_tokens=3_000,
@@ -513,7 +476,6 @@ class ChatAgentPage(ExamplePage):
         view.beginText(messageId)
         view.appendText(messageId, "这一轮的用量与花费如下。")
         view.endText(messageId)
-        # 一次工具调用：会话统计里会数出「次数 / 轮数 / 按名计数」
         readId = view.addToolCall(messageId, "read", '{"path": "src/app.py"}')
         view.setToolCallResult(messageId, readId, "…文件内容…", ok=True)
         view.setStepStats(
@@ -529,7 +491,6 @@ class ChatAgentPage(ExamplePage):
         )
         self._chat.endAssistantMessage()
 
-        # 会话级汇总（opencode context 面板同口径）→ 直接喂底部工具栏的圆环
         session = view.sessionStats(_DEMO_WINDOW)
         self._chat.chatInput().setContextUsage(
             session.total_tokens, _DEMO_WINDOW, session.total_cost_usd
@@ -542,19 +503,9 @@ class ChatAgentPage(ExamplePage):
         )
 
     def _demo_retry(self) -> None:
-        """手动重试：错误类型单独存字段，错误卡据此决定是否点亮「重试」。
-
-        ``binder.error(errorType, message)`` 原样把类型传给 view（早期实现
-        格式化成 ``"[Type] msg"`` 拼进文案，类型就此丢失）。判据是「换次机会
-        大概率会成功」：限流 / 超时 / 网络 / 5xx 给按钮；参数错误 / 鉴权失败 /
-        内容过滤不给（重试只会再失败一次），但仍给「重新生成」。
-
-        ``retryMessage()`` 与 ``regenerateFrom()`` 的区别是**不删消息** ——
-        保留 id 与时间线位置，同参数重发。
-        """
+        """手动重试：错误类型单独存字段，错误卡据此决定是否点亮「重试」。"""
         view = self._chat.chatView()
-        # 前面必须有一条**用户消息**：`retryMessage()` 找不到前置提问就返回
-        # None 且不做任何改动（宁可不重试，也不猜要重发什么）
+        # 前面必须有用户消息：retryMessage 找不到前置提问就直接返回 None。
         self._chat.sendUserMessage("跑一下测试")
         messageId = self._chat.beginAssistantMessage()
         view.beginStep(messageId)
@@ -620,7 +571,7 @@ class ChatAgentPage(ExamplePage):
         self._note("已插入通知 / 重试卡 / 活动行，并把 thinking 密度设为 hidden")
 
     def _on_retry_requested(self, messageId: int) -> None:
-        """宿主侧：同参数重发。**保留消息位置**，清错误并把状态落成 stopped。"""
+        """宿主侧：同参数重发。"""
         prompt = self._chat.retryMessage(messageId)
         self._note(
             f"重试消息 #{messageId}"
@@ -629,10 +580,7 @@ class ChatAgentPage(ExamplePage):
 
 
 def _parse(arguments: str) -> dict:
-    """容错解析工具参数。
-    示例里够用；真宿主直接用 ``chat.renderers.parseToolArguments``（同一份
-    实现：非 JSON 纯文本会落成 ``{"": 原文}``，流式半截参数不会整段消失）。
-    """
+    """容错解析工具参数。"""
     import json
 
     try:

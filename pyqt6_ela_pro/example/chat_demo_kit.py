@@ -1,4 +1,4 @@
-"""[pyqt6_ela_pro] 聊天示例页的共用零件?"""
+"""[pyqt6_ela_pro] 聊天示例页的共用零件。"""
 
 from PyQt6.QtWidgets import QVBoxLayout
 
@@ -15,10 +15,7 @@ def readonly_chat(
     empty_title=None,
     empty_subtitle=None,
 ):
-    """建一个**只读**的聊天组件（隐藏输入区），用于「陈列」而非「上手」。
-    ``chatInput().setVisible(False)`` + ``setGenerating(False)`` 之后它就是一个
-    纯消息画布。页面上每个能力域共用一个，不要每个小节都建一个 —— 6 个
-    """
+    """建只读聊天组件（隐藏输入区）；每个能力域共用一个。"""
     chat = ElaChatWidget(parent)
     chat.setUserName("我")
     chat.setAssistantName(assistant)
@@ -34,16 +31,7 @@ def readonly_chat(
 
 
 def note(page, text: str, pixel: int = 12) -> ColorText:
-    """一行说明文字。
-
-    **每个 ``ColorText`` 都必须显式 ``setTextPixelSize``** —— 它走 ``ElaText``，
-    不设就是 ``ElaText`` 的默认字号（实测 28px），一行注释突然冒出巨大字号，
-    整页的比例就崩了。
-
-    **不要写 Markdown 强调**（``**粗体`` / ```代码```）—— ``ElaText`` 只吃
-    ``Qt::PlainText``，写进去就是原样显示的星号。要真上 Markdown 得用
-    ``ElaMarkdownViewer``，代价是一整个子控件，不值得为一行说明付出。
-    """
+    """一行说明文字（已设字号，禁止 Markdown 强调）。"""
     label = ColorText(text, page)
     label.setTextPixelSize(pixel)
     label.setWordWrap(True)
@@ -54,8 +42,8 @@ def replay_section(
     page, title, method, player, build_steps, *, interval=40, buttons=(), hint=None
 ):
     """一节 = 标题行（含「</> 代码」）+ 若干按钮 + 说明。
-    ``build_steps`` 是 ``() -> [(ms, callable), ...]``，**每次都重新调用** ——
-    步骤里的闭包会捕获当轮的 ``messageId``，不能缓存。``buttons`` 是除「重播」
+
+    返回 ``(layout, note_label)``；``buttons`` 为 ``[(文案, 回调), ...]``，``build_steps`` 每次重新调用。
     """
     row = page._createHeaderRow(title, method)  # noqa: SLF001 —— 示例页内部约定
     row.addWidget(

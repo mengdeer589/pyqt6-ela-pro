@@ -1,8 +1,4 @@
-"""文件变更与 diff 示例页。
-
-这一页专门展示 `ElaDiffView` / `ElaChatFileChanges` / 内置工具渲染器：
-短 diff、多文件、长 diff（滚动 / 折叠 / 截断）、shell 控制台、write / patch。
-"""
+"""文件变更与 diff 示例页。 这一页专门展示 `ElaDiffView` / `ElaChatFileChanges` / 内置工具渲染器： 短 diff、多文件、长 diff（滚动 / 折叠 / 截断）、shell 控制台、write / patch。"""
 
 from __future__ import annotations
 
@@ -52,7 +48,6 @@ class ChatFilesPage(ExamplePage):
         main_layout.addWidget(self._chat)
 
         installBuiltinToolRenderers()
-        # 预填一条，页面打开就能看到真实的 diff 卡
         self._demo_edit()
 
         for section in (
@@ -252,7 +247,6 @@ class ChatFilesPage(ExamplePage):
         bubble = view.bubble(messageId)
         if bubble is None:
             return
-        # 工具卡在「工具调用 (N)」外层折叠面板里，两层都展开才看得到 diff。
         for panel in bubble.toolPanels():
             panel.setOpened(True)
         card = bubble._tool_cards.get(callId)
