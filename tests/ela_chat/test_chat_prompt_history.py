@@ -5,12 +5,22 @@ from __future__ import annotations
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QKeyEvent
 
-from pyqt6_ela_pro.chat import ElaChatInput, ElaChatPromptHistory
+from pyqt6_ela_pro.chat import ElaChatInput, ElaChatPromptHistory, ElaChatSuggestion
 
 
 def _press(widget, key):
     event = QKeyEvent(QKeyEvent.Type.KeyPress, key, Qt.KeyboardModifier.NoModifier)
     widget.textEdit().keyPressEvent(event)
+
+
+def _insert_mention(widget, text: str) -> None:
+    widget.setMentionProvider(
+        lambda _query: [
+            ElaChatSuggestion(id="alice", label="Al", insert_text="@Al ", kind="agent")
+        ]
+    )
+    widget.setText(text)
+    widget.popup().activateCurrent()
 
 
 class TestPromptHistory:
@@ -59,3 +69,30 @@ class TestPromptHistory:
         other.setDraftState(state)
         assert other.text() == "hello"
         assert other.attachmentCount() == 1
+
+    def test_draft_state_restores_mentions(self, qapp, make):
+        inp = make(ElaChatInput)
+        _insert_mention(inp, "hello @Al")
+        state = inp.draftState()
+        assert state["mentions"][0]["id"] == "alice"
+
+        other = make(ElaChatInput)
+        other.setDraftState(state)
+        assert other.mentions() == ["alice"]
+        span = other.mentionSpans()[0]
+        assert other.text()[span.start : span.end] == "@Al"
+
+    def test_history_restores_mentions(self, qapp, make):
+        inp = make(ElaChatInput)
+        history = ElaChatPromptHistory()
+        inp.setHistory(history)
+        _insert_mention(inp, "hello @Al")
+        assert inp.submit()
+
+        other = make(ElaChatInput)
+        other.setHistory(history)
+        other.setText("draft")
+        _press(other, Qt.Key.Key_Up)
+        assert other.mentions() == ["alice"]
+        span = other.mentionSpans()[0]
+        assert other.text()[span.start : span.end] == "@Al"

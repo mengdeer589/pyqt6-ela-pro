@@ -92,7 +92,7 @@ class _InputCompletionMixin:
                 start = match.start(1) - 1
                 self._set_edit_text(text[:start] + token + text[match.end(1) :])
             else:
-                self._set_edit_text(text + token)
+                self._set_edit_text(self._join_token(text, token))
             self.commandSelected.emit(item.id or item.label)
             self._popup_kind = ""
             return
@@ -102,10 +102,17 @@ class _InputCompletionMixin:
             start = match.start(1) - 1
             self._set_edit_text(text[:start] + token + text[match.end(1) :])
         else:
-            self._set_edit_text(text + token)
+            self._set_edit_text(self._join_token(text, token))
         self._mentions.append((item.id, token, getattr(item, "kind", "")))
         self.mentionSelected.emit(item.id, item.label)
         self._popup_kind = ""
+
+    @staticmethod
+    def _join_token(text: str, token: str) -> str:
+        """把补全 token 接到文本末尾（无词边界时先补一个空格）。"""
+        if text and not text[-1].isspace():
+            return f"{text} {token}"
+        return text + token
 
     def _set_edit_text(self, text: str) -> None:
         self._edit.setPlainText(text)
@@ -132,12 +139,13 @@ class _InputCompletionMixin:
                 out.append(mid)
         return out
 
-    def mentionSpans(self) -> list:
+    def mentionSpans(self, text: Optional[str] = None) -> list:
         """当前文本里仍有效的 ``@`` 引用区间（``ElaChatMention`` 列表）。
 
         偏移按 Python ``str`` 下标计；同一 token 多次出现只取第一处。
+        ``text`` 用于提交前按 **strip 后**的文本计算区间；缺省读编辑器原文。
         """
-        text = self._edit.toPlainText()
+        text = self._edit.toPlainText() if text is None else str(text)
         if not text:
             return []
         result = []
@@ -152,8 +160,33 @@ class _InputCompletionMixin:
             if match is None:
                 continue
             start = match.start(1)
-            result.append(ElaChatMention(start=start, end=start + len(bare), kind=kind))
+            result.append(
+                ElaChatMention(
+                    start=start,
+                    end=start + len(bare),
+                    kind=kind,
+                    id=str(entry[0] or ""),
+                )
+            )
         return result
+
+    def setMentions(self, mentions) -> None:
+        """按当前文本恢复 ``@`` 引用条目（接受 ``ElaChatMention`` / dict）。"""
+        text = self._edit.toPlainText()
+        entries = []
+        for item in mentions or ():
+            mention = (
+                item
+                if isinstance(item, ElaChatMention)
+                else ElaChatMention.fromDict(item)
+            )
+            if mention is None or not mention.isValid:
+                continue
+            token = text[mention.start : mention.end]
+            if not token:
+                continue
+            entries.append((mention.id, token, mention.kind))
+        self._mentions = entries
 
     def clearMentions(self) -> None:
         """清空引用记录。"""

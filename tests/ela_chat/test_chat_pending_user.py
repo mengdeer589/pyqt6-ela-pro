@@ -35,6 +35,7 @@ class TestPendingUser:
         pending = chat.chatView().messages()[-1]
         chat._on_pending_user_action(pending.id, "queue")
         assert chat.queueCount() == 1
+        assert chat.steerCount() == 0
         assert chat.chatView().message(pending.id) is None
 
     def test_pending_delete(self, qapp, make):
@@ -43,4 +44,57 @@ class TestPendingUser:
         chat.steerMessage("删掉")
         pending = chat.chatView().messages()[-1]
         chat._on_pending_user_action(pending.id, "delete")
+        assert chat.steerCount() == 0
         assert chat.chatView().message(pending.id) is None
+
+    def test_remove_pending_message_drops_steer(self, qapp, make):
+        chat = make(ElaChatWidget)
+        chat.setGenerating(True)
+        chat.steerMessage("删掉")
+        pending = chat.chatView().messages()[-1]
+        chat.removeMessage(pending.id)
+        assert chat.steerCount() == 0
+
+    def test_removing_active_stream_drops_steer(self, qapp, make):
+        chat = make(ElaChatWidget)
+        chat.sendUserMessage("q")
+        message_id = chat.beginAssistantMessage()
+        chat.steerMessage("late")
+        chat.removeMessage(message_id)
+        assert chat.steerCount() == 0
+
+    def test_ending_turn_drops_undelivered_steer(self, qapp, make):
+        chat = make(ElaChatWidget)
+        chat.sendUserMessage("q")
+        chat.beginAssistantMessage()
+        chat.steerMessage("late")
+        chat.endAssistantMessage()
+        assert chat.steerCount() == 0
+        assert not [
+            message
+            for message in chat.chatView().messages()
+            if message.delivery == "steer"
+        ]
+
+    def test_error_turn_drops_undelivered_steer(self, qapp, make):
+        chat = make(ElaChatWidget)
+        chat.sendUserMessage("q")
+        chat.beginAssistantMessage()
+        chat.steerMessage("late")
+        chat.setMessageError("boom", errorType="ServerError")
+        assert chat.steerCount() == 0
+
+    def test_undo_and_regenerate_drop_steer(self, qapp, make):
+        chat = make(ElaChatWidget)
+        user_id = chat.sendUserMessage("q")
+        chat.beginAssistantMessage()
+        chat.steerMessage("late")
+        chat.undoMessage(user_id)
+        assert chat.steerCount() == 0
+
+        chat = make(ElaChatWidget)
+        chat.sendUserMessage("q")
+        assistant_id = chat.beginAssistantMessage()
+        chat.steerMessage("late")
+        chat.regenerateFrom(assistant_id)
+        assert chat.steerCount() == 0

@@ -859,7 +859,7 @@ class ChatInputPage(ExamplePage):
 
     def _on_queue_undo(self) -> None:
         if self._chat.undoQueueChange():
-            self._say(10, "已撤销上一次队列操作（排序 / 插话 / 移除都在快照栈里）")
+            self._say(10, "已撤销上一次队列操作（排序 / 移除 / 转插话都在快照栈里）")
         else:
             self._say(10, "没有可撤销的队列操作")
 

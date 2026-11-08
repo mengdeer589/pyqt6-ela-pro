@@ -638,21 +638,23 @@ class PermissionCard(_ThemeAwareMixin, ElaScrollPageArea):
         self._sync_segments()
 
     def _on_activate(self, question, value: str) -> None:
-        """整行被激活：普通候选项 = 切换勾选；自定义行 = 展开编辑器。"""
+        """整行被激活：普通候选项多选切换勾选、单选保持选中；自定义行展开编辑器。"""
         if not value:
             self._enter_editing(question.key)
             return
         already = value in (self._answers.get(question.key) or ())
-        self._select_value(question, value, not already)
+        checked = not already if question.isMultiple else True
+        self._select_value(question, value, checked)
 
     def _on_mark_clicked(self, question, value: str) -> None:
-        """点标记 / 按 Space：普通行切换勾选，自定义行（``value`` 空串）选中并展开编辑器。
+        """点标记 / 按 Space：普通行多选切换勾选、单选保持选中；自定义行展开编辑器。
 
         单选是 radio 语义，标记不提供「再点取消」；取消只挂多选。
         """
         if value:
             already = value in (self._answers.get(question.key) or ())
-            self._select_value(question, value, not already)
+            checked = not already if question.isMultiple else True
+            self._select_value(question, value, checked)
             return
         key = question.key
         if not question.options:

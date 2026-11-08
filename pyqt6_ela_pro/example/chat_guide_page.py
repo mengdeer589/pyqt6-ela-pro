@@ -548,10 +548,10 @@ binder 和窗口（本页示例里 `worker` 就是这个角色）。
 | `undoMessage(id)` / `undoLastUserMessage()` | 撤回用户消息：删除该条及其后消息，原文 / 附件回填输入框。`undoMessage` **只对用户消息生效**（传助手消息返回 `None`，别拿 `messages()[-1]` 的助手回答 id 去撤）；`undoLastUserMessage()` 自己找**最后一条用户消息**，是「撤回最后一条消息」的正确入口 |
 | `regenerateFrom(id)` | 删除该回答，返回前置用户消息（**按钮与整条底部行只在回合结束后出现** —— 流式 / 排队中不显示：回答没写完点了会整段丢掉，复制到的也只是半句话） |
 | `retryMessage(id)` | **重试**（同参数重发）：清错误并把状态落成 `stopped`、**保留消息位置与 id**，返回前置用户消息。与 `regenerateFrom` 的区别就是不删消息 —— 删掉重建会让「重试」看起来像「重新生成」，也会打断用户正在读的上下文 |
-| `steerMessage(text)` / `drainSteer()` / `setSteerEnabled(on)` | 生成中插话：在 `beginStep` 安全边界把新指令送进**正在跑的这一轮**（对齐 opencode 的 `Delivery = "steer" \| "queue"`，那边 prompt 默认 steer），而不是排队等它跑完。`drainSteer()` 一次只投一条 |
+| `steerMessage(text, attachments=None, messageId=None, *, mentions=None)` / `drainSteer()` / `setSteerEnabled(on)` | 生成中插话：在 `beginStep` 安全边界把新指令送进**正在跑的这一轮**（对齐 opencode 的 `Delivery = "steer" \| "queue"`，那边 prompt 默认 steer），而不是排队等它跑完。`mentions` 是用户文本里的 `@` 区间；`drainSteer()` 一次只投一条 |
 | `sendNextQueued()` / `setAutoSendQueue(on)` | 排队续发（回合结束默认自动发送队首；仅空闲时发送） |
 | `sendQueuedNow(id)` | 排队 dock「立即发送」：先按 `Stopped` 收尾当前流并发出 `stopRequested`，再提交该条（同一时刻只有一个活跃流）。**只发被点的那条**，其余排队消息保持排队 |
-| `clear()` | 清空消息与排队；生成中会发出 `stopRequested`；发出 `cleared` 信号 |
+| `clear()` | 清空消息与排队（**输入区草稿 / 附件保留**）；生成中会发出 `stopRequested`；发出 `cleared` 信号 |
 | `cleared` | 界面已清空（消息 + 队列 + 生成态）——**宿主在这里重置后端会话**（`worker.reset()`），后端上下文只有宿主知道，组件管不到 |
 | `clearRequested` | 输入区工具栏「清空上下文」按钮点击**且有待清内容**时（确认弹框**之前**发出，可做埋点；空会话不发、也不弹框） |
 | `requestClear()` | 主动走「ElaConfirmDialog 确认 → `clear()`」链路（空会话不弹框） |
@@ -562,8 +562,8 @@ binder 和窗口（本页示例里 `worker` 就是这个角色）。
 | `generationStarted(id)` / `generationFinished(id, status)` / `messageUpdated(id)` / `messageActionTriggered(id, action)` / `sessionChanged(id)` / `attachmentsChanged(list)` / `batchRenderFinished()` | 状态 / 遥测信号：生成开始 / 结束（`status` 是字符串枚举）、消息快照更新、消息操作按钮、会话标记、附件变化、批量恢复的首批排空（**不是**「全部渲染完」） |
 | `setUserName(name)` / `setAssistantName(name)` / `setPlaceholderText(text)` / `setMentionProvider(fn)` / `mentions()` / `sendUserMessage(text, attachments=None, messageId=None)` / `addMessage(role, text)` | 外壳与程序化消息：名字作用于已有与后续消息；`@` 引用 `provider(query) -> list`，提交时用 `mentions()` 取有效 id；`sendUserMessage` 建用户消息 + 进生成态（返回 id），`addMessage` 只建消息不提交 |
 | `addSelector(key, title, items, current)` / `selectorValue(key)` / `setCommandProvider(fn)` / `setShellMode(on)` / `setHistory(history)` | 输入区命令 / 模型选择器 / shell / 提示历史的 widget 转发（**不转发 view 的同名接口**） |
-| `moveQueued(id, toIndex)` / `steerQueued(id)` / `undoQueueChange()` / `canUndoQueue()` | 队列排序 / 转插话 / 撤销（快照栈上限 20） |
-| `mentionSpans()` / `draftState()` / `setDraftState(state)` | @ 引用区间 / 草稿快照（宿主按会话保存） |
+| `moveQueued(id, toIndex)` / `steerQueued(id)` / `undoQueueChange()` / `canUndoQueue()` | 队列排序 / 转插话 / 撤销（快照栈上限 20；只覆盖队列操作，直接插话不进撤销栈） |
+| `mentionSpans()` / `setMentions(mentions)` / `draftState()` / `setDraftState(state)` | @ 引用区间（带 id）/ 按文本恢复引用 / 草稿快照（宿主按会话保存） |
 | `setGenerating(on)` / `isGenerating()` / `streamingMessageId()` | 生成态与当前流式消息 id（`stopGeneration()` 见「三层边界」） |
 
 > **widget 不再转发 view 的细粒度接口** —— `addToolCall()` / `beginText()` /
@@ -602,7 +602,7 @@ binder 和窗口（本页示例里 `worker` 就是这个角色）。
 | `setHistory(history)` / `draftState()` / `setDraftState(state)` | 提示历史（`ElaChatPromptHistory`，↑/↓ 浏览）与草稿快照 |
 | `mentionSpans()` | 当前文本的 `ElaChatMention` 区间（用户消息 @ 高亮用） |
 | `setQueueEnabled(on)` / `queueEnabled()` | 生成中是否允许排队（默认开；关掉时发送键置灰、回车不被吞） |
-| `submit()` / `text()` / `setText(text)` / `clear()` | 程序化提交 / 读写草稿（`submit()` 走与回车相同的校验与信号） |
+| `submit()` / `text()` / `setText(text)` / `clear()` | 程序化提交 / 读写草稿（`submit()` 走与回车相同的校验与信号）；`clear()` 清文本 / @ 引用 / 附件，不碰 shell 模式与选择器 |
 
 ## View（消息内容层，经 `chatView()` 调用）
 
@@ -622,7 +622,8 @@ binder 和窗口（本页示例里 `worker` 就是这个角色）。
 | `addPendingUserMessage(text, ...)` / `resolvePendingUserMessage(id, sent=True)` | 待发送用户消息（插话先上屏） |
 | `searchText(query, caseSensitive=False)` / `searchNext()` / `searchPrev()` / `clearSearch()` | 会话内搜索与循环跳转 |
 | `setMessageIdentity(id, agent, model, modelVariant)` / `setMessageMentions(id, mentions)` | 消息身份 / @ 区间（也可在 `addMessage` 时传） |
-| `setReasoningStyle(style)` / `setToolGrouping(on)` / `setStatsMode(mode)` | 展示形态，立即对已有消息生效 |
+| `setReasoningStyle(style)` / `setStatsMode(mode)` | 展示形态，立即对已有消息生效 |
+| `setToolGrouping(on)` | 是否把连续上下文工具合并为分组卡；只影响之后新建的工具卡，已建卡不重组 |
 | `setDisclaimer(text)` / `setDisclaimerVisible(on)` | 助手消息底部的「内容由 AI 生成，仅供参考」提示（默认开启；流式期间随整行隐藏）；`DISCLAIMER_TEXT` 是默认文案 |
 | `setCopyNotificationEnabled(on)` | 点击消息底部「复制」后是否弹 `ElaMessageBar`「已复制到剪贴板」成功提示（默认开启，立即对已有消息生效；应用偏好，不进 `exportSession`） |
 | `setWaitingPlaceholderEnabled(on)` | 等待首个 token（TTFT）期间是否在助手气泡内显示 `ElaShimmer` 骨架（默认开启，立即对已有消息生效）。骨架不是 part：不进 `parts` / 导出 / journal；收到首个正文 / 思考 / 工具 / 审批 / 统计即隐藏。应用偏好，不进 `exportSession` |

@@ -169,6 +169,16 @@ class _ViewSearchMixin:
         self._search_index = index
         self.scrollToMessage(hit.message_id)
         bubble = self._bubbles.get(hit.message_id)
+        if bubble is not None and bubble.viewersSuspended():
+            self._restore_message_viewers(hit.message_id)
+        bubble = self._bubbles.get(hit.message_id)
+        if (
+            bubble is not None
+            and hit.part_id
+            and bubble.partsWindowed()
+            and bubble._part_widgets.get(hit.part_id) is None
+        ):
+            bubble.expandParts()
         if bubble is not None and hit.part_id:
             widget = bubble._part_widgets.get(hit.part_id)
             if isinstance(widget, ElaMarkdownViewer):

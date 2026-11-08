@@ -494,6 +494,7 @@ class TestInputAndToolbar:
         inp._mentions.append(("id1", "@Al "))
         assert inp.mentions() == []
         inp.setText("@Al ")
+        inp._mentions.append(("id1", "@Al "))
         assert inp.mentions() == ["id1"]
 
     def test_toolbar_clear_removes_registered_stretch(self, qapp, make):

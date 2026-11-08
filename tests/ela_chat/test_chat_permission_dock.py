@@ -150,6 +150,29 @@ class TestInteractionLivesInDock:
         assert chat.permissionDock().card() is None
         assert chat.permissionDock().isHidden()
 
+    def test_sync_auto_resolve_does_not_block_next(self, qapp, make):
+        """宿主在 ``permissionRequested`` 槽里同步答复时，下一张仍要进 dock。"""
+        chat = make(ElaChatWidget)
+        mid = _turn(chat)
+        view = chat.chatView()
+
+        def auto_allow(message_id, request_id):
+            if request_id == "r1":
+                view.resolvePermission(
+                    message_id, request_id, ElaChatPermissionStatusType.Allowed
+                )
+
+        view.permissionRequested.connect(auto_allow)
+        view.beginPermission(mid, ElaChatPermission(request_id="r1", action="bash"))
+        view.beginPermission(mid, ElaChatPermission(request_id="r2", action="bash"))
+
+        pending = [item.request_id for item in view.pendingPermissions(mid)]
+        assert pending == ["r2"]
+        card = chat.permissionDock().card()
+        assert card is not None
+        assert card.permission().request_id == "r2"
+        assert chat.permissionDock().queued() == 0
+
     def test_clear_session_empties_the_dock(self, qapp, make):
         chat = make(ElaChatWidget)
         mid = _turn(chat)

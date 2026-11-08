@@ -13,7 +13,13 @@ from PyQt6.QtTest import QTest
 from PyQt6.QtWidgets import QApplication, QFrame
 from PyQt6ElaWidgetTools import ElaIconType
 
-from pyqt6_ela_pro.chat import ElaChatInput, ElaChatToolBar
+from pyqt6_ela_pro.chat import (
+    ElaChatInput,
+    ElaChatMention,
+    ElaChatSuggestion,
+    ElaChatToolBar,
+    ElaChatWidget,
+)
 from pyqt6_ela_pro.chat._theme import accent_color, card_border_color
 from pyqt6_ela_pro.chat.input_completion import _MENTION_TAIL
 
@@ -595,6 +601,92 @@ class TestMentionTail:
     def test_tail_covers_cjk_extensions(self, text, matched):
         found = re.search(re.escape("@Al") + _MENTION_TAIL, text) is not None
         assert found is matched
+
+
+class TestMentionEditing:
+    @staticmethod
+    def _with_provider(widget) -> None:
+        widget.setMentionProvider(
+            lambda _query: [
+                ElaChatSuggestion(
+                    id="alice", label="Al", insert_text="@Al ", kind="agent"
+                )
+            ]
+        )
+
+    def test_popup_inserts_word_boundary(self, qapp, make):
+        widget = make(ElaChatInput)
+        self._with_provider(widget)
+        widget.setText("hello")
+        widget.openMentionPopup()
+        widget.popup().activateCurrent()
+        assert widget.text() == "hello @Al "
+        assert widget.mentions() == ["alice"]
+
+    def test_submit_spans_follow_stripped_text(self, qapp, make):
+        chat = make(ElaChatWidget)
+        widget = chat.chatInput()
+        self._with_provider(widget)
+        widget.setText("  @Al")
+        widget.popup().activateCurrent()
+        widget.textEdit().insertPlainText("hi")
+        widget.submit()
+        message = chat.chatView().lastMessage()
+        assert message.text == "@Al hi"
+        assert len(message.mentions) == 1
+        mention = message.mentions[0]
+        assert message.text[mention.start : mention.end] == "@Al"
+
+    def test_clear_and_set_text_drop_mentions(self, qapp, make):
+        widget = make(ElaChatInput)
+        self._with_provider(widget)
+        widget.setText("@Al")
+        widget.popup().activateCurrent()
+        assert widget.mentionSpans()
+        widget.clear()
+        widget.setText("@Al fresh")
+        assert widget.mentionSpans() == []
+        assert widget.mentions() == []
+
+    def test_clear_resets_whole_draft(self, qapp, make):
+        widget = make(ElaChatInput)
+        self._with_provider(widget)
+        widget.setText("hello @Al")
+        widget.popup().activateCurrent()
+        widget.addAttachment("a.txt", "C:/tmp/a.txt", 3)
+        widget.openMentionPopup()
+        assert not widget.popup().isHidden()
+        changed = []
+        widget.attachmentsChanged.connect(changed.append)
+
+        widget.clear()
+        assert widget.text() == ""
+        assert widget.mentionSpans() == []
+        assert widget.attachmentCount() == 0
+        assert changed and changed[-1] == []
+        assert widget.popup().isHidden()
+
+    def test_undo_restores_mentions(self, qapp, make):
+        chat = make(ElaChatWidget)
+        widget = chat.chatInput()
+        self._with_provider(widget)
+        widget.setText("hello @Al")
+        widget.popup().activateCurrent()
+        widget.submit()
+        message_id = chat.chatView().lastMessage().id
+        chat.undoMessage(message_id)
+        assert widget.mentions() == ["alice"]
+        span = widget.mentionSpans()[0]
+        assert widget.text()[span.start : span.end] == "@Al"
+
+    def test_queued_edit_restores_mentions(self, qapp, make):
+        chat = make(ElaChatWidget)
+        queue_id = chat.enqueueMessage(
+            "hello @Al",
+            mentions=[ElaChatMention(start=6, end=9, kind="agent", id="alice")],
+        )
+        assert chat.editQueuedMessage(queue_id)
+        assert chat.chatInput().mentions() == ["alice"]
 
 
 class TestLargePasteToAttachment:

@@ -281,12 +281,16 @@ class ElaChatInput(
         return self._edit.toPlainText()
 
     def setText(self, text: str) -> None:
-        """设置输入文本（光标移到末尾）。"""
+        """设置输入文本（光标移到末尾；旧 ``@`` 引用失效）。"""
+        self.clearMentions()
         self._set_edit_text(text or "")
 
     def clear(self) -> None:
-        """清空输入。"""
+        """清空草稿（文本 / ``@`` 引用 / 附件）与补全浮层。"""
         self._edit.clear()
+        self.clearMentions()
+        self._attachments.clear()
+        self._close_popup()
 
     def setPlaceholderText(self, text: str) -> None:
         """设置占位文案。"""
@@ -329,7 +333,7 @@ class ElaChatInput(
             self._history.add(
                 text,
                 attachments,
-                self.mentionSpans(),
+                self.mentionSpans(text),
                 self._historyMode(),
             )
         if self._shell_mode:

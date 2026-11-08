@@ -35,6 +35,13 @@ class _BubbleDetailMixin:
         for part in list(self._parts):
             self._apply_part_visibility(part.id)
         self._refresh_tool_panels()
+        row = self._thinking_row
+        if row is None:
+            return
+        if self.timelineDetail().thinking.hidden:
+            row.end()
+        elif self._current_reasoning_id is not None and row.isHidden():
+            row.resume()
 
     def setPartExpanded(self, partId: str, opened: bool) -> None:
         """设置某个分段的展开状态（覆盖全局密度默认值）。"""

@@ -12,11 +12,13 @@ class _WidgetSteerMixin:
         text: str,
         attachments=None,
         messageId: Optional[str] = None,
+        *,
+        mentions=None,
     ) -> Optional[str]:
         """生成中**插话**：把新指令送进正在跑的这一轮，而不是排队等它跑完。
 
         投递由 binder 在 step 安全边界调 :meth:`drainSteer` 完成；组件不负责把文本
-        送进后端。
+        送进后端。``mentions`` 是用户文本里的 ``@`` 区间（``ElaChatMention``）。
 
         :returns: steer id（空文本返回 ``None``）
         """
@@ -27,11 +29,11 @@ class _WidgetSteerMixin:
             for item in self._steer:
                 if item.get("messageId") == messageId:
                     return item["id"]
-        self._snapshot_queue()
+        mentions = list(mentions or [])
         pendingId = self._view.addPendingUserMessage(
             text,
             attachments,
-            [],
+            mentions,
             "steer",
         )
         steerId = uuid4().hex[:12]
@@ -42,6 +44,7 @@ class _WidgetSteerMixin:
                 "attachments": list(attachments or []),
                 "messageId": messageId,
                 "pendingMessageId": pendingId,
+                "mentions": mentions,
             }
         )
         self.steerChanged.emit(self.steerMessages())
@@ -59,12 +62,11 @@ class _WidgetSteerMixin:
         """丢弃指定插话（用户改主意了）。"""
         for index, item in enumerate(self._steer):
             if item["id"] == steerId:
-                self._snapshot_queue()
                 pendingId = item.get("pendingMessageId")
-                if pendingId is not None:
-                    self._view.resolvePendingUserMessage(int(pendingId), sent=False)
                 self._steer.pop(index)
                 self.steerChanged.emit(self.steerMessages())
+                if pendingId is not None:
+                    self._view.resolvePendingUserMessage(int(pendingId), sent=False)
                 return True
         return False
 
@@ -72,12 +74,40 @@ class _WidgetSteerMixin:
         """清空待送插话。"""
         if not self._steer:
             return
-        self._snapshot_queue()
-        for item in list(self._steer):
+        items = list(self._steer)
+        self._steer.clear()
+        for item in items:
             pendingId = item.get("pendingMessageId")
             if pendingId is not None:
                 self._view.resolvePendingUserMessage(int(pendingId), sent=False)
-        self._steer.clear()
+        self.steerChanged.emit(self.steerMessages())
+
+    def _dropSteerForPending(self, messageId: int) -> bool:  # noqa: N802
+        """移除指向指定待发送消息的插话条目。"""
+        for index, item in enumerate(self._steer):
+            if item.get("pendingMessageId") != messageId:
+                continue
+            self._steer.pop(index)
+            self.steerChanged.emit(self.steerMessages())
+            return True
+        return False
+
+    def _pruneSteer(self) -> None:  # noqa: N802
+        """丢弃待发送消息已不存在（或已送达）的插话条目。"""
+        if not self._steer:
+            return
+        kept = []
+        for item in self._steer:
+            pendingId = item.get("pendingMessageId")
+            if pendingId is None:
+                kept.append(item)
+                continue
+            message = self._view.message(int(pendingId))
+            if message is not None and message.delivery == "steer":
+                kept.append(item)
+        if len(kept) == len(self._steer):
+            return
+        self._steer = kept
         self.steerChanged.emit(self.steerMessages())
 
     def setSteerEnabled(self, on: bool) -> None:

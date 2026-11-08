@@ -79,3 +79,16 @@ def test_shared_state_supports_zero_based_clock():
     now[0] = 1.5
     assert state.turn_duration_ms() == 1500
     assert state.round_duration_ms() == 1500
+
+
+def test_reused_journal_discards_dropped_turn_buffers():
+    """复用 journal 且上一回合未 ``end()`` 时，在途分片不能带进新回合。"""
+
+    journal = ElaChatTurnJournal(clock=lambda: 0.0)
+    journal.begin(1)
+    journal.text("A")
+    journal.text("B")
+    journal.begin(2)
+    journal.text("C")
+    journal.text("D")
+    assert journal.message().text == "CD"

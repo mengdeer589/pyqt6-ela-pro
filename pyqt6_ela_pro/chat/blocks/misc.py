@@ -220,9 +220,7 @@ class CompactionSeparator(_ThemeAwareMixin, ElaScrollPageArea):
             + max(0, int(getattr(stats, "cache_read_tokens", 0) or 0))
             + max(0, int(getattr(stats, "cache_write_tokens", 0) or 0))
         )
-        output = max(0, int(getattr(stats, "completion_tokens", 0) or 0)) + max(
-            0, int(getattr(stats, "reasoning_tokens", 0) or 0)
-        )
+        output = max(0, int(getattr(stats, "completion_tokens", 0) or 0))
         if prompt + output <= 0:
             self._stats_text = ""
         else:

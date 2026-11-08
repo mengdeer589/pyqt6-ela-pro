@@ -67,7 +67,7 @@ class _BubbleToolsMixin:
         return self._current_tool_panel
 
     def setToolGrouping(self, on: bool) -> None:
-        """设置是否把连续上下文工具（read/glob/grep/list）合并为分组卡。"""
+        """设置是否把连续上下文工具合并为分组卡（只影响之后新建的工具卡）。"""
         self._tool_grouping = bool(on)
 
     def setToolDefaultOpen(self, policy) -> None:

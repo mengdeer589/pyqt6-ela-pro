@@ -5,7 +5,7 @@ from __future__ import annotations
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QKeyEvent
 
-from pyqt6_ela_pro.chat import ElaChatWidget
+from pyqt6_ela_pro.chat import ElaChatSuggestion, ElaChatWidget
 
 
 def _ctrl_enter(widget):
@@ -15,6 +15,17 @@ def _ctrl_enter(widget):
         Qt.KeyboardModifier.ControlModifier,
     )
     widget.chatInput().textEdit().keyPressEvent(event)
+
+
+def _with_mention(chat: ElaChatWidget, text: str) -> None:
+    inp = chat.chatInput()
+    inp.setMentionProvider(
+        lambda _query: [
+            ElaChatSuggestion(id="alice", label="Al", insert_text="@Al ", kind="agent")
+        ]
+    )
+    inp.setText(text)
+    inp.popup().activateCurrent()
 
 
 class TestAlternateDelivery:
@@ -32,3 +43,28 @@ class TestAlternateDelivery:
         _ctrl_enter(chat)
         assert chat.chatView().count() == 1
         assert chat.chatInput().text() == ""
+
+    def test_idle_send_keeps_mentions(self, qapp, make):
+        chat = make(ElaChatWidget)
+        _with_mention(chat, "@Al")
+        _ctrl_enter(chat)
+        message = chat.chatView().lastMessage()
+        assert message.text == "@Al"
+        assert len(message.mentions) == 1
+        mention = message.mentions[0]
+        assert message.text[mention.start : mention.end] == "@Al"
+
+    def test_steer_keeps_mentions(self, qapp, make):
+        chat = make(ElaChatWidget)
+        chat.setGenerating(True)
+        _with_mention(chat, "@Al")
+        _ctrl_enter(chat)
+        pending = [
+            message
+            for message in chat.chatView().messages()
+            if message.delivery == "steer"
+        ]
+        assert len(pending) == 1
+        mention = pending[0].mentions[0]
+        assert pending[0].text[mention.start : mention.end] == "@Al"
+        assert chat.steerMessages()[0]["mentions"]

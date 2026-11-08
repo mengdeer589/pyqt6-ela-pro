@@ -541,6 +541,21 @@ class TestAnswerPayload:
         card._on_mark_clicked(question, "A")
         assert card.answers() == {}
 
+    def test_single_normal_row_is_radio(self, qapp, make):
+        """单选普通候选项再点不取消；换项才替换答案。"""
+        chat = make(ElaChatWidget)
+        card = _single(chat, _turn(chat), options=(("A", ""), ("B", "")))
+        question = card._questions()[0]
+        row = card._option_buttons[0]
+        row.activate.emit("A")
+        assert card.answers() == {"q0": ["A"]}
+        row.activate.emit("A")
+        assert card.answers() == {"q0": ["A"]}
+        card._on_mark_clicked(question, "A")
+        assert card.answers() == {"q0": ["A"]}
+        card._option_buttons[1].activate.emit("B")
+        assert card.answers() == {"q0": ["B"]}
+
 
 class TestNavigation:
     def test_next_then_submit(self, qapp, make):

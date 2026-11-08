@@ -205,6 +205,8 @@ class TestDeferredShells:
         view.resize(640, 480)
         view.show()
         qapp.processEvents()
+        # 关闭视口挂起：定时器在并行负载下可能抢在贴底前物化 id 1
+        view.setViewportSuspension(False)
         view.importSession(_bundle(100, steps=1))
         qapp.processEvents()
         assert view.bubble(1) is None

@@ -263,17 +263,7 @@ class AttachmentStrip(ElaThemeWidget):
 
     @staticmethod
     def _normalize(item) -> ElaChatAttachment:
-        if isinstance(item, ElaChatAttachment):
-            return item
-        if isinstance(item, dict):
-            return ElaChatAttachment(
-                name=str(item.get("name") or "文件"),
-                path=str(item.get("path") or ""),
-                size=_as_int(item.get("size")),
-                digest=str(item.get("digest") or ""),
-                mime=str(item.get("mime") or ""),
-            )
-        return ElaChatAttachment(name=str(item))
+        return ElaChatAttachment.coerce(item)
 
     def _rebuild(self, attachments: list) -> None:
         for card in self._cards:

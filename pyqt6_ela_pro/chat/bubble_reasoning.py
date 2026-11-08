@@ -74,14 +74,18 @@ class _BubbleReasoningMixin:
                 old.hide()
                 old.setParent(None)
                 old.deleteLater()
+            if self._is_part_hidden(part):
+                widget.setVisible(False)
+            elif part.status != ElaChatStatusType.Streaming:
+                # 非流式：恢复分区默认展开 / 手动披露状态；流式块保持「思考中」的展开态
+                self._apply_part_visibility(part.id)
             if part.status == ElaChatStatusType.Streaming:
                 streaming_id = part.id
         self._current_reasoning_id = streaming_id
         if streaming_id is not None:
             widget = self._part_widgets.get(streaming_id)
             if isinstance(widget, ElaMarkdownViewer):
-                self._move_thinking_row(widget)
-                self._thinking_row.begin()
+                self._begin_thinking_row(widget)
                 scanner = self._heading_scanners.get(streaming_id)
                 if scanner is not None:
                     self._thinking_row.setHeading(scanner.result())
@@ -89,6 +93,15 @@ class _BubbleReasoningMixin:
                 self._thinking_row.end()
         elif self._thinking_row is not None:
             self._thinking_row.end()
+
+    def _begin_thinking_row(self, before: QWidget) -> None:
+        """显示内联思考行；thinking 分区隐藏时保持收起。"""
+        if self.timelineDetail().thinking.hidden:
+            if self._thinking_row is not None:
+                self._thinking_row.end()
+            return
+        self._move_thinking_row(before)
+        self.thinkingRow().begin()
 
     def _populate_reasoning_widget(self, widget: QWidget, part: ElaChatPart) -> None:
         """把思考分段数据灌入重建后的控件（含流式状态）。"""
@@ -279,8 +292,7 @@ class _BubbleReasoningMixin:
             if isinstance(widget, ReasoningBlock):
                 widget.begin()
             elif isinstance(widget, ElaMarkdownViewer):
-                self._move_thinking_row(widget)
-                self.thinkingRow().begin()
+                self._begin_thinking_row(widget)
                 widget.setMarkdown("")
             return
         self._current_reasoning_id = None
@@ -299,15 +311,14 @@ class _BubbleReasoningMixin:
                 widget.setBusy(True)
                 widget.setOpened(True)
             elif isinstance(widget, ElaMarkdownViewer):
-                self._move_thinking_row(widget)
-                self.thinkingRow().begin()
+                self._begin_thinking_row(widget)
             return
         partId = self._ensure_reasoning_part()
         widget = self._part_widgets.get(partId)
         if isinstance(widget, ReasoningBlock):
             widget.begin()
         elif isinstance(widget, ElaMarkdownViewer):
-            self.thinkingRow().begin()
+            self._begin_thinking_row(widget)
             widget.setMarkdown("")
 
     def appendReasoning(self, chunk: str) -> None:
@@ -329,6 +340,11 @@ class _BubbleReasoningMixin:
             if scanner is None:
                 scanner = _HeadingScanner()
                 self._heading_scanners[partId] = scanner
+            if (
+                not self.timelineDetail().thinking.hidden
+                and self.thinkingRow().isHidden()
+            ):
+                self._begin_thinking_row(widget)
             self.thinkingRow().setHeading(scanner.push(chunk))
             if not self._defer_viewer_append(partId, widget):
                 widget.appendMarkdown(chunk)

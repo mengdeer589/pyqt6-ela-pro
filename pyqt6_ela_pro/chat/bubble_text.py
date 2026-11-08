@@ -178,6 +178,7 @@ class _BubbleTextMixin:
             placeholder.setAttribute(
                 Qt.WidgetAttribute.WA_TransparentForMouseEvents, True
             )
+            placeholder.setVisible(not widget.isHidden())
             index = layout.indexOf(widget) if layout is not None else -1
             self._part_widgets[part.id] = placeholder
             if layout is not None:
@@ -235,6 +236,7 @@ class _BubbleTextMixin:
                     layout.insertWidget(index, widget)
                 else:
                     layout.addWidget(widget)
+            self._apply_part_visibility(partId)
             if placeholder is not None:
                 placeholder.hide()
                 placeholder.setParent(None)
@@ -258,18 +260,18 @@ class _BubbleTextMixin:
         self._pending_text_lead.clear()
         if text:
             self._mark_generation_started()
-        # 多段正文时 setText 是整体替换，先清旧正文段，否则会拼接成 "A" + "C"
-        if (
-            text
-            and sum(1 for item in self._parts if item.kind == ElaChatPartKindType.Text)
-            > 1
-        ):
+        # 多段正文时 setText 是整体替换，先清旧正文段，否则会拼接成 "A" + "C"；
+        # 空文本同样要清空全部正文段，不能只清最后一段。
+        text_parts = [
+            item for item in self._parts if item.kind == ElaChatPartKindType.Text
+        ]
+        if len(text_parts) > 1 or (not text and text_parts):
             self._remove_parts({ElaChatPartKindType.Text})
             self._current_text_id = None
+        if not text:
+            return
         partId = self._current_text_id or self._last_text_part_id()
         if partId is None:
-            if not text:
-                return  # 空文本不建空分段（会污染 parts 与导出结果）
             self.beginText()
             partId = self._current_text_id
         self._discard_part_state(partId)

@@ -59,7 +59,7 @@ class _WidgetTurnMixin:
         return messageId
 
     def _on_input_submitted(self, text: str, attachments: list) -> None:
-        mentions = self._input.mentionSpans()
+        mentions = self._input.mentionSpans(text)
         if self._generating and self._queue_enabled:
             self.enqueueMessage(text, attachments, mentions=mentions)
             return
@@ -67,10 +67,11 @@ class _WidgetTurnMixin:
 
     def _on_alternate_submitted(self, text: str, attachments: list) -> None:
         """``Ctrl+Enter``：生成中走插话，空闲时普通发送。"""
+        mentions = self._input.mentionSpans(text)
         if self._generating:
-            self.steerMessage(text, attachments)
+            self.steerMessage(text, attachments, mentions=mentions)
         else:
-            self.sendUserMessage(text, attachments)
+            self.sendUserMessage(text, attachments, mentions=mentions)
 
     def _on_pending_user_action(self, messageId: int, action: str) -> None:
         """待发送消息上的「移到队列 / 删除」。"""
@@ -83,8 +84,10 @@ class _WidgetTurnMixin:
                 message.attachments,
                 mentions=message.mentions,
             )
+            self._dropSteerForPending(messageId)
             self._view.resolvePendingUserMessage(messageId, sent=False)
         elif action == "delete":
+            self._dropSteerForPending(messageId)
             self._view.resolvePendingUserMessage(messageId, sent=False)
         self.pendingUserActionRequested.emit(messageId, action)
 
@@ -111,7 +114,7 @@ class _WidgetTurnMixin:
         confirmed = ElaConfirmDialog.show(
             self._input,
             "清空上下文",
-            "确定要清空当前对话吗？此操作不可撤销。",
+            "确定要清空当前对话吗？输入框草稿会保留。此操作不可撤销。",
             position="top",
         )
         if confirmed:
@@ -119,8 +122,8 @@ class _WidgetTurnMixin:
 
     def clear(self) -> None:
         """清空整个会话：中止生成 -> 停流 -> 清队列 -> 清消息 -> 发 ``cleared``。
-        顺序要紧：先 ``stopRequested`` 让宿主 cancel 后端，再停流，否则后端还会往
-        已清空的消息里发分片。只清组件侧，后端会话归宿主（接 ``cleared`` 后自行
+        只清组件侧，后端会话归宿主（接 ``cleared`` 后自行重置）；输入区草稿 /
+        附件保留，需要全清请再调 ``chatInput().clear()``。
         """
         with self._autoSendPaused():
             if self._generating or self._streaming_id is not None:
@@ -157,6 +160,10 @@ class _WidgetTurnMixin:
         if messageId == self._streaming_id:
             self._streaming_id = None
             self.setGenerating(False)
+            if self._steer:
+                self.clearSteer()
+        else:
+            self._dropSteerForPending(messageId)
         # 删消息前必须先 abort 该消息里的未答复审批，否则 dock 上会留下一张
         # 指向已不存在消息的死卡（用户点了没有任何回音）。
         bubble = self._view.bubble(messageId)
@@ -213,6 +220,8 @@ class _WidgetTurnMixin:
         target = self._streaming_id if messageId is None else messageId
         if target is None:
             self.setGenerating(False)
+            if self._steer:
+                self.clearSteer()
             if self._auto_send_queue:
                 self.sendNextQueued()
             return None
@@ -228,6 +237,8 @@ class _WidgetTurnMixin:
             self._view.endMessage(target, status)
         if target == self._streaming_id:
             self._streaming_id = None
+            if self._steer:
+                self.clearSteer()
         self.setGenerating(False)
         self._emit_generation_finished(target, status)
         if self._auto_send_queue:
@@ -248,6 +259,8 @@ class _WidgetTurnMixin:
         """
         if target == self._streaming_id:
             self._streaming_id = None
+            if self._steer:
+                self.clearSteer()
         self.setGenerating(False)
         self._emit_generation_finished(target, status)
         if self._auto_send_queue:
@@ -336,12 +349,16 @@ class _WidgetTurnMixin:
         if self._streaming_id is not None and self._streaming_id >= messageId:
             self._streaming_id = None
             self.setGenerating(False)
+            if self._steer:
+                self.clearSteer()
         self._view.removeMessagesFrom(messageId)
+        self._pruneSteer()
         self._finished_generation = {
             item for item in self._finished_generation if item < messageId
         }
         self._input.setText(target.text)
         self._input.setAttachments(target.attachments)
+        self._input.setMentions(target.mentions)
         return target
 
     def undoLastUserMessage(self) -> Optional[ElaChatMessage]:
@@ -376,7 +393,10 @@ class _WidgetTurnMixin:
         if self._streaming_id is not None and self._streaming_id >= messageId:
             self._streaming_id = None
             self.setGenerating(False)
+            if self._steer:
+                self.clearSteer()
         self._view.removeMessagesFrom(messageId)
+        self._pruneSteer()
         self._finished_generation = {
             item for item in self._finished_generation if item < messageId
         }

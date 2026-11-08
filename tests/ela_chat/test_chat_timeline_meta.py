@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import re
+
 from pyqt6_ela_pro.chat import (
     ElaChatDetailPlacementType,
     ElaChatDetailSection,
@@ -10,7 +12,9 @@ from pyqt6_ela_pro.chat import (
     ElaChatNoticeType,
     ElaChatPart,
     ElaChatPartKindType,
+    ElaChatReasoningStyleType,
     ElaChatRoleType,
+    ElaChatStats,
     ElaChatTimelineDetail,
     ElaChatToolCall,
     ElaChatView,
@@ -55,7 +59,7 @@ class TestNoticeModel:
 
 class TestMentionModel:
     def test_roundtrip_and_invalid(self):
-        mention = ElaChatMention(start=2, end=6, kind="file")
+        mention = ElaChatMention(start=2, end=6, kind="file", id="a.py")
         assert mention.isValid
         assert ElaChatMention.fromDict(mention.toDict()) == mention
         assert not ElaChatMention(start=6, end=2).isValid
@@ -65,13 +69,15 @@ class TestMentionModel:
             id=1,
             role=ElaChatRoleType.User,
             text="看 @a.py",
-        ).withMentions([ElaChatMention(start=2, end=6, kind="file")])
+        ).withMentions([ElaChatMention(start=2, end=6, kind="file", id="a.py")])
         message = message.withIdentity("coder", "m1", "high")
         restored = ElaChatMessage.fromDict(message.toDict())
         assert restored.agent == "coder"
         assert restored.model == "m1"
         assert restored.model_variant == "high"
-        assert restored.mentions == (ElaChatMention(start=2, end=6, kind="file"),)
+        assert restored.mentions == (
+            ElaChatMention(start=2, end=6, kind="file", id="a.py"),
+        )
 
     def test_invalid_mentions_dropped(self):
         message = ElaChatMessage(id=1, role=ElaChatRoleType.User).withMentions(
@@ -222,6 +228,72 @@ class TestTimelineWidgets:
             }
         )
         assert not widget.isHidden()
+
+    def test_hidden_thinking_survives_viewer_suspension(self, qapp, make):
+        view = make(ElaChatView)
+        view.setReasoningStyle(ElaChatReasoningStyleType.Inline)
+        message_id = view.beginMessage(ElaChatRoleType.Assistant)
+        view.beginReasoning(message_id)
+        view.appendReasoning(message_id, "想一想")
+        view.endReasoning(message_id)
+        view.endMessage(message_id)
+        view.setTimelineDetail({"thinking": {"placement": "hidden"}})
+        bubble = view.bubble(message_id)
+        part_id = next(
+            part.id
+            for part in bubble.parts()
+            if part.kind == ElaChatPartKindType.Reasoning
+        )
+        assert bubble._part_widgets[part_id].isHidden()
+        bubble.setViewersSuspended(True)
+        bubble.setViewersSuspended(False)
+        assert bubble._part_widgets[part_id].isHidden()
+
+    def test_hidden_thinking_row_follows_detail(self, qapp, make):
+        view = make(ElaChatView)
+        view.setReasoningStyle(ElaChatReasoningStyleType.Inline)
+        view.setTimelineDetail({"thinking": {"placement": "hidden"}})
+        message_id = view.beginMessage(ElaChatRoleType.Assistant)
+        view.beginReasoning(message_id)
+        view.appendReasoning(message_id, "想一想")
+        bubble = view.bubble(message_id)
+        assert bubble._thinking_row is not None
+        assert bubble._thinking_row.isHidden()
+
+        view.setTimelineDetail({"thinking": {"placement": "expanded"}})
+        assert not bubble._thinking_row.isHidden()
+
+    def test_expanded_thinking_survives_style_switch(self, qapp, make):
+        view = make(ElaChatView)
+        view.setReasoningStyle(ElaChatReasoningStyleType.Inline)
+        message_id = view.beginMessage(ElaChatRoleType.Assistant)
+        view.beginReasoning(message_id)
+        view.appendReasoning(message_id, "想一想")
+        view.endReasoning(message_id)
+        view.endMessage(message_id)
+        view.setTimelineDetail({"thinking": {"placement": "expanded"}})
+        view.setReasoningStyle(ElaChatReasoningStyleType.Collapse)
+        bubble = view.bubble(message_id)
+        part_id = next(
+            part.id
+            for part in bubble.parts()
+            if part.kind == ElaChatPartKindType.Reasoning
+        )
+        assert bubble._part_widgets[part_id].isOpened()
+
+    def test_compaction_stats_do_not_double_count_reasoning(self, qapp, make):
+        from pyqt6_ela_pro.chat.blocks.misc import CompactionSeparator
+
+        card = make(CompactionSeparator)
+        card.setStats(
+            ElaChatStats(
+                prompt_tokens=10,
+                completion_tokens=100,
+                reasoning_tokens=40,
+                cache_read_tokens=5,
+            )
+        )
+        assert [int(item) for item in re.findall(r"\d+", card._stats_text)] == [15, 100]
 
     def test_disclosure_survives_session_roundtrip(self, qapp, make):
         view = make(ElaChatView)

@@ -345,6 +345,40 @@ class TestStatsErrorAttachments:
         view.addMessageAttachment(messageId, "b.txt", "C:/tmp/b.txt", 2)
         assert len(view.message(messageId).attachments) == 2
 
+    def test_attachments_work_on_virtualized_messages(self, qapp, make):
+        view = make(ElaChatView)
+        view.resize(900, 600)
+        view.show()
+        qapp.processEvents()
+        rows = [
+            {"id": index + 1, "role": "user", "text": f"msg {index}"}
+            for index in range(220)
+        ]
+        ids = view.restoreMessages(rows, preserveIds=True)
+        qapp.processEvents()
+        target = next(i for i in ids if view.bubble(i) is None)
+
+        view.setMessageAttachments(
+            target, [{"name": "a.txt", "path": "C:/tmp/a.txt", "size": 3}]
+        )
+        assert [item.name for item in view.message(target).attachments] == ["a.txt"]
+
+        view.addMessageAttachment(target, "b.txt", "C:/tmp/b.txt", 4)
+        view.addMessageAttachment(target, "dup.txt", "C:/tmp/a.txt", 9)
+        assert [item.name for item in view.message(target).attachments] == [
+            "a.txt",
+            "b.txt",
+        ]
+        assert view.bubble(target) is None
+
+        view.materializeMessage(target)
+        bubble = view.bubble(target)
+        assert bubble is not None
+        assert [item.name for item in bubble.attachments()] == [
+            "a.txt",
+            "b.txt",
+        ]
+
     def test_title_and_timestamp(self, qapp, make):
         view = make(ElaChatView)
         messageId = view.addMessage(ElaChatRoleType.Assistant, "hi")
@@ -354,6 +388,35 @@ class TestStatsErrorAttachments:
         assert snapshot.title == "deepseek"
         assert snapshot.timestamp == "12:34:56"
         assert view.bubble(messageId).title() == "deepseek"
+
+    def test_error_setters_work_on_virtualized_messages(self, qapp, make):
+        view = make(ElaChatView)
+        view.resize(900, 600)
+        view.show()
+        qapp.processEvents()
+        rows = [
+            {"id": index + 1, "role": "assistant", "text": f"msg {index}"}
+            for index in range(220)
+        ]
+        ids = view.restoreMessages(rows, preserveIds=True)
+        qapp.processEvents()
+        target = next(i for i in ids if view.bubble(i) is None)
+
+        view.setMessageError(target, "boom", "ServerError")
+        snapshot = view.message(target)
+        assert (snapshot.error, snapshot.error_type, snapshot.status) == (
+            "boom",
+            "ServerError",
+            ElaChatStatusType.Error,
+        )
+
+        view.clearMessageError(target)
+        snapshot = view.message(target)
+        assert (snapshot.error, snapshot.error_type, snapshot.status) == (
+            "",
+            "",
+            ElaChatStatusType.Stopped,
+        )
 
 
 class TestMessageActions:
@@ -847,6 +910,21 @@ class TestContentMaxWidth:
         assert view.contentMaxWidth() == 0
         assert view._content_layout.contentsMargins().left() == 10
         assert view._content_layout.contentsMargins().right() == 10
+
+    def test_existing_bubble_follows_setter(self, qapp, make):
+        """运行期改阅读列宽时，已建好的助手气泡也要一起更新。"""
+
+        view = make(ElaChatView)
+        view.resize(1200, 700)
+        view.show()
+        qapp.processEvents()
+        message_id = view.addMessage(ElaChatRoleType.Assistant, "hi")
+        bubble = view.bubble(message_id)
+        assert bubble.contentMaxWidth() == 768
+        view.setContentMaxWidth(420)
+        assert bubble.contentMaxWidth() == 420
+        view.setContentMaxWidth(0)
+        assert bubble.contentMaxWidth() == 0
 
     def test_column_wraps_content_and_footer(self, qapp, make):
         """内容列必须同时装下正文、附件条与底部行（否则限宽时 footer 伸出列外）。"""

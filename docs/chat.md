@@ -167,7 +167,9 @@
   **发送 / 停止同按钮**：流式中草稿为空才显示「停止」，有草稿仍为「发送」
   （默认交由宿主排队，`setQueueEnabled` 可关）；`Esc` / `Ctrl+G` 停止；
   文件进入输入区的通道：`attachments()` 快照（含 `path`）/ `attachmentPaths()` 路径列表 /
-  `attachmentsChanged` 信号 / 提交时 `messageSubmittedFull(text, attachments)`
+  `attachmentsChanged` 信号 / 提交时 `messageSubmittedFull(text, attachments)`；
+  `clear()` 清空整份草稿（文本 / @ 引用 / 附件），`ElaChatWidget.clear()` 只清会话、
+  不碰输入区草稿
 - **ElaChatToolBar / ElaChatToolButton** — 可复用水平工具栏：
   `leading` / `trailing` 两段，追加 `addButton` / `addWidget` /
   `addSeparator` 与插入版 `insertButton` / `insertWidget` /
@@ -407,13 +409,15 @@ chat.sendNextQueued()                         # 或手动触发
   - `draftState()` / `setDraftState()` + 300ms `draftChanged`：宿主按会话保存草稿。
 - **队列增强** — `ElaChatQueueDock` 增加「插话」（生成中）/ 撤销；
   `ElaChatWidget.moveQueued(queueId, toIndex)` / `steerQueued(queueId)` /
-  `undoQueueChange()`（快照栈上限 20）。`steerMessage` 会在时间线上先建一条
-  「待发送」用户消息，`drainSteer` 结算为已送达；「移到队列 / 删除」动作由
-  `pendingUserActionRequested` 交给 widget 处理。
+  `undoQueueChange()`（快照栈上限 20）。撤销覆盖队列增删改 / 排序 / 转为插话；
+  `steerMessage` / `clearSteer` / `dequeueSteer` 不进撤销栈。`steerMessage` 在时间线上
+  先建一条「待发送」用户消息，`drainSteer` 结算为已送达；「移到队列 / 删除」动作由
+  `pendingUserActionRequested` 交给 widget 处理，回合结束 / 删消息时会同步清理未投递插话。
 - **消息身份 / @ 提及** — `ElaChatMessage` 增加 `agent` / `model` /
   `model_variant` / `mentions` / `delivery`；`view.setMessageIdentity(...)` 后
   用户消息头显示 `agent · 模型`，助手底部 meta 显示 `agent · 模型 · 耗时 · 已中断`。
-  `ElaChatInput.mentionSpans()` 给出 `ElaChatMention` 区间，用户气泡按区间
-  高亮，复制仍取纯文本。
+  `ElaChatInput.mentionSpans()` 给出带 id 的 `ElaChatMention` 区间，
+  `setMentions()` 按当前文本恢复引用；草稿 / 提示历史 / 撤回 / 队列编辑都会保留
+  引用。用户气泡按区间高亮，复制仍取纯文本。
 
 **延伸阅读**：应用内 API 指南见 `pyqt6_ela_pro/example/chat_guide_page.py`；可运行示例是 `example/chat_workbench_page.py` 的 **AI 组件工作台**（七个工作区：概览 / 输入区 / Agent / 文件与 Diff / 时间线与检索 / 会话 / 持久化，与图表工作台一样首次切换才构建）；最小接入示例在仓库 `llm_test/`（不入库）。

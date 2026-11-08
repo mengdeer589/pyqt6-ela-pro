@@ -133,11 +133,15 @@ class TestClear:
         chat.cleared.connect(lambda: cleared.append(1))
         chat.sendUserMessage("问题")
         chat.beginAssistantMessage()
+        chat.chatInput().setText("保留的草稿")
+        chat.chatInput().addAttachment("a.txt", "C:/tmp/a.txt", 3)
         chat.clear()
         assert cleared == [1]
         assert chat.chatView().messages() == []
         assert chat.isGenerating() is False
         assert chat.chatView()._empty.isVisibleTo(chat.chatView())
+        assert chat.chatInput().text() == "保留的草稿"
+        assert chat.chatInput().attachmentCount() == 1
 
 
 class TestInputBarClearButton:
@@ -188,6 +192,7 @@ class TestInputBarClearButton:
         assert calls[0][0] is chat.chatInput()
         assert calls[0][3] == "top"
         assert "清空" in calls[0][1]
+        assert "草稿" in calls[0][2]
         # 请求信号 + 清空信号都发了
         assert requested == [1]
         assert cleared == [1]
@@ -421,6 +426,29 @@ class TestTitles:
         chat.setUserName("管理员")
         assert chat.chatView().message(user_id).title == "管理员"
         assert chat.chatView().bubble(user_id).title() == "管理员"
+
+    def test_names_apply_to_unmaterialized_history(self, qapp, make):
+        chat = make(ElaChatWidget)
+        chat.resize(900, 600)
+        chat.show()
+        qapp.processEvents()
+        rows = [
+            {
+                "id": index + 1,
+                "role": "user" if index % 2 == 0 else "assistant",
+                "text": f"msg {index}",
+            }
+            for index in range(220)
+        ]
+        chat.chatView().restoreMessages(rows, preserveIds=True)
+        qapp.processEvents()
+        assert any(chat.chatView().bubble(row["id"]) is None for row in rows)
+
+        chat.setUserName("用户")
+        chat.setAssistantName("助手")
+        for row in rows:
+            expected = "用户" if row["role"] == "user" else "助手"
+            assert chat.chatView().message(row["id"]).title == expected
 
 
 class TestToolBarAndActions:

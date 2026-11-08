@@ -29,6 +29,34 @@ class TestQueueOps:
         assert chat.queueCount() == 1
         assert chat.steerCount() == 0
 
+    def test_steer_queued_undo_refuses_after_drain(self, qapp, make):
+        chat = make(ElaChatWidget)
+        chat.enqueueMessage("a")
+        chat.setGenerating(True)
+        assert chat.steerQueued(chat.queuedMessages()[0]["id"])
+        assert chat.drainSteer() is not None
+        assert chat.undoQueueChange() is False
+        assert chat.queueCount() == 0
+
+    def test_direct_steer_does_not_enter_queue_undo(self, qapp, make):
+        chat = make(ElaChatWidget)
+        chat.setGenerating(True)
+        chat.steerMessage("x")
+        assert chat.canUndoQueue() is False
+        chat.enqueueMessage("q")
+        assert chat.canUndoQueue() is True
+        chat.steerMessage("y")
+        assert chat.undoQueueChange()
+        assert chat.queueCount() == 0
+        assert chat.steerCount() == 2
+
+    def test_clear_steer_does_not_enter_queue_undo(self, qapp, make):
+        chat = make(ElaChatWidget)
+        chat.setGenerating(True)
+        chat.steerMessage("x")
+        chat.clearSteer()
+        assert chat.canUndoQueue() is False
+
     def test_dock_working_label(self, qapp, make):
         chat = make(ElaChatWidget)
         chat.enqueueMessage("a")

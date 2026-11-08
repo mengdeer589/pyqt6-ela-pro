@@ -122,6 +122,7 @@ class ElaChatTurnJournal:
         self._seq = 0
         self._dumped = 0
         self._stats_ids = {}
+        self._buffers.clear()
         self._flow.reset()
 
     def begin(self, messageId: Optional[int] = None) -> "ElaChatTurnJournal":

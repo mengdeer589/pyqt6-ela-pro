@@ -7,6 +7,7 @@ from typing import Optional
 
 
 from .message import (
+    ElaChatAttachment,
     ElaChatPermission,
     ElaChatRoleType,
     ElaChatStats,
@@ -323,28 +324,51 @@ class _ViewStreamMixin:
         return None
 
     def setMessageAttachments(self, messageId: int, attachments) -> None:
-        """整体替换指定消息的附件。"""
-        bubble = self._require_bubble(messageId, "setMessageAttachments")
-        if bubble is None:
+        """整体替换指定消息的附件（未物化消息只更新快照）。"""
+        api = "setMessageAttachments"
+        self._require_int_id(messageId, api)
+        if self._store.message(messageId) is None:
+            if self._strict_ids:
+                raise KeyError(f"{api}：消息 id {messageId!r} 不存在")
             return
-        bubble.setAttachments(attachments)
-        self._update_snapshot(
-            messageId, lambda m: m.withAttachments(bubble.attachments())
-        )
+        bubble = self._bubbles.get(messageId)
+        if bubble is not None:
+            bubble.setAttachments(attachments)
+            items = tuple(bubble.attachments())
+        else:
+            items = tuple(
+                ElaChatAttachment.coerce(item) for item in (attachments or ())
+            )
+        self._update_snapshot(messageId, lambda m: m.withAttachments(items))
         self.messageUpdated.emit(messageId)
         self._follow_bottom()
 
     def addMessageAttachment(
         self, messageId: int, name: str, path: str = "", size: int = 0
     ) -> None:
-        """为指定消息追加一个附件。"""
-        bubble = self._require_bubble(messageId, "addMessageAttachment")
-        if bubble is None:
+        """为指定消息追加一个附件（未物化消息只更新快照）。"""
+        api = "addMessageAttachment"
+        self._require_int_id(messageId, api)
+        message = self._store.message(messageId)
+        if message is None:
+            if self._strict_ids:
+                raise KeyError(f"{api}：消息 id {messageId!r} 不存在")
             return
-        bubble.addAttachment(name, path, size)
-        self._update_snapshot(
-            messageId, lambda m: m.withAttachments(bubble.attachments())
-        )
+        bubble = self._bubbles.get(messageId)
+        if bubble is not None:
+            bubble.addAttachment(name, path, size)
+            items = tuple(bubble.attachments())
+        else:
+            attachment = ElaChatAttachment.coerce(
+                {"name": name, "path": path, "size": size}
+            )
+            items = list(message.attachments)
+            if not (
+                attachment.path and any(item.path == attachment.path for item in items)
+            ):
+                items.append(attachment)
+            items = tuple(items)
+        self._update_snapshot(messageId, lambda m: m.withAttachments(items))
         self.messageUpdated.emit(messageId)
 
     def setStepStats(self, messageId: int, stats: Optional[ElaChatStats]) -> None:
@@ -358,11 +382,16 @@ class _ViewStreamMixin:
 
     def setMessageDuration(self, messageId: int, durationMs: float) -> None:
         """设置指定消息的总耗时（显示在底部 meta 层）。"""
-        bubble = self._require_bubble(messageId, "setMessageDuration")
-        if bubble is None:
+        api = "setMessageDuration"
+        self._require_int_id(messageId, api)
+        if self._store.message(messageId) is None:
+            if self._strict_ids:
+                raise KeyError(f"{api}：消息 id {messageId!r} 不存在")
             return
-        bubble.setDuration(durationMs)
+        bubble = self._bubbles.get(messageId)
         self._update_snapshot(messageId, lambda m: m.withDuration(durationMs))
+        if bubble is not None:
+            bubble.setDuration(durationMs)
         self.messageUpdated.emit(messageId)
 
     def setMessageError(
@@ -372,12 +401,17 @@ class _ViewStreamMixin:
         ``errorType`` 单独存字段而不是拼进 ``message`` —— 拼进去类型就丢了，
         错误卡无法判断该不该给「重试」按钮。
         """
-        bubble = self._require_bubble(messageId, "setMessageError")
-        if bubble is None:
+        api = "setMessageError"
+        self._require_int_id(messageId, api)
+        if self._store.message(messageId) is None:
+            if self._strict_ids:
+                raise KeyError(f"{api}：消息 id {messageId!r} 不存在")
             return
-        bubble.setError(message, errorType)
-        # setError 会收尾未完成分段（正文 / 思考 / 工具分组），同步快照
-        self._sync_parts(messageId)
+        bubble = self._bubbles.get(messageId)
+        if bubble is not None:
+            bubble.setError(message, errorType)
+            # setError 会收尾未完成分段（正文 / 思考 / 工具分组），同步快照
+            self._sync_parts(messageId)
         self._update_snapshot(
             messageId, lambda m: m.withError(message, errorType=errorType)
         )
@@ -399,18 +433,24 @@ class _ViewStreamMixin:
         「重试」前必须先调它，否则旧错误卡会留在界面上与新流式内容并存。
         清空文案却留着 ``Error`` 状态会导出「出错但没错误」的自相矛盾数据。
         """
-        bubble = self._require_bubble(messageId, "clearMessageError")
-        if bubble is None:
+        api = "clearMessageError"
+        self._require_int_id(messageId, api)
+        if self._store.message(messageId) is None:
+            if self._strict_ids:
+                raise KeyError(f"{api}：消息 id {messageId!r} 不存在")
             return
         error, error_type = self.messageError(messageId)
         if not (error or error_type):
             return
-        bubble.clearError()
+        bubble = self._bubbles.get(messageId)
+        if bubble is not None:
+            bubble.clearError()
         # 显式传空串清类型：withError 的 errorType=None 语义是「保持原值」
         self._update_snapshot(messageId, lambda m: m.withError("", errorType=""))
         message = self.message(messageId)
         if message is not None and message.status == ElaChatStatusType.Error:
-            bubble.setStatus(ElaChatStatusType.Stopped)
+            if bubble is not None:
+                bubble.setStatus(ElaChatStatusType.Stopped)
             self._update_snapshot(
                 messageId,
                 lambda m: m.withStatus(ElaChatStatusType.Stopped),
@@ -419,18 +459,28 @@ class _ViewStreamMixin:
 
     def setMessageTitle(self, messageId: int, title: str) -> None:
         """设置指定消息的头部名称 / 模型名。"""
-        bubble = self._require_bubble(messageId, "setMessageTitle")
-        if bubble is None:
+        api = "setMessageTitle"
+        self._require_int_id(messageId, api)
+        if self._store.message(messageId) is None:
+            if self._strict_ids:
+                raise KeyError(f"{api}：消息 id {messageId!r} 不存在")
             return
-        bubble.setTitle(title)
+        bubble = self._bubbles.get(messageId)
         self._update_snapshot(messageId, lambda m: m.withTitle(title))
+        if bubble is not None:
+            bubble.setTitle(title)
         self.messageUpdated.emit(messageId)
 
     def setMessageTimestamp(self, messageId: int, timestamp: str) -> None:
         """设置指定消息的头部时间文本。"""
-        bubble = self._require_bubble(messageId, "setMessageTimestamp")
-        if bubble is None:
+        api = "setMessageTimestamp"
+        self._require_int_id(messageId, api)
+        if self._store.message(messageId) is None:
+            if self._strict_ids:
+                raise KeyError(f"{api}：消息 id {messageId!r} 不存在")
             return
-        bubble.setTimestamp(timestamp)
+        bubble = self._bubbles.get(messageId)
         self._update_snapshot(messageId, lambda m: m.withTimestamp(timestamp))
+        if bubble is not None:
+            bubble.setTimestamp(timestamp)
         self.messageUpdated.emit(messageId)

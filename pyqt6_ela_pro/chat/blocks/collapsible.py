@@ -419,6 +419,11 @@ class ThinkingRow(ElaThemeWidget):
         self._ring.setIsBusying(True)
         self.show()
 
+    def resume(self) -> None:
+        """重新显示思考行（保留当前标题）。"""
+        self._ring.setIsBusying(True)
+        self.show()
+
     def end(self) -> None:
         """结束思考（隐藏）。"""
         self._ring.setIsBusying(False)

@@ -53,8 +53,10 @@ class _BubblePermissionMixin:
             self._settle_permission_card(partId, request)
             return partId
         card = self._create_interactive_card(partId, request)
-        self.permissionRequested.emit(str(request.request_id))
+        # 先让 dock 收下卡，再通知宿主：宿主可能在 permissionRequested 槽里
+        # 同步 resolvePermission，落定后的卡不能再进 dock。
         self.permissionDockRequested.emit(card, partId)
+        self.permissionRequested.emit(str(request.request_id))
         return partId
 
     def _create_interactive_card(self, partId: str, request: ElaChatPermission):

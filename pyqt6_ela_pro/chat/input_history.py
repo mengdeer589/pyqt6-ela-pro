@@ -38,7 +38,7 @@ class _InputHistoryMixin:
         attachments = state.get("attachments")
         if isinstance(attachments, list):
             self.setAttachments(attachments)
-        self._mentions.clear()
+        self.setMentions(state.get("mentions"))
 
     def _historyMode(self) -> str:  # noqa: N802
         return "shell" if self._shell_mode else "normal"
@@ -48,9 +48,11 @@ class _InputHistoryMixin:
             return
         self._history_applying = True
         try:
+            self.clearMentions()
             self._set_edit_text(str(entry.get("text") or ""))
             attachments = entry.get("attachments")
             if isinstance(attachments, list):
                 self.setAttachments(attachments)
+            self.setMentions(entry.get("mentions"))
         finally:
             self._history_applying = False

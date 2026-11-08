@@ -230,6 +230,16 @@ class ElaChatAttachment:
         """返回替换展示名后的新快照。"""
         return replace(self, name=name)
 
+    @classmethod
+    def coerce(cls, value) -> "ElaChatAttachment":
+        """把附件输入归一成快照（``ElaChatAttachment`` / dict / 其它转字符串）。"""
+        if isinstance(value, cls):
+            return value
+        if isinstance(value, dict):
+            attachment = cls.fromDict(value)
+            return attachment if attachment.name else attachment.withName("文件")
+        return cls(name=str(value))
+
     def toDict(self) -> dict:
         """转为纯 JSON 字典。"""
         return {
@@ -773,6 +783,8 @@ class ElaChatMention:
     end: int = 0
     #: 类型（``file`` / ``agent`` / 其它宿主自定义）
     kind: str = ""
+    #: 引用 id（宿主解析出的文件 / agent id；空串表示未知）
+    id: str = ""
 
     @property
     def isValid(self) -> bool:
@@ -782,6 +794,7 @@ class ElaChatMention:
     def toDict(self) -> dict:
         """转为纯 JSON 字典。"""
         return {
+            "id": _as_str(self.id),
             "start": _as_int(self.start),
             "end": _as_int(self.end),
             "kind": _as_str(self.kind),
@@ -796,6 +809,7 @@ class ElaChatMention:
             start=_as_int(data.get("start")),
             end=_as_int(data.get("end")),
             kind=_as_str(data.get("kind")),
+            id=_as_str(data.get("id")),
         )
 
 

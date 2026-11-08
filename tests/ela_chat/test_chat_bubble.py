@@ -626,6 +626,24 @@ class TestPermissionGuards:
         bubble.setText("")
         assert bubble.parts() == ()
 
+    def test_set_text_empty_clears_all_text_parts(self, qapp, make):
+        bubble = make(ElaChatBubble, ElaChatRoleType.Assistant)
+        bubble.beginStream()
+        bubble.beginText()
+        bubble.appendText("AAA")
+        bubble.endText()
+        bubble.beginText()
+        bubble.appendText("BBB")
+        bubble.endText()
+        bubble.endStream()
+        bubble.setText("")
+        assert bubble.text() == ""
+        assert not [
+            part for part in bubble.parts() if part.kind == ElaChatPartKindType.Text
+        ]
+        bubble.appendText("C")
+        assert bubble.text() == "C"
+
     def test_set_parts_normalizes_empty_ids(self, qapp, make):
         """损坏数据缺 id：两条空 id 分段不能互相覆盖。"""
         bubble = make(ElaChatBubble, ElaChatRoleType.Assistant)

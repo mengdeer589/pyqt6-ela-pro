@@ -36,7 +36,10 @@ class _ViewAppearanceMixin:
         return self._reasoning_style
 
     def setToolGrouping(self, on: bool) -> None:
-        """设置是否把连续上下文工具合并为分组卡（含已存在消息）。"""
+        """设置是否把连续上下文工具合并为分组卡。
+
+        只影响之后新建的工具卡；已建好的分组卡不会重组。
+        """
         self._tool_grouping = bool(on)
         for bubble in self._bubbles.values():
             bubble.setToolGrouping(self._tool_grouping)
@@ -173,6 +176,8 @@ class _ViewAppearanceMixin:
         不再只限助手气泡，否则宽窗口下左右边缘对不齐。
         """
         self._content_max_width = max(0, int(width))
+        for bubble in self._bubbles.values():
+            bubble.setContentMaxWidth(self._content_max_width)
         self._apply_content_margins()
         host = self.parentWidget()
         sync = getattr(host, "_sync_composer_width", None)

@@ -21,14 +21,13 @@ class _WidgetQueueMixin:
         finally:
             self._auto_send_queue = autoSend
 
-    def _snapshot_queue(self) -> None:
-        """记录一次队列快照（撤销栈上限 20）。"""
-        self._queue_history.append(
-            (
-                [dict(item) for item in self._queue],
-                [dict(item) for item in self._steer],
-            )
-        )
+    def _snapshot_queue(self, steerId: Optional[str] = None) -> None:
+        """记录一次队列快照（撤销栈上限 20）。
+
+        ``steerId`` 只由 :meth:`steerQueued` 传入，撤销时据此移除它创建的那条
+        插话；其余队列操作不需要回滚 ``_steer``。
+        """
+        self._queue_history.append(([dict(item) for item in self._queue], steerId))
         if len(self._queue_history) > 20:
             del self._queue_history[0]
 
@@ -37,14 +36,18 @@ class _WidgetQueueMixin:
         return bool(self._queue_history)
 
     def undoQueueChange(self) -> bool:
-        """撤销上一次队列操作（添加 / 移除 / 编辑 / 排序 / 插话）。"""
+        """撤销上一次队列操作（添加 / 移除 / 编辑 / 排序 / 转为插话）。"""
         if not self._queue_history:
             return False
-        queue, steer = self._queue_history.pop()
+        queue, steerId = self._queue_history.pop()
+        if steerId is not None:
+            if not any(item.get("id") == steerId for item in self._steer):
+                # 插话已被投递 / 清理：恢复队列会重复发送同一条指令。
+                return False
+            self._steer = [item for item in self._steer if item.get("id") != steerId]
+            self.steerChanged.emit(self.steerMessages())
         self._queue = queue
-        self._steer = steer
         self._sync_queue()
-        self.steerChanged.emit(self.steerMessages())
         self.queueChanged.emit(self.queuedMessages())
         return True
 
@@ -70,11 +73,12 @@ class _WidgetQueueMixin:
         for index, item in enumerate(self._queue):
             if item["id"] != queueId:
                 continue
-            self._snapshot_queue()
+            steerId = uuid4().hex[:12]
+            self._snapshot_queue(steerId)
             self._queue.pop(index)
             self._steer.append(
                 {
-                    "id": uuid4().hex[:12],
+                    "id": steerId,
                     "text": item["text"],
                     "attachments": list(item.get("attachments") or []),
                     "messageId": item.get("messageId"),
@@ -176,6 +180,7 @@ class _WidgetQueueMixin:
             self._input.setText(item["text"])
             if item["attachments"]:
                 self._input.setAttachments(item["attachments"])
+            self._input.setMentions(item.get("mentions"))
             self._input.textEdit().setFocus()
             return True
         return False
