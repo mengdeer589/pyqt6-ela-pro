@@ -60,6 +60,7 @@ from .blocks import (
     MessageMeta,
     ThinkingRow,
     ToolGroupPanel,
+    TurnChangesRow,
     normalizeAvatarShape,
     toolDefaultOpen,
 )
@@ -336,6 +337,8 @@ class ElaChatBubble(
         self._current_tool_panel: Optional[ToolGroupPanel] = None
         self._panel_calls: dict = {}
         self._tool_cards: dict = {}
+        #: 工具调用 id -> 开始时间（epoch 秒；回合结束 / 清空时回收）
+        self._tool_started: dict = {}
         self._group_card = None
         self._tool_grouping = True
         #: 「哪些工具卡默认展开」的策略（可注入，见 setToolDefaultOpen）
@@ -343,6 +346,10 @@ class ElaChatBubble(
         self._error: Optional[ErrorCard] = None
         self._retry_card = None
         self._attachments: Optional[AttachmentStrip] = None
+        #: 回合末变更汇总（从工具 metadata 派生，不落库）
+        self._change_summary_enabled = True
+        self._changes_host: Optional[QWidget] = None
+        self._changes_row: Optional[TurnChangesRow] = None
         #: 审批分段 id -> 审批卡控件
         self._permission_cards: dict = {}
         #: 仍在 dock 里等待用户操作的交互卡（partId -> 卡片）；落定后清空
@@ -399,6 +406,12 @@ class ElaChatBubble(
             host_layout.setSpacing(0)
             self._attachments_host.hide()
             column_layout.addWidget(self._attachments_host)
+            self._changes_host = QWidget(self._column)
+            changes_layout = QVBoxLayout(self._changes_host)
+            changes_layout.setContentsMargins(0, 0, 0, 0)
+            changes_layout.setSpacing(0)
+            self._changes_host.hide()
+            column_layout.addWidget(self._changes_host)
             self._footer = QWidget(self._column)
             footer_holder = QVBoxLayout(self._footer)
             footer_holder.setContentsMargins(0, 0, 0, 0)
@@ -1147,6 +1160,7 @@ class ElaChatBubble(
         self._parts = []
         self._part_widgets = {}
         self._tool_cards = {}
+        self._tool_started.clear()
         self._panel_calls = {}
         self._panel_steps = {}
         self._group_card = None
@@ -1167,6 +1181,18 @@ class ElaChatBubble(
             panel.deleteLater()
         self._panels = []
         self._bulk_panels.clear()
+        if self._changes_host is not None:
+            self._changes_host.hide()
+            changes_layout = self._changes_host.layout()
+            if changes_layout is not None:
+                while changes_layout.count():
+                    item = changes_layout.takeAt(0)
+                    widget = item.widget()
+                    if widget is not None and not is_deleted(widget):
+                        widget.hide()
+                        widget.setParent(None)
+                        widget.deleteLater()
+            self._changes_row = None
         if self._parts_layout is not None:
             while self._parts_layout.count():
                 item = self._parts_layout.takeAt(0)

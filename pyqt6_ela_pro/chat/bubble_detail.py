@@ -4,18 +4,17 @@ from __future__ import annotations
 
 from typing import Optional
 
-from .blocks._helpers import SHELL_TOOLS, _WRITE_TOOLS
-from .message import ElaChatPartKindType, ElaChatToolStatusType
+from .blocks._helpers import toolKindOf
+from .message import (
+    ElaChatPartKindType,
+    ElaChatToolKindType,
+    ElaChatToolStatusType,
+)
 from .timeline_detail import (
     DEFAULT_TIMELINE_DETAIL,
     ElaChatTimelineDetail,
     coerceTimelineDetail,
 )
-
-#: 编辑类工具（与 blocks._helpers._WRITE_TOOLS 同口径，额外补 patch）
-_EDIT_TOOLS = frozenset({"edit", "write", "patch", "apply_patch"})
-#: 子代理类工具
-_SUBAGENT_TOOLS = frozenset({"subagent", "task", "agent"})
 
 
 class _BubbleDetailMixin:
@@ -69,13 +68,17 @@ class _BubbleDetailMixin:
             return "notices"
         if kind == ElaChatPartKindType.Tool:
             call = getattr(part, "tool_call", None)
-            name = str(getattr(call, "name", "") or "").lower()
-            if name in SHELL_TOOLS:
-                return "shell"
-            if name in _EDIT_TOOLS or name in _WRITE_TOOLS:
-                return "edit"
-            if name in _SUBAGENT_TOOLS:
+            tool_kind = toolKindOf(call)
+            if tool_kind == ElaChatToolKindType.Subagent:
                 return "subagents"
+            if tool_kind == ElaChatToolKindType.Execute:
+                return "shell"
+            if tool_kind in (
+                ElaChatToolKindType.Edit,
+                ElaChatToolKindType.Delete,
+                ElaChatToolKindType.Move,
+            ):
+                return "edit"
             return "tools"
         return None
 
@@ -89,6 +92,10 @@ class _BubbleDetailMixin:
         part = self._find_part(partId)
         widget = self._part_widgets.get(partId)
         if part is None or widget is None:
+            return
+        call = getattr(part, "tool_call", None)
+        if call is not None and getattr(call, "parent_id", ""):
+            # 子代理子调用挂在父卡里，显隐由父卡统一控制。
             return
         section_name = self._part_section_name(part)
         if section_name is None:

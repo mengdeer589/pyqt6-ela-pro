@@ -1,60 +1,63 @@
 from __future__ import annotations
 
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import QEvent, QPointF, Qt
+from PyQt6.QtGui import QEnterEvent
 from PyQt6.QtWidgets import QWidget
 
-from pyqt6_ela_pro.ela_toast import ElaToast, ElaToastType
+from pyqt6_ela_pro import ElaSeverity
+from pyqt6_ela_pro._styles import SHADOW_MARGIN
+from pyqt6_ela_pro.ela_toast import _LIVE_TOASTS, _TOAST_GAP, ElaToast
 
 
 class TestElaToastInit:
     def test_initialization_with_defaults(self):
-        toast = ElaToast(ElaToastType.Info, "提示信息", 2000)
+        toast = ElaToast(ElaSeverity.Info, "提示信息", 2000)
         assert toast._border_radius == 8
         assert toast._display_msec == 2000
-        assert toast._toast_type == ElaToastType.Info
+        assert toast._severity == ElaSeverity.Info
         assert toast._text == "提示信息"
         assert toast._shadow_border == 4
         toast.close()
         toast.deleteLater()
 
     def test_frameless_window_hint(self):
-        toast = ElaToast(ElaToastType.Success, "成功", 2000)
+        toast = ElaToast(ElaSeverity.Success, "成功", 2000)
         flags = toast.windowFlags()
         assert flags & Qt.WindowType.FramelessWindowHint
         toast.close()
         toast.deleteLater()
 
     def test_translucent_background(self):
-        toast = ElaToast(ElaToastType.Success, "成功", 2000)
+        toast = ElaToast(ElaSeverity.Success, "成功", 2000)
         assert toast.testAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         toast.close()
         toast.deleteLater()
 
     def test_delete_on_close(self):
-        toast = ElaToast(ElaToastType.Success, "成功", 2000)
+        toast = ElaToast(ElaSeverity.Success, "成功", 2000)
         assert toast.testAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
         toast.close()
         toast.deleteLater()
 
     def test_fixed_size(self):
-        toast = ElaToast(ElaToastType.Success, "成功", 2000)
+        toast = ElaToast(ElaSeverity.Success, "成功", 2000)
         assert toast.height() == 48
         toast.close()
         toast.deleteLater()
 
 
-class TestElaToastType:
-    def test_success_type_enum(self):
-        assert ElaToastType.Success == 0
+class TestElaSeverity:
+    def test_info_enum(self):
+        assert ElaSeverity.Info == 0
 
-    def test_info_type_enum(self):
-        assert ElaToastType.Info == 1
+    def test_success_enum(self):
+        assert ElaSeverity.Success == 1
 
-    def test_warning_type_enum(self):
-        assert ElaToastType.Warning == 2
+    def test_warning_enum(self):
+        assert ElaSeverity.Warning == 2
 
-    def test_error_type_enum(self):
-        assert ElaToastType.Error == 3
+    def test_error_enum(self):
+        assert ElaSeverity.Error == 3
 
 
 class TestElaToastStaticMethods:
@@ -84,8 +87,49 @@ class TestElaToastStaticMethods:
 
 class TestElaToastAnimation:
     def test_run_animation_creates_fade_in(self):
-        toast = ElaToast(ElaToastType.Info, "测试", 2000)
+        toast = ElaToast(ElaSeverity.Info, "测试", 2000)
         toast._run_animation()
         assert toast._fade_in is not None
+        toast.close()
+        toast.deleteLater()
+
+
+class TestElaToastLayout:
+    def test_long_text_is_elided(self, qapp):
+        long_text = "很长的通知文字" * 20
+        toast = ElaToast(ElaSeverity.Info, long_text, 1000)
+        try:
+            assert toast._elided_text.endswith("…")
+            assert len(toast._elided_text) < len(long_text)
+        finally:
+            toast.close()
+            toast.deleteLater()
+
+    def test_stack_gap_excludes_shadow_margin(self, qapp):
+        _LIVE_TOASTS.clear()
+        first = ElaToast(ElaSeverity.Info, "a", 1000)
+        second = ElaToast(ElaSeverity.Info, "b", 1000)
+        try:
+            assert second.pos().y() - first.pos().y() == (
+                first.height() - 2 * SHADOW_MARGIN + _TOAST_GAP
+            )
+        finally:
+            first.close()
+            second.close()
+            first.deleteLater()
+            second.deleteLater()
+            _LIVE_TOASTS.clear()
+
+
+class TestElaToastHover:
+    def test_hover_pauses_and_resumes_dwell_timer(self, qapp):
+        toast = ElaToast(ElaSeverity.Info, "提示", 1000)
+        toast._present()
+        toast._dwell_timer.start(1000)
+        toast.enterEvent(QEnterEvent(QPointF(0, 0), QPointF(0, 0), QPointF(0, 0)))
+        assert not toast._dwell_timer.isActive()
+        toast.leaveEvent(QEvent(QEvent.Type.Leave))
+        assert toast._dwell_timer.isActive()
+        toast._dwell_timer.stop()
         toast.close()
         toast.deleteLater()

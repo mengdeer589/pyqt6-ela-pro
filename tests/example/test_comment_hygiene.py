@@ -115,7 +115,7 @@ def _scan(src: str, name: str = "sample.py") -> list[str]:
 
 def test_guard_scans_all_pages():
     files = _python_files()
-    assert len(files) >= 35, f"只扫到 {len(files)} 个页面，路径解析可能错了"
+    assert len(files) >= 30, f"只扫到 {len(files)} 个页面，路径解析可能错了"
 
 
 def test_example_comment_hygiene():

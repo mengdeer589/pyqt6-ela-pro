@@ -7,7 +7,7 @@ from __future__ import annotations
 from typing import Optional
 
 from PyQt6.QtCore import QRectF, QSize, Qt
-from PyQt6.QtGui import QColor, QIcon, QPainter, QPalette, QPen, QPixmap
+from PyQt6.QtGui import QColor, QFont, QIcon, QPainter, QPalette, QPen, QPixmap
 from PyQt6.QtWidgets import (
     QFrame,
     QLabel,
@@ -20,6 +20,7 @@ from PyQt6.QtWidgets import (
 from PyQt6ElaWidgetTools import ElaIconType, ElaText
 
 from ._colors import parse_color
+from ._theme import relativeLuminance
 
 
 class EditBorderlessStyle(QProxyStyle):
@@ -222,6 +223,52 @@ def iconGlyph(icon) -> str:
         return chr(int(value))
     except (TypeError, ValueError, OverflowError):
         return ""
+
+
+def paintSeverityBadge(  # noqa: N802
+    painter: QPainter,
+    rect,
+    color,
+    icon,
+    *,
+    pixel_size: int = 12,
+    rotation: float = 0.0,
+) -> None:
+    """实心等级色圆 + 对比色 ElaAwesome 字形（toast / 通知弹窗 / 状态提示共用）。
+
+    :param rotation: 字形绕圆心旋转的角度；圆本身不转（加载态 spinner 用）。
+    """
+    box = QRectF(rect)
+    if box.isEmpty():
+        return
+    fill = QColor(color)
+    painter.save()
+    painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+    painter.setRenderHint(QPainter.RenderHint.TextAntialiasing, True)
+    painter.setPen(Qt.PenStyle.NoPen)
+    painter.setBrush(fill)
+    painter.drawEllipse(box)
+    font = QFont("ElaAwesome")
+    font.setPixelSize(pixel_size)
+    painter.setFont(font)
+    # 实心圆上按亮度选黑 / 白字形；relativeLuminance 是 Rec.709 近似，够用。
+    glyph_color = (
+        QColor(0, 0, 0) if relativeLuminance(fill) > 0.55 else QColor(255, 255, 255)
+    )
+    painter.setPen(glyph_color)
+    if rotation:
+        painter.translate(box.center())
+        painter.rotate(rotation)
+        glyph_rect = QRectF(
+            -box.width() / 2.0,
+            -box.height() / 2.0,
+            box.width(),
+            box.height(),
+        )
+    else:
+        glyph_rect = box
+    painter.drawText(glyph_rect, Qt.AlignmentFlag.AlignCenter, iconGlyph(icon))
+    painter.restore()
 
 
 def drawElaIcon(  # noqa: N802

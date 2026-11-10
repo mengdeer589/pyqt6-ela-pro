@@ -291,6 +291,36 @@ class TestScrollIsNotHijacked:
         assert _scrollbar(scrolled_up).value() == _scrollbar(scrolled_up).maximum()
 
 
+class TestEmbeddedAndFollow:
+    def test_embedded_uses_raised_surface(self, make):
+        from PyQt6ElaWidgetTools import eTheme
+
+        from pyqt6_ela_pro._theme import surfaceRaised
+
+        view = make(ElaTerminalView)
+        mode = eTheme.getThemeMode()
+        view.setEmbedded(True)
+        assert view.embedded() is True
+        assert view._card._border.alpha() == 0
+        assert view._card._bg == surfaceRaised(mode)
+        view.setEmbedded(False)
+        assert view.embedded() is False
+        assert view._card._border.alpha() > 0
+
+    def test_auto_scroll_off_does_not_jump_to_bottom(self, make, qapp):
+        """关掉跟随后新输出仍停在上方（旧实现只判 _following，照样跳底）。"""
+        view = make(ElaTerminalView, maxLines=0)
+        view.setToolbarVisible(False)
+        view.resize(640, 220)
+        view.show()
+        view.setAutoScroll(False)
+        for i in range(200):
+            view.append(f"line {i}\n")
+        _drain(qapp)
+        assert _scrollbar(view).maximum() > 0
+        assert _scrollbar(view).value() == 0
+
+
 class TestHighlightColor:
     def test_none_restores_derived_default(self, make):
         view = make(ElaTerminalView)

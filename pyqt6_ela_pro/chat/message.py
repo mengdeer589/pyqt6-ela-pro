@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import math
+import re
 from dataclasses import dataclass, field, replace
 from enum import StrEnum, nonmember
 from typing import Any, Optional, Tuple
@@ -16,7 +17,7 @@ from ._json import loads as _loads
 from ._pricing import formatCost
 
 #: 持久化格式版本。字段语义发生不兼容变更时 +1，读取方应按版本分支处理。
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 
 def _as_str(value, default: str = "") -> str:
@@ -143,6 +144,53 @@ class ElaChatToolStatusType(StrEnum):
     All = nonmember((Pending, Running, Done, Error, Aborted))
 
 
+class ElaChatToolKindType(StrEnum):
+    """工具类别（对齐 ACP ``ToolKind``，额外保留 ``Subagent``）。
+
+    ``kind`` 为空时由宿主/界面按工具名推导；显式给值优先。
+    """
+
+    #: 读取文件 / 数据
+    Read = "read"
+    #: 修改文件 / 内容
+    Edit = "edit"
+    #: 删除文件 / 数据
+    Delete = "delete"
+    #: 移动 / 重命名
+    Move = "move"
+    #: 搜索 / 枚举
+    Search = "search"
+    #: 执行命令 / 代码
+    Execute = "execute"
+    #: 推理 / 规划
+    Think = "think"
+    #: 获取外部数据
+    Fetch = "fetch"
+    #: 切换会话模式
+    SwitchMode = "switch_mode"
+    #: 子代理 / 任务委派（ACP 之外的扩展）
+    Subagent = "subagent"
+    #: 其它
+    Other = "other"
+
+    #: 全部合法类别（非枚举成员）
+    All = nonmember(
+        (
+            Read,
+            Edit,
+            Delete,
+            Move,
+            Search,
+            Execute,
+            Think,
+            Fetch,
+            SwitchMode,
+            Subagent,
+            Other,
+        )
+    )
+
+
 def _format_size(size) -> str:
     """把字节数格式化为人类可读文本。
 
@@ -265,6 +313,30 @@ class ElaChatAttachment:
 
 
 @dataclass(frozen=True)
+class ElaChatToolLocation:
+    """工具访问 / 修改的文件位置（用于「跟随 agent」与轨迹视图）。"""
+
+    #: 文件路径
+    path: str
+    #: 1-based 行号；0 表示只到文件级
+    line: int = 0
+
+    def toDict(self) -> dict:
+        """转为纯 JSON 字典。"""
+        return {"path": self.path, "line": max(0, _as_int(self.line))}
+
+    @classmethod
+    def fromDict(cls, data) -> Optional["ElaChatToolLocation"]:
+        """从字典还原（坏项返回 ``None``）。"""
+        if not isinstance(data, dict):
+            return None
+        path = _as_str(data.get("path"))
+        if not path:
+            return None
+        return cls(path=path, line=max(0, _as_int(data.get("line"))))
+
+
+@dataclass(frozen=True)
 class ElaChatToolCall:
     """工具调用快照（工具名称 / 参数 / 结果 / 状态）。"""
 
@@ -280,6 +352,18 @@ class ElaChatToolCall:
     status: str = ElaChatToolStatusType.Running
     #: 结构化附加数据（文件变更 / shell 状态 / 诊断等，JSON 安全；库原样交给渲染器）
     metadata: dict = field(default_factory=dict)
+    #: 工具类别（见 :class:`ElaChatToolKindType`；空表示按名字推导）
+    kind: str = ""
+    #: 人类可读标题（可选；空表示按工具名生成）
+    title: str = ""
+    #: 访问 / 修改的文件位置
+    locations: Tuple[ElaChatToolLocation, ...] = field(default_factory=tuple)
+    #: 父工具调用 id（子代理嵌套；空表示顶层）
+    parent_id: str = ""
+    #: 开始时间（epoch 秒；0 表示未知）
+    started_at: float = 0.0
+    #: 耗时（毫秒；0 表示未知）
+    duration_ms: float = 0.0
 
     @property
     def isRunning(self) -> bool:
@@ -314,6 +398,41 @@ class ElaChatToolCall:
             self, metadata=dict(metadata) if isinstance(metadata, dict) else {}
         )
 
+    def withKind(self, kind: str) -> "ElaChatToolCall":
+        """返回替换工具类别后的新快照（非法值归空，交给名字推导）。"""
+        value = str(kind or "")
+        return replace(self, kind=value if value in ElaChatToolKindType.All else "")
+
+    def withTitle(self, title: str) -> "ElaChatToolCall":
+        """返回替换人类可读标题后的新快照。"""
+        return replace(self, title=str(title or ""))
+
+    def withLocations(self, locations) -> "ElaChatToolCall":
+        """返回替换文件位置后的新快照（坏项跳过）。"""
+        items = []
+        for item in locations or ():
+            if isinstance(item, ElaChatToolLocation):
+                items.append(item)
+            elif isinstance(item, dict):
+                parsed = ElaChatToolLocation.fromDict(item)
+                if parsed is not None:
+                    items.append(parsed)
+        return replace(self, locations=tuple(items))
+
+    def withParent(self, parentId: str) -> "ElaChatToolCall":
+        """返回替换父调用 id 后的新快照。"""
+        return replace(self, parent_id=str(parentId or ""))
+
+    def withTiming(
+        self, startedAt: float = 0.0, durationMs: float = 0.0
+    ) -> "ElaChatToolCall":
+        """返回替换开始时间 / 耗时后的新快照（负值归 0）。"""
+        return replace(
+            self,
+            started_at=max(0.0, _as_float(startedAt)),
+            duration_ms=max(0.0, _as_float(durationMs)),
+        )
+
     def toDict(self) -> dict:
         """转为纯 JSON 字典。"""
         return {
@@ -323,6 +442,12 @@ class ElaChatToolCall:
             "result": self.result,
             "status": self.status,
             "metadata": dict(self.metadata or {}),
+            "kind": self.kind if self.kind in ElaChatToolKindType.All else "",
+            "title": self.title,
+            "locations": [item.toDict() for item in self.locations],
+            "parent_id": self.parent_id,
+            "started_at": max(0.0, _as_float(self.started_at)),
+            "duration_ms": max(0.0, _as_float(self.duration_ms)),
         }
 
     @classmethod
@@ -343,6 +468,18 @@ class ElaChatToolCall:
             metadata=dict(data.get("metadata"))
             if isinstance(data.get("metadata"), dict)
             else {},
+            kind=_as_choice(data.get("kind"), ElaChatToolKindType.All, ""),
+            title=_as_str(data.get("title")),
+            locations=tuple(
+                item
+                for item in _as_tuple_of(
+                    data.get("locations"), ElaChatToolLocation.fromDict
+                )
+                if item is not None
+            ),
+            parent_id=_as_str(data.get("parent_id")),
+            started_at=max(0.0, _as_float(data.get("started_at"))),
+            duration_ms=max(0.0, _as_float(data.get("duration_ms"))),
         )
 
 
@@ -502,6 +639,8 @@ class ElaChatPartKindType(StrEnum):
     Permission = "permission"
     #: 时间线通知段（语义标签在 ``notice_type``，文案在 ``text`` / ``detail``）
     Notice = "notice"
+    #: 计划 / 待办段（结构化数据在 :attr:`ElaChatPart.plan`）
+    Plan = "plan"
 
     #: 全部合法类型（非枚举成员）
     All = nonmember(
@@ -514,6 +653,7 @@ class ElaChatPartKindType(StrEnum):
             Compaction,
             Permission,
             Notice,
+            Plan,
         )
     )
 
@@ -577,6 +717,222 @@ class ElaChatPermissionStatusType(StrEnum):
     Settled = nonmember((Allowed, Always, Rejected, Cancelled))
     #: 全部合法状态（非枚举成员）
     All = nonmember((Pending, Allowed, Always, Rejected, Cancelled))
+
+
+class ElaChatPlanItemStatusType(StrEnum):
+    """计划项状态常量。"""
+
+    #: 待办
+    Pending = "pending"
+    #: 进行中
+    InProgress = "in_progress"
+    #: 已完成
+    Completed = "completed"
+    #: 已取消
+    Cancelled = "cancelled"
+
+    #: 全部合法状态（非枚举成员）
+    All = nonmember((Pending, InProgress, Completed, Cancelled))
+
+
+def _plan_status(value, default: str = ElaChatPlanItemStatusType.Pending) -> str:
+    """把外部计划状态归一成库内常量（``done`` / ``doing`` 这类别名也认）。"""
+    key = _as_str(value).strip().lower().replace("-", "_").replace(" ", "_")
+    aliases = {
+        "todo": ElaChatPlanItemStatusType.Pending,
+        "open": ElaChatPlanItemStatusType.Pending,
+        "in_progress": ElaChatPlanItemStatusType.InProgress,
+        "inprogress": ElaChatPlanItemStatusType.InProgress,
+        "doing": ElaChatPlanItemStatusType.InProgress,
+        "active": ElaChatPlanItemStatusType.InProgress,
+        "running": ElaChatPlanItemStatusType.InProgress,
+        "done": ElaChatPlanItemStatusType.Completed,
+        "complete": ElaChatPlanItemStatusType.Completed,
+        "completed": ElaChatPlanItemStatusType.Completed,
+        "finished": ElaChatPlanItemStatusType.Completed,
+        "cancelled": ElaChatPlanItemStatusType.Cancelled,
+        "canceled": ElaChatPlanItemStatusType.Cancelled,
+        "aborted": ElaChatPlanItemStatusType.Cancelled,
+    }
+    return aliases.get(key, default)
+
+
+@dataclass(frozen=True)
+class ElaChatPlanItem:
+    """计划 / 待办的一项。"""
+
+    #: 展示文本
+    text: str
+    #: 状态（见 :class:`ElaChatPlanItemStatusType`）
+    status: str = ElaChatPlanItemStatusType.Pending
+    #: 稳定 id（可空；空表示按位置识别）
+    id: str = ""
+
+    @property
+    def isActive(self) -> bool:
+        """是否进行中。"""
+        return self.status == ElaChatPlanItemStatusType.InProgress
+
+    @property
+    def isDone(self) -> bool:
+        """是否已完成。"""
+        return self.status == ElaChatPlanItemStatusType.Completed
+
+    def withStatus(self, status: str) -> "ElaChatPlanItem":
+        """返回替换状态后的新快照。"""
+        return replace(self, status=_plan_status(status, self.status))
+
+    def toDict(self) -> dict:
+        """转为纯 JSON 字典。"""
+        return {"text": self.text, "status": self.status, "id": self.id}
+
+    @classmethod
+    def fromDict(cls, data) -> Optional["ElaChatPlanItem"]:
+        """从字典 / 字符串还原（空文本返回 ``None``）。"""
+        if isinstance(data, str):
+            return cls(text=data) if data.strip() else None
+        if not isinstance(data, dict):
+            return None
+        text = _as_str(data.get("text") or data.get("content") or data.get("title"))
+        if not text.strip():
+            return None
+        return cls(
+            text=text,
+            status=_plan_status(data.get("status")),
+            id=_as_str(data.get("id")),
+        )
+
+
+@dataclass(frozen=True)
+class ElaChatPlan:
+    """一份计划 / 待办快照（``kind == Plan`` 的内容）。"""
+
+    #: 计划项（按展示顺序）
+    items: Tuple[ElaChatPlanItem, ...] = field(default_factory=tuple)
+    #: 标题
+    title: str = "计划"
+
+    def progress(self) -> Tuple[int, int]:
+        """返回 ``(已完成, 总数)``。"""
+        done = sum(1 for item in self.items if item.isDone)
+        return done, len(self.items)
+
+    def current(self) -> Optional[ElaChatPlanItem]:
+        """当前应展示的计划项：优先进行中，其次第一个未完成项。"""
+        for item in self.items:
+            if item.isActive:
+                return item
+        for item in self.items:
+            if not item.isDone and item.status != ElaChatPlanItemStatusType.Cancelled:
+                return item
+        return None
+
+    def isComplete(self) -> bool:
+        """是否全部完成（空计划视为未完成）。"""
+        return bool(self.items) and all(item.isDone for item in self.items)
+
+    def withItems(self, items) -> "ElaChatPlan":
+        """返回替换计划项后的新快照。"""
+        return replace(self, items=tuple(items or ()))
+
+    def withTitle(self, title: str) -> "ElaChatPlan":
+        """返回替换标题后的新快照。"""
+        return replace(self, title=str(title or "计划"))
+
+    def toDict(self) -> dict:
+        """转为纯 JSON 字典。"""
+        return {
+            "title": self.title,
+            "items": [item.toDict() for item in self.items],
+        }
+
+    @classmethod
+    def fromDict(cls, data) -> Optional["ElaChatPlan"]:
+        """从字典 / 列表还原（空计划返回 ``None``）。"""
+        if isinstance(data, (list, tuple)):
+            return cls.fromList(data)
+        if not isinstance(data, dict):
+            return None
+        raw_items = data.get("items")
+        items = []
+        if isinstance(raw_items, (list, tuple)):
+            for item in raw_items:
+                parsed = ElaChatPlanItem.fromDict(item)
+                if parsed is not None:
+                    items.append(parsed)
+        if not items:
+            return None
+        return cls(
+            items=tuple(items),
+            title=_as_str(data.get("title"), "计划") or "计划",
+        )
+
+    @classmethod
+    def fromList(cls, items) -> Optional["ElaChatPlan"]:
+        """从 ``ElaChatPlanItem`` / dict / 字符串列表构造（空列表返回 ``None``）。"""
+        parsed = []
+        for item in items or ():
+            if isinstance(item, ElaChatPlanItem):
+                parsed.append(item)
+            else:
+                value = ElaChatPlanItem.fromDict(item)
+                if value is not None:
+                    parsed.append(value)
+        if not parsed:
+            return None
+        return cls(items=tuple(parsed))
+
+    @classmethod
+    def fromMarkdown(cls, text: str, title: str = "计划") -> Optional["ElaChatPlan"]:
+        """从 Markdown 清单解析计划（``- [ ]`` / ``- [x]`` / ``- [>]`` / 编号列表）。
+
+        解析不出任何条目时返回 ``None``，调用方应保留原文而不是造一张空卡。
+        """
+        items = []
+        in_fence = False
+        for raw in str(text or "").splitlines():
+            line = raw.strip()
+            if line.startswith("```"):
+                in_fence = not in_fence
+                continue
+            if in_fence or not line:
+                continue
+            if line.startswith("#"):
+                continue
+            match = re.match(r"^[-*+]\s*\[([ xX>~\-])\]\s*(.+)$", line)
+            if match:
+                mark = match.group(1).lower()
+                if mark in ("x",):
+                    status = ElaChatPlanItemStatusType.Completed
+                elif mark in (">", "~", "-"):
+                    status = ElaChatPlanItemStatusType.InProgress
+                else:
+                    status = ElaChatPlanItemStatusType.Pending
+                items.append(
+                    ElaChatPlanItem(text=match.group(2).strip(), status=status)
+                )
+                continue
+            match = re.match(r"^(?:\d+[.)]|[-*+])\s+(.+)$", line)
+            if match:
+                items.append(ElaChatPlanItem(text=match.group(1).strip()))
+        if not items:
+            return None
+        return cls(items=tuple(items), title=title or "计划")
+
+    @classmethod
+    def coerce(cls, value) -> Optional["ElaChatPlan"]:
+        """把计划输入归一成快照（plan / dict / list / Markdown 字符串）。"""
+        if value is None:
+            return None
+        if isinstance(value, cls):
+            return value
+        if isinstance(value, str):
+            return cls.fromMarkdown(value)
+        if isinstance(value, dict):
+            return cls.fromDict(value)
+        if isinstance(value, (list, tuple)):
+            return cls.fromList(value)
+        return None
 
 
 @dataclass(frozen=True)
@@ -831,6 +1187,8 @@ class ElaChatPart:
     stats: Optional[ElaChatStats] = None
     #: 审批请求（``kind == Permission``）
     permission: Optional[ElaChatPermission] = None
+    #: 计划 / 待办（``kind == Plan``）
+    plan: Optional[ElaChatPlan] = None
     #: 思考耗时（毫秒，``kind == Reasoning``）
     duration_ms: float = 0.0
     #: 所属步骤序号（从 1 开始）
@@ -864,6 +1222,10 @@ class ElaChatPart:
         """返回替换审批请求后的新快照。"""
         return replace(self, permission=permission)
 
+    def withPlan(self, plan: Optional[ElaChatPlan]) -> "ElaChatPart":
+        """返回替换计划快照后的新快照。"""
+        return replace(self, plan=plan)
+
     def withDuration(self, durationMs: float) -> "ElaChatPart":
         """返回替换耗时后的新快照。"""
         return replace(self, duration_ms=float(durationMs or 0.0))
@@ -882,6 +1244,7 @@ class ElaChatPart:
             "tool_call": self.tool_call.toDict() if self.tool_call else None,
             "stats": self.stats.toDict() if self.stats else None,
             "permission": self.permission.toDict() if self.permission else None,
+            "plan": self.plan.toDict() if self.plan else None,
             "duration_ms": _as_float(self.duration_ms),
             "step": _as_int(self.step, 1),
             "notice_type": _as_str(self.notice_type),
@@ -914,6 +1277,7 @@ class ElaChatPart:
             else None,
             stats=ElaChatStats.fromDict(data.get("stats")),
             permission=ElaChatPermission.fromDict(data.get("permission")),
+            plan=ElaChatPlan.fromDict(data.get("plan")),
             duration_ms=_as_float(data.get("duration_ms")),
             step=max(1, _as_int(data.get("step"), 1)),
             notice_type=_as_str(data.get("notice_type")),

@@ -6,6 +6,7 @@ from enum import IntEnum
 from typing import Optional
 
 from ._internal import is_deleted
+from .tooltip_targets import install_menu_tooltips
 from PyQt6.QtCore import QObject, pyqtSignal
 from PyQt6.QtGui import QIcon
 from PyQt6.QtWidgets import QMenu, QSystemTrayIcon
@@ -84,6 +85,8 @@ class ElaTrayIcon(QObject):
 
     def setMenu(self, menu: Optional[QMenu]) -> None:  # noqa: N802 (Qt 命名)
         """设置右键菜单（传 ``ElaMenu`` 可得 Ela 外观；传 ``None`` 摘掉菜单）。"""
+        if menu is not None:
+            install_menu_tooltips(menu)
         self._tray.setContextMenu(menu)
 
     def menu(self) -> Optional[QMenu]:

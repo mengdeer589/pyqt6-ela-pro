@@ -8,6 +8,7 @@ from PyQt6.QtWidgets import QLabel, QWidget
 from PyQt6ElaWidgetTools import ElaIconType
 
 from pyqt6_ela_pro.chat import ElaChatToolBar, ElaChatToolButton
+from pyqt6_ela_pro.tooltips import _tooltip_dict
 
 
 class TestAddButton:
@@ -21,7 +22,7 @@ class TestAddButton:
         assert bar.keys() == ["run"]
         assert bar.toolButton("run") is button
         assert bar.item("run") is button
-        assert button.toolTip() == "执行"
+        assert _tooltip_dict[button]._text == "执行"
 
     def test_auto_key(self, qapp, make):
         bar = make(ElaChatToolBar)

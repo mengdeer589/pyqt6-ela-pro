@@ -23,6 +23,7 @@ from PyQt6.QtGui import (
 
 from .._internal import applyMissingGlyphFonts, is_deleted
 from ..math_lite import extract_math
+from ..tooltip_targets import DOCUMENT_TOOLTIP_PROPERTY, document_format_tooltip
 from .media import _IMAGE_SYNTAX_RE
 from .syntax import _clamp_pos
 from .themes import _QUOTE_LEFT_MARGIN
@@ -673,10 +674,10 @@ class _MarkdownRenderMixin:
                         href = fmt.anchorHref()
                         if (
                             href
-                            and not fmt.toolTip()
+                            and not document_format_tooltip(fmt)
                             and not href.startswith(_CONTROL_ANCHOR_PREFIXES)
                         ):
-                            target.setToolTip(href)
+                            target.setProperty(DOCUMENT_TOOLTIP_PROPERTY, href)
                     elif not fmt.hasProperty(foreground_property):
                         # 「显式前景色」用属性存在性判断：``foreground().style()``
                         # 每次调用都要让 PyQt 把 C++ 枚举映射回 Python 枚举

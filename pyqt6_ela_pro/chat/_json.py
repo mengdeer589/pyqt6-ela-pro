@@ -13,6 +13,8 @@ except ImportError:  # pragma: no cover
 
 #: orjson 对非字符串键的兼容开关（旧版本没有该属性时退化为 0，仅字符串键可用）
 _ORJSON_OPTIONS = getattr(_orjson, "OPT_NON_STR_KEYS", 0) if _orjson else 0
+#: orjson 的 2 空格缩进开关（缩进只用于展示，持久化仍是紧凑格式）
+_ORJSON_INDENT = getattr(_orjson, "OPT_INDENT_2", 0) if _orjson else 0
 
 
 def backend() -> str:
@@ -35,15 +37,27 @@ def _has_non_finite(value: Any) -> bool:
     return False
 
 
-def dumps(obj: Any, allow_nan: bool = False) -> str:
-    """序列化为紧凑 UTF-8 JSON 文本（``str``）。
+def dumps(obj: Any, allow_nan: bool = False, indent: int = 0) -> str:
+    """序列化为 UTF-8 JSON 文本（``str``）。
 
     ``allow_nan=False``（默认）时 NaN / Infinity 抛 :class:`ValueError`。
+    ``indent=0``（默认）输出紧凑格式（持久化 / journal 用）；非 0 输出
+    2 空格缩进的展示格式，仅供渲染器格式化结果。
     """
     if _orjson is not None:
         if not allow_nan and _has_non_finite(obj):
             raise ValueError("Out of range float values are not JSON compliant")
-        return _orjson.dumps(obj, option=_ORJSON_OPTIONS).decode("utf-8")
+        option = _ORJSON_OPTIONS
+        if indent:
+            option |= _ORJSON_INDENT
+        return _orjson.dumps(obj, option=option).decode("utf-8")
+    if indent:
+        return json.dumps(
+            obj,
+            ensure_ascii=False,
+            indent=2,
+            allow_nan=allow_nan,
+        )
     return json.dumps(
         obj,
         ensure_ascii=False,

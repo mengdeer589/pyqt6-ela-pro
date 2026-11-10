@@ -257,6 +257,8 @@ class ElaChatInput(
         safe_connect(self._button, "clicked", self._on_button_clicked, "input.send")
         #: 已写入按钮的图标枚举 —— ``QIcon`` 无值相等语义，每次比较都会重建图标
         self._button_icon = ElaIconType.IconName.ArrowUp
+        #: 当前发送 / 停止提示文案（避免重复重建 ElaToolTip）
+        self._button_tooltip = ""
         # 工具栏控件不抢焦点：点按钮时编辑框保持聚焦（卡片维持强调色边框）
         for control in (
             self._add_file_button,
@@ -395,8 +397,8 @@ class ElaChatInput(
             self._button_icon = icon
         if self._button.color() != color:
             self._button.setColor(color)
-        if self._button.toolTip() != tooltip:
-            self._button.setToolTip(tooltip)
+        if self._button_tooltip != tooltip:
+            self._button_tooltip = tooltip
             set_tooltip(self._button, tooltip, ElaToolTipPositionType.Top)
         # 空草稿且非「停止」态时置灰；生成中禁用排队时提交会被 submit() 拒绝，
         # 按钮必须跟着置灰（否则就是点了没反应的「发送」）

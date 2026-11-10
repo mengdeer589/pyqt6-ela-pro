@@ -23,6 +23,7 @@ from PyQt6ElaWidgetTools import (
     eTheme,
 )
 
+from ..tooltip_targets import install_item_view_tooltips
 from ._tokens import theme_changed_slot
 from .model import ElaPinDirectionType, types_compatible
 from .registry import ElaNodeRegistry
@@ -33,6 +34,8 @@ __all__ = ["ElaNodeCreationMenu", "ElaNodeContextMenu", "ElaEdgeContextMenu"]
 #: 传位次数字直接 `TypeError: argument 2 has unexpected type 'int'`）
 _TC_POPUP_BASE = ElaThemeType.ThemeColor.PopupBase
 _TC_POPUP_BORDER = ElaThemeType.ThemeColor.PopupBorder
+#: 节点类型描述的自定义 role（不写 Qt.ToolTipRole，避免原生 QToolTip）
+_ITEM_TOOLTIP_ROLE = int(Qt.ItemDataRole.UserRole) + 1
 _TC_TEXT = ElaThemeType.ThemeColor.BasicText
 _TC_TEXT_CATEGORY = ElaThemeType.ThemeColor.BasicTextCategory
 
@@ -121,6 +124,9 @@ class ElaNodeCreationMenu(QDialog):
         self.list.setMaximumHeight(360)
         self._model = QStandardItemModel(self.list)
         self.list.setModel(self._model)
+        self._item_tooltip_adapter = install_item_view_tooltips(
+            self.list, role=_ITEM_TOOLTIP_ROLE
+        )
         lay.addWidget(self.search_edit)
         lay.addWidget(self.list)
 
@@ -132,6 +138,12 @@ class ElaNodeCreationMenu(QDialog):
         # 自动断连，单例信号上不残留死对象包装
         theme_changed_slot(self, self._retheme)
         self._retheme()
+
+    def hideEvent(self, event) -> None:  # noqa: N802 (Qt 命名)
+        adapter = getattr(self, "_item_tooltip_adapter", None)
+        if adapter is not None:
+            adapter.hide()
+        super().hideEvent(event)
 
     def paintEvent(self, event) -> None:  # noqa: N802 (Qt 命名)
         """自绘圆角外框（弹层底色 + 1px 边）—— 禁 QSS 后由这里接管。
@@ -190,6 +202,7 @@ class ElaNodeCreationMenu(QDialog):
     def _rebuild(self) -> None:
         """按搜索词 / 兼容过滤重建分类列表（分类头不可选 + 粗体）。"""
         self._model.clear()
+        self._item_tooltip_adapter.hide()
         keyword = self.search_edit.text()
         reg = ElaNodeRegistry.instance()
         specs = [
@@ -211,7 +224,7 @@ class ElaNodeCreationMenu(QDialog):
                 item = QStandardItem(f"  {spec.title}")
                 item.setData(spec.type_name, Qt.ItemDataRole.UserRole)
                 if spec.description:
-                    item.setToolTip(spec.description)
+                    item.setData(spec.description, _ITEM_TOOLTIP_ROLE)
                 item.setIcon(_item_icon(spec.category))
                 self._model.appendRow(item)
                 if first_item is None:

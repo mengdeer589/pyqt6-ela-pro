@@ -13,6 +13,7 @@ from PyQt6ElaWidgetTools import (
 from pyqt6_ela_pro import (
     ElaConfirmDialog,
     ElaMessageDialog,
+    ElaSeverity,
     ElaStateToolTip,
     ElaToast,
     ElaToolTip,
@@ -22,6 +23,14 @@ from pyqt6_ela_pro import (
     show_notify,
 )
 from .base_page import ExamplePage
+
+
+_NOTIFY_DEMOS = {
+    ElaSeverity.Info: ("提示", "这是一条通知信息，用于提醒用户某些重要事项。"),
+    ElaSeverity.Success: ("操作成功", "文件已保存到本地。"),
+    ElaSeverity.Warning: ("注意", "磁盘空间不足，请及时清理。"),
+    ElaSeverity.Error: ("操作失败", "网络连接失败，请稍后重试。"),
+}
 
 
 class DrawerTooltipPage(ExamplePage):
@@ -275,24 +284,46 @@ class DrawerTooltipPage(ExamplePage):
             )
         )
         self._addInfoText(
-            "右下角通知弹窗，从屏幕边缘滑入，支持自动关闭和鼠标悬停保持",
+            "右下角通知弹窗，支持信息 / 成功 / 警告 / 错误四级，"
+            "从屏幕边缘滑入，悬停暂停自动关闭",
             parent_layout,
         )
         btn_layout = QHBoxLayout()
         btn_layout.setSpacing(15)
-        show_btn = ElaPushButton("显示通知", self)
-        show_btn.setFixedWidth(100)
-        show_btn.clicked.connect(self._onShowNotify)
-        btn_layout.addWidget(show_btn)
+        for label, severity in (
+            ("信息", ElaSeverity.Info),
+            ("成功", ElaSeverity.Success),
+            ("警告", ElaSeverity.Warning),
+            ("错误", ElaSeverity.Error),
+        ):
+            btn = ElaPushButton(label, self)
+            btn.setFixedWidth(80)
+            btn.clicked.connect(lambda _=False, s=severity: self._onShowNotify(s))
+            btn_layout.addWidget(btn)
+        long_btn = ElaPushButton("长文本", self)
+        long_btn.setFixedWidth(80)
+        long_btn.clicked.connect(
+            lambda _=False: self._onShowNotify(ElaSeverity.Warning, long=True)
+        )
+        btn_layout.addWidget(long_btn)
         btn_layout.addStretch()
         parent_layout.addLayout(btn_layout)
         parent_layout.addSpacing(20)
 
-    def _onShowNotify(self):
+    def _onShowNotify(self, severity=ElaSeverity.Info, long=False):
+        title, content = _NOTIFY_DEMOS[severity]
+        if long:
+            title = "长文本通知"
+            content = (
+                "这是一条较长的通知内容，用于验证正文自动换行和弹窗高度自适应。"
+                "通知会从屏幕右下角滑入，悬停时暂停自动关闭，移开后重新计时。"
+                "如果内容继续变长，卡片会按折行后的实际高度撑开，而不是被裁掉。"
+            )
         show_notify(
-            title="提示",
-            content="这是一条通知信息，用于提醒用户某些重要事项。",
+            title=title,
+            content=content,
             timeout=10000,
+            severity=severity,
         )
 
     def _demoMessageDialog(self, parent_layout):

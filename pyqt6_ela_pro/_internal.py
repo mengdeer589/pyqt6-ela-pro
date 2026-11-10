@@ -50,6 +50,7 @@ __all__ = [
     "load_lazy_pinyin",
     "safe_call",
     "system_cjk_font_family",
+    "fontFamilyAvailable",
     "to_logical_pos",
     "applyMissingGlyphFonts",
     "glyphCovers",
@@ -111,19 +112,45 @@ def load_lazy_pinyin():
 _cjk_ui_font_family = None
 _cjk_ui_font_probed = False
 
+#: 中文系统 CJK UI 字体候选（顺序即优先级）。GDI 中文系统只登记本地化族名
+#: （如「微软雅黑」），DirectWrite 则保留英文名。
+_CJK_UI_FONT_CANDIDATES = ("Microsoft YaHei", "微软雅黑")
+
+#: 同一字体在 GDI / DirectWrite 下的本地化族名别名（键为 casefold）。
+_FONT_FAMILY_ALIASES = {
+    "microsoft yahei": ("微软雅黑",),
+    "微软雅黑": ("Microsoft YaHei",),
+    "microsoft yahei ui": ("微软雅黑 UI",),
+    "微软雅黑 ui": ("Microsoft YaHei UI",),
+    "simsun": ("宋体",),
+    "宋体": ("SimSun",),
+    "nsimsun": ("新宋体",),
+    "新宋体": ("NSimSun",),
+    "simhei": ("黑体",),
+    "黑体": ("SimHei",),
+    "kaiti": ("楷体",),
+    "楷体": ("KaiTi",),
+    "fangsong": ("仿宋",),
+    "仿宋": ("FangSong",),
+}
+
 
 def system_cjk_font_family():
     """中文系统下可用的 CJK UI 字体族（其它系统 / 字体缺失返回 ``None``）。
-    只认「中文系统 + Microsoft YaHei」；调用点必须在 QApplication 之后，
-    结果进程级缓存。字体回退 / cmap 毒化的细节见 ``docs/core.md``。
+    候选见 ``_CJK_UI_FONT_CANDIDATES``（兼容 GDI 登记的本地化族名）；
+    调用点必须在 QApplication 之后，结果进程级缓存。字体回退 / cmap 毒化的
+    细节见 ``docs/core.md``。
     """
     global _cjk_ui_font_family, _cjk_ui_font_probed
     if not _cjk_ui_font_probed:
         _cjk_ui_font_probed = True
         try:
             if QLocale.system().language() == QLocale.Language.Chinese:
-                if "Microsoft YaHei" in QFontDatabase.families():
-                    _cjk_ui_font_family = "Microsoft YaHei"
+                families = set(QFontDatabase.families())
+                for name in _CJK_UI_FONT_CANDIDATES:
+                    if name in families:
+                        _cjk_ui_font_family = name
+                        break
         except Exception:
             _cjk_ui_font_family = None
     return _cjk_ui_font_family
@@ -138,6 +165,34 @@ def _fontFamilySet() -> set:
         except Exception:  # noqa: BLE001 —— 无 GUI 时查询字体不能把调用方带崩
             _font_family_set = set()
     return _font_family_set
+
+
+def fontFamilyAvailable(family: str) -> bool:
+    """字体族是否可用（兼容 GDI 中文系统只登记本地化族名）。
+
+    ``QFont.exactMatch()`` 只认活动 face 名；GDI zh_CN 下英文名（如
+    ``Microsoft YaHei``）会判不可用，但同一字体以「微软雅黑」登记。
+    """
+    name = (family or "").strip()
+    if not name:
+        return False
+    try:
+        if QFont(name).exactMatch():
+            return True
+    except Exception:  # noqa: BLE001 —— 字体探测失败按不可用处理
+        return False
+    families = _fontFamilySet()
+    if name in families:
+        return True
+    folded = name.casefold()
+    for alias in _FONT_FAMILY_ALIASES.get(folded, ()):
+        if alias in families:
+            return True
+    try:
+        raw = QRawFont.fromFont(QFont(name))
+        return bool(raw.isValid() and raw.familyName().casefold() == folded)
+    except Exception:  # noqa: BLE001
+        return False
 
 
 def _glyphRawFont(family: str) -> Optional[QRawFont]:

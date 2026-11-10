@@ -12,6 +12,7 @@ from types import SimpleNamespace
 import pytest
 from _qthelpers import wait_for_clipboard as _wait_for_clipboard
 from _qthelpers import wait_until as _wait
+from PyQt6.QtCore import QSize
 from PyQt6.QtGui import QImage, QTextCursor
 from PyQt6.QtPrintSupport import QPrinter
 
@@ -172,6 +173,26 @@ def _load_pdf(path):
     return document
 
 
+def _page_ink(image: QImage) -> int:
+    """页面栅格化后的非透明像素数（PDF 背景透明，空白页为 0）。"""
+    image = image.convertToFormat(QImage.Format.Format_ARGB32)
+    ink = 0
+    for y in range(0, image.height(), 2):
+        for x in range(0, image.width(), 2):
+            if image.pixelColor(x, y).alpha() > 0:
+                ink += 1
+    return ink
+
+
+def _pdf_text(document) -> str:
+    """PDF 全文（用于断言内容确实被写入，不依赖分页位置）。"""
+    chunks = []
+    for page in range(document.pageCount()):
+        selection = document.getAllText(page)
+        chunks.append(selection.text() if selection is not None else "")
+    return "".join(chunks)
+
+
 class TestExportPdf:
     SOURCE = "# 标题\n\n正文 $x^2$"
     LONG_SOURCE = "\n\n".join(f"第 {index} 段：" + "内容" * 60 for index in range(80))
@@ -212,6 +233,58 @@ class TestExportPdf:
         assert v.exportPdf(str(default))
         assert v.exportPdf(str(small), fontPointSize=8.0)
         assert _load_pdf(small).pageCount() < _load_pdf(default).pageCount()
+        v.deleteLater()
+
+    @pytest.mark.parametrize(
+        "kwargs",
+        [{}, {"fontPointSize": 8.0}, {"marginsMm": (10, 20, 10, 20)}],
+        ids=["default", "font-8pt", "custom-margins"],
+    )
+    def test_every_page_draws_content(self, qapp, tmp_path, kwargs):
+        """逐页栅格化断言：分页 clip 必须随页偏移，否则第 2 页起整页空白。
+
+        文字命令在 PDF 内容流里仍然存在（``getAllText`` 能读到），所以只能按
+        像素判断；页码会掩盖空白页，导出时关掉。
+        """
+        v = ElaMarkdownViewer()
+        v.setMarkdown(self.LONG_SOURCE)
+        path = tmp_path / "every-page.pdf"
+        assert v.exportPdf(str(path), pageNumbers=False, **kwargs)
+        document = _load_pdf(path)
+        assert document.pageCount() >= 3
+        for page in range(document.pageCount()):
+            image = document.render(page, QSize(240, 320))
+            assert not image.isNull()
+            assert _page_ink(image) > 20, f"第 {page + 1} 页没有可见内容"
+        v.deleteLater()
+
+    def test_export_flushes_pending_stream(self, qapp, tmp_path):
+        """流式定时器还压着最新分片时导出，也必须包含当前全部内容。"""
+        v = ElaMarkdownViewer()
+        v.beginStream()
+        source = "\n\n".join(
+            f"STREAM-PARA-{index} " + "body " * 40 for index in range(80)
+        )
+        for start in range(0, len(source), 512):
+            v.appendMarkdown(source[start : start + 512])
+        # 未跑事件循环：定时器里还压着尾部，文档只有上次 flush 的内容
+        assert "STREAM-PARA-79" not in v.document().toPlainText()
+
+        path = tmp_path / "stream.pdf"
+        assert v.exportPdf(str(path), pageNumbers=False)
+        assert v.isStreaming()
+        assert "STREAM-PARA-79" in v.toPlainText()
+        document = _load_pdf(path)
+        assert "STREAM-PARA-79" in _pdf_text(document)
+        for page in range(document.pageCount()):
+            assert _page_ink(document.render(page, QSize(240, 320))) > 20
+
+        # 导出后增量状态不被破坏：继续追加并收尾，不重复、不丢尾
+        v.appendMarkdown("\n\nFINAL-MARKER")
+        v.endStream()
+        text = v.toPlainText()
+        assert text.count("STREAM-PARA-79") == 1
+        assert "FINAL-MARKER" in text
         v.deleteLater()
 
     def test_line_spacing_increases_page_count(self, qapp, tmp_path):

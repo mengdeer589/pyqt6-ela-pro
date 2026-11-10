@@ -16,6 +16,7 @@ from PyQt6.QtGui import QColor, QImage, QTextCursor, QTextTable
 
 import pyqt6_ela_pro.mermaid_support as support
 from pyqt6_ela_pro.ela_markdown_viewer import ElaMarkdownViewer
+from pyqt6_ela_pro.tooltip_targets import DOCUMENT_TOOLTIP_PROPERTY
 from pyqt6_ela_pro.mermaid_support import (
     MERMAID_THEME_VARIABLES,
     ElaMermaidRenderer,
@@ -295,7 +296,10 @@ class TestMermaidViewerIntegration:
         fragment = _mermaid_images(v)[0]
         image_format = fragment.charFormat().toImageFormat()
         assert abs(image_format.width() - 100) < 1.0  # 200 / 2
-        assert image_format.toolTip() == f"Mermaid: {MERMAID_MARKDOWN[11:-4]}"
+        assert (
+            image_format.property(DOCUMENT_TOOLTIP_PROPERTY)
+            == f"Mermaid: {MERMAID_MARKDOWN[11:-4]}"
+        )
 
         assert not _code_tables(v)
         assert themes and themes[0] in ("light", "dark")

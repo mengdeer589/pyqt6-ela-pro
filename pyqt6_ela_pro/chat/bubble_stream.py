@@ -80,11 +80,14 @@ class _BubbleStreamMixin:
                 continue
             if part.tool_call.status in ElaChatToolStatusType.Settled:
                 continue
+            duration = self._tool_duration(part.id, part.tool_call)
             call = part.tool_call.withStatus(settled)
+            if duration:
+                call = call.withTiming(call.started_at, duration)
             self._replace_part(part.id, part.withStatus(part_status).withToolCall(call))
             card = self._tool_cards.get(part.id)
             if card is not None and hasattr(card, "setStatus"):
-                card.setStatus(settled)
+                card.setStatus(settled, durationMs=duration)
         for panel in self.toolPanels():
             self._sync_tool_panel(panel)
         # 通用清扫：回合结束后不允许残留 streaming 的 part
@@ -143,6 +146,7 @@ class _BubbleStreamMixin:
         self._meta.setInterrupted(self._status == ElaChatStatusType.Stopped)
         self._sync_header_status()
         self._sync_footer()
+        self._sync_changes_row()
         if self._status != ElaChatStatusType.Streaming:
             # 流式期间徽标被收起（见 _apply_stats_mode），回合结束再按模式摆出来
             self._apply_stats_mode()

@@ -23,8 +23,22 @@ from PyQt6.QtCore import (
 from ._colors import parse_color
 from ._internal import connect_theme_signal, is_deleted, single_shot_on
 from ._motion import Duration, start_idle_loop, start_transition
-from ._styles import SHADOW_MARGIN, ColorText, paintOverlayShadow, paintRoundedCard
-from ._theme import ElaStatusRoleType, accent, border, statusColor, surfacePopup
+from ._styles import (
+    SHADOW_MARGIN,
+    ColorText,
+    paintOverlayShadow,
+    paintRoundedCard,
+    paintSeverityBadge,
+)
+from ._theme import (
+    ElaStatusRoleType,
+    accent,
+    border,
+    statusColor,
+    surfacePopup,
+    text,
+    textMuted,
+)
 from .widget_base import ElaThemeWidget
 from PyQt6.QtGui import (
     QPainter,
@@ -59,7 +73,6 @@ STATETOOLTIP_MIN_WIDTH: int = 240
 STATETOOLTIP_MAX_WIDTH: int = 360
 STATETOOLTIP_HEIGHT: int = 56
 STATETOOLTIP_CLOSE_BUTTON_SIZE: int = 20
-STATETOOLTIP_ICON_SIZE: int = 16
 #: 状态卡片内部布局（左内边距 / 图标列 / 图标与文字 / 文字与关闭键 / 右内边距）
 _ST_LEFT_PAD: int = 14
 _ST_RIGHT_PAD: int = 10
@@ -364,6 +377,36 @@ class ElaToolTip(QWidget):
         self.move(int(x), int(y))
         self.show()
 
+    def showAtPoint(self, globalPos: QPoint) -> None:  # noqa: N802 (Qt 命名)
+        """在全局坐标点附近显示（菜单项 / item view 等没有目标 widget 的场景）。
+
+        默认落在坐标点右下方；右侧 / 下方放不下时翻到左侧 / 上方，并收敛到
+        该点所在屏幕的工作区。
+        """
+        self._ensureWindowFlags()
+        if not self.isWindow():
+            self.setParent(None)
+
+        screen = QApplication.screenAt(globalPos)
+        if screen is None:
+            screen = QApplication.primaryScreen()
+        if screen is None:
+            self.move(globalPos.x() + 12, globalPos.y() + 16)
+            self.show()
+            return
+
+        area = screen.availableGeometry()
+        x = globalPos.x() + 12
+        y = globalPos.y() + 16
+        if x + self.width() > area.right() + 1:
+            x = globalPos.x() - self.width() - 12
+        if y + self.height() > area.bottom() + 1:
+            y = globalPos.y() - self.height() - 16
+        x = max(area.left(), min(x, area.right() - self.width() + 1))
+        y = max(area.top(), min(y, area.bottom() - self.height() + 1))
+        self.move(int(x), int(y))
+        self.show()
+
     def _clamp_to_screen(self, x: int, y: int, widget: QWidget, above: bool) -> tuple:
         """把提示框收敛到目标 widget 所在屏幕的工作区：上方放不下翻到下方、反之亦然。"""
         try:
@@ -517,7 +560,7 @@ def remove_tooltip(widget: QWidget) -> None:
 
 class ElaStateToolTip(ElaThemeWidget):
     """带状态指示的提示卡片：加载中（旋转图标）/ 完成（对勾）。
-    表面与 :class:`ElaToast` 同材质（``PopupBase`` + ``PopupBorder`` + 阴影边距），
+    表面与 :class:`ElaToast` 同材质（``surfacePopup`` + 1px 描边 + 阴影边距），
     宽度随内容自适应（240~360），完成 1s 后淡出并发出 ``closed``。
     """
 
@@ -544,8 +587,6 @@ class ElaStateToolTip(ElaThemeWidget):
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         self._animation = QPropertyAnimation(self, b"windowOpacity")
         self._rotateTimer = QTimer(self)
-        self._iconFont = QFont("ElaAwesome")
-        self._iconFont.setPixelSize(STATETOOLTIP_ICON_SIZE)
 
         self._titleLabel = ColorText(self)
         self._titleLabel.setTextPixelSize(STATETOOLTIP_TITLE_FONT_SIZE)
@@ -571,6 +612,7 @@ class ElaStateToolTip(ElaThemeWidget):
         self._closeBtn.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self._closeBtn.setCursor(Qt.CursorShape.PointingHandCursor)
         self._closeBtn.setAccessibleName("关闭")
+        set_tooltip(self._closeBtn, "关闭", ElaToolTipPositionType.Top)
         self._closeBtn.clicked.connect(self._onCloseButtonClicked)
 
         self._setup_ui()
@@ -578,7 +620,12 @@ class ElaStateToolTip(ElaThemeWidget):
 
     def _setup_ui(self) -> None:
         self._rotateTimer.timeout.connect(self._rotateTimerFlow)
+        self._applyTextColors()
         self._updateContent()
+
+    def _applyTextColors(self) -> None:
+        self._titleLabel.setTextColor(text(self._currentTheme))
+        self._contentLabel.setTextColor(textMuted(self._currentTheme))
 
     def _connectSignals(self) -> None:
         # 持续动效：Reduced/Disabled 下不转。角度冻结在当前值 —— 仍是一段可见的
@@ -587,6 +634,7 @@ class ElaStateToolTip(ElaThemeWidget):
 
     def _onThemeChanged(self, mode: int) -> None:
         self._currentTheme = mode
+        self._applyTextColors()
         self.update()
 
     def _getAccentColor(self) -> QColor:
@@ -630,13 +678,13 @@ class ElaStateToolTip(ElaThemeWidget):
         card_width = chrome + text_width
 
         self._titleLabel.setFixedWidth(text_width)
-        self._titleLabel.setText(
-            title_metrics.elidedText(
-                self._title,
-                Qt.TextElideMode.ElideRight,
-                text_width,
-            )
+        elided_title = title_metrics.elidedText(
+            self._title,
+            Qt.TextElideMode.ElideRight,
+            text_width,
         )
+        self._titleLabel.setText(elided_title)
+        self._sync_title_tooltip(elided_title)
 
         title_height = title_metrics.height() if has_title else 0
         if has_content:
@@ -664,6 +712,23 @@ class ElaStateToolTip(ElaThemeWidget):
             sm + card_width - _ST_RIGHT_PAD - STATETOOLTIP_CLOSE_BUTTON_SIZE,
             sm + _ST_PAD_Y,
         )
+
+    def _sync_title_tooltip(self, elided: str) -> None:
+        """标题被省略时用库内提示显示全文。"""
+        text = self._title if elided != self._title else ""
+        if text == getattr(self, "_title_tooltip_text", None):
+            return
+        self._title_tooltip_text = text
+        if text:
+            set_tooltip(
+                self._titleLabel,
+                text,
+                ElaToolTipPositionType.Top,
+                maxWidth=STATETOOLTIP_MAX_WIDTH,
+                wordWrap=True,
+            )
+        else:
+            remove_tooltip(self._titleLabel)
 
     def _updateSizeAndPositions(self) -> None:
         self._updateContent()
@@ -835,25 +900,22 @@ class ElaStateToolTip(ElaThemeWidget):
             radius=radius,
         )
 
-        # 状态图标：加载中旋转的箭头 / 完成的对勾，颜色取自主题状态令牌
-        painter.save()
-        painter.translate(_ST_LEFT_PAD + _ST_ICON_BOX / 2, card_height / 2)
-        if not self._isDone:
-            painter.rotate(self._rotateAngle)
-        painter.setFont(self._iconFont)
-        painter.setPen(self._getAccentColor())
-        icon = (
-            ElaIconType.IconName.CircleCheck
+        # 状态图标：实心等级圆 + 旋转箭头 / 对勾，与 toast / 通知弹窗同一套
+        badge_rect = QRectF(
+            _ST_LEFT_PAD,
+            (card_height - _ST_ICON_BOX) / 2,
+            _ST_ICON_BOX,
+            _ST_ICON_BOX,
+        )
+        paintSeverityBadge(
+            painter,
+            badge_rect,
+            self._getAccentColor(),
+            ElaIconType.IconName.Check
             if self._isDone
-            else ElaIconType.IconName.ArrowRotateRight
+            else ElaIconType.IconName.ArrowRotateRight,
+            rotation=0.0 if self._isDone else self._rotateAngle,
         )
-        half = STATETOOLTIP_ICON_SIZE / 2
-        painter.drawText(
-            QRectF(-half, -half, STATETOOLTIP_ICON_SIZE, STATETOOLTIP_ICON_SIZE),
-            Qt.AlignmentFlag.AlignCenter,
-            chr(icon.value),
-        )
-        painter.restore()
         painter.end()
 
     def getSuitablePos(self) -> QPoint:

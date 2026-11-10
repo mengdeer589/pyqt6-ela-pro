@@ -32,6 +32,7 @@ class TestPartModel:
         assert ElaChatPartKindType.Synthetic == "synthetic"
         assert ElaChatPartKindType.Compaction == "compaction"
         assert ElaChatPartKindType.Permission == "permission"
+        assert ElaChatPartKindType.Plan == "plan"
         assert set(ElaChatPartKindType.All) == {
             "reasoning",
             "text",
@@ -41,6 +42,7 @@ class TestPartModel:
             "compaction",
             "permission",
             "notice",
+            "plan",
         }
 
     def test_defaults_and_helpers(self):
@@ -532,13 +534,12 @@ class TestBubbleParts:
         # 徽标在父窗口显示后才会创建 ElaToolTip（隐藏态不建，bug #17）
         bubble.show()
         qapp.processEvents()
-        tooltip = badge._label.toolTip()
-        assert tooltip.startswith("首字 120 ms")
-        assert "端到端 7.4s" in tooltip
         # 悬浮提示走库内 ElaToolTip（不是原生 QToolTip）
         ela_tooltip = _tooltip_dict.get(badge._label)
         assert ela_tooltip is not None
-        assert ela_tooltip._text == tooltip
+        tooltip = ela_tooltip._text
+        assert tooltip.startswith("首字 120 ms")
+        assert "端到端 7.4s" in tooltip
         assert "↑0" in badge._label.text()
         assert "↓0" in badge._label.text()
         assert "总计 5" in badge._label.text()
@@ -550,7 +551,6 @@ class TestBubbleParts:
         """没有可展示明细时不绑空提示气泡（悬停会弹一个纯底板）。"""
         badge = make(StatsBadge)
         badge.setStats(ElaChatStats(total_tokens=8))
-        assert badge._label.toolTip() == ""
         assert badge._label not in _tooltip_dict
 
         badge.setStats(ElaChatStats(total_tokens=8, ttft_ms=90.0))
@@ -567,7 +567,7 @@ class TestBubbleParts:
         badge = StatsBadge(host)
         badge.setStats(ElaChatStats(total_tokens=8, ttft_ms=90.0))
 
-        assert badge._label.toolTip() == "首字 90 ms"
+        assert badge._tooltip_text == "首字 90 ms"
         assert badge._label not in _tooltip_dict
 
         host.show()

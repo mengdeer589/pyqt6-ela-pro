@@ -15,12 +15,15 @@ from PyQt6ElaWidgetTools import eTheme
 from ..._internal import _ThemeAwareMixin
 from ..._styles import ColorText
 from ..._theme import accent as accent_color, textMuted
+from ...tooltips import ElaToolTipPositionType, remove_tooltip, set_tooltip
 from .header import _StatusDot
 
 #: 活动行高度
 WORKING_ROW_HEIGHT = 28
 #: 活动行字号
 WORKING_ROW_PIXEL_SIZE = 12
+#: 小于这个宽度不绑提示（初始布局占位宽度）
+_TOOLTIP_MIN_WIDTH = 200
 
 
 class ElaChatWorkingRow(_ThemeAwareMixin, QWidget):
@@ -30,9 +33,9 @@ class ElaChatWorkingRow(_ThemeAwareMixin, QWidget):
         super().__init__(parent)
         self._theme_mode = eTheme.getThemeMode()
         self._text = ""
+        self._tooltip_text = ""
         self.setFixedHeight(WORKING_ROW_HEIGHT)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-        self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
 
         layout = QHBoxLayout(self)
         layout.setContentsMargins(0, 4, 0, 4)
@@ -50,7 +53,6 @@ class ElaChatWorkingRow(_ThemeAwareMixin, QWidget):
         """设置活动文案（空串 = 隐藏）。"""
         self._text = str(text or "")
         self._label.setText(self._text)
-        self._label.setToolTip(self._text)
         self.setVisible(bool(self._text))
         self._dot.setActive(bool(self._text))
         self._elide_text()
@@ -61,12 +63,30 @@ class ElaChatWorkingRow(_ThemeAwareMixin, QWidget):
 
     def _elide_text(self) -> None:
         if not self._text:
+            self._sync_tooltip("")
             return
         width = max(80, self.width() - 24)
         metrics = QFontMetrics(self._label.font())
-        self._label.setText(
-            metrics.elidedText(self._text, Qt.TextElideMode.ElideRight, width)
-        )
+        elided = metrics.elidedText(self._text, Qt.TextElideMode.ElideRight, width)
+        self._label.setText(elided)
+        self._sync_tooltip(self._text if elided != self._text else "")
+
+    def _sync_tooltip(self, text: str) -> None:
+        if self.width() < _TOOLTIP_MIN_WIDTH:
+            text = ""
+        if text == self._tooltip_text:
+            return
+        self._tooltip_text = text
+        if text:
+            set_tooltip(
+                self._label,
+                text,
+                ElaToolTipPositionType.Top,
+                maxWidth=520,
+                wordWrap=True,
+            )
+        else:
+            remove_tooltip(self._label)
 
     def resizeEvent(self, event) -> None:  # noqa: N802 (Qt 命名)
         super().resizeEvent(event)

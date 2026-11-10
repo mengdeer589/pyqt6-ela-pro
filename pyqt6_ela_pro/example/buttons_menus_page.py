@@ -31,6 +31,7 @@ from pyqt6_ela_pro import (
     setAccentColor,
 )
 from pyqt6_ela_pro.svg_icon import svg_icon_loader
+from pyqt6_ela_pro.tooltips import ElaToolTipPositionType, set_tooltip
 
 #: 演示用的内联 SVG（24x24 描边风格）；<COLOR_CODE> 会被替换成当前主题文字色。
 _SVG_BODY = {
@@ -406,7 +407,11 @@ class ButtonsMenusPage(ExamplePage):
 
         icon_only = ElaButton(parent=self)
         icon_only.setSvgIcon(_stroke_svg(_SVG_BODY["close"]), 16)
-        icon_only.setToolTip("clearSvgIcon 可退回纯图标状态")
+        set_tooltip(
+            icon_only,
+            "clearSvgIcon 可退回纯图标状态",
+            ElaToolTipPositionType.Top,
+        )
         source_row.addWidget(icon_only)
         source_row.addStretch()
         parent_layout.addLayout(source_row)

@@ -50,6 +50,16 @@ class ToolRenderContext:
     allowOpenWhilePending: bool
     #: 结构化附加数据（``ElaChatToolCall.metadata`` 原样交出；缺省空字典）
     metadata: dict = field(default_factory=dict)
+    #: 有效工具类别（见 :class:`~pyqt6_ela_pro.chat.message.ElaChatToolKindType`）
+    kind: str = ""
+    #: 人类可读标题（空表示按工具名生成）
+    title: str = ""
+    #: 访问 / 修改的文件位置（``ElaChatToolLocation`` 元组）
+    locations: tuple = ()
+    #: 父工具调用 id（子代理嵌套；空表示顶层）
+    parentId: str = ""
+    #: 耗时（毫秒；0 表示未知）
+    durationMs: float = 0.0
 
     def parsedArguments(self) -> dict:
         """解析参数为字典（容错，永不抛异常）。

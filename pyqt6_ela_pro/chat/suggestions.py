@@ -11,6 +11,7 @@ from PyQt6.QtWidgets import QAbstractItemView, QVBoxLayout, QWidget
 from PyQt6ElaWidgetTools import ElaListView, ElaScrollPageArea
 
 from .._internal import safe_connect
+from ..tooltip_targets import install_item_view_tooltips
 from .message import _as_int
 
 #: 列表项高度
@@ -58,6 +59,10 @@ class SuggestionPopup(ElaScrollPageArea):
         self._model = QStandardItemModel(self)
         self._view = ElaListView(self)
         self._view.setModel(self._model)
+        self._item_tooltip_adapter = install_item_view_tooltips(
+            self._view,
+            text_getter=self._item_description,
+        )
         self._view.setItemHeight(_ITEM_HEIGHT)
         self._view.setUniformItemSizes(True)
         self._view.setIsTransparent(True)
@@ -114,6 +119,17 @@ class SuggestionPopup(ElaScrollPageArea):
         """关闭浮层。"""
         self.hide()
 
+    def _item_description(self, index) -> str:
+        if 0 <= index.row() < len(self._items):
+            return self._items[index.row()].description
+        return ""
+
+    def hideEvent(self, event) -> None:  # noqa: N802 (Qt 命名)
+        adapter = getattr(self, "_item_tooltip_adapter", None)
+        if adapter is not None:
+            adapter.hide()
+        super().hideEvent(event)
+
     def isOpen(self) -> bool:
         """浮层是否可见且有候选项。"""
         return self.isVisible() and bool(self._items)
@@ -127,12 +143,11 @@ class SuggestionPopup(ElaScrollPageArea):
             for item in (items or [])
         ]
         self._model.clear()
+        self._item_tooltip_adapter.hide()
         for item in self._items:
             entry = QStandardItem(item.label)
             entry.setEditable(False)
             entry.setData(item, Qt.ItemDataRole.UserRole)
-            if item.description:
-                entry.setToolTip(item.description)
             self._model.appendRow(entry)
         if not self._items:
             self.close()

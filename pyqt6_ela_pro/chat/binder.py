@@ -355,7 +355,17 @@ class ElaChatStreamBinder:
         if answer:
             self.answer(answer)
 
-    def toolStart(self, callId: str, name: str, arguments="") -> None:
+    def toolStart(
+        self,
+        callId: str,
+        name: str,
+        arguments="",
+        *,
+        kind: str = "",
+        title: str = "",
+        locations=None,
+        parentId: str = "",
+    ) -> None:
         """工具调用开始（``arguments`` 支持 dict 或 JSON 字符串；回合外忽略）。"""
         if not self.isOpen():
             return
@@ -369,7 +379,14 @@ class ElaChatStreamBinder:
         self._clear_retry()
         self._set_activity(self._activity_for_tool(name), "tool", str(name or ""))
         self._chat.chatView().addToolCall(
-            self._target(), name, arguments, callId or None
+            self._target(),
+            name,
+            arguments,
+            callId or None,
+            kind=kind,
+            title=title,
+            locations=locations,
+            parentId=parentId,
         )
 
     def toolEnd(self, callId: str, result: str, ok: Optional[bool] = None) -> None:
@@ -399,6 +416,10 @@ class ElaChatStreamBinder:
             toolCall.get("id") or "",
             function.get("name") or "unknown",
             function.get("arguments", ""),
+            kind=toolCall.get("kind") or "",
+            title=toolCall.get("title") or "",
+            locations=toolCall.get("locations"),
+            parentId=toolCall.get("parent_id") or toolCall.get("parentId") or "",
         )
 
     def toolCallEnded(self, toolCall: dict, result: str) -> None:

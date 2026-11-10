@@ -17,6 +17,7 @@ from PyQt6.QtGui import (
 from PyQt6.QtWidgets import QFrame, QVBoxLayout, QWidget
 
 from .._motion import start_idle_loop
+from ..tooltips import ElaToolTipPositionType, remove_tooltip, set_tooltip
 from ._spinner import SpinnerArc
 from ._tokens import T, theme_changed_slot
 from .model import ElaBlueprintNode, ElaPinDirectionType
@@ -178,7 +179,11 @@ class ElaPinHandle(QWidget):
         self.pin = pin
         self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, False)
         self.setCursor(Qt.CursorShape.CrossCursor)
-        self.setToolTip(f"{pin.name} ({pin.data_type})")
+        set_tooltip(
+            self,
+            f"{pin.name} ({pin.data_type})",
+            ElaToolTipPositionType.Top,
+        )
         _transparent(self)
 
     def logical_center(self) -> QPointF:
@@ -637,9 +642,15 @@ class ElaNodeWidget(QFrame):
             self._pulse_timer.stop()
             self._pulse = 0.0
         if status == "error" and self.node.error_message:
-            self.setToolTip(self.node.error_message)
+            set_tooltip(
+                self,
+                self.node.error_message,
+                ElaToolTipPositionType.Top,
+                maxWidth=420,
+                wordWrap=True,
+            )
         else:
-            self.setToolTip("")
+            remove_tooltip(self)
         self._invalidate_cache()
         self.update()
 

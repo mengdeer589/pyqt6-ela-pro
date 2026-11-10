@@ -163,6 +163,7 @@ class ElaChatView(
         self._disclaimer_visible = True
         self._copy_notification_enabled = True
         self._waiting_placeholder_enabled = True
+        self._change_summary_enabled = True
         self._jump_threshold = None
         self._scroll_guards: list = []
         self._guards_by_message: dict = {}
@@ -203,7 +204,6 @@ class ElaChatView(
         layout.addWidget(self._scroll)
 
         self._jump_button = JumpToBottomButton(self)
-        self._jump_button.setToolTip("回到底部")
         set_tooltip(self._jump_button, "回到底部", ElaToolTipPositionType.Top)
         self._jump_button.hide()
         safe_connect(

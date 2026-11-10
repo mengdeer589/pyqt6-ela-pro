@@ -55,12 +55,10 @@ class _ImageAttachmentCard(QWidget):
         self._button = ElaIconButton(thumb, self)
         self._button.setFixedSize(width, height)
         self._button.setBorderRadius(6)
-        self._button.setToolTip(tooltip)
         set_tooltip(self._button, tooltip, ElaToolTipPositionType.Top)
         self._button.clicked.connect(self.clicked)
         self._close = ElaIconButton(ElaIconType.IconName.CircleXmark, 11, 16, 16, self)
         self._close.setBorderRadius(8)
-        self._close.setToolTip("移除附件")
         set_tooltip(self._close, "移除附件", ElaToolTipPositionType.Top)
         self._close.clicked.connect(self.removed)
         self._close.raise_()
@@ -306,11 +304,16 @@ class AttachmentStrip(ElaThemeWidget):
                     "attachments.remove_image",
                     receiver=card,
                 )
-                card.setToolTip(tooltip)
+                set_tooltip(
+                    card,
+                    tooltip,
+                    ElaToolTipPositionType.Top,
+                    maxWidth=520,
+                    wordWrap=True,
+                )
                 return card
         chip = ElaChip(self._chip_text(attachment), self)
         chip.setClosable(True)
-        chip.setToolTip(tooltip)
         set_tooltip(chip, tooltip, ElaToolTipPositionType.Top)
         safe_connect(
             chip,

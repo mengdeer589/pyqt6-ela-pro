@@ -10,6 +10,8 @@ from PyQt6ElaWidgetTools import ElaIconType, ElaMenu
 
 from .._internal import is_deleted, safe_connect
 from ..ela_dropdown_button import ElaDropDownButton
+from ..tooltip_targets import install_menu_tooltips, set_action_tooltip
+from ..tooltips import ElaToolTipPositionType, remove_tooltip, set_tooltip
 
 
 @dataclass(frozen=True)
@@ -45,7 +47,6 @@ class ElaChatSelector(ElaDropDownButton):
         self._current = str(current or "")
         self._actions: dict = {}
         self._menu: Optional[ElaMenu] = None
-        self.setToolTip(self._title)
         self.setItems(items or [], current)
 
     def setItems(self, items, current: Optional[str] = None) -> None:
@@ -109,8 +110,7 @@ class ElaChatSelector(ElaDropDownButton):
                 action = menu.addAction(item.label)
             action.setCheckable(True)
             action.setChecked(item.id == self._current)
-            if item.description:
-                action.setToolTip(item.description)
+            set_action_tooltip(action, item.description)
             safe_connect(
                 action,
                 "triggered",
@@ -120,6 +120,7 @@ class ElaChatSelector(ElaDropDownButton):
             )
             self._actions[item.id] = action
         self._menu = menu
+        install_menu_tooltips(menu)
         self.setMenu(menu)
 
     def _sync_menu_checks(self) -> None:
@@ -131,11 +132,21 @@ class ElaChatSelector(ElaDropDownButton):
     def _sync_label(self) -> None:
         item = self.currentItem()
         self.setText(item.label if item is not None else self._title)
-        self.setToolTip(
+        text = (
             f"{self._title}: {item.label}"
             if item is not None and self._title
             else self._title
         )
+        if text:
+            set_tooltip(
+                self,
+                text,
+                ElaToolTipPositionType.Top,
+                maxWidth=420,
+                wordWrap=True,
+            )
+        else:
+            remove_tooltip(self)
 
     def _select(self, itemId: str) -> None:
         if itemId == self._current:

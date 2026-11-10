@@ -35,6 +35,7 @@ from ._motion import (
 )
 
 from ._theme import (
+    ElaSeverity,
     ElaStatusRoleType,
     accent,
     border,
@@ -42,6 +43,7 @@ from ._theme import (
     chartPalette,
     resetAccentColor,
     setAccentColor,
+    severityColor,
     statusColor,
     surface,
     surfaceDialog,
@@ -102,6 +104,18 @@ from .tooltips import (
     ElaToolTipPositionType,
     ElaToolTip,
     ElaStateToolTip,
+)
+
+from .tooltip_targets import (
+    ACTION_TOOLTIP_PROPERTY,
+    DOCUMENT_TOOLTIP_PROPERTY,
+    ElaToolTipAdapter,
+    action_tooltip_text,
+    document_format_tooltip,
+    install_document_tooltips,
+    install_item_view_tooltips,
+    install_menu_tooltips,
+    set_action_tooltip,
 )
 
 from .dialog_base import ElaDialogBase
@@ -198,7 +212,7 @@ from .ela_tag_search_box import ElaTagSearchBox
 
 from .ela_tag_search_multi_box import ElaTagSearchMultiBox
 
-from .notify_popup import ElaNotifyPopup
+from .notify_popup import ElaNotifyManager, ElaNotifyPopup
 
 from .svg_icon import (
     ElaSvgIconLoader,
@@ -358,6 +372,7 @@ __all__ = [
     "start_idle_loop",
     "idle_loop_running",
     # ── 语义令牌 ──
+    "ElaSeverity",
     "ElaStatusRoleType",
     "surface",
     "surfaceRaised",
@@ -370,6 +385,7 @@ __all__ = [
     "textDisabled",
     "textOnAccent",
     "accent",
+    "severityColor",
     "statusColor",
     "chartPalette",
     "setAccentColor",
@@ -502,6 +518,7 @@ __all__ = [
     "ElaNodeCreationMenu",
     "ElaNodeRegistry",
     "ElaNodeSpec",
+    "ElaNotifyManager",
     "ElaNotifyPopup",
     "ElaParquetTable",
     "ElaPasswordEdit",
@@ -535,7 +552,16 @@ __all__ = [
     "ElaTimeline",
     "ElaToast",
     "ElaToolTip",
+    "ElaToolTipAdapter",
     "ElaToolTipPositionType",
+    "ACTION_TOOLTIP_PROPERTY",
+    "DOCUMENT_TOOLTIP_PROPERTY",
+    "action_tooltip_text",
+    "document_format_tooltip",
+    "install_document_tooltips",
+    "install_item_view_tooltips",
+    "install_menu_tooltips",
+    "set_action_tooltip",
     "ElaUploadArea",
     "ElaWindowEmbedder",
     "SuggestionPopup",

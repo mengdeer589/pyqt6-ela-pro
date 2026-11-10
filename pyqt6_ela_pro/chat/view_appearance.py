@@ -70,6 +70,22 @@ class _ViewAppearanceMixin:
         """「AI 生成」提示是否可见。"""
         return self._disclaimer_visible
 
+    def setChangeSummaryEnabled(self, on: bool) -> None:
+        """设置回合末是否显示文件变更汇总（应用偏好，不进 bundle 视图段）。"""
+        self._change_summary_enabled = bool(on)
+        for bubble in self._bubbles.values():
+            bubble.setChangeSummaryEnabled(self._change_summary_enabled)
+
+    def changeSummaryEnabled(self) -> bool:
+        """回合末是否显示文件变更汇总。"""
+        return self._change_summary_enabled
+
+    def turnChanges(self, messageId: int):
+        """获取指定消息的文件变更汇总（从工具 metadata 派生）。"""
+        from ._changes import changesFromPartsOrMessage
+
+        return changesFromPartsOrMessage(self.message(messageId))
+
     def setCopyNotificationEnabled(self, on: bool) -> None:
         """设置点击「复制」后是否弹成功提示（默认开；应用偏好，不进 bundle 视图段）。"""
         self._copy_notification_enabled = bool(on)

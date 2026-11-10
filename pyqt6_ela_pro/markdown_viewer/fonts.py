@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import logging
 
-from PyQt6.QtGui import QFont, QGuiApplication
+from PyQt6.QtGui import QGuiApplication
+
+from .._internal import fontFamilyAvailable
 
 logger = logging.getLogger(__name__)
 
@@ -42,14 +44,13 @@ def _normalize_font_family(value) -> str:
 
 
 def isFontFamilyAvailable(family: str) -> bool:
-    """字体族是否可用（精确匹配；多族只检查第一个）。无 GUI 时返回 ``False``。"""
+    """字体族是否可用（兼容 GDI 中文系统的本地化族名；多族只检查第一个）。
+    无 GUI 时返回 ``False``。
+    """
     name = _normalize_font_family(family)
     if not name or QGuiApplication.instance() is None:
         return False
-    try:
-        return QFont(name).exactMatch()
-    except Exception:  # noqa: BLE001 —— 字体探测失败按不可用处理
-        return False
+    return fontFamilyAvailable(name)
 
 
 def defaultMarkdownBodyFontFamily() -> str:

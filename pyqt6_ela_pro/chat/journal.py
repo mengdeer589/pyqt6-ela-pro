@@ -19,6 +19,7 @@ from .message import (
     ElaChatMessage,
     ElaChatPart,
     ElaChatPartKindType,
+    ElaChatPlan,
     ElaChatRoleType,
     ElaChatStats,
     ElaChatStatusType,
@@ -27,7 +28,22 @@ from .message import (
 )
 
 #: 日志行格式版本（与消息的 ``SCHEMA_VERSION`` 独立演进）
-JOURNAL_VERSION = 1
+JOURNAL_VERSION = 2
+
+
+def _location_list(value) -> list:
+    """把 ``ElaChatToolLocation`` / dict 列表归一成 JSON 安全的位置列表。"""
+    result = []
+    for item in value or ():
+        if isinstance(item, dict):
+            path = _str(item.get("path"))
+            line = max(0, _int(item.get("line")))
+        else:
+            path = _str(getattr(item, "path", ""))
+            line = max(0, _int(getattr(item, "line", 0)))
+        if path:
+            result.append({"path": path, "line": line})
+    return result
 
 
 class _Ev:
@@ -48,6 +64,7 @@ class _Ev:
     Compaction = "cp"
     CompactionText = "ct"
     CompactionEnd = "ce"
+    Plan = "p"
     End = "e"
 
 
@@ -86,6 +103,8 @@ class ElaChatTurnJournal:
         self._parts: list = []
         #: 未落定分段的增量缓冲 ``{partId: [chunk, ...]}``（见 ``_flushBuffer``）
         self._buffers: dict = {}
+        #: 工具调用 id -> 开始时间（epoch 秒；算耗时用）
+        self._tool_started: dict = {}
         self._step = 1
         self._status = ElaChatStatusType.Streaming
         self._error = ""
@@ -123,6 +142,7 @@ class ElaChatTurnJournal:
         self._dumped = 0
         self._stats_ids = {}
         self._buffers.clear()
+        self._tool_started.clear()
         self._flow.reset()
 
     def begin(self, messageId: Optional[int] = None) -> "ElaChatTurnJournal":
@@ -240,7 +260,17 @@ class ElaChatTurnJournal:
         self._rec_reasoning = None
         return self
 
-    def toolStart(self, callId: str, name: str, arguments="") -> "ElaChatTurnJournal":
+    def toolStart(
+        self,
+        callId: str,
+        name: str,
+        arguments="",
+        *,
+        kind: str = "",
+        title: str = "",
+        locations=None,
+        parentId: str = "",
+    ) -> "ElaChatTurnJournal":
         """记录工具调用开始（``arguments`` 支持 dict / JSON 字符串）。"""
         if not self._open:
             return self
@@ -249,12 +279,20 @@ class ElaChatTurnJournal:
                 arguments = _json.dumps(arguments)
             except (TypeError, ValueError):
                 arguments = str(arguments)
+        callId = callId or self._mint()
+        started_at = self._clock()
+        self._tool_started[callId] = started_at
         self._push(
             _Ev.ToolStart,
-            id=callId or self._mint(),
+            id=callId,
             name=name or "",
             args=arguments or "",
             step=self._step,
+            kind=str(kind or ""),
+            title=str(title or ""),
+            loc=_location_list(locations),
+            parent=str(parentId or ""),
+            at=_float(started_at),
         )
         return self
 
@@ -264,7 +302,15 @@ class ElaChatTurnJournal:
         """记录工具调用结束。"""
         if not self._open:
             return self
-        self._push(_Ev.ToolEnd, id=callId or "", result=result or "", ok=bool(ok))
+        started = self._tool_started.pop(callId, 0.0)
+        duration = max(0.0, (self._clock() - started) * 1000.0) if started else 0.0
+        self._push(
+            _Ev.ToolEnd,
+            id=callId or "",
+            result=result or "",
+            ok=bool(ok),
+            ms=_float(duration),
+        )
         return self
 
     def stats(self, stats: Optional[ElaChatStats]) -> "ElaChatTurnJournal":
@@ -335,6 +381,27 @@ class ElaChatTurnJournal:
         self._rec_compaction = None
         return self
 
+    def setPlan(self, plan, partId: Optional[str] = None) -> "ElaChatTurnJournal":
+        """记录一次计划快照（同一 part id 覆盖，不追加重复卡）。"""
+        if not self._open:
+            return self
+        value = ElaChatPlan.coerce(plan)
+        if value is None:
+            return self
+        if partId is None:
+            for part in reversed(self._parts):
+                if part.kind == ElaChatPartKindType.Plan:
+                    partId = part.id
+                    break
+        partId = partId or self._mint()
+        self._push(
+            _Ev.Plan,
+            id=partId,
+            step=self._step,
+            data=value.toDict(),
+        )
+        return self
+
     def end(
         self, status: str = ElaChatStatusType.Done, error: str = ""
     ) -> "ElaChatTurnJournal":
@@ -357,12 +424,12 @@ class ElaChatTurnJournal:
         self._seq += 1
         return "j%d" % self._seq
 
-    def _push(self, kind: str, **fields) -> None:
+    def _push(self, event_kind: str, **fields) -> None:
         """记一条事件，**并同步应用到自己的重放状态**。
         记录与重放走同一条路径，所以正在记录的 journal 本身就可直接读
         ``message()``。浮点在记录端就洗干净：``dumps()`` 用 ``allow_nan=False``。
         """
-        event = {"v": JOURNAL_VERSION, "e": kind}
+        event = {"v": JOURNAL_VERSION, "e": event_kind}
         for name, value in fields.items():
             event[name] = _float(value) if isinstance(value, float) else value
         self._events.append(event)
@@ -602,7 +669,14 @@ class ElaChatTurnJournal:
             name=_str(event.get("name")),
             arguments=_str(event.get("args")),
             status=ElaChatToolStatusType.Running,
+            kind=_str(event.get("kind")),
+            title=_str(event.get("title")),
+            parent_id=_str(event.get("parent")),
+            started_at=max(0.0, _float(event.get("at"))),
         )
+        raw_locations = event.get("loc")
+        if isinstance(raw_locations, list):
+            call = call.withLocations(raw_locations)
         step = _int(event.get("step"), self._step)
         existing = self._find(callId)
         if existing is not None:
@@ -627,6 +701,9 @@ class ElaChatTurnJournal:
             _str(event.get("result")),
             ElaChatToolStatusType.Done if ok else ElaChatToolStatusType.Error,
         )
+        duration = max(0.0, _float(event.get("ms")))
+        if duration:
+            call = call.withTiming(call.started_at, duration)
         # part 状态保持 Done：工具跑完了，只是失败 —— 失败由 ``tool_call.status`` 承载。
         self._replace(part, part.withToolCall(call).withStatus(ElaChatStatusType.Done))
 
@@ -688,6 +765,26 @@ class ElaChatTurnJournal:
             status = ElaChatStatusType.Done
         self._replace(part, part.withStatus(status))
 
+    def _ev_plan(self, event: dict) -> None:
+        partId = _str(event.get("id"))
+        plan = ElaChatPlan.fromDict(event.get("data"))
+        if not partId or plan is None:
+            return
+        existing = self._find(partId)
+        if existing is not None:
+            if existing.kind == ElaChatPartKindType.Plan:
+                self._replace(existing, existing.withPlan(plan))
+            return
+        self._append(
+            ElaChatPart(
+                id=partId,
+                kind=ElaChatPartKindType.Plan,
+                status=ElaChatStatusType.Done,
+                plan=plan,
+                step=_int(event.get("step"), self._step),
+            )
+        )
+
     def _ev_end(self, event: dict) -> None:
         status = _str(event.get("status"), ElaChatStatusType.Done)
         if status not in ElaChatStatusType.All:
@@ -730,6 +827,13 @@ class ElaChatTurnJournal:
                     if failed
                     else ElaChatToolStatusType.Aborted
                 )
+                if self._open:
+                    started = self._tool_started.get(call.id)
+                    if started:
+                        call = call.withTiming(
+                            call.started_at,
+                            max(0.0, (self._clock() - started) * 1000.0),
+                        )
                 settled.append(
                     part.withToolCall(call).withStatus(
                         ElaChatStatusType.Error if failed else ElaChatStatusType.Done
@@ -886,6 +990,7 @@ _HANDLERS = {
     _Ev.Compaction: ElaChatTurnJournal._ev_compaction,
     _Ev.CompactionText: ElaChatTurnJournal._ev_compaction_text,
     _Ev.CompactionEnd: ElaChatTurnJournal._ev_compaction_end,
+    _Ev.Plan: ElaChatTurnJournal._ev_plan,
     _Ev.End: ElaChatTurnJournal._ev_end,
 }
 

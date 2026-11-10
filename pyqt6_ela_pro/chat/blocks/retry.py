@@ -28,6 +28,7 @@ from ..._theme import (
     text as text_color,
     textMuted,
 )
+from ...tooltips import ElaToolTipPositionType, remove_tooltip, set_tooltip
 from ...ela_button import ElaButton
 
 
@@ -93,7 +94,7 @@ class ElaChatRetryCard(_ThemeAwareMixin, ElaScrollPageArea):
             ElaIconType.IconName.Xmark, 12, 18, 18, self
         )
         self._cancel_button.setBorderRadius(4)
-        self._cancel_button.setToolTip("取消重试")
+        set_tooltip(self._cancel_button, "取消重试", ElaToolTipPositionType.Top)
         safe_connect(
             self._cancel_button,
             "clicked",
@@ -115,7 +116,16 @@ class ElaChatRetryCard(_ThemeAwareMixin, ElaScrollPageArea):
         self._attempt = max(1, int(attempt or 1))
         self._message = str(message or "")
         self._next_at = float(nextAt or 0.0)
-        self._message_label.setToolTip(self._message)
+        if self._message:
+            set_tooltip(
+                self._message_label,
+                self._message,
+                ElaToolTipPositionType.Top,
+                maxWidth=560,
+                wordWrap=True,
+            )
+        else:
+            remove_tooltip(self._message_label)
         self._sync_text()
         self.show()
         if self._next_at > 0:
@@ -130,7 +140,7 @@ class ElaChatRetryCard(_ThemeAwareMixin, ElaScrollPageArea):
         self._message = ""
         self._next_at = 0.0
         self._message_label.clear()
-        self._message_label.setToolTip("")
+        remove_tooltip(self._message_label)
         self._info_label.clear()
         self.hide()
 

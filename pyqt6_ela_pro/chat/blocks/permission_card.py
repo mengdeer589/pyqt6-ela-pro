@@ -383,15 +383,26 @@ class PermissionCard(_ThemeAwareMixin, ElaScrollPageArea):
         self._editing = ""
 
     def _current_values(self, question) -> list:
-        """该题当前的答案列表（自定义优先且与候选项互斥）。"""
-        if self._custom_on.get(question.key) and self._custom.get(question.key):
-            return [self._custom[question.key]]
-        return list(self._answers.get(question.key) or ())
+        """该题当前的答案列表。
+
+        单选：自定义优先且与候选项互斥（radio 只能有一个答案）。
+        多选：自定义只是额外一项，与已勾选的候选项共存。
+        """
+        key = question.key
+        custom = self._custom.get(key, "") if self._custom_on.get(key) else ""
+        if question.isMultiple:
+            values = list(self._answers.get(key) or ())
+            if custom:
+                values.append(custom)
+            return list(dict.fromkeys(values))
+        if custom:
+            return [custom]
+        return list(self._answers.get(key) or ())
 
     def _build_answer(self) -> str:
         """把向导状态编码成 ``permissionReplied`` 的 ``answer``。
         单选塌缩成标量、多选发数组；未答题整条不进 payload（空数组会被误读成
-        「一个都不选」），自定义答案与候选项互斥。
+        「一个都不选」），自定义答案与候选项单选互斥、多选共存。
         """
         payload = {}
         for question in self._questions():
@@ -672,7 +683,9 @@ class PermissionCard(_ThemeAwareMixin, ElaScrollPageArea):
         key = question.key
         self._custom[key] = text
         self._custom_on[key] = True
-        self._answers.pop(key, None)
+        # 单选是 radio：自定义答案顶掉候选项；多选是「额外一项」，保留已选项。
+        if not question.isMultiple:
+            self._answers.pop(key, None)
         self._drafts.pop(key, None)
         self._editing = ""
         row = self._custom_row(key)
@@ -691,9 +704,10 @@ class PermissionCard(_ThemeAwareMixin, ElaScrollPageArea):
             self._answers[key] = picked
         else:
             self._answers[key] = [value] if checked else []
-        # 选了候选项 -> 取消「自定义选中」（两者互斥，见 _build_answer）；输入框一起收起。
-        self._custom_on[key] = False
-        self._close_custom_editor(key)
+        # 单选：选候选项 = 取消自定义（radio 只能有一个答案）；多选两者共存。
+        if not question.isMultiple:
+            self._custom_on[key] = False
+            self._close_custom_editor(key)
         self._refresh_rows()
 
     def _custom_row(self, key: str):
@@ -724,9 +738,12 @@ class PermissionCard(_ThemeAwareMixin, ElaScrollPageArea):
 
     def _enter_editing(self, key: str) -> None:
         self._editing = key
-        # 展开编辑器 = 选中自定义：单选下候选项随之取消，否则两根圆点同时亮着。
+        question = self._current_question()
+        # 展开编辑器 = 选中自定义：单选下候选项随之取消（radio 只能有一个答案）；
+        # 多选下自定义只是额外一项，已勾选的候选项必须保留。
         self._custom_on[key] = True
-        self._answers.pop(key, None)
+        if question is None or not question.isMultiple:
+            self._answers.pop(key, None)
         row = self._custom_row(key)
         if row is not None:
             # 编辑器里已有内容（未提交草稿）就不要用已提交值覆盖。

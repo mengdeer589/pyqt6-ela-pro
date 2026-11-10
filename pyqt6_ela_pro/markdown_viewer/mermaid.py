@@ -18,6 +18,7 @@ from PyQt6.QtWidgets import QApplication
 from .._internal import is_deleted
 from .. import mermaid_support
 from ..mermaid_support import ElaMermaidRenderer
+from ..tooltip_targets import DOCUMENT_TOOLTIP_PROPERTY
 from .syntax import _clamp_pos
 from .tokens import (
     _CODE_TOKEN_SUFFIX,
@@ -342,7 +343,9 @@ class _MarkdownMermaidMixin:
         image_format.setName(url)
         image_format.setWidth(width)
         image_format.setHeight(height)
-        image_format.setToolTip(f"{_MERMAID_TIP_PREFIX}{code}")
+        image_format.setProperty(
+            DOCUMENT_TOOLTIP_PROPERTY, f"{_MERMAID_TIP_PREFIX}{code}"
+        )
         image_format.setVerticalAlignment(QTextCharFormat.VerticalAlignment.AlignMiddle)
         if pending_anchor:
             image_format.setAnchorNames([pending_anchor])

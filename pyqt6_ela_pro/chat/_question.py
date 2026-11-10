@@ -28,6 +28,7 @@ from PyQt6ElaWidgetTools import (
 
 from .._internal import _ThemeAwareMixin, is_deleted, safe_connect, single_shot_on
 from .._styles import ColorText, paintRoundedCard
+from ..tooltips import ElaToolTipPositionType, set_tooltip
 from ._theme import (
     accent_color,
     base_color,
@@ -186,7 +187,7 @@ class QuestionSegment(_ThemeAwareMixin, QWidget):
         self._answered = False
         self.setFixedSize(SEGMENT_HIT, SEGMENT_HIT)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.setToolTip(f"第 {index + 1} 个问题")
+        set_tooltip(self, f"第 {index + 1} 个问题", ElaToolTipPositionType.Top)
 
     def setState(self, active: bool, answered: bool) -> None:  # noqa: N802
         """设置三态。"""

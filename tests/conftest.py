@@ -10,6 +10,8 @@ from _qthelpers import WidgetFactory
 from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import QApplication, QWidget
 
+from pyqt6_ela_pro.chat.renderers import clearToolRenderers
+
 
 @pytest.fixture
 def _clipboard_works(qapp) -> bool:
@@ -130,6 +132,9 @@ def qt_cleanup(qapp):
     factory = WidgetFactory(qapp)
     yield factory
     factory.destroy_all()
+    # 工具渲染器注册表是进程级的：示例页点过「安装内置渲染器」会留下 read 等
+    # 条目，污染后续分组用例。每条用例结束统一清空（宿主自己的注册在用例内有效）。
+    clearToolRenderers()
 
 
 @pytest.fixture

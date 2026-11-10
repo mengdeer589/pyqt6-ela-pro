@@ -10,9 +10,10 @@ from __future__ import annotations
 import pytest
 from PyQt6.QtGui import QFont, QFontDatabase, QRawFont
 
-from pyqt6_ela_pro.markdown_viewer import code as viewer_module
 from pyqt6_ela_pro._internal import missingGlyphFont
 from pyqt6_ela_pro.ela_markdown_viewer import ElaMarkdownViewer
+from pyqt6_ela_pro.markdown_viewer import appearance
+from pyqt6_ela_pro.markdown_viewer import code as viewer_module
 
 _CJK = "Microsoft YaHei"
 
@@ -64,6 +65,14 @@ class TestDefaultCodeFontFamily:
 
     def test_cjk_prefers_nsimsun(self, cjk_with_nsimsun):
         assert viewer_module._default_code_font_family() == "NSimSun"
+
+    def test_cjk_prefers_localized_nsimsun(self, monkeypatch):
+        monkeypatch.setattr(viewer_module, "system_cjk_font_family", lambda: "微软雅黑")
+        monkeypatch.setattr(viewer_module, "_DEFAULT_CODE_FONT_FAMILY", None)
+        monkeypatch.setattr(
+            viewer_module, "_font_family_available", lambda name: name == "新宋体"
+        )
+        assert viewer_module._default_code_font_family() == "新宋体"
 
     def test_cjk_latin_font_is_independent(self, cjk_with_latin):
         cjk_family, latin_family = cjk_with_latin
@@ -259,3 +268,13 @@ class TestCodeFormatFamilies:
         v.setCodeFontFamily("Courier New")
         assert v._code_format().fontFamilies() == ["Courier New"]
         assert v._code_text_format().fontFamilies() == ["Courier New"]
+
+
+class TestSerifLocalizedFamily:
+    def test_serif_token_accepts_localized_family(self, monkeypatch):
+        monkeypatch.setattr(appearance, "system_cjk_font_family", lambda: "微软雅黑")
+        monkeypatch.setattr(
+            appearance, "_font_family_available", lambda name: name == "宋体"
+        )
+        monkeypatch.setattr(appearance, "_BODY_FONT_CACHE", {})
+        assert appearance._resolve_body_font_family("serif", "微软雅黑") == "宋体"

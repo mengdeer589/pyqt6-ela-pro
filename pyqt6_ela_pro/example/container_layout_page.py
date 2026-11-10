@@ -393,13 +393,15 @@ class ContainerLayoutPage(ExamplePage):
         self._addInfoText("SiliconUI 风格抽屉，支持上下左右四个方向滑入", parent_layout)
         # 不要 QFont().defaultFamily()（首次 ~190ms）；用 QApplication.font().family()（0.01ms）。
         default_font_family = QApplication.font().family()
-        for name, pos, size in [
-            ("左侧抽屉", ElaDrawerPositionType.Left, 300),
-            ("右侧抽屉", ElaDrawerPositionType.Right, 380),
-            ("顶部抽屉", ElaDrawerPositionType.Top, 200),
-            ("底部抽屉", ElaDrawerPositionType.Bottom, 200),
+        for name, pos, size, masked in [
+            ("左侧抽屉", ElaDrawerPositionType.Left, 300, True),
+            ("右侧抽屉", ElaDrawerPositionType.Right, 380, True),
+            ("顶部抽屉", ElaDrawerPositionType.Top, 200, True),
+            ("底部抽屉", ElaDrawerPositionType.Bottom, 200, True),
+            ("右侧无遮罩", ElaDrawerPositionType.Right, 380, False),
         ]:
             drawer = ElaDrawer(position=pos, drawer_size=size, parent=self)
+            drawer.setMaskEnabled(masked)
             content = ElaThemeWidget()
             content_layout = QVBoxLayout(content)
             content_layout.setContentsMargins(16, 16, 16, 16)
@@ -408,7 +410,11 @@ class ContainerLayoutPage(ExamplePage):
             title.setTextPixelSize(18)
             title.setFont(QFont(default_font_family, 18, QFont.Weight.Bold))
             content_layout.addWidget(title)
-            desc = ElaText(f"这是一个{name}，可以放置设置项、表单等内容。", content)
+            desc = ElaText(
+                f"这是一个{name}，可以放置设置项、表单等内容。"
+                + (" 无遮罩模式下抽屉外仍可操作。" if not masked else ""),
+                content,
+            )
             desc.setTextPixelSize(14)
             content_layout.addWidget(desc)
             content_layout.addStretch()

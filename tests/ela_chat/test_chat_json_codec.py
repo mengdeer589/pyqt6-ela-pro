@@ -49,6 +49,17 @@ class TestDumps:
         else:
             assert "NaN" in text  # 标准库保持原样（非规范 JSON）
 
+    def test_indent_is_pretty_on_both_backends(self, monkeypatch):
+        sample = {"a": 1, "b": [2, 3]}
+        assert jsonDumps(sample) == '{"a":1,"b":[2,3]}'
+        text = jsonDumps(sample, indent=2)
+        assert text == json.dumps(sample, ensure_ascii=False, indent=2)
+        # 标准库回落分支同样支持缩进
+        monkeypatch.setattr(_json, "_orjson", None)
+        assert jsonDumps(sample, indent=2) == json.dumps(
+            sample, ensure_ascii=False, indent=2
+        )
+
     def test_backends_agree(self, monkeypatch):
         if _json._orjson is None:
             pytest.skip("orjson 未安装，无法对比两套后端")

@@ -10,6 +10,7 @@ from PyQt6.QtCore import QUrl
 from PyQt6.QtTest import QTest
 
 from pyqt6_ela_pro.ela_markdown_viewer import ElaMarkdownViewer
+from pyqt6_ela_pro.tooltip_targets import DOCUMENT_TOOLTIP_PROPERTY
 
 
 def _plain(viewer: ElaMarkdownViewer) -> str:
@@ -186,7 +187,7 @@ class TestLinkTooltip:
         v.setMarkdown("见 [站点](https://example.com) 说明")
 
         tooltips = {
-            fragment.charFormat().toolTip()
+            fragment.charFormat().property(DOCUMENT_TOOLTIP_PROPERTY)
             for fragment in _fragments(v)
             if fragment.charFormat().isAnchor()
         }
@@ -202,7 +203,7 @@ class TestLinkTooltip:
         for fragment in _fragments(v):
             fmt = fragment.charFormat()
             if fmt.isAnchor() and fmt.anchorHref().startswith("#"):
-                assert not fmt.toolTip()
+                assert not fmt.property(DOCUMENT_TOOLTIP_PROPERTY)
         v.deleteLater()
 
 

@@ -1,8 +1,8 @@
 """
 ElaDrawer SiliconUI 风格侧边抽屉组件。
 
-支持上下左右四个方向滑出的抽屉面板，带遮罩层和动画效果。
-参考 SiliconUI 的 SiLayerDrawer 设计。
+支持上下左右四个方向滑出的抽屉面板，带遮罩层和动画效果；``setMaskEnabled(False)``
+可切到无遮罩侧栏（不挡、不灰，抽屉外仍可操作）。参考 SiliconUI 的 SiLayerDrawer 设计。
 """
 
 from __future__ import annotations
@@ -12,7 +12,14 @@ from enum import IntEnum
 from typing import Optional
 
 from PyQt6.QtCore import Qt, QPropertyAnimation, pyqtSignal, QRect, QEvent
-from PyQt6.QtGui import QColor, QPainter, QPainterPath, QPaintEvent, QMouseEvent
+from PyQt6.QtGui import (
+    QColor,
+    QMouseEvent,
+    QPainter,
+    QPainterPath,
+    QPaintEvent,
+    QRegion,
+)
 from PyQt6.QtWidgets import QWidget, QVBoxLayout, QGraphicsDropShadowEffect
 
 from PyQt6ElaWidgetTools import eTheme, ElaThemeType
@@ -139,6 +146,8 @@ class ElaDrawer(ElaThemeWidget):
         self._is_opened = False
         self._is_closing = False
         self._close_on_dim_clicked = True
+        #: 是否显示遮罩层；False = 无遮罩侧栏（遮罩不挡、不灰，抽屉外仍可操作）
+        self._mask_enabled = True
         self._animation_duration = Duration.Normal
         self._corner_radius = 12
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
@@ -186,7 +195,9 @@ class ElaDrawer(ElaThemeWidget):
         self._onThemeChanged(self._theme_mode)
 
     def _onThemeChanged(self, mode: ElaThemeType.ThemeMode) -> None:
-        bg_color = eTheme.getThemeColor(mode, ElaThemeType.ThemeColor.DialogBase)
+        # 表面跟内容基面（ElaThemeWidget 的 BasicPress）一致：QScrollArea.setWidget()
+        # 会强制内容 autoFillBackground(True)，用 DialogBase 会在暗色下露出一块更亮的底。
+        bg_color = eTheme.getThemeColor(mode, ElaThemeType.ThemeColor.BasicPress)
         self._drawer_widget.setBgColor(bg_color)
         dim_color = QColor(0, 0, 0, 102)
         self._dim_widget.setBgColor(dim_color)
@@ -266,6 +277,46 @@ class ElaDrawer(ElaThemeWidget):
         self._close_on_dim_clicked = on
         return self
 
+    def setMaskEnabled(self, on: bool = True) -> "ElaDrawer":
+        """设置是否使用遮罩层（默认 ``True``）。
+
+        ``False`` = 无遮罩侧栏：不显示 dim、不拦截抽屉外的鼠标事件；抽屉仍然
+        从侧边滑入，只是不再把整页压暗。运行中切换立即生效。
+        """
+        self._mask_enabled = bool(on)
+        if self._mask_enabled:
+            self.clearMask()
+            if self._is_opened and not self._is_closing:
+                self._dim_widget.setWindowOpacity(1.0)
+                self._dim_widget.show()
+        else:
+            self._dim_anim.stop()
+            self._dim_widget.hide()
+            if self._is_opened and not self._is_closing:
+                self._apply_mask()
+        return self
+
+    def maskEnabled(self) -> bool:
+        """是否使用遮罩层。"""
+        return self._mask_enabled
+
+    def _apply_mask(self) -> None:
+        """无遮罩模式下只保留抽屉一侧的命中区域，外部点击穿透。"""
+        if self._mask_enabled:
+            return
+        margin = 28  # 阴影余量（blur 16 + offset 4）
+        width = min(self.width(), self._drawer_size + margin)
+        height = min(self.height(), self._drawer_size + margin)
+        if self._position == ElaDrawerPositionType.Left:
+            rect = QRect(0, 0, width, self.height())
+        elif self._position == ElaDrawerPositionType.Right:
+            rect = QRect(self.width() - width, 0, width, self.height())
+        elif self._position == ElaDrawerPositionType.Top:
+            rect = QRect(0, 0, self.width(), height)
+        else:
+            rect = QRect(0, self.height() - height, self.width(), height)
+        self.setMask(QRegion(rect))
+
     def setAnimationDuration(self, duration: int) -> "ElaDrawer":
         self._animation_duration = duration
         self._show_anim.setDuration(duration)
@@ -310,17 +361,23 @@ class ElaDrawer(ElaThemeWidget):
             self._drawer_widget.setGeometry(start_rect)
             self._drawer_widget.show()
             self._drawer_widget.raise_()
-            self._dim_widget.setWindowOpacity(0)
-            self._dim_widget.show()
+            if self._mask_enabled:
+                self._dim_widget.setWindowOpacity(0)
+                self._dim_widget.show()
+            else:
+                self._dim_widget.hide()
             self.show()
+            if not self._mask_enabled:
+                self._apply_mask()
 
             self._show_anim.setStartValue(start_rect)
             self._show_anim.setEndValue(end_rect)
             start_transition(self._show_anim, self._animation_duration)
 
-            self._dim_anim.setStartValue(0)
-            self._dim_anim.setEndValue(1)
-            start_transition(self._dim_anim, self._animation_duration)
+            if self._mask_enabled:
+                self._dim_anim.setStartValue(0)
+                self._dim_anim.setEndValue(1)
+                start_transition(self._dim_anim, self._animation_duration)
         except Exception as e:
             # **异常必须回滚到「关闭态」**：只 print 后 return 会让面板 / 遮罩
             # 已 show() 但 ``_is_opened`` 仍为 False，closeDrawer() 首行直接返回，
@@ -329,6 +386,7 @@ class ElaDrawer(ElaThemeWidget):
             self._dim_anim.stop()
             self._drawer_widget.hide()
             self._dim_widget.hide()
+            self.clearMask()
             self.hide()
             logger.warning("showDrawer 失败，已回滚到关闭态: %s", e)
             return
@@ -359,9 +417,13 @@ class ElaDrawer(ElaThemeWidget):
             self._hide_anim, self._animation_duration, on_complete=self._onHideFinished
         )
 
-        self._dim_anim.setStartValue(1)
-        self._dim_anim.setEndValue(0)
-        start_transition(self._dim_anim, self._animation_duration)
+        if self._mask_enabled:
+            self._dim_anim.setStartValue(1)
+            self._dim_anim.setEndValue(0)
+            start_transition(self._dim_anim, self._animation_duration)
+        else:
+            self._dim_anim.stop()
+            self._dim_widget.hide()
 
     def _onDimClicked(self) -> None:
         if self._close_on_dim_clicked:
@@ -370,6 +432,7 @@ class ElaDrawer(ElaThemeWidget):
     def _onHideFinished(self) -> None:
         self._dim_widget.hide()
         self._drawer_widget.hide()
+        self.clearMask()
         self.hide()
         self._is_closing = False
         self._is_opened = False
@@ -392,6 +455,7 @@ class ElaDrawer(ElaThemeWidget):
                 parent = watched
                 end_rect = self._getEndRect(parent)
                 self._drawer_widget.setGeometry(end_rect)
+                self._apply_mask()
         return super().eventFilter(watched, event)
 
     def resizeEvent(self, event) -> None:
@@ -402,3 +466,4 @@ class ElaDrawer(ElaThemeWidget):
             if parent:
                 end_rect = self._getEndRect(parent)
                 self._drawer_widget.setGeometry(end_rect)
+            self._apply_mask()

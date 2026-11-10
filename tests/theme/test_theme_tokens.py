@@ -169,7 +169,10 @@ class TestStatusColor:
         assert T.statusColor(_L, T.ElaStatusRoleType.Error).name() == native
 
     def test_neutral_falls_back_to_muted_text(self):
-        assert T.statusColor(_L, T.ElaStatusRoleType.Neutral).name() == T.textMuted(_L).name()
+        assert (
+            T.statusColor(_L, T.ElaStatusRoleType.Neutral).name()
+            == T.textMuted(_L).name()
+        )
 
     def test_warning_and_success_keep_their_own_hues(self):
         """状态色的语义来自**色相**，不能跟着强调色走。
@@ -203,6 +206,36 @@ class TestStatusColor:
         assert (
             T.statusColor(_L, int(T.ElaStatusRoleType.Error)).name()
             == T.statusColor(_L, T.ElaStatusRoleType.Error).name()
+        )
+
+
+class TestSeverityColor:
+    """``ElaSeverity`` 的取色：Info 走强调色，其余走状态色。"""
+
+    def test_info_uses_accent(self):
+        assert T.severityColor(_L, T.ElaSeverity.Info).name() == T.accent(_L).name()
+
+    @pytest.mark.parametrize(
+        "severity,role",
+        [
+            (T.ElaSeverity.Success, T.ElaStatusRoleType.Success),
+            (T.ElaSeverity.Warning, T.ElaStatusRoleType.Warning),
+            (T.ElaSeverity.Error, T.ElaStatusRoleType.Error),
+        ],
+    )
+    def test_status_levels_use_status_color(self, severity, role):
+        assert T.severityColor(_L, severity).name() == T.statusColor(_L, role).name()
+
+    def test_accepts_bare_int(self):
+        assert (
+            T.severityColor(_L, int(T.ElaSeverity.Warning)).name()
+            == T.severityColor(_L, T.ElaSeverity.Warning).name()
+        )
+
+    def test_illegal_severity_falls_back_to_info(self):
+        assert (
+            T.severityColor(_L, 99).name()
+            == T.severityColor(_L, T.ElaSeverity.Info).name()
         )
 
 
@@ -308,9 +341,10 @@ class TestShadowHelpers:
 
     def test_toast_shadow_border_uses_shared_constant(self, qapp):
         from pyqt6_ela_pro._styles import SHADOW_MARGIN
-        from pyqt6_ela_pro.ela_toast import ElaToast, ElaToastType
+        from pyqt6_ela_pro import ElaSeverity
+        from pyqt6_ela_pro.ela_toast import ElaToast
 
-        toast = ElaToast(ElaToastType.Info, "x", 1000)
+        toast = ElaToast(ElaSeverity.Info, "x", 1000)
         try:
             assert toast._shadow_border == SHADOW_MARGIN
         finally:

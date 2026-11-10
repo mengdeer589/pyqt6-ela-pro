@@ -18,6 +18,7 @@ from PyQt6ElaWidgetTools import (
 from .._internal import _ThemeAwareMixin, safe_connect
 from .._styles import ColorText
 from .._theme import text as text_color, textMuted
+from ..tooltips import ElaToolTipPositionType, set_tooltip
 
 #: 搜索条高度
 SEARCH_BAR_HEIGHT = 30
@@ -82,9 +83,9 @@ class ElaChatSearchBar(_ThemeAwareMixin, QWidget):
         for button in (self._prev, self._next, self._close):
             button.setBorderRadius(4)
             button.setFocusPolicy(Qt.FocusPolicy.NoFocus)
-        self._prev.setToolTip("上一个")
-        self._next.setToolTip("下一个")
-        self._close.setToolTip("关闭")
+        set_tooltip(self._prev, "上一个", ElaToolTipPositionType.Top)
+        set_tooltip(self._next, "下一个", ElaToolTipPositionType.Top)
+        set_tooltip(self._close, "关闭", ElaToolTipPositionType.Top)
         safe_connect(
             self._prev,
             "clicked",

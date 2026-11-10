@@ -11,6 +11,7 @@ from pyqt6_ela_pro.table_view import (
     TABLE_THREAD_QUIT_TIMEOUT,
     ElaDataTable,
     ElaRowColorDelegate,
+    _CELL_TOOLTIP_ROLE,
     _LoadThread,
 )
 
@@ -114,6 +115,16 @@ class TestElaDataTable:
 
         table = ElaDataTable()
         table.deleteLater()  # should not raise TypeError when disconnecting
+
+    def test_item_tooltip_stored_in_custom_role(self):
+        """单元格 tooltip 不写原生 ToolTipRole，由 viewport 过滤器显示库内提示。"""
+        table = ElaDataTable()
+        table.setTableData([["A"], ["x"]])
+        table.setItemToolTip(0, 0, "说明")
+        item = table.item(0, 0)
+        assert item.toolTip() == ""
+        assert item.data(_CELL_TOOLTIP_ROLE) == "说明"
+        table.deleteLater()
 
     def test_set_column_widths_by_header_name(self):
         """Test string header keys resolve to columns."""

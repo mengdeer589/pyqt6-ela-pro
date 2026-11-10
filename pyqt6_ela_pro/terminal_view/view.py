@@ -53,6 +53,7 @@ from .._internal import (
     system_cjk_font_family,
 )
 from .._styles import editBorderlessStyle
+from .._theme import surfaceRaised
 from ..ela_button import ElaButton
 from ..tooltips import ElaToolTipPositionType, set_tooltip
 from ..widget_base import ElaThemeWidget
@@ -169,11 +170,12 @@ class _TerminalCard(QWidget):
         path = QPainterPath()
         path.addRoundedRect(rect, _CARD_RADIUS, _CARD_RADIUS)
         painter.fillPath(path, self._bg)
-        pen = QPen(self._border)
-        pen.setWidthF(1.0)
-        painter.setPen(pen)
-        painter.setBrush(Qt.BrushStyle.NoBrush)
-        painter.drawPath(path)
+        if self._border.alpha() > 0:
+            pen = QPen(self._border)
+            pen.setWidthF(1.0)
+            painter.setPen(pen)
+            painter.setBrush(Qt.BrushStyle.NoBrush)
+            painter.drawPath(path)
         painter.end()
 
 
@@ -287,6 +289,8 @@ class ElaTerminalView(ElaThemeWidget):
         self._line_numbers_visible = True
         self._toolbar_visible = True
         self._word_wrap = False
+        #: 嵌入宿主卡片：去掉自带边框，底色跟随 raised surface
+        self._embedded = False
 
         self._buildUi()
         self._buildTimers()
@@ -349,7 +353,6 @@ class ElaTerminalView(ElaThemeWidget):
                 parent=bar,
             )
             btn.setFocusPolicy(Qt.FocusPolicy.NoFocus)
-            btn.setToolTip(tip)
             set_tooltip(btn, tip, ElaToolTipPositionType.Top)
             btn.clicked.connect(slot)
             lay.addWidget(btn)
@@ -497,6 +500,30 @@ class ElaTerminalView(ElaThemeWidget):
     def lineCount(self) -> int:  # noqa: N802 (Qt 命名)
         """数据模型中的保留行数（不受过滤影响）。"""
         return len(self._lines)
+
+    def lineSpacing(self) -> int:  # noqa: N802 (Qt 命名)
+        """当前等宽字体的行距（像素；供宿主估算 body 高度）。"""
+        return QFontMetrics(self._edit.font()).lineSpacing()
+
+    def contentHeight(self) -> int:  # noqa: N802 (Qt 命名)
+        """当前渲染内容的高度（像素；含文档上下边距，不含滚动条）。
+
+        按首块行高估算，适合默认的 NoWrap 终端；开启自动换行且各块行数不同时
+        可能低估。
+        """
+        document = self._edit.document()
+        block = document.begin()
+        if not block.isValid():
+            return 0
+        layout = block.layout()
+        line_height = (
+            int(layout.boundingRect().height())
+            if layout is not None and layout.lineCount()
+            else self.lineSpacing()
+        )
+        return line_height * self.visibleLineCount() + int(
+            document.documentMargin() * 2
+        )
 
     def visibleLineCount(self) -> int:  # noqa: N802 (Qt 命名)
         """当前实际渲染的行数（过滤后可能少于 :meth:`lineCount`）。"""
@@ -742,6 +769,21 @@ class ElaTerminalView(ElaThemeWidget):
         """行号槽是否处于显示态（不受父级可见性影响）。"""
         return self._line_numbers_visible
 
+    def setEmbedded(self, on: bool = True) -> None:
+        """嵌入宿主卡片：去掉自带边框，底色改用 raised surface。
+
+        用于工具卡内容区等「外层已有卡面」的场景；ANSI / 复制 / 行数上限不变。
+        """
+        on = bool(on)
+        if on == self._embedded:
+            return
+        self._embedded = on
+        self._refresh_palette()
+
+    def embedded(self) -> bool:
+        """是否处于嵌入宿主卡片的形态。"""
+        return self._embedded
+
     def setFontSize(self, size: int) -> None:  # noqa: N802 (Qt 命名)
         """设置等宽字号（像素），自动夹到 8-32。
         ``inf`` / ``-inf`` 照常夹到上/下限（这才兑现本文档承诺的「自动夹到
@@ -897,10 +939,17 @@ class ElaTerminalView(ElaThemeWidget):
         self._format_cache.clear()
         self._refresh_highlight()
         if _alive(self._card):
-            self._card.applyTheme(
-                self._palette["background"],
-                _blend(self._palette["background"], self._palette["foreground"], 0.18),
-            )
+            if self._embedded:
+                self._card.applyTheme(
+                    surfaceRaised(self._theme_mode), QColor(0, 0, 0, 0)
+                )
+            else:
+                self._card.applyTheme(
+                    self._palette["background"],
+                    _blend(
+                        self._palette["background"], self._palette["foreground"], 0.18
+                    ),
+                )
         if _alive(self._gutter):
             self._gutter.update()
 
@@ -1027,7 +1076,9 @@ class ElaTerminalView(ElaThemeWidget):
                 guard_start = min(guard_start, tail_start)
             guard_start = max(0, guard_start - removed)
             self._apply_missing_glyph_fonts(guard_start)
-            if self._following:
+            # 必须同时看自动跟随开关：关掉跟随后 _following 仍是 True，
+            # 只判 _following 会让「跟随」按钮关了也照样跳到底部。
+            if self.isFollowing():
                 self._scroll_to_bottom()
         finally:
             self._auto_scrolling = False

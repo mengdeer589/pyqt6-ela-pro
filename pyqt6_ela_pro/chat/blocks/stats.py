@@ -103,7 +103,6 @@ class StatsBadge(ElaThemeWidget):
         if text == self._tooltip_text:
             return
         self._tooltip_text = text
-        self._label.setToolTip(text)
         # 隐藏徽标不建 ElaToolTip：footer 模式下大部分步骤徽标永不显示，显示时 showEvent 补建。
         if self.isVisible():
             self._bind_tooltip()

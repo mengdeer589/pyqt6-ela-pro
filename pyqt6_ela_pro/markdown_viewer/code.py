@@ -22,7 +22,7 @@ from PyQt6.QtGui import (
 )
 
 from .._colors import parse_color
-from .._internal import system_cjk_font_family
+from .._internal import fontFamilyAvailable, system_cjk_font_family
 from .tokens import (
     _CODE_CELL_LEFT_PADDING,
     _CODE_CELL_PADDING_BOTTOM,
@@ -67,15 +67,12 @@ _DEFAULT_CODE_FONT_FAMILY: Optional[str] = None
 
 _DEFAULT_LATIN_CODE_FONT_FAMILY: Optional[str] = None
 
-_CJK_MONOSPACE_FONTS = ("NSimSun", "SimSun")
+_CJK_MONOSPACE_FONTS = ("NSimSun", "SimSun", "新宋体", "宋体")
 
 
 def _font_family_available(family: str) -> bool:
-    """字体族是否可用（``QFont.exactMatch`` 不枚举全量字体库）。"""
-    try:
-        return QFont(family).exactMatch()
-    except Exception:  # noqa: BLE001 —— 字体探测失败按不可用处理
-        return False
+    """字体族是否可用（兼容 GDI 中文系统的本地化族名）。"""
+    return fontFamilyAvailable(family)
 
 
 def _default_code_font_family() -> str:

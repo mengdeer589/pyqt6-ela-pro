@@ -22,6 +22,7 @@ from pyqt6_ela_pro.chat import (
 )
 from pyqt6_ela_pro.chat._theme import accent_color, card_border_color
 from pyqt6_ela_pro.chat.input_completion import _MENTION_TAIL
+from pyqt6_ela_pro.tooltips import _tooltip_dict
 
 
 class TestSubmit:
@@ -86,7 +87,7 @@ class TestGenerating:
         widget.setGenerating(True)
         assert widget.isGenerating()
         # 草稿为空 → 停止（图标按钮，用 tooltip 判断状态）
-        assert widget._button.toolTip() == "停止"
+        assert _tooltip_dict[widget._button]._text == "停止"
         assert widget._button.color() == "danger"
 
         widget._button.click()
@@ -97,13 +98,13 @@ class TestGenerating:
         edit.setFocus()
         QTest.keyClicks(edit, "next")
         qapp.processEvents()
-        assert widget._button.toolTip() == "发送"
+        assert _tooltip_dict[widget._button]._text == "发送"
         assert widget._button.color() == "primary"
         QTest.keyClick(edit, Qt.Key.Key_Return)
         assert submitted == ["next"]
 
         widget.setGenerating(False)
-        assert widget._button.toolTip() == "发送"
+        assert _tooltip_dict[widget._button]._text == "发送"
 
     def test_submit_queue_toggle_while_generating(self, qapp, make):
         widget = make(ElaChatInput)
@@ -162,10 +163,10 @@ class TestTexts:
         widget = make(ElaChatInput)
         widget.setSendText("发送消息")
         assert widget.sendText() == "发送消息"
-        assert widget._button.toolTip() == "发送消息"
+        assert _tooltip_dict[widget._button]._text == "发送消息"
         widget.setStopText("中止")
         widget.setGenerating(True)
-        assert widget._button.toolTip() == "中止"
+        assert _tooltip_dict[widget._button]._text == "中止"
 
     def test_placeholder_roundtrip(self, qapp, make):
         widget = make(ElaChatInput)
@@ -271,7 +272,7 @@ class TestToolBarExtension:
     def test_add_file_button_and_picker(self, qapp, tmp_path, make):
         widget = make(ElaChatInput)
         assert widget.addFileButton() is widget.toolBar().toolButton("add_file")
-        assert widget.addFileButton().toolTip() == "添加文件 (Ctrl+U)"
+        assert _tooltip_dict[widget.addFileButton()]._text == "添加文件 (Ctrl+U)"
         file_path = tmp_path / "说明.txt"
         file_path.write_text("hello", encoding="utf-8")
         requests = []

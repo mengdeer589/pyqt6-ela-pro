@@ -13,7 +13,9 @@ from .._diff import diffLines as diffChatLines
 from .._diff import filesFromMetadata as chatFilesFromMetadata
 from .._diff import parseUnifiedDiff as parseChatDiff
 from ._json import backend as jsonBackend, dumps as jsonDumps, loads as jsonLoads
+from ._changes import ElaChatTurnChanges
 from ._pricing import ModelPricing, cost_from_parts, formatCost, stats_cost
+from ._trace import ElaChatTraceResult, ElaChatTraceRow, buildTraceRows
 from .binder import ElaChatStreamBinder, ElaChatTurnSummary
 from .journal import JOURNAL_VERSION, ElaChatTurnJournal
 from .message import (
@@ -25,6 +27,9 @@ from .message import (
     ElaChatPermission,
     ElaChatOption,
     ElaChatPermissionStatusType,
+    ElaChatPlan,
+    ElaChatPlanItem,
+    ElaChatPlanItemStatusType,
     ElaChatQuestion,
     ElaChatReasoningStyleType,
     ElaChatRoleType,
@@ -33,6 +38,8 @@ from .message import (
     ElaChatStats,
     ElaChatStatusType,
     ElaChatToolCall,
+    ElaChatToolKindType,
+    ElaChatToolLocation,
     ElaChatToolStatusType,
 )
 from .mock import ElaChatMockBackend, ElaChatMockChunk, ElaChatMockUsage
@@ -76,9 +83,13 @@ _LAZY_MODULES = {
         "MessageActions",
         "MessageHeader",
         "MessageMeta",
+        "PlanListView",
+        "PlanPanel",
         "ReasoningBlock",
         "StatsBadge",
+        "SubagentCard",
         "ThinkingRow",
+        "TurnChangesRow",
         "ToolCallCard",
         "ToolGroupPanel",
         "toolDefaultOpen",
@@ -89,6 +100,7 @@ _LAZY_MODULES = {
     "selector": ("ElaChatSelector", "ElaChatSelectorItem"),
     "suggestions": ("ElaChatSuggestion", "SuggestionPopup"),
     "status": ("ElaChatStatusBar",),
+    "trace": ("ElaChatTracePanel",),
     "toolbar": ("ElaChatToolBar", "ElaChatToolButton"),
     "renderers_builtin": (
         "cleanAnsi",
@@ -112,6 +124,9 @@ __all__ = [
     "ElaChatPartKindType",
     "ElaChatPermission",
     "ElaChatPermissionStatusType",
+    "ElaChatPlan",
+    "ElaChatPlanItem",
+    "ElaChatPlanItemStatusType",
     "ElaChatMention",
     "ElaChatNoticeType",
     "ElaChatDetailDepthType",
@@ -122,6 +137,8 @@ __all__ = [
     "ElaChatFileChange",
     "ElaChatFileChangeLine",
     "ElaChatFileChanges",
+    "PlanListView",
+    "PlanPanel",
     "ElaChatPromptHistory",
     "ElaChatSearchBar",
     "ElaChatSearchHit",
@@ -137,8 +154,15 @@ __all__ = [
     "ElaChatQuestion",
     "ElaChatAttachment",
     "ElaChatToolCall",
+    "ElaChatToolKindType",
+    "ElaChatToolLocation",
     "ElaChatToolStatusType",
     "ElaChatStats",
+    "ElaChatTurnChanges",
+    "ElaChatTracePanel",
+    "ElaChatTraceResult",
+    "ElaChatTraceRow",
+    "buildTraceRows",
     "SCHEMA_VERSION",
     "ElaChatTurnJournal",
     "JOURNAL_VERSION",
@@ -147,6 +171,7 @@ __all__ = [
     "SESSION_SCHEMA_VERSION",
     "ElaChatSuggestion",
     "SuggestionPopup",
+    "SubagentCard",
     "ElaChatStreamBinder",
     "ElaChatTurnSummary",
     "ElaChatAsyncWorker",

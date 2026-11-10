@@ -21,6 +21,7 @@ from PyQt6.QtWidgets import QAbstractScrollArea, QApplication, QToolButton
 
 from .._internal import is_deleted
 from .._styles import FlatIconButton
+from ..tooltips import ElaToolTipPositionType, set_tooltip
 from .syntax import _clamp_pos
 from .themes import _QUOTE_LEFT_MARGIN
 from .tokens import (
@@ -133,7 +134,11 @@ class _MarkdownPaintMixin:
             self._code_buttons_tables[index].format().property(_CODE_LANG_PROPERTY)
             or ""
         )
-        button.setToolTip(f"复制代码 · {lang}" if lang else "复制代码")
+        set_tooltip(
+            button,
+            f"复制代码 · {lang}" if lang else "复制代码",
+            ElaToolTipPositionType.Top,
+        )
         button.clicked.connect(lambda _checked=False, i=index: self._copy_code_block(i))
         button.installEventFilter(self)
         button.hide()

@@ -4,7 +4,7 @@ import os
 import sys
 import traceback
 
-from pyqt6_ela_pro import ElaSplashScreen
+from pyqt6_ela_pro import ElaSplashScreen, install_item_view_tooltips
 
 os.environ["QT_LOGGING_RULES"] = "*.debug=false;qt.qpa.fonts.warning=false"
 
@@ -60,7 +60,7 @@ from pyqt6_ela_pro.example import (
     ChartLibPage,
     ChartsPage,
     ChatGuidePage,
-    ChatWorkbenchPage,
+    ChatPlaygroundPage,
     ComboBoxPage,
     ContainerLayoutPage,
     DataTablePage,
@@ -180,8 +180,8 @@ class ExampleWindow(ElaWindow):
         _, chat = self.addExpanderNode("AI 对话", icon.Comments)
         self._addPage(
             "AI 对话",
-            "AI 组件工作台",
-            ChatWorkbenchPage(self),
+            "AI 组件",
+            ChatPlaygroundPage(self),
             chat,
             icon.Comments,
         )
@@ -280,9 +280,10 @@ class ExampleWindow(ElaWindow):
         for group, title, _page in self._page_entries:
             item = QStandardItem(f"{group} · {title}")
             item.setEditable(False)
-            item.setToolTip(f"{group} / {title}")
+            item.setData(f"{group} / {title}", Qt.ItemDataRole.ToolTipRole)
             nav_model.appendRow(item)
         nav_list.setModel(nav_model)
+        install_item_view_tooltips(nav_list)
         nav_list.clicked.connect(self._on_page_nav_clicked)
         nav_dock.setWidget(nav_list)
         nav_dock.setMinimumWidth(190)

@@ -54,7 +54,6 @@ class ElaChatToolButton(ElaIconButton):
         self._checkable = bool(checkable)
         self._checked = False
         if tooltip:
-            self.setToolTip(tooltip)
             set_tooltip(self, tooltip, ElaToolTipPositionType.Top)
         safe_connect(self, "clicked", lambda *_: self._on_clicked(), "toolbar.button")
 
@@ -165,7 +164,6 @@ class ElaChatToolBar(ElaThemeWidget):
                 parent=self,
             )
             if tooltip:
-                button.setToolTip(tooltip)
                 set_tooltip(button, tooltip, ElaToolTipPositionType.Top)
             if checkable:
                 button.setCheckable(True)

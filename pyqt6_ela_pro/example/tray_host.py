@@ -11,6 +11,7 @@ from PyQt6ElaWidgetTools import ElaMenu
 
 from ..ela_tray_icon import ElaTrayIcon
 from ..menu_item import ElaMenuItem
+from ..tooltip_targets import set_action_tooltip
 
 #: 分隔符哨兵（``setItems`` 里识别，作用于菜单项之间的空位）
 SEPARATOR = "-"
@@ -111,7 +112,7 @@ class ElaTrayHost(QObject):
                 action = menu.addElaIconAction(item.icon, item.label)
             action.setData(item.id)
             if item.tooltip and item.tooltip != item.label:
-                action.setToolTip(item.tooltip)
+                set_action_tooltip(action, item.tooltip)
             action.triggered.connect(
                 lambda _checked=False, actionId=item.id: self._on_action(actionId)
             )

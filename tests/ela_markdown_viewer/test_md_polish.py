@@ -17,6 +17,7 @@ from pyqt6_ela_pro.ela_markdown_viewer import (
     _STREAM_HIGHLIGHT_MAX_CHARS,
     ElaMarkdownViewer,
 )
+from pyqt6_ela_pro.tooltip_targets import DOCUMENT_TOOLTIP_PROPERTY
 
 
 def _fragments(viewer: ElaMarkdownViewer) -> list:
@@ -180,7 +181,10 @@ class TestFormulaTooltipAndCopy:
         v.setMarkdown(self.SOURCE)
 
         fragment = self._image_fragment(v)
-        assert fragment.charFormat().toImageFormat().toolTip() == "LaTeX: E=mc^2"
+        assert (
+            fragment.charFormat().toImageFormat().property(DOCUMENT_TOOLTIP_PROPERTY)
+            == "LaTeX: E=mc^2"
+        )
         v.deleteLater()
 
     def test_copy_formula(self, qapp, requires_clipboard):

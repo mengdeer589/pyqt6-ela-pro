@@ -49,7 +49,9 @@ Running，再 `setCurrentTime(duration())` 跳到终点，终值仍经过真实 
 2. 补齐上游缺的语义，例如 Success / Warning 状态色与 charts 调色板。
 
 常用入口：`currentMode()`、`surface()`、`text()`、`textMuted()`、`border()`、
-`statusColor(mode, role)`、`chartPalette()`、`setAccentColor()` / `resetAccentColor()`。
+`statusColor(mode, role)`、`severityColor(mode, severity)`、`chartPalette()`、
+`setAccentColor()` / `resetAccentColor()`。`ElaSeverity`（Info / Success / Warning /
+Error）是 toast 与通知弹窗共用的消息等级，`Info` 走强调色、其余走状态色。
 
 ## 配色（`_colors.py`）
 
@@ -91,9 +93,21 @@ C++ 对象（0xC0000005）。
 
 提供 `ElaToolTip`（8 种显示位置）与 `ElaStateToolTip`（加载 / 完成状态卡片）。
 `set_tooltip(widget, text, position)` 会复用已有提示框、只更新配置；绑定后吞掉
-`QEvent.ToolTip`，避免原生 `QToolTip` 与自定义提示同时弹出。
+`QEvent.ToolTip`，避免原生 `QToolTip` 与自定义提示同时弹出。`ElaStateToolTip`
+的关闭按钮与超长省略标题也走同一套库内提示。
 
 长文本用 `maxWidth` + `wordWrap` 控制折行；`contentWidget` 给定时用它替代文本。
+非 QWidget 目标用 `tooltip_targets` 的适配器（内部持有单个 `ElaToolTip`，
+按 `ToolTip` 事件用 `showAtPoint` 显示、移动 / 离开 / 点击时收起）：
+
+- `install_item_view_tooltips(view, role=...)`：`QAbstractItemView` 的 item；
+- `install_menu_tooltips(menu)` + `set_action_tooltip(action, text)`：菜单项；
+- `install_document_tooltips(text_edit)`：`QTextEdit` / `QTextBrowser` 的链接、
+  公式、Mermaid 图片；格式文本用 `DOCUMENT_TOOLTIP_PROPERTY` 存储。
+
+QWidget 目标一律走 `set_tooltip` / `remove_tooltip`；系统托盘由操作系统绘制，
+只能保留原生 `QSystemTrayIcon.setToolTip`（守卫
+`tests/tooltips/test_native_tooltip_policy.py`）。
 
 ## 表格（`table_view.py`）
 

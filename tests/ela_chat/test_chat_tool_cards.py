@@ -554,8 +554,8 @@ class TestBubbleMetaAndHover:
         bubble = make(ElaChatBubble, ElaChatRoleType.User, "hi")
         for key in ("copy", "undo"):
             button = bubble.actions().toolButton(key)
-            assert button.toolTip()
             assert button in _tooltip_dict
+            assert _tooltip_dict[button]._text
 
     def test_hidden_actions_mouse_transparent(self, qapp, make):
         bubble = make(ElaChatBubble, ElaChatRoleType.User, "hi")

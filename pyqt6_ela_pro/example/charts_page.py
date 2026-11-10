@@ -24,6 +24,7 @@ from pyqt6_ela_pro import (
     ElaChip,
     ElaThemeWidget,
 )
+from pyqt6_ela_pro.tooltips import ElaToolTipPositionType, set_tooltip
 from pyqt6_ela_pro.charts import (
     chartThemes,
     colormapColors,
@@ -3843,9 +3844,17 @@ class ChartsPage(ExamplePage):
         except Exception:
             saved = False
         if not saved:
-            self._interactChart.setToolTip("getDataURL 保存失败（目标目录不可写）")
+            set_tooltip(
+                self._interactChart,
+                "getDataURL 保存失败（目标目录不可写）",
+                ElaToolTipPositionType.Top,
+            )
             return
-        self._interactChart.setToolTip(f"getDataURL 已保存：{target}")
+        set_tooltip(
+            self._interactChart,
+            f"getDataURL 已保存：{target}",
+            ElaToolTipPositionType.Top,
+        )
 
     def _demoPlotlyInteractions(self, parent_layout):
         parent_layout.addLayout(

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import time
 from dataclasses import replace
 from typing import Optional
 from uuid import uuid4
@@ -11,7 +12,9 @@ from .._internal import safe_connect
 from .blocks import (
     CONTEXT_TOOLS,
     SHELL_TOOLS,
+    SUBAGENT_TOOLS,
     ContextToolGroupCard,
+    SubagentCard,
     ToolCallCard,
     ToolGroupPanel,
     toolDefaultOpen,
@@ -25,7 +28,11 @@ from .message import (
     ElaChatToolCall,
     ElaChatToolStatusType,
 )
-from .renderers import toolRendererGroupable, toolRendererSubtitle
+from .renderers import (
+    toolRenderer,
+    toolRendererGroupable,
+    toolRendererSubtitle,
+)
 
 
 class _BubbleToolsMixin:
@@ -95,10 +102,15 @@ class _BubbleToolsMixin:
         toolCallId: Optional[str] = None,
         *,
         tool_call: Optional[ElaChatToolCall] = None,
+        kind: str = "",
+        title: str = "",
+        locations=None,
+        parentId: str = "",
     ) -> str:
         """添加一个工具调用，返回调用 id（上下文工具自动归组）。
 
         ``tool_call`` 由恢复路径传入已完成快照，卡片构造时即带结果与最终状态。
+        ``parentId`` 非空时作为子代理的子调用挂在父卡里。
         """
         if self._role != ElaChatRoleType.Assistant:
             return ""
@@ -129,8 +141,60 @@ class _BubbleToolsMixin:
             # 旧数据缺 tool_call.id：用刚分配的 call id 补齐，否则回填结果时找不到
             # 同一条调用，分组卡会把整个 tool_call 换成 None（数据丢失）。
             call = replace(call, id=callId)
+        if kind:
+            call = call.withKind(kind)
+        if title:
+            call = call.withTitle(title)
+        if locations:
+            call = call.withLocations(locations)
+        if parentId:
+            call = call.withParent(parentId)
+        if call.started_at <= 0 and call.status in (
+            ElaChatToolStatusType.Pending,
+            ElaChatToolStatusType.Running,
+        ):
+            # 只给「新建 / 仍在跑」的调用补开始时间；恢复进来的已落定快照保持原值，
+            # 否则同一份 bundle 导出再导入会对不上。
+            call = call.withTiming(time.time(), call.duration_ms)
+        self._tool_started[callId] = call.started_at
         name = call.name
         arguments = call.arguments
+        if call.parent_id:
+            parent = self._tool_cards.get(call.parent_id)
+            if isinstance(parent, SubagentCard):
+                failed = call.status == ElaChatToolStatusType.Error
+                child = parent.addChild(
+                    call,
+                    defaultOpen=self._tool_default_open(
+                        call.name, call.arguments, not failed
+                    ),
+                )
+                safe_connect(
+                    child,
+                    "toggled",
+                    self._on_tool_card_toggled,
+                    "bubble.subagent_child",
+                    receiver=child,
+                )
+                self._tool_cards[callId] = child
+                self._parts.append(
+                    ElaChatPart(
+                        id=callId,
+                        kind=ElaChatPartKindType.Tool,
+                        status=(
+                            ElaChatStatusType.Done
+                            if call.status in ElaChatToolStatusType.Settled
+                            else ElaChatStatusType.Streaming
+                        ),
+                        tool_call=call,
+                        step=self._step_index,
+                    )
+                )
+                self._part_widgets[callId] = child
+                self._move_step_stats_to_end(self._step_index)
+                return callId
+            # 父卡不存在（坏数据 / 乱序）：回落顶层，避免子调用丢失。
+            call = call.withParent("")
         panel = self._ensure_tools()
         container = panel.toolContainer()
         key = (name or "").lower()
@@ -159,16 +223,24 @@ class _BubbleToolsMixin:
             self._group_card.addToolCall(call)
             card = self._group_card
         else:
-            card = ToolCallCard(
-                parent=container,
-                tool_call=call,
-                # shell 类工具 pending 期间允许展开（命令与输出是多行文本）
-                allowOpenWhilePending=key in SHELL_TOOLS,
-                # 建卡时结果还没到，ok 传 True（失败展开由 setResult 单独处理）
-                defaultOpen=self._tool_default_open(
-                    call.name, call.arguments, not failed
-                ),
+            default_open = self._tool_default_open(
+                call.name, call.arguments, not failed
             )
+            if key in SUBAGENT_TOOLS and toolRenderer(name) is None:
+                card = SubagentCard(
+                    parent=container,
+                    tool_call=call,
+                    defaultOpen=default_open,
+                )
+            else:
+                card = ToolCallCard(
+                    parent=container,
+                    tool_call=call,
+                    # shell 类工具 pending 期间允许展开（命令与输出是多行文本）
+                    allowOpenWhilePending=key in SHELL_TOOLS,
+                    # 建卡时结果还没到，ok 传 True（失败展开由 setResult 单独处理）
+                    defaultOpen=default_open,
+                )
             card.setMessageId(self._message_id)
             safe_connect(
                 card,
@@ -218,7 +290,7 @@ class _BubbleToolsMixin:
             return ""
         if len(calls) == 1:
             call = calls[0]
-            name = call.name or "工具"
+            name = call.title or call.name or "工具"
             subtitle = ""
             try:
                 _key, subtitle = toolRendererSubtitle(name, call.arguments)
@@ -237,7 +309,7 @@ class _BubbleToolsMixin:
         order = []
         failed = 0
         for call in calls:
-            name = call.name or "工具"
+            name = call.title or call.name or "工具"
             if name not in counts:
                 order.append(name)
                 counts[name] = 0
@@ -265,6 +337,7 @@ class _BubbleToolsMixin:
             if part.kind == ElaChatPartKindType.Tool
             and part.step == step
             and part.tool_call is not None
+            and not part.tool_call.parent_id
         ]
         total = len(calls)
         done = sum(1 for call in calls if call.status in ElaChatToolStatusType.Settled)
@@ -280,6 +353,18 @@ class _BubbleToolsMixin:
             panel._summary_key = key
             panel.setCounts(done, total, summary=self._toolPanelSummary(calls))
 
+    def _tool_duration(self, callId: str, call: ElaChatToolCall) -> float:
+        """按记录的 started_at 算耗时（已有耗时优先，尊重恢复数据）。"""
+        if call is not None and call.duration_ms > 0:
+            return call.duration_ms
+        started = self._tool_started.get(callId, 0.0)
+        if not started:
+            if call is not None and call.started_at > 0:
+                started = call.started_at
+            else:
+                return 0.0
+        return max(0.0, (time.time() - started) * 1000.0)
+
     def setToolCallResult(self, toolCallId: str, result: str, ok: bool = True) -> None:
         """更新指定工具调用的结果。"""
         if self._parts_deferred or (
@@ -291,15 +376,25 @@ class _BubbleToolsMixin:
                     ElaChatToolStatusType.Done if ok else ElaChatToolStatusType.Error
                 )
                 call = part.tool_call.withResult(result or "", status)
+                call = call.withTiming(
+                    call.started_at, self._tool_duration(toolCallId, call)
+                )
                 self._replace_part(toolCallId, part.withToolCall(call))
             return
         card = self._tool_cards.get(toolCallId)
         if card is None:
             return
-        card.updateResult(toolCallId, result, ok=ok)
+        call = self.toolCall(toolCallId)
+        duration = self._tool_duration(toolCallId, call)
+        card.updateResult(toolCallId, result, ok=ok, durationMs=duration)
         part = self._find_part(toolCallId)
         if part is not None:
             self._replace_part(toolCallId, part.withToolCall(card.toolCall(toolCallId)))
+            parent_id = part.tool_call.parent_id if part.tool_call else ""
+            if parent_id:
+                parent = self._tool_cards.get(parent_id)
+                if isinstance(parent, SubagentCard):
+                    parent.refreshStats()
         self._sync_tool_panel(self._panel_for_call(toolCallId))
 
     def toolCall(self, toolCallId: str) -> Optional[ElaChatToolCall]:
@@ -326,6 +421,7 @@ class _BubbleToolsMixin:
         """移除全部工具调用卡片与各步骤外层面板。"""
         self._remove_parts({ElaChatPartKindType.Tool})
         self._tool_cards.clear()
+        self._tool_started.clear()
         self._group_card = None
         self._panel_calls.clear()
         for panel in self._panels:
@@ -335,3 +431,4 @@ class _BubbleToolsMixin:
         self._panels = []
         self._panel_steps.clear()
         self._current_tool_panel = None
+        self._sync_changes_row()

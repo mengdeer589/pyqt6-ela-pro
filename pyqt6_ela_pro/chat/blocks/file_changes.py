@@ -15,6 +15,7 @@ from ..._internal import _ThemeAwareMixin, safe_connect
 from ..._styles import BareButton, ColorText
 from ..._theme import statusColor, text as text_color, textMuted
 from ..._theme import ElaStatusRoleType
+from ...tooltips import ElaToolTipPositionType, remove_tooltip, set_tooltip
 from ...ela_button import ElaButton
 from ...ela_diff_view import ElaDiffView
 from ..._diff import (
@@ -223,7 +224,6 @@ class ElaChatFileChanges(_ThemeAwareMixin, QWidget):
             lambda _checked=False, r=row: self._toggle_row(r),
             "file_changes.toggle",
         )
-        path_label.setToolTip(file.path)
         self._sync_header(row)
         return row
 
@@ -246,7 +246,16 @@ class ElaChatFileChanges(_ThemeAwareMixin, QWidget):
             if row["opened"]
             else ElaIconType.IconName.ChevronRight
         )
-        row["header"].setToolTip(file.path)
+        if file.path:
+            set_tooltip(
+                row["header"],
+                file.path,
+                ElaToolTipPositionType.Top,
+                maxWidth=560,
+                wordWrap=True,
+            )
+        else:
+            remove_tooltip(row["header"])
 
     def _ensure_body(self, row: dict) -> None:
         if row["body"] is not None:

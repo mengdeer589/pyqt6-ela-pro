@@ -18,6 +18,7 @@ from ._helpers import (
     RETRYABLE_ERROR_TYPES,
     ROLE_ICONS,
     SHELL_TOOLS,
+    SUBAGENT_TOOLS,
     TOOL_ICONS,
     _AVATAR_PIXMAP_CACHE,
     _AVATAR_PIXMAP_CACHE_MAX,
@@ -44,7 +45,10 @@ from ._helpers import (
     toolArgumentPairs,
     toolDefaultOpen,
     toolDefaultOpenCoding,
+    toolIconFor,
     toolIconName,
+    toolKindOf,
+    toolLocationsOf,
     toolSubtitle,
     toolSubtitleParts,
 )
@@ -88,6 +92,9 @@ from .file_changes import (
     DEFAULT_MAX_VISIBLE_FILES,
     ElaChatFileChanges,
 )
+from .plan_panel import PlanListView, PlanPanel
+from .subagent_card import SubagentCard
+from .changes_summary import TurnChangesRow
 from .permission_card import (
     PermissionCard,
 )
@@ -126,14 +133,19 @@ __all__ = [
     "PREVIEW_MAX_CHARS",
     "PermissionCard",
     "PermissionRecord",
+    "PlanListView",
+    "PlanPanel",
     "REASONING_FLUSH_INTERVAL_MS",
     "RETRYABLE_ERROR_TYPES",
     "ROLE_ICONS",
     "ReasoningBlock",
     "SHELL_TOOLS",
+    "SUBAGENT_TOOLS",
     "STATUS_DOT_BREATH_MS",
     "StatsBadge",
     "SteerNotice",
+    "SubagentCard",
+    "TurnChangesRow",
     "TOOL_ICONS",
     "ThinkingRow",
     "ToolCallCard",
@@ -167,7 +179,10 @@ __all__ = [
     "toolArgumentPairs",
     "toolDefaultOpen",
     "toolDefaultOpenCoding",
+    "toolIconFor",
     "toolIconName",
+    "toolKindOf",
+    "toolLocationsOf",
     "toolSubtitle",
     "toolSubtitleParts",
 ]

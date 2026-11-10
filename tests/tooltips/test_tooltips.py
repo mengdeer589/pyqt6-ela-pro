@@ -12,7 +12,14 @@ from PyQt6ElaWidgetTools import ElaIconButton, ElaThemeType, eTheme
 import pyqt6_ela_pro._internal as internal_module
 import pyqt6_ela_pro.tooltips as tooltips_module
 from pyqt6_ela_pro._styles import SHADOW_MARGIN
-from pyqt6_ela_pro._theme import ElaStatusRoleType, accent, statusColor, surfacePopup
+from pyqt6_ela_pro._theme import (
+    ElaStatusRoleType,
+    accent,
+    statusColor,
+    surfacePopup,
+    text,
+    textMuted,
+)
 from pyqt6_ela_pro.tooltips import (
     STATETOOLTIP_MAX_WIDTH,
     STATETOOLTIP_MIN_WIDTH,
@@ -451,6 +458,21 @@ class TestToolTipClamp:
         parent.deleteLater()
         qapp.processEvents()
 
+    def test_show_at_point_stays_inside_work_area(self, qapp):
+        """菜单项 / item view 用的按点显示也要收敛进屏幕工作区。"""
+        area = QApplication.primaryScreen().availableGeometry()
+        tooltip = ElaToolTip("提示")
+        for point in (
+            area.center(),
+            area.topLeft(),
+            QPoint(area.right(), area.bottom()),
+        ):
+            tooltip.showAtPoint(point)
+            assert area.contains(tooltip.frameGeometry())
+        tooltip.hide()
+        tooltip.deleteLater()
+        qapp.processEvents()
+
 
 class TestToolTipTheme:
     """提示框文字颜色跟随主题（深色背景下必须变亮）。"""
@@ -598,6 +620,15 @@ class TestStateToolTip:
 
         st.deleteLater()
 
+    def test_close_button_and_elided_title_use_library_tooltip(self, qapp):
+        st = ElaStateToolTip("很长的标题" * 20, "Content")
+        assert _tooltip_dict[st._closeBtn]._text == "关闭"
+        assert _tooltip_dict[st._titleLabel]._text == st._title
+
+        st.setTitle("短标题")
+        assert st._titleLabel not in _tooltip_dict
+        st.deleteLater()
+
 
 class TestStateToolTipTimerLifecycle:
     """复用同一个 tooltip（hide 之后再 show）必须重启 loading spinner。"""
@@ -636,7 +667,7 @@ class TestStateToolTipAppearance:
     """状态提示与 Ela 浮动层同一套材质 / 控件。
 
     回归：曾是固定 360px 宽的「横幅」+ 自绘 ✕ + ``QGraphicsDropShadowEffect``，
-    与 toast / tooltip / 确认弹框的 ``PopupBase`` + ``PopupBorder`` 材质和
+    与 toast / tooltip / 确认弹框的 ``surfacePopup`` + 1px 描边材质和
     Ela 图标按钮都不一致。
     """
 
@@ -664,6 +695,46 @@ class TestStateToolTipAppearance:
         assert tip._titleLabel.textFormat() == Qt.TextFormat.PlainText
         assert tip._contentLabel.textFormat() == Qt.TextFormat.PlainText
         tip.deleteLater()
+
+    def test_text_hierarchy_uses_theme_colors(self, qapp):
+        tip = ElaStateToolTip("t", "c")
+        mode = eTheme.getThemeMode()
+        try:
+            assert tip._titleLabel.textColor().name() == text(mode).name()
+            assert tip._contentLabel.textColor().name() == textMuted(mode).name()
+        finally:
+            tip.deleteLater()
+
+    def test_text_colors_follow_theme(self, qapp):
+        previous = eTheme.getThemeMode()
+        tip = ElaStateToolTip("t", "c")
+        try:
+            for mode in (ElaThemeType.ThemeMode.Light, ElaThemeType.ThemeMode.Dark):
+                eTheme.setThemeMode(mode)
+                qapp.processEvents()
+                assert tip._titleLabel.textColor().name() == text(mode).name()
+                assert tip._contentLabel.textColor().name() == textMuted(mode).name()
+        finally:
+            eTheme.setThemeMode(previous)
+            tip.deleteLater()
+            qapp.processEvents()
+
+    def test_paint_uses_shared_severity_badge(self, qapp, monkeypatch):
+        calls = []
+        original = tooltips_module.paintSeverityBadge
+
+        def spy(*args, **kwargs):
+            calls.append(kwargs.get("rotation"))
+            return original(*args, **kwargs)
+
+        monkeypatch.setattr(tooltips_module, "paintSeverityBadge", spy)
+        tip = ElaStateToolTip("t", "c")
+        tip.show()
+        qapp.processEvents()
+        tip.grab()
+        assert calls, "状态提示必须走共享的等级圆绘制"
+        tip.deleteLater()
+        qapp.processEvents()
 
     def test_surface_uses_popup_base(self, qapp):
         previous = eTheme.getThemeMode()

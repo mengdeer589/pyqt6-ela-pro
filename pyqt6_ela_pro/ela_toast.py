@@ -1,42 +1,83 @@
-"""通知提示组件，风格参考 ElaWidgetTools 的 ElaToast。"""
+"""通知提示组件（顶部居中、单行、自动淡出）。"""
 
 from __future__ import annotations
 
-from enum import IntEnum
 from typing import Optional
 
 from PyQt6.QtCore import (
     Qt,
-    QRect,
-    QRectF,
+    QAbstractAnimation,
+    QEvent,
     QPoint,
     QPropertyAnimation,
+    QRectF,
     QTimer,
-    QAbstractAnimation,
 )
+from PyQt6.QtGui import (
+    QCursor,
+    QEnterEvent,
+    QFont,
+    QFontMetrics,
+    QPainter,
+    QPaintEvent,
+)
+from PyQt6.QtWidgets import QApplication, QWidget
+
+from PyQt6ElaWidgetTools import ElaIconType, ElaThemeType
+
 from ._internal import is_deleted
-from PyQt6.QtGui import QPainter, QPainterPath, QFont, QFontMetrics, QPaintEvent
-from PyQt6.QtWidgets import QWidget, QApplication
-
-from PyQt6ElaWidgetTools import eTheme, ElaThemeType, ElaIconType
-
 from ._motion import Duration, Easing, start_transition
-from ._styles import SHADOW_MARGIN, iconGlyph, paintOverlayShadow
-from ._theme import ElaStatusRoleType, statusColor
+from ._styles import (
+    SHADOW_MARGIN,
+    paintOverlayShadow,
+    paintRoundedCard,
+    paintSeverityBadge,
+)
+from ._theme import (
+    ElaSeverity,
+    blend,
+    border,
+    severityColor,
+    surfacePopup,
+    text,
+)
 from .widget_base import ElaThemeWidget
 
 #: 同一锚点（父控件，None 表示屏幕）下当前存活的 toast，按创建顺序排列。
 #: 新的 toast 需要排在已有 toast 下方，否则连发多个会完全重叠成一个。
 _LIVE_TOASTS: dict = {}
 
-#: 同锚点 toast 之间的垂直间距（像素）
+#: 同锚点 toast 之间的视觉间距（像素）
 _TOAST_GAP = 10
+
+#: 卡片高度（不含上下阴影边距）
+_TOAST_HEIGHT = 40
+#: 卡片左右内边距
+_PAD_X = 14
+#: 等级圆直径
+_BADGE_SIZE = 20
+#: 等级圆与文本间距
+_GAP = 10
+#: 文本额外留白（避免刚好卡在宽度上限时频繁省略）
+_TEXT_SLACK = 12
+#: 卡片宽度上下限
+_MIN_WIDTH = 200
+_MAX_WIDTH = 400
+
+#: 实心圆内的字形用「非圆形」图标，避免与圆底重复。
+_SEVERITY_ICONS = {
+    ElaSeverity.Info: ElaIconType.IconName.Info,
+    ElaSeverity.Success: ElaIconType.IconName.Check,
+    ElaSeverity.Warning: ElaIconType.IconName.Exclamation,
+    ElaSeverity.Error: ElaIconType.IconName.Xmark,
+}
 
 
 def _prune_toasts(anchor) -> None:
     """清掉已销毁的 toast 记录。
     只看 ``is_deleted``、不看 ``isVisible()``：登记发生在 ``__init__`` 里，
     此时还没 ``show()``。也不能靠 ``destroyed`` 信号 —— 那时 PyQt 包装器
+    已换成基类包装器，读不到实例属性。
     """
     live = _LIVE_TOASTS.get(anchor)
     if not live:
@@ -66,14 +107,7 @@ def _reflow_toasts(anchor) -> None:
             if base is None:
                 return
         toast.move(toast.x(), base + y)
-        y += toast.height() + _TOAST_GAP
-
-
-class ElaToastType(IntEnum):
-    Success = 0
-    Info = 1
-    Warning = 2
-    Error = 3
+        y += toast.height() - 2 * SHADOW_MARGIN + _TOAST_GAP
 
 
 class ElaToast(ElaThemeWidget):
@@ -81,7 +115,7 @@ class ElaToast(ElaThemeWidget):
 
     def __init__(
         self,
-        toast_type: ElaToastType,
+        severity: ElaSeverity,
         text: str,
         display_msec: int,
         parent: Optional[QWidget] = None,
@@ -90,9 +124,10 @@ class ElaToast(ElaThemeWidget):
 
         self._border_radius = 8
         self._display_msec = display_msec
-        self._toast_type = toast_type
+        self._severity = ElaSeverity(severity)
         self._text = text
         self._shadow_border = SHADOW_MARGIN
+        self._is_closing = False
 
         self.setObjectName("ElaToast")
         self.setWindowFlags(
@@ -110,15 +145,17 @@ class ElaToast(ElaThemeWidget):
         self._dwell_timer.setSingleShot(True)
         self._dwell_timer.timeout.connect(self._startFadeOut)
 
-        self._icon_font = QFont("ElaAwesome")
         self._text_font = QFont()
-
         self._text_font.setPixelSize(14)
         fm = QFontMetrics(self._text_font)
         tw = fm.horizontalAdvance(text)
-        total_w = max(200, min(400, tw + 80))
-        self.setFixedHeight(48)
-        self.setFixedWidth(total_w + self._shadow_border * 2)
+        chrome = 2 * _PAD_X + _BADGE_SIZE + _GAP
+        total_w = max(_MIN_WIDTH, min(_MAX_WIDTH, tw + chrome + _TEXT_SLACK))
+        self._elided_text = fm.elidedText(
+            text, Qt.TextElideMode.ElideRight, total_w - chrome
+        )
+        self.setFixedHeight(_TOAST_HEIGHT + 2 * self._shadow_border)
+        self.setFixedWidth(total_w + 2 * self._shadow_border)
 
         # 顶部居中；同一锚点下已有 toast 时向下顺延，避免连发多条完全重叠。
         anchor = parent if parent is not None else None
@@ -126,7 +163,7 @@ class ElaToast(ElaThemeWidget):
         _prune_toasts(anchor)
         offset = 0
         for other in _LIVE_TOASTS.get(anchor, ()):
-            offset += other.height() + _TOAST_GAP
+            offset += other.height() - 2 * SHADOW_MARGIN + _TOAST_GAP
 
         pos = QPoint()
         if parent:
@@ -138,7 +175,9 @@ class ElaToast(ElaThemeWidget):
                 base_y + offset,
             )
         else:
-            screen = QApplication.primaryScreen()
+            screen = (
+                QApplication.screenAt(QCursor.pos()) or QApplication.primaryScreen()
+            )
             if screen:
                 sg = screen.availableGeometry()
                 base_y = sg.y() + 60
@@ -172,41 +211,37 @@ class ElaToast(ElaThemeWidget):
                 _reflow_toasts(anchor)
         super().closeEvent(event)
 
-    # ── Static public API ─────────────────────────────────
-
     @staticmethod
     def success(
         text: str, display_msec: int = 2000, parent: Optional[QWidget] = None
     ) -> None:
-        """成功提示。``parent`` 决定定位锚点（缺省为屏幕）。"""
-        toast = ElaToast(ElaToastType.Success, text, display_msec, parent)
+        """成功提示。``parent`` 决定定位锚点（缺省为光标所在屏）。"""
+        toast = ElaToast(ElaSeverity.Success, text, display_msec, parent)
         toast._present()
 
     @staticmethod
     def info(
         text: str, display_msec: int = 2000, parent: Optional[QWidget] = None
     ) -> None:
-        """信息提示。``parent`` 决定定位锚点（缺省为屏幕）。"""
-        toast = ElaToast(ElaToastType.Info, text, display_msec, parent)
+        """信息提示。``parent`` 决定定位锚点（缺省为光标所在屏）。"""
+        toast = ElaToast(ElaSeverity.Info, text, display_msec, parent)
         toast._present()
 
     @staticmethod
     def warning(
         text: str, display_msec: int = 2000, parent: Optional[QWidget] = None
     ) -> None:
-        """警告提示。``parent`` 决定定位锚点（缺省为屏幕）。"""
-        toast = ElaToast(ElaToastType.Warning, text, display_msec, parent)
+        """警告提示。``parent`` 决定定位锚点（缺省为光标所在屏）。"""
+        toast = ElaToast(ElaSeverity.Warning, text, display_msec, parent)
         toast._present()
 
     @staticmethod
     def error(
         text: str, display_msec: int = 2000, parent: Optional[QWidget] = None
     ) -> None:
-        """错误提示。``parent`` 决定定位锚点（缺省为屏幕）。"""
-        toast = ElaToast(ElaToastType.Error, text, display_msec, parent)
+        """错误提示。``parent`` 决定定位锚点（缺省为光标所在屏）。"""
+        toast = ElaToast(ElaSeverity.Error, text, display_msec, parent)
         toast._present()
-
-    # ── Internal ──────────────────────────────────────────
 
     def _run_animation(self) -> None:
         self._fade_in = QPropertyAnimation(self, b"windowOpacity")
@@ -225,9 +260,16 @@ class ElaToast(ElaThemeWidget):
         # 所以这里绝不能碰 self._fade_in（只能用自己的 _dwell_timer）。
         if is_deleted(self):
             return
+        # 悬停期间不开始计时；leaveEvent 会在移开后补上。
+        if self.underMouse() or self._dwell_timer.isActive():
+            return
         self._dwell_timer.start(self._display_msec)
 
     def _startFadeOut(self) -> None:
+        if self._is_closing:
+            return
+        self._is_closing = True
+        self._dwell_timer.stop()
         self._fade_out = QPropertyAnimation(self, b"windowOpacity")
         self._fade_out.setStartValue(1.0)
         self._fade_out.setEndValue(0.0)
@@ -239,11 +281,18 @@ class ElaToast(ElaThemeWidget):
             deletion_policy=QAbstractAnimation.DeletionPolicy.DeleteWhenStopped,
         )
 
+    def enterEvent(self, event: QEnterEvent) -> None:
+        self._dwell_timer.stop()
+        super().enterEvent(event)
+
+    def leaveEvent(self, event: QEvent) -> None:
+        if self.isVisible() and not self._is_closing:
+            self._dwell_timer.start(self._display_msec)
+        super().leaveEvent(event)
+
     def _onThemeChanged(self, mode: ElaThemeType.ThemeMode) -> None:
         self._theme_mode = mode
         self.update()
-
-    # ── Paint ─────────────────────────────────────────────
 
     def paintEvent(self, _event: QPaintEvent) -> None:
         painter = QPainter(self)
@@ -253,56 +302,37 @@ class ElaToast(ElaThemeWidget):
         mode = self._theme_mode
         sb = self._shadow_border
         br = self._border_radius
-        fg = QRect(sb, sb, self.width() - 2 * sb, self.height() - 2 * sb)
+        card_w = self.width() - 2 * sb
+        card_h = self.height() - 2 * sb
+        sev_color = severityColor(mode, self._severity)
 
         # 阴影：窗口尺寸已按 _shadow_border 撑开，此处必须画出阴影，
         # 否则 toast 看起来比别的弹层「扁」一层。
         paintOverlayShadow(painter, self.rect(), margin=sb, radius=br)
+        painter.translate(sb, sb)
 
-        painter.setPen(eTheme.getThemeColor(mode, ElaThemeType.ThemeColor.PopupBorder))
-        painter.setBrush(eTheme.getThemeColor(mode, ElaThemeType.ThemeColor.PopupBase))
-        painter.drawRoundedRect(fg, br, br)
-
-        if self._toast_type == ElaToastType.Success:
-            # 语义色统一走 `_theme.statusColor`（分深浅两档），别写死浅色档 hex
-            ind_color = statusColor(mode, ElaStatusRoleType.Success)
-            icon_enum = ElaIconType.IconName.Check
-        elif self._toast_type == ElaToastType.Info:
-            ind_color = eTheme.getThemeColor(
-                mode, ElaThemeType.ThemeColor.PrimaryNormal
-            )
-            icon_enum = ElaIconType.IconName.CircleInfo
-        elif self._toast_type == ElaToastType.Warning:
-            ind_color = statusColor(mode, ElaStatusRoleType.Warning)
-            icon_enum = ElaIconType.IconName.CircleExclamation
-        else:
-            ind_color = eTheme.getThemeColor(mode, ElaThemeType.ThemeColor.StatusDanger)
-            icon_enum = ElaIconType.IconName.CircleXmark
-
-        # 左侧 4px 语义色条，裁到圆角盒内
-        clip_path = QPainterPath()
-        clip_path.addRoundedRect(QRectF(fg), br, br)
-        painter.save()
-        painter.setClipPath(clip_path)
-        painter.setPen(Qt.PenStyle.NoPen)
-        painter.setBrush(ind_color)
-        painter.drawRect(QRect(fg.x(), fg.y(), 4, fg.height()))
-        painter.restore()
-
-        self._icon_font.setPixelSize(16)
-        painter.setFont(self._icon_font)
-        painter.setPen(ind_color)
-        painter.drawText(
-            QRect(fg.x() + 14, fg.y(), 20, fg.height()),
-            Qt.AlignmentFlag.AlignCenter,
-            iconGlyph(icon_enum),
+        tint = 0.06 if mode == ElaThemeType.ThemeMode.Light else 0.10
+        paintRoundedCard(
+            painter,
+            QRectF(0, 0, card_w, card_h),
+            background=blend(surfacePopup(mode), sev_color, tint),
+            border=border(mode),
+            radius=br,
         )
 
-        self._text_font.setPixelSize(14)
+        badge_rect = QRectF(
+            _PAD_X, (card_h - _BADGE_SIZE) / 2, _BADGE_SIZE, _BADGE_SIZE
+        )
+        paintSeverityBadge(
+            painter, badge_rect, sev_color, _SEVERITY_ICONS[self._severity]
+        )
+
+        text_left = _PAD_X + _BADGE_SIZE + _GAP
+        text_width = card_w - text_left - _PAD_X
         painter.setFont(self._text_font)
-        painter.setPen(eTheme.getThemeColor(mode, ElaThemeType.ThemeColor.BasicText))
+        painter.setPen(text(mode))
         painter.drawText(
-            QRect(fg.x() + 42, fg.y(), fg.width() - 52, fg.height()),
+            QRectF(text_left, 0, text_width, card_h),
             Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft,
-            self._text,
+            self._elided_text,
         )

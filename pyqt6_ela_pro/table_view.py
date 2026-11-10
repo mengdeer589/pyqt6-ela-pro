@@ -27,12 +27,15 @@ from PyQt6.QtWidgets import (
 from PyQt6ElaWidgetTools import ElaTableView
 
 from ._internal import load_lazy_pinyin, safe_connect
+from .tooltip_targets import install_item_view_tooltips
 
 
 TABLE_MIN_SECTION_SIZE: int = 60
 TABLE_ROW_MIN_HEIGHT: int = 46
 # 保留常量以兼容外部引用（线程 quit 超时已由轮询清理取代）
 TABLE_THREAD_QUIT_TIMEOUT: int = 1000
+#: 单元格 tooltip 的自定义 role（不写 Qt.ToolTipRole，避免原生 QToolTip）
+_CELL_TOOLTIP_ROLE = int(Qt.ItemDataRole.UserRole) + 101
 
 
 def _safe_width(value) -> int:
@@ -123,6 +126,8 @@ class ElaDataTable(ElaTableView):
         super().__init__(parent)  # type: ignore[arg-type]
         self._model = QStandardItemModel(self)
         self.setModel(self._model)
+        # 单元格 tooltip 由 viewport 的 ToolTip 事件驱动（一个提示框服务整表）。
+        install_item_view_tooltips(self, role=_CELL_TOOLTIP_ROLE)
 
         self.setAlternatingRowColors(True)
         vh = self.verticalHeader()
@@ -630,7 +635,7 @@ class ElaDataTable(ElaTableView):
     def setItemToolTip(self, row: int, col: int, toolTip: str) -> None:
         item = self.item(row, col)
         if item:
-            item.setToolTip(toolTip)
+            item.setData(str(toolTip or ""), _CELL_TOOLTIP_ROLE)
 
     def setItemCheckable(self, row: int, col: int, checkable: bool) -> None:
         item = self.item(row, col)

@@ -52,8 +52,9 @@ tests/                     回归测试（按组件 / 家族目录组织；`-m "
 - **动效策略**：`motion` 全局三档（`Full` / `Reduced` / `Disabled`），默认跟随系统
   「关闭动画」设置 —— `Reduced` 把状态过渡压到 ≤50ms 并停掉持续动效。
 - **AI 对话栈**：命令式回合 API + `ElaChatStreamBinder` 一键接线、分段时间线
-  （思考 / 正文 / 工具 / 步骤用量 / 通知 / 压缩）、工具结果富渲染注册表 + **可选内置
-  diff / shell 渲染器**、审批（批准型 + 问答型逐题向导）、自动重试倒计时、运行态活动行、
+  （思考 / 正文 / 工具 / 步骤用量 / 通知 / 压缩 / 计划）、工具结果富渲染注册表 + **可选内置
+  diff / shell / read / 搜索 / fetch / MCP / todo 渲染器**、子代理嵌套卡、回合文件变更汇总、
+  独立运行轨迹面板、审批（批准型 + 问答型逐题向导）、自动重试倒计时、运行态活动行、
   时间线密度（hidden / collapsed / expanded × 六类）、会话内搜索、`/` 命令、模型 / agent
   选择器、shell 模式、提示历史与草稿、队列排序 / 插话 / 撤销、待发送消息、@ 提及高亮、
   多话题与崩溃恢复日志、会话导出导入。
@@ -91,8 +92,8 @@ tests/                     回归测试（按组件 / 家族目录组织；`-m "
 - **桌面集成**：全局划词助手（**默认带取词安全闸门**，避免向终端注入 Ctrl+C）、
   划词结果对话框、Windows 托盘、窗口 / Chromium 嵌入（CDP）、任务栏进度。
 - **示例应用**：两级侧边栏，每个组件旁有 `</> 代码` 按钮直接看实现源码；
-  AI 组件工作台与图表工作台同构（多工作区、首次切换才构建），聊天工作区为
-  「预填 + 可重播」，只在流式中可见的过程可以直接重看。
+  AI 聊天实验台是标准多话题聊天页（输入区常驻），组件特性收进右侧
+  `ElaSplitter` + `ElaPivot` 面板，按 tab 插入当前话题。
 
 ## 安装
 
@@ -174,7 +175,7 @@ sys.exit(app.exec())
 | `btn.clearSvgIcon()` | 清掉 SVG 图标 |
 | `loader.setPackageDirectory(path)` | 指定 `loadFromPackage` 找图标包的目录（**默认指向库内置目录，那里现在什么都没有**，宿主应设成自己的资源目录） |
 | `create_ela_splitter(widgets, orientation, ...)` | 创建主题感知分割器 |
-| `show_notify(title, content, timeout)` | 弹出通知 |
+| `show_notify(title, content, timeout, severity)` | 弹出通知（`severity` 取 `ElaSeverity.Info` / `Success` / `Warning` / `Error`） |
 
 ### 组件类
 
@@ -229,9 +230,9 @@ sys.exit(app.exec())
 | **ElaMessageDialog** | 消息确认对话框 |
 | **ElaConfirmDialog** | 贴锚点弹出的轻量确认弹框（Ela 原生文字按钮 + PopupBase 表面） |
 | **ElaDialogBase** | 可定制按钮的对话框基类 |
-| **ElaToast** | 通知提示（成功/信息/警告/错误，淡入淡出自动关闭；等级枚举 `ElaToastType`） |
-| **ElaNotifyPopup** | 弹出通知控件 |
-| **ElaNotifyManager** | 通知队列管理（排队 / 去重 / 逐条弹出；`show_notify()` 是它的自由函数入口） |
+| **ElaToast** | 顶部居中单行提示（成功/信息/警告/错误，等级色圆标 + 淡入淡出自动关闭；等级枚举 `ElaSeverity`） |
+| **ElaNotifyPopup** | 右下角通知弹窗（信息/成功/警告/错误，等级色圆标 + 底部剩余时间条） |
+| **ElaNotifyManager** | 通知堆叠管理（`show_notify()` 是它的自由函数入口） |
 | **ElaToolTip** | 自定义工具提示 |
 | **ElaStateToolTip** | 加载 / 完成状态提示（宽度随内容自适应，完成自动淡出） |
 | **ElaToolTipPositionType** | 提示位置枚举 |
@@ -240,7 +241,7 @@ sys.exit(app.exec())
 
 | 组件 | 说明 |
 |---|---|
-| **ElaDrawer** | 四方向侧边抽屉 |
+| **ElaDrawer** | 四方向侧边抽屉；`setMaskEnabled(False)` 切成无遮罩侧栏（不挡、不灰，抽屉外仍可操作） |
 | **ElaDrawerPositionType** | 抽屉方向枚举 |
 | **ElaSteps** | 步骤条（多步引导，前进/后退；水平/垂直） |
 | **ElaPagination** | 分页（页码按钮、省略号、跳转输入框） |
@@ -273,7 +274,7 @@ sys.exit(app.exec())
 | **ElaMarkdownViewer** | Markdown 查看器（主题自适应；主字体缺字形时单族符号字体兜底，不改文本） |
 | **ElaChip** | 标签纸片（16 色，可关闭/可选择/胶囊/前置图标） |
 | **ElaInfoBadge** | 角标（Dot/Value/Icon 模式，5 种级别） |
-| **ElaTerminalView** | 终端输出（ANSI 色彩 / 行号 / 自动滚动 / 搜索过滤 / 选区复制 / 导出；`append` 吃 str 与 bytes；缺字形单族符号字体兜底） |
+| **ElaTerminalView** | 终端输出（ANSI 色彩 / 行号 / 自动滚动 / 搜索过滤 / 选区复制 / 导出；`append` 吃 str 与 bytes；缺字形单族符号字体兜底；`setEmbedded(True)` 去边框并改用 raised 表面） |
 
 #### AI 对话
 
@@ -298,10 +299,14 @@ sys.exit(app.exec())
 | **ElaChatAsyncWorker** | 异步后端 worker 基类（QThread + asyncio + 命令队列 + 取消收尾） |
 | **ElaChatMockBackend** | 模拟后端（QTimer，无模型服务跑通全链路，信号与真实 worker 同构） |
 | **ElaChatStatusBar** | 宿主状态栏（信息 + 四档语义状态 + busy 指示） |
-| **ElaChatRoleType / ElaChatStatusType / ElaChatPartKindType / ElaChatToolStatusType / ElaChatReasoningStyleType / ElaChatPermissionStatusType** | 消息角色 / 消息状态（`Queued` 只是头部展示态，不进 `_status`）/ 时间线分段种类 / 工具调用状态 / 思考展示形态 / 审批状态；均为 `StrEnum`（与字符串、JSON 兼容） |
-| **ElaChatAttachment / ElaChatToolCall** | 附件（路径 / 图片 / 名称）与工具调用记录（含 `metadata` 结构化附加数据），成对 `toDict` / `fromDict` |
+| **ElaChatRoleType / ElaChatStatusType / ElaChatPartKindType / ElaChatToolStatusType / ElaChatToolKindType / ElaChatReasoningStyleType / ElaChatPermissionStatusType** | 消息角色 / 消息状态（`Queued` 只是头部展示态，不进 `_status`）/ 时间线分段种类 / 工具调用状态 / 工具类别（对齐 ACP）/ 思考展示形态 / 审批状态；均为 `StrEnum`（与字符串、JSON 兼容） |
+| **ElaChatAttachment / ElaChatToolCall / ElaChatToolLocation** | 附件（路径 / 图片 / 名称）与工具调用记录（`kind` / `title` / `locations` / `parent_id` / 计时 + `metadata` 结构化附加数据），成对 `toDict` / `fromDict` |
+| **ElaChatPlan / ElaChatPlanItem / ElaChatPlanItemStatusType / PlanPanel / PlanListView** | 计划 / 待办：`view.setPlan` 写入 `Plan` 分段，折叠显示当前项 + 进度；`fromMarkdown` 解析 checklist、`toDict/fromDict` 持久化 |
+| **SubagentCard** | 子代理父卡：`parent_id` 嵌套子工具（普通 `ToolCallCard`），头部显示任务 / 状态 / 工具数与耗时 |
+| **ElaChatTurnChanges / TurnChangesRow** | 回合文件变更汇总：从 `metadata.files` 按路径合并，回合结束显示「N 个文件变更 +x −y」，展开复用 `ElaChatFileChanges`；派生数据不落库 |
+| **ElaChatTracePanel / ElaChatTraceRow / ElaChatTraceResult / buildTraceRows** | 独立运行轨迹：turn → step → tool / reasoning / plan / permission / compaction 树 + 耗时条 / 词元 / 成本，点行回跳消息 |
 | **ElaChatMention / ElaChatNoticeType** | 用户文本里的 @ 引用区间 / 时间线通知类型 |
-| **ElaChatPermission / ElaChatQuestion / ElaChatOption** | 审批请求；**`questions` 非空 = 问答型逐题向导**，为空 = 批准型三键。候选项**必须带 description**，自定义答案与候选项互斥 |
+| **ElaChatPermission / ElaChatQuestion / ElaChatOption** | 审批请求；**`questions` 非空 = 问答型逐题向导**，为空 = 批准型三键。候选项**必须带 description**，自定义答案与候选项单选互斥、多选共存 |
 | **ElaChatSuggestion** | 空态建议项 |
 | **ElaChatAvatarSource** | 头像来源（会话里持久化的是它，不是图片路径） |
 | **ElaChatMockChunk / ElaChatMockUsage** | 假后端 `ElaChatMockBackend` 的分片 / 用量构造参数 |
@@ -392,7 +397,7 @@ python -m pyqt6_ela_pro.example
 | 基础组件 | 输入与选择 / 下拉框组件 / 容器与布局 / 视图与列表 / 按钮与菜单 / 进度与反馈 / Fluent 与补充组件 |
 | 数据与图表 | 表格（ElaDataTable / ElaParquetTable）/ 图表（第三方库：pyqtgraph / matplotlib / 仪表盘）/ ElaChartWidget 图表工作台 |
 | 内容渲染 | Markdown（文本 / 代码 / 公式 / Mermaid / 流式） |
-| AI 对话 | AI 组件工作台：概览 / 输入区 / Agent / 文件与 Diff / 时间线与检索 / 会话 / 持久化（预填 + 可重播，首次切换才构建） |
+| AI 对话 | AI 聊天实验台：多话题聊天 + 输入区 + 右侧 `ElaSplitter` 特性面板（`ElaPivot` 分基础 / 工具 / Agent / 时间线 / 会话 / 输入） |
 | 窗口与应用外壳 | ElaWindow 应用外壳（本页操作主窗口：导航栏模式、窗口按钮、背景绘制、内容堆栈、dock、新窗口打开、关闭链路）/ 弹窗与提示 / 启动与托盘 |
 | 系统交互与嵌入 | 外部内容嵌入（窗口 / 浏览器）/ 终端输出 / 划词助手 |
 | 动效与图形 | 动画与图标 / 节点图编辑器 |
@@ -447,7 +452,7 @@ Windows AMD64（**Windows 7 SP1+**；交付线使用 PyQt6 6.8.1 + 自编译 Qt 
 |---|---|
 | 输入、容器、展示、对话框等原生组件 | 上游 [ElaWidgetTools](https://github.com/Liniyous/ElaWidgetTools) C++ + [PyQt6-ElaWidgetTools](https://github.com/HIllya51/PyElaWidgetTools) 绑定 |
 | `ElaSplitter`、`ElaPagination`、`ElaToast`、`ElaSpotlight`、`ElaSteps`、`ElaTimeline`、`ElaRatingControl`、`ElaInfoBadge`、`ElaChip`、`ElaDropDownButton`、`ElaSplitButton`、`ElaPasswordEdit`、`ElaConfirmDialog`、`ElaMarkdownViewer`、`ElaUploadArea`、`ElaSplashScreen` | [ElaWidgetTools（RainbowCandyX fork）](https://github.com/RainbowCandyX/ElaWidgetTools) C++ 源码移植 |
-| `ElaDrawer` | PyQt-SiliconUI `SiLayerDrawer` 设计（内容槽走 `ElaWidgetOwnershipType` 三态） |
+| `ElaDrawer` | PyQt-SiliconUI `SiLayerDrawer` 设计（内容槽走 `ElaWidgetOwnershipType` 三态；`setMaskEnabled(False)` 无遮罩侧栏） |
 | `ElaDrawerArea` | 上游 `ElaDrawerArea` 子类化修复（点击标题栏展开 / 收起） |
 | `ElaButton`、`ElaDivider`、`ElaChip` 等 | Ant Design 风格自研（对照 ElaWidgetTools 既有组件） |
 | `ElaChartWidget`（`charts/`） | InstructionX_UIKit `charts` 移植（类 ECharts `setOption` 引擎） |

@@ -10,6 +10,7 @@ from .blocks import ElaChatWorkingRow
 from .message import (
     ElaChatPart,
     ElaChatPartKindType,
+    ElaChatPlan,
     ElaChatRoleType,
     ElaChatStatusType,
 )
@@ -78,6 +79,96 @@ class _ViewTimelineMixin:
         )
         self._update_snapshot(messageId, lambda m: m.withParts((*m.parts, part)))
         return partId
+
+    def setPlan(
+        self,
+        messageId: int,
+        plan,
+        *,
+        partId: Optional[str] = None,
+    ) -> str:
+        """插入 / 更新一条计划卡，返回分段 id。
+
+        ``partId`` 为空时复用该消息最后一张计划卡；计划内容随消息持久化。
+        """
+        value = ElaChatPlan.coerce(plan)
+        if value is None:
+            return ""
+        bubble = self._bubbles.get(messageId)
+        if bubble is not None:
+            value_id = bubble.setPlan(value, partId)
+            if value_id:
+                self._sync_parts(messageId)
+                self.messageUpdated.emit(messageId)
+            return value_id
+        message = self._store.message(messageId)
+        if message is None:
+            raise ValueError(f"setPlan: 消息 {messageId} 不存在")
+        if message.role != ElaChatRoleType.Assistant:
+            return ""
+        target = partId
+        if target is None:
+            for part in reversed(message.parts):
+                if part.kind == ElaChatPartKindType.Plan:
+                    target = part.id
+                    break
+        target = target or uuid4().hex[:12]
+        existing = next((part for part in message.parts if part.id == target), None)
+        if existing is not None and existing.kind == ElaChatPartKindType.Plan:
+            updated = existing.withPlan(value)
+            self._update_snapshot(
+                messageId,
+                lambda m, item=updated: m.withParts(
+                    tuple(item if p.id == item.id else p for p in m.parts)
+                ),
+            )
+            return target
+        part = ElaChatPart(
+            id=target,
+            kind=ElaChatPartKindType.Plan,
+            status=ElaChatStatusType.Done,
+            plan=value,
+            step=max(1, int(message.stepCount() or 1)),
+        )
+        self._update_snapshot(
+            messageId, lambda m, item=part: m.withParts((*m.parts, item))
+        )
+        return target
+
+    def plan(self, messageId: int) -> Optional[ElaChatPlan]:
+        """获取指定消息最后一张计划卡的快照。"""
+        part = self.planPart(messageId)
+        return part.plan if part is not None else None
+
+    def planPart(self, messageId: int) -> Optional[ElaChatPart]:
+        """获取指定消息最后一个计划分段。"""
+        bubble = self._bubbles.get(messageId)
+        if bubble is not None:
+            part = bubble.planPart()
+            if part is not None:
+                return part
+        message = self.message(messageId)
+        if message is None:
+            return None
+        for part in reversed(message.parts):
+            if part.kind == ElaChatPartKindType.Plan:
+                return part
+        return None
+
+    def clearPlan(self, messageId: int) -> None:
+        """移除指定消息的全部计划卡。"""
+        bubble = self._bubbles.get(messageId)
+        if bubble is not None:
+            bubble.clearPlan()
+            self._sync_parts(messageId)
+            self.messageUpdated.emit(messageId)
+            return
+        self._update_snapshot(
+            messageId,
+            lambda m: m.withParts(
+                tuple(part for part in m.parts if part.kind != ElaChatPartKindType.Plan)
+            ),
+        )
 
     def setRetry(
         self,

@@ -242,7 +242,7 @@ resize（冻结 / 放开）、滚动、深浅主题。开发机（Win11，PyQt6 
   圆角 mask（`ElaMarkdownViewer.setViewportBackground`，bugs #14）；嵌入查看器（聊天气泡）保持透明、由宿主传入自己的底色作不透明底（聊天组件已传）；宿主自绘文本控件同理。
 - **CJK 字体 shaping（Win7）**：非 CJK 主字体渲染 CJK 内容（逐字形回退）与多族字体列表（逐字形族匹配）都会走慢 shaping，且任一走过一次即**进程级毒化**后续一切文本绘制（10~250×，Qt/DirectWrite 层）。
   **第三个触发方向**：主字体是 CJK、但文本含它 cmap 里没有的符号（LLM 输出常带 ↔ / ⇒ / □ / √）同样走逐字形回退并毒化。所以库自产进 `QTextDocument` 的标记只用雅黑 cmap 内的字形：任务勾选 `□`/`■`（U+25A1/U+25A0）、折叠 `+`/`−`（U+002B/U+2212）；不要换回 `☐`/`☑`、`▸`/`▾`（均不在雅黑 cmap）。**查看器默认对缺字字符套单族符号字体**（`_internal.applyMissingGlyphFonts`：Segoe UI Symbol / Cambria Math，只改字体族、不改文本；`ElaMarkdownViewer.setMissingGlyphFallbackEnabled(False)` 可关；`ElaTerminalView` 也已默认接入，同样可关）。终端等其它 `QTextDocument` 组件可复用该工具。
-  本库已把可控触发点全部收口：**中文系统**下终端默认字体、查看器代码字符格式 / 默认代码字体、图表文本（`chartFont`）与聊天等宽 / 标题标签均为**单族** `Microsoft YaHei`（其它系统保持原状）；宿主仍可用
+  本库已把可控触发点全部收口：**中文系统**下终端默认字体、查看器代码字符格式 / 默认代码字体、图表文本（`chartFont`）与聊天等宽 / 标题标签均为**单族**雅黑（`system_cjk_font_family()`；DirectWrite 为 `Microsoft YaHei`，GDI 中文系统为「微软雅黑」；其它系统保持原状）；宿主仍可用
   `ElaTerminalView.setFontFamilies()` / `ElaMarkdownViewer.setCodeFontFamily()` 覆盖 —— 要避免逐字形回退请给**单个** CJK 字体，**多族列表（等宽 + CJK 后备）同样慢**（公式渲染是唯一保留多族的例外：数学字形与 CJK 覆盖二选一）。
 
 

@@ -4,8 +4,9 @@ from __future__ import annotations
 
 import pytest
 from PyQt6 import sip
-from PyQt6.QtGui import QColor
+from PyQt6.QtGui import QColor, QPalette
 from PyQt6.QtWidgets import QWidget
+from PyQt6ElaWidgetTools import ElaThemeType, eTheme
 
 from pyqt6_ela_pro._ownership import ElaWidgetOwnershipType
 from pyqt6_ela_pro.ela_side_drawer import (
@@ -14,6 +15,7 @@ from pyqt6_ela_pro.ela_side_drawer import (
     ElaDrawerDim,
     ElaDrawer,
 )
+from pyqt6_ela_pro.widget_base import ElaThemeWidget
 
 
 @pytest.fixture
@@ -67,7 +69,9 @@ class TestElaDrawerPanel:
         assert getattr(panel, attr) == expected
 
     def test_initialization_with_custom_values(self, make):
-        panel = make(ElaDrawerPanel, position=ElaDrawerPositionType.Left, corner_radius=8)
+        panel = make(
+            ElaDrawerPanel, position=ElaDrawerPositionType.Left, corner_radius=8
+        )
         assert panel._corner_radius == 8
         assert panel._position == ElaDrawerPositionType.Left
 
@@ -118,7 +122,10 @@ class TestElaDrawer:
 
     def test_initialization_with_custom_values(self, make, parent):
         drawer = make(
-            ElaDrawer, position=ElaDrawerPositionType.Left, drawer_size=400, parent=parent
+            ElaDrawer,
+            position=ElaDrawerPositionType.Left,
+            drawer_size=400,
+            parent=parent,
         )
         assert drawer._position == ElaDrawerPositionType.Left
         assert drawer._drawer_size == 400
@@ -200,9 +207,84 @@ class TestElaDrawer:
         drawer.setCloseOnDimClicked(False)
         assert drawer._close_on_dim_clicked is False
 
+    def test_mask_enabled_default(self, drawer):
+        assert drawer.maskEnabled() is True
+
+    def test_set_mask_enabled(self, drawer):
+        assert drawer.setMaskEnabled(False) is drawer
+        assert drawer.maskEnabled() is False
+        drawer.setMaskEnabled(True)
+        assert drawer.maskEnabled() is True
+
+    def test_show_without_mask(self, make, parent, qapp):
+        """无遮罩：dim 不显示、右侧命中区非空、关闭后清 mask。"""
+        drawer = make(
+            ElaDrawer,
+            position=ElaDrawerPositionType.Right,
+            drawer_size=360,
+            parent=parent,
+        )
+        drawer.setMaskEnabled(False)
+        drawer.setAnimationDuration(0)
+        drawer.setContentWidget(make(QWidget))
+        parent.resize(800, 600)
+        drawer.showDrawer()
+        qapp.processEvents()
+        assert drawer.isOpened() is True
+        assert drawer._dim_widget.isHidden() is True
+        region = drawer.mask()
+        assert not region.isEmpty()
+        assert region.contains(drawer.rect().topRight()) is True
+        assert region.contains(drawer.rect().topLeft()) is False
+
+        drawer.closeDrawer()
+        qapp.processEvents()
+        assert drawer.isOpened() is False
+        assert drawer.mask().isEmpty()
+
+    def test_toggle_mask_while_open(self, make, parent, qapp):
+        drawer = make(ElaDrawer, drawer_size=360, parent=parent)
+        drawer.setAnimationDuration(0)
+        drawer.setContentWidget(make(QWidget))
+        parent.resize(800, 600)
+        drawer.showDrawer()
+        qapp.processEvents()
+        assert drawer._dim_widget.isHidden() is False
+        assert drawer.mask().isEmpty()
+
+        drawer.setMaskEnabled(False)
+        assert drawer._dim_widget.isHidden() is True
+        assert not drawer.mask().isEmpty()
+
+        drawer.setMaskEnabled(True)
+        assert drawer._dim_widget.isHidden() is False
+        assert drawer.mask().isEmpty()
+
     def test_set_animation_duration(self, drawer):
         drawer.setAnimationDuration(500)
         assert drawer._animation_duration == 500
+
+    @pytest.mark.parametrize(
+        "mode",
+        [ElaThemeType.ThemeMode.Light, ElaThemeType.ThemeMode.Dark],
+        ids=["light", "dark"],
+    )
+    def test_panel_surface_matches_content_base_surface(self, make, parent, mode):
+        """抽屉表面必须等于 ``ElaThemeWidget`` 的内容基面。
+
+        ``QScrollArea.setWidget()`` 会强制内容 ``autoFillBackground(True)``；
+        两者不一致时（``DialogBase`` vs ``BasicPress``）暗色下会露出一块浅色板。
+        """
+        previous = eTheme.getThemeMode()
+        try:
+            eTheme.setThemeMode(mode)
+            content = make(ElaThemeWidget)
+            drawer = make(ElaDrawer, parent=parent)
+            assert drawer._drawer_widget._bg_color == content.palette().color(
+                QPalette.ColorRole.Window
+            )
+        finally:
+            eTheme.setThemeMode(previous)
 
     def test_delete_later_disconnects_theme_signal(self, drawer):
         """析构要断开主题信号。"""

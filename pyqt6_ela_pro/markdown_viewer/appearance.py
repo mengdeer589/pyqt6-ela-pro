@@ -45,7 +45,7 @@ _DEBUG_LAYOUT = os.environ.get("ELACHAT_DEBUG_LAYOUT", "").strip().lower() not i
     "off",
 )
 
-_SERIF_CJK_FONTS = ("SimSun", "NSimSun")
+_SERIF_CJK_FONTS = ("SimSun", "NSimSun", "宋体", "新宋体")
 _SERIF_LATIN_FONTS = ("Georgia", "Cambria", "Times New Roman")
 _BODY_FONT_CACHE: dict = {}
 

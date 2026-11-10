@@ -57,6 +57,9 @@ class _MarkdownStreamMixin:
         # 否则重绘或布局刷新会访问已删除的 C++ 对象（PyQt 静默 abort）
         self._rebuild_code_buttons([])
         self._reset_image_scan()
+        adapter = getattr(self, "_document_tooltip_adapter", None)
+        if adapter is not None:
+            adapter.hide()
         self._text_browser.document().clear()
         self._caret_visible = True
         # 持续动效：Reduced/Disabled 下不闪，但**光标必须留在可见态** ——
@@ -140,7 +143,7 @@ class _MarkdownStreamMixin:
         return window is not self and window.isVisible()
 
     def _finish_pending_render(self) -> None:
-        """把在途分块渲染 / 懒渲染一口气做完（读取与导出前调用）。"""
+        """把在途分块渲染 / 流式刷新 / 懒渲染一口气做完（读取与导出前调用）。"""
         if self._large_render_chunks:
             # 分块期间文档已被清空，_render() 读到的旧值是 0：先存下分块
             # 路径捕获的状态，渲染完再按同一策略落点（同内容重渲保留位置）。
@@ -153,6 +156,20 @@ class _MarkdownStreamMixin:
         if self._needs_render and self._source:
             self._needs_render = False
             self._render()
+            return
+        # 流式定时器还压着最新分片：不补这一步，导出 / 读取只会拿到上次
+        # flush 的内容（流式长回答导出表现为大段空白）。
+        if (
+            self._stream_active
+            and self._stream_source
+            and not is_deleted(self._stream_timer)
+            and self._stream_timer.isActive()
+        ):
+            self._stream_timer.stop()
+            try:
+                self._flush_stream()
+            except Exception:
+                self._render()
 
     def isStreaming(self) -> bool:
         """当前是否处于流式模式。"""
@@ -243,6 +260,9 @@ class _MarkdownStreamMixin:
         # 文档上，``markdownSelection()`` 会返回**别的段落**的内容。
         self._block_source_map = None
         self._reset_image_scan()
+        adapter = getattr(self, "_document_tooltip_adapter", None)
+        if adapter is not None:
+            adapter.hide()
         self._text_browser.document().clear()
         self._large_render_timer.start(0)
 

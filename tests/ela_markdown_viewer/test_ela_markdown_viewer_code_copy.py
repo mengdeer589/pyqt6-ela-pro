@@ -16,6 +16,7 @@ from pyqt6_ela_pro.ela_markdown_viewer import (
     _CODE_LANG_PROPERTY,
     ElaMarkdownViewer,
 )
+from pyqt6_ela_pro.tooltips import _tooltip_dict
 
 
 def _tables(viewer: ElaMarkdownViewer) -> list:
@@ -86,7 +87,7 @@ class TestCodeCard:
             if v._code_buttons:
                 break
         assert v._code_buttons
-        assert "python" in v._code_buttons[0].toolTip()
+        assert "python" in _tooltip_dict[v._code_buttons[0]]._text
         v.deleteLater()
 
 

@@ -2,9 +2,15 @@
 
 from __future__ import annotations
 
-from PyQt6.QtCore import QRect, Qt
+import pytest
+from PyQt6.QtCore import QAbstractAnimation, QRect, Qt
 
-from pyqt6_ela_pro.notify_popup import ElaNotifyManager, ElaNotifyPopup
+from pyqt6_ela_pro import ElaSeverity
+from pyqt6_ela_pro.notify_popup import (
+    ElaNotifyManager,
+    ElaNotifyPopup,
+    show_notify,
+)
 
 
 class TestElaNotifyPopup:
@@ -17,6 +23,7 @@ class TestElaNotifyPopup:
         assert popup._title == "Test"
         assert popup._content == "Content"
         assert popup._timeout == 5000
+        assert popup.severity() == ElaSeverity.Info
 
         popup.deleteLater()
 
@@ -79,6 +86,123 @@ class TestElaNotifyPopup:
         popup.deleteLater()
 
 
+class TestElaNotifySeverity:
+    """等级归一化与非法值。"""
+
+    def test_set_severity_from_enum(self):
+        popup = ElaNotifyPopup()
+        popup.setSeverity(ElaSeverity.Error)
+        assert popup.severity() == ElaSeverity.Error
+        popup.deleteLater()
+
+    @pytest.mark.parametrize(
+        "text,expected",
+        [
+            ("info", ElaSeverity.Info),
+            ("SUCCESS", ElaSeverity.Success),
+            (" Warning ", ElaSeverity.Warning),
+            ("error", ElaSeverity.Error),
+        ],
+    )
+    def test_set_severity_from_string(self, text, expected):
+        popup = ElaNotifyPopup()
+        popup.setSeverity(text)
+        assert popup.severity() == expected
+        popup.deleteLater()
+
+    def test_invalid_severity_raises(self):
+        popup = ElaNotifyPopup()
+        with pytest.raises(ValueError):
+            popup.setSeverity("fatal")
+        popup.deleteLater()
+
+    def test_show_notification_accepts_severity(self):
+        popup = ElaNotifyPopup(timeout=0)
+        popup.showNotification(title="t", content="c", severity=ElaSeverity.Warning)
+        assert popup.severity() == ElaSeverity.Warning
+        popup._close_animation()
+        popup.deleteLater()
+
+
+class TestElaNotifyLayout:
+    """高度自适应与堆叠间距。"""
+
+    def test_height_grows_with_long_content(self):
+        short = ElaNotifyPopup(title="t", content="短", timeout=0)
+        long = ElaNotifyPopup(title="t", content="很长的一段通知文字。" * 20, timeout=0)
+        try:
+            assert long.height() > short.height()
+        finally:
+            short.deleteLater()
+            long.deleteLater()
+
+    def test_stack_gap_excludes_shadow_margin(self, qapp, monkeypatch):
+        manager = ElaNotifyManager()
+        manager._popups.clear()
+        monkeypatch.setattr(
+            ElaNotifyPopup,
+            "_get_screen_geometry",
+            staticmethod(lambda: QRect(0, 0, 1920, 1080)),
+        )
+
+        manager.showNotification(title="a", content="b", timeout=0)
+        manager.showNotification(title="c", content="d", timeout=0)
+        first, second = manager._popups
+        try:
+            expected = first.height() - 2 * first._shadow_margin + 10
+            assert first._end_pos.y() - second._end_pos.y() == expected
+        finally:
+            for popup in (first, second):
+                popup._close_animation()
+                popup.deleteLater()
+            manager._popups.clear()
+
+    def test_progress_runs_for_timeout(self):
+        popup = ElaNotifyPopup(timeout=1000)
+        popup.showNotification()
+        try:
+            assert popup._progress_anim.duration() == 1000
+            assert popup._progress_anim.startValue() == 1.0
+            assert popup._progress_anim.endValue() == 0.0
+            assert popup._progress_anim.state() == QAbstractAnimation.State.Running
+            popup._progress_anim.setCurrentTime(500)
+            assert popup._progress == pytest.approx(0.5, abs=0.01)
+        finally:
+            popup._close_animation()
+            popup.deleteLater()
+
+    def test_no_progress_when_timeout_zero(self):
+        popup = ElaNotifyPopup(timeout=0)
+        popup.showNotification()
+        try:
+            assert popup._progress == -1.0
+        finally:
+            popup._close_animation()
+            popup.deleteLater()
+
+    def test_reflow_moves_remaining_popup_down(self, qapp, monkeypatch):
+        manager = ElaNotifyManager()
+        manager._popups.clear()
+        monkeypatch.setattr(
+            ElaNotifyPopup,
+            "_get_screen_geometry",
+            staticmethod(lambda: QRect(0, 0, 1920, 1080)),
+        )
+
+        manager.showNotification(title="a", content="b", timeout=0)
+        manager.showNotification(title="c", content="d", timeout=0)
+        first, second = manager._popups
+        old_y = second._end_pos.y()
+
+        manager._onPopupClosed(first)
+        try:
+            assert second._end_pos.y() > old_y
+        finally:
+            second._close_animation()
+            second.deleteLater()
+            manager._popups.clear()
+
+
 class TestElaNotifyManager:
     """Test cases for ElaNotifyManager singleton."""
 
@@ -101,6 +225,28 @@ class TestElaNotifyManager:
         assert isinstance(popup, ElaNotifyPopup)
 
         popup.deleteLater()
+
+    def test_manager_passes_severity(self):
+        manager = ElaNotifyManager()
+        manager._popups.clear()
+
+        manager.showNotification(
+            title="Test", content="Message", timeout=100, severity=ElaSeverity.Error
+        )
+
+        assert manager._popups[0].severity() == ElaSeverity.Error
+
+        manager._popups[0].deleteLater()
+
+    def test_show_notify_passes_severity(self):
+        manager = ElaNotifyManager()
+        manager._popups.clear()
+
+        show_notify(title="Test", content="Message", timeout=100, severity="success")
+
+        assert manager._popups[0].severity() == ElaSeverity.Success
+
+        manager._popups[0].deleteLater()
 
     def test_ela_notify_manager_removes_closed_popup(self):
         """Test _onPopupClosed removes popup from list."""

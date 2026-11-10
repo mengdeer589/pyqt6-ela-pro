@@ -24,6 +24,7 @@ from PyQt6ElaWidgetTools import (
 
 from ..._styles import ColorText
 from ..._theme import ElaStatusRoleType, statusColor
+from ...tooltips import ElaToolTipPositionType, remove_tooltip, set_tooltip
 from .._theme import (
     blend,
     muted_color,
@@ -40,12 +41,21 @@ from ..renderers import (
 )
 from ._helpers import (
     _elide_source,
+    formatDuration,
     toolArgumentPairs,
     toolDefaultOpen,
-    toolIconName,
+    toolIconFor,
+    toolKindOf,
     toolSubtitleParts,
 )
 from .collapsible import _CollapsibleBlock
+
+#: 工具卡 / 分组摘要的提示框最大宽度（长命令 / 参数折行，不拉成超宽单行）
+TOOLTIP_MAX_WIDTH: int = 560
+#: 小于这个宽度不绑提示：批量恢复 / 初始布局的 100px 占位宽度会反复建提示框
+TOOLTIP_MIN_WIDTH: int = 200
+#: 提示框里参数全文的上限（写文件类的 content 可能几十 KB）
+TOOLTIP_MAX_CHARS: int = 1200
 
 
 class ToolCallCard(_CollapsibleBlock):
@@ -80,6 +90,8 @@ class ToolCallCard(_CollapsibleBlock):
         self._args_label: Optional[ElaText] = None
         self._result_caption: Optional[ElaText] = None
         self._result_label: Optional[ElaText] = None
+        self._duration_caption: Optional[ElaText] = None
+        self._duration_label: Optional[ColorText] = None
         #: 所属消息 id（供渲染器上下文用，0 表示独立使用本卡）
         self._message_id = 0
         #: 宿主注册的渲染器（``None`` = 未注册，走默认纯文本 body）
@@ -88,7 +100,9 @@ class ToolCallCard(_CollapsibleBlock):
         self._renderer_widget = None
         self._renderer_body_holder: Optional[QWidget] = None
 
-        self._icon = ElaIconButton(toolIconName(call.name), 14, 18, 18, self)
+        self._icon = ElaIconButton(
+            toolIconFor(call.name, toolKindOf(call)), 14, 18, 18, self
+        )
         self._icon.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
         self._icon.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self._icon.setBorderRadius(4)
@@ -115,11 +129,14 @@ class ToolCallCard(_CollapsibleBlock):
         self._title_label.setMinimumWidth(0)
         self._title_text = f"工具调用：{call.name}"
         self._subtitle_text = ""
+        self._subtitle_key = ""
         self._args_text = ""
         #: ``(cap, len, hash, font)`` → 省略结果；resize / 主题切换会反复问
         self._elide_cache: dict = {}
         #: 上一次的失败态：``_apply_theme`` 只在它变化时跑（每次分片都刷字体在 Win7 上很贵）。
         self._error_state = None
+        #: 当前绑定的 header tooltip 文本（空串 = 未绑定）
+        self._header_tooltip_text = ""
         insert_at = self.headerLayout().count() - 1
         self.insertHeaderWidget(insert_at, self._subtitle_label)
         self.insertHeaderWidget(insert_at + 1, self._args_label)
@@ -131,6 +148,7 @@ class ToolCallCard(_CollapsibleBlock):
         super().showEvent(event)
         if self.isOpened() and not self._body_built:
             self._build_body()
+        self._elide_header_texts()
 
     def toolCall(self, callId: Optional[str] = None) -> ElaChatToolCall:
         """获取当前工具调用快照（``callId`` 供容器统一路由，卡内忽略）。"""
@@ -164,10 +182,12 @@ class ToolCallCard(_CollapsibleBlock):
         """获取调用参数文本。"""
         return self._call.arguments
 
-    def setResult(self, result: str, ok: bool = True) -> None:
+    def setResult(self, result: str, ok: bool = True, durationMs: float = 0.0) -> None:
         """设置调用结果与状态（``ok=False`` 标记失败）。"""
         status = ElaChatToolStatusType.Done if ok else ElaChatToolStatusType.Error
         self._call = self._call.withResult(result, status)
+        if durationMs:
+            self._call = self._call.withTiming(self._call.started_at, durationMs)
         self._sync_header()
         if status == ElaChatToolStatusType.Error:
             self.setOpened(True)
@@ -178,9 +198,11 @@ class ToolCallCard(_CollapsibleBlock):
         """获取调用结果文本。"""
         return self._call.result
 
-    def setStatus(self, status: str) -> None:
+    def setStatus(self, status: str, durationMs: float = 0.0) -> None:
         """设置调用状态（见 :class:`ElaChatToolStatusType`）。"""
         self._call = self._call.withStatus(status)
+        if durationMs:
+            self._call = self._call.withTiming(self._call.started_at, durationMs)
         self._sync_header()
         # 状态变化也要通知渲染器，否则展开状态下「运行中 -> 完成」会永远停在运行态。
         if self._body_built:
@@ -195,9 +217,15 @@ class ToolCallCard(_CollapsibleBlock):
         self._allow_open_while_pending = bool(on)
         self._sync_header()
 
-    def updateResult(self, callId: str, result: str, ok: bool = True) -> None:
+    def updateResult(
+        self,
+        callId: str,
+        result: str,
+        ok: bool = True,
+        durationMs: float = 0.0,
+    ) -> None:
         """统一结果更新入口（``callId`` 由容器路由，卡内忽略）。"""
-        self.setResult(result, ok=ok)
+        self.setResult(result, ok=ok, durationMs=durationMs)
 
     def _on_toggled(self, checked: bool) -> None:
         if not checked or not self._expandable:
@@ -220,7 +248,9 @@ class ToolCallCard(_CollapsibleBlock):
         self._args_value = ColorText(self)
         self._result_caption = ColorText("结果", self)
         self._result_value = ColorText(self)
-        for label in (self._args_value, self._result_value):
+        self._duration_caption = ColorText("耗时", self)
+        self._duration_label = ColorText(self)
+        for label in (self._args_value, self._result_value, self._duration_label):
             label.setTextFormat(Qt.TextFormat.PlainText)
             label.setWordWrap(True)
             label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
@@ -228,6 +258,8 @@ class ToolCallCard(_CollapsibleBlock):
         self.bodyLayout().addWidget(self._args_value)
         self.bodyLayout().addWidget(self._result_caption)
         self.bodyLayout().addWidget(self._result_value)
+        self.bodyLayout().addWidget(self._duration_caption)
+        self.bodyLayout().addWidget(self._duration_label)
         self._sync_body()
         self._apply_theme()
         self.updateGeometry()
@@ -247,6 +279,11 @@ class ToolCallCard(_CollapsibleBlock):
             isError=call.status == ElaChatToolStatusType.Error,
             allowOpenWhilePending=self._allow_open_while_pending,
             metadata=dict(call.metadata or {}),
+            kind=toolKindOf(call),
+            title=call.title or "",
+            locations=tuple(call.locations or ()),
+            parentId=call.parent_id or "",
+            durationMs=call.duration_ms or 0.0,
         )
 
     def _build_renderer_body(self) -> bool:
@@ -304,6 +341,12 @@ class ToolCallCard(_CollapsibleBlock):
         self._result_value.setText(self._call.result or "—")
         self._args_caption.setVisible(bool(self._call.arguments))
         self._args_value.setVisible(bool(self._call.arguments))
+        duration = formatDuration(self._call.duration_ms)
+        if self._duration_caption is not None:
+            self._duration_caption.setVisible(bool(duration))
+        if self._duration_label is not None:
+            self._duration_label.setText(duration or "")
+            self._duration_label.setVisible(bool(duration))
 
     def _sync_header(self) -> None:
         call = self._call
@@ -311,8 +354,8 @@ class ToolCallCard(_CollapsibleBlock):
             ElaChatToolStatusType.Pending,
             ElaChatToolStatusType.Running,
         )
-        self._icon.setAwesome(toolIconName(call.name))
-        self._title_text = f"工具调用：{call.name}"
+        self._icon.setAwesome(toolIconFor(call.name, toolKindOf(call)))
+        self._title_text = call.title or f"工具调用：{call.name}"
         self.setTitle(self._title_text)
         # 宿主注册了 subtitle 就用它，否则走通用键名启发式；键传给 toolArgumentPairs 去重。
         _subtitle_key, self._subtitle_text = toolRendererSubtitle(
@@ -320,6 +363,7 @@ class ToolCallCard(_CollapsibleBlock):
         )
         if not self._subtitle_text:
             _subtitle_key, self._subtitle_text = toolSubtitleParts(call.arguments)
+        self._subtitle_key = _subtitle_key
         self._subtitle_label.setVisible(bool(self._subtitle_text))
         self._args_text = "  ".join(
             toolArgumentPairs(call.arguments, excludeKey=_subtitle_key)
@@ -346,6 +390,11 @@ class ToolCallCard(_CollapsibleBlock):
         title_cap = int(avail * 0.52)
         subtitle_cap = int(avail * 0.20)
         args_cap = max(60, avail - title_cap - subtitle_cap)
+        truncated = False
+        running = self._call.status in (
+            ElaChatToolStatusType.Pending,
+            ElaChatToolStatusType.Running,
+        )
         for label, text, cap in (
             (self._title_label, self._title_text, title_cap),
             (self._subtitle_label, self._subtitle_text, subtitle_cap),
@@ -365,8 +414,52 @@ class ToolCallCard(_CollapsibleBlock):
                 if len(self._elide_cache) >= 12:
                     self._elide_cache.clear()
                 self._elide_cache[key] = elided
+            # 运行中的参数摘要是隐藏的，别让它的截断状态单独触发一个
+            # 只重复标题 / 副标题的提示框。
+            if not (running and label is self._args_label):
+                truncated = truncated or elided != source or len(source) < len(text)
             if label.text() != elided:
                 label.setText(elided)
+        self._sync_header_tooltip(truncated)
+
+    def _sync_header_tooltip(self, truncated: bool) -> None:
+        """标题 / 副标题 / 参数被省略时，给可接收悬停的 header 绑库内提示。"""
+        if not truncated or self.width() < TOOLTIP_MIN_WIDTH:
+            text = ""
+        else:
+            lines = [self._title_text, self._subtitle_text]
+            # 运行中的参数是半截 JSON，显示出来会误导；与可见摘要同一口径。
+            if self._call.status not in (
+                ElaChatToolStatusType.Pending,
+                ElaChatToolStatusType.Running,
+            ):
+                args = "  ".join(
+                    toolArgumentPairs(
+                        self._call.arguments,
+                        limit=8,
+                        excludeKey=self._subtitle_key,
+                        value_limit=0,
+                    )
+                )
+                if len(args) > TOOLTIP_MAX_CHARS:
+                    args = args[: TOOLTIP_MAX_CHARS - 1] + "…"
+                lines.append(args)
+            text = "\n".join(line for line in lines if line)
+            if len(text) > TOOLTIP_MAX_CHARS:
+                text = text[: TOOLTIP_MAX_CHARS - 1] + "…"
+        if text == self._header_tooltip_text:
+            return
+        self._header_tooltip_text = text
+        if text:
+            set_tooltip(
+                self._header,
+                text,
+                ElaToolTipPositionType.Top,
+                maxWidth=TOOLTIP_MAX_WIDTH,
+                wordWrap=True,
+            )
+        else:
+            remove_tooltip(self._header)
 
     def resizeEvent(self, event) -> None:  # noqa: N802 (Qt 命名)
         super().resizeEvent(event)
@@ -392,6 +485,7 @@ class ToolCallCard(_CollapsibleBlock):
         for caption in (
             getattr(self, "_args_caption", None),
             getattr(self, "_result_caption", None),
+            getattr(self, "_duration_caption", None),
         ):
             if caption is not None:
                 caption.setTextColor(muted_color(mode, 0.5))
@@ -399,6 +493,7 @@ class ToolCallCard(_CollapsibleBlock):
         for value in (
             getattr(self, "_args_value", None),
             getattr(self, "_result_value", None),
+            getattr(self, "_duration_label", None),
         ):
             if value is not None:
                 value.setTextColor(muted_color(mode, 0.75))
@@ -409,7 +504,7 @@ class ToolCallCard(_CollapsibleBlock):
             self._icon.setDarkIconColor(danger)
         else:
             # Error -> Done 的重复上报要把图标字形与颜色一起还原，否则成功后图标还是红的。
-            self._icon.setAwesome(toolIconName(self._call.name))
+            self._icon.setAwesome(toolIconFor(self._call.name, toolKindOf(self._call)))
             self._icon.setLightIconColor(self._default_icon_light)
             self._icon.setDarkIconColor(self._default_icon_dark)
         self.update()
@@ -435,6 +530,8 @@ class ContextToolGroupCard(_CollapsibleBlock):
         super().__init__(title="正在探索", opened=defaultOpen, parent=parent)
         self._calls: list[ElaChatToolCall] = []
         self._call_rows: dict = {}
+        self._row_full_text: dict = {}
+        self._row_tooltip_text: dict = {}
         self._counts = {"read": 0, "glob": 0, "grep": 0, "list": 0}
         self._rows_container = QWidget(self)
         self._rows_layout = QVBoxLayout(self._rows_container)
@@ -471,12 +568,20 @@ class ContextToolGroupCard(_CollapsibleBlock):
                 return call
         return None
 
-    def updateResult(self, callId: str, result: str, ok: bool = True) -> None:
+    def updateResult(
+        self,
+        callId: str,
+        result: str,
+        ok: bool = True,
+        durationMs: float = 0.0,
+    ) -> None:
         """按 id 更新某个工具调用的结果与状态。"""
         status = ElaChatToolStatusType.Done if ok else ElaChatToolStatusType.Error
         for index, call in enumerate(self._calls):
             if call.id == callId:
                 updated = call.withResult(result, status)
+                if durationMs:
+                    updated = updated.withTiming(call.started_at, durationMs)
                 self._calls[index] = updated
                 self._sync_row(updated)
                 self._sync_header()
@@ -501,7 +606,9 @@ class ContextToolGroupCard(_CollapsibleBlock):
         if not subtitle:
             subtitle_key, subtitle = toolSubtitleParts(call.arguments)
         pairs = "  ".join(
-            toolArgumentPairs(call.arguments, limit=2, excludeKey=subtitle_key)
+            toolArgumentPairs(
+                call.arguments, limit=2, excludeKey=subtitle_key, value_limit=0
+            )
         )
         text = f"{call.name}  {subtitle}"
         if pairs:
@@ -510,9 +617,46 @@ class ContextToolGroupCard(_CollapsibleBlock):
             text += "  · 失败"
         elif call.status == ElaChatToolStatusType.Aborted:
             text += "  · 已中止"
-        if len(text) > 72:
-            text = text[:71] + "…"
-        row.setText(text)
+        duration = formatDuration(call.duration_ms)
+        if duration:
+            text += f"  · {duration}"
+        display = text
+        if len(display) > 72:
+            display = display[:71] + "…"
+        row.setText(display)
+        tip_text = text
+        if len(tip_text) > TOOLTIP_MAX_CHARS:
+            tip_text = tip_text[: TOOLTIP_MAX_CHARS - 1] + "…"
+        self._row_full_text[call.id] = tip_text if display != text else ""
+        self._sync_row_tooltip(call.id)
+
+    def _sync_row_tooltip(self, callId: str) -> None:
+        row = self._call_rows.get(callId)
+        if row is None:
+            return
+        text = self._row_full_text.get(callId, "")
+        # 初始布局宽度是 100px 占位：此时每行都“被截断”，批量恢复会反复建
+        # 提示框并干扰虚拟列表的布局时序。真正布局完成（resize）后再绑。
+        if self.width() < TOOLTIP_MIN_WIDTH:
+            text = ""
+        if self._row_tooltip_text.get(callId, "") == text:
+            return
+        self._row_tooltip_text[callId] = text
+        if text:
+            set_tooltip(
+                row,
+                text,
+                ElaToolTipPositionType.Top,
+                maxWidth=TOOLTIP_MAX_WIDTH,
+                wordWrap=True,
+            )
+        else:
+            remove_tooltip(row)
+
+    def resizeEvent(self, event) -> None:  # noqa: N802 (Qt 命名)
+        super().resizeEvent(event)
+        for callId in list(getattr(self, "_row_full_text", ())):
+            self._sync_row_tooltip(callId)
 
     def finish(self) -> None:
         """全部完成（标题切「已探索」，隐藏忙碌环）。"""
@@ -581,6 +725,7 @@ class ToolGroupPanel(_CollapsibleBlock):
         self._summary = ""
         self._summary_key = None
         self._title_key = None
+        self._tooltip_text = ""
         self._body_container = QWidget(self)
         self._tool_layout = QVBoxLayout(self._body_container)
         self._tool_layout.setContentsMargins(0, 0, 0, 0)
@@ -664,9 +809,26 @@ class ToolGroupPanel(_CollapsibleBlock):
             tip = summary if elided != summary else ""
         if self._title_label.text() != text:
             self._title_label.setText(text)
-        if self._title_label.toolTip() != tip:
-            self._title_label.setToolTip(tip)
+        self._sync_tooltip(tip)
         self.setBusy(running)
+
+    def _sync_tooltip(self, text: str) -> None:
+        """摘要被省略时用库内提示显示全文（原位更新，不重建提示框）。"""
+        if self.width() < TOOLTIP_MIN_WIDTH:
+            text = ""
+        if text == getattr(self, "_tooltip_text", None):
+            return
+        self._tooltip_text = text
+        if text:
+            set_tooltip(
+                self._header,
+                text,
+                ElaToolTipPositionType.Top,
+                maxWidth=TOOLTIP_MAX_WIDTH,
+                wordWrap=True,
+            )
+        else:
+            remove_tooltip(self._header)
 
     def resizeEvent(self, event) -> None:  # noqa: N802 (Qt 命名)
         super().resizeEvent(event)

@@ -468,6 +468,10 @@ class ChatGuidePage(ExamplePage):
 | `ElaChatAsyncWorker` | 真实异步后端基类：QThread + asyncio + 命令队列 + 取消收尾 |
 | `ElaChatMockBackend` | 假后端（QTimer），无模型服务即可跑通全链路 |
 | `ElaChatStatusBar` | 可选宿主状态栏（info / busy / success / error 四档） |
+| `ElaChatPlan` / `PlanPanel` | 计划 / 待办：`setPlan` 写入 `Plan` 分段，折叠显示当前项 + 进度 |
+| `SubagentCard` | 子代理父卡：`parentId` 嵌套子工具，头部显示任务 / 状态 / 统计 |
+| `TurnChangesRow` | 回合文件变更汇总：从 `metadata.files` 派生，展开看合并 diff |
+| `ElaChatTracePanel` | 独立运行轨迹：turn → step → tool 树 + 耗时条 / 词元 / 成本 |
 
 **worker 是鸭子类型**：任意对象只要满足下面的信号与方法，就能直接交给
 binder 和窗口（本页示例里 `worker` 就是这个角色）。
@@ -614,7 +618,9 @@ binder 和窗口（本页示例里 `worker` 就是这个角色）。
 | `setVirtualPartsEnabled(on)` | 关闭时下一次导入立即建全部工具卡 / 思考块（小会话或逐控件断言测试用）；已延迟的消息会当场物化 |
 | `setShellVirtualizationEnabled(on, minMessages=None)` | 批量恢复 ≥ 80 条时默认连气泡壳一起延迟；关闭后立即建壳。未物化消息的 `bubble(id)` 返回 `None`，`message(id)` / `messages()` / 导出仍是完整数据 |
 | `setVirtualListEnabled(on, minMessages=None)` | 批量 ≥ 200 条时默认改用 spacer 虚拟列表（只保留视口附近气泡，不逐条建占位）；关闭后当场物化全部消息 |
-| `addToolCall(messageId, name, args, toolCallId, metadata=...)` | 追加工具调用（上下文工具自动归组）；`metadata` 进渲染器上下文（文件变更 / shell 状态等） |
+| `addToolCall(messageId, name, args, toolCallId, *, metadata=None, kind="", title="", locations=None, parentId="")` | 追加工具调用（上下文工具自动归组）。`kind` 是 ACP 对齐的工具类别（空值按名字推导）；`locations` 是 `ElaChatToolLocation` 列表；`parentId` 把子代理子调用挂到父工具；`metadata` 进渲染器上下文（文件变更 / shell 状态等） |
+| `setPlan(messageId, plan, *, partId=None)` / `plan(messageId)` / `planPart(messageId)` / `clearPlan(messageId)` | 计划 / 待办卡：接受 `ElaChatPlan` / dict / list / Markdown；默认复用最后一张计划卡，反复 `todowrite` 不会堆卡 |
+| `turnChanges(messageId)` / `setChangeSummaryEnabled(on)` / `changeSummaryEnabled()` | 回合文件变更汇总（读 `metadata.files`，参数兜底）；开关只影响展示，数据不落库 |
 | `setTimelineDetail(detail)` / `setPartExpanded(partId, opened)` | 时间线密度 / 逐分段披露 |
 | `addNotice(messageId, noticeType, text, detail)` | 追加时间线通知 |
 | `setActivity(text)` | 底部运行态活动行 |
@@ -629,7 +635,7 @@ binder 和窗口（本页示例里 `worker` 就是这个角色）。
 | `setWaitingPlaceholderEnabled(on)` | 等待首个 token（TTFT）期间是否在助手气泡内显示 `ElaShimmer` 骨架（默认开启，立即对已有消息生效）。骨架不是 part：不进 `parts` / 导出 / journal；收到首个正文 / 思考 / 工具 / 审批 / 统计即隐藏。应用偏好，不进 `exportSession` |
 | `setUserAvatar(source)` / `setAssistantAvatar(source)` / `setAvatarShape(shape)` | 头像自定义：SVG / 路径 / `QPixmap` / `QImage` / `QIcon` / `bytes` 等（含已存在与后续消息）；形状 `"circle"`（默认）/ `"rounded"`（**带圆角的矩形**）/ `"square"`，非法值回落圆形 |
 | `setToolDefaultOpen(policy)` | 注入工具卡展开策略（`policy(name, args, ok) -> bool`），只影响**之后新建**的卡片 |
-| `registerToolRenderer(name, factory, *, subtitle, groupable, replace=False)` | **工具结果富渲染**（模块级函数）：`factory(ToolRenderContext) -> QWidget` 只替换卡片**内容区**，头部 / 折叠 / 错误竖线 / 忙碌环 / 展开策略仍由 `ToolCallCard` 负责。可选实现 `updateToolResult(result, status)` 收推送。`subtitle(args) -> (键, 值)` 的键自动从参数摘要排除。`replace=False` 时注册同名渲染器直接报错（防静默覆盖）。库内不内置任何渲染器 |
+| `registerToolRenderer(name, factory, *, subtitle, groupable, replace=False)` | **工具结果富渲染**（模块级函数）：`factory(ToolRenderContext) -> QWidget` 只替换卡片**内容区**，头部 / 折叠 / 错误竖线 / 忙碌环 / 展开策略仍由 `ToolCallCard` 负责。可选实现 `updateToolResult(result, status)` 收推送。`subtitle(args) -> (键, 值)` 的键自动从参数摘要排除。`replace=False` 时注册同名渲染器直接报错（防静默覆盖）。**可选内置**：`installBuiltinToolRenderers()` 覆盖 shell / edit / read / list / search / fetch / mcp / todo，仍以宿主同名实现优先 |
 | `beginPermission(messageId, request)` / `resolvePermission(messageId, requestId, reply, answer, feedback)` | 工具审批。**交互与记录分离**：等待回复时交互卡在**输入区上方的 `ElaChatPermissionDock`**（输入区照常可用，不顶替它），答完在时间线该 part 的**原位**留下一张**默认折叠**的 `PermissionRecord`（与「工具调用 (N)」同一套折叠交互）。**组件只画卡 + 发信号，不阻塞**（Qt 里挂起等用户点按钮会卡死事件循环）；「始终允许」的规则持久化归宿主。`request.questions` 非空 = **问答型逐题向导**（见下），为空 = 批准型三键（允许一次 / **始终允许 = 长按 700ms 才生效** / 拒绝…）。传入**已是落定态**的 request 时直接落成记录卡（重放后端历史用），不进 dock、不发 `permissionRequested` |
 | `pendingPermissions(messageId)` / `permissionCard(messageId, requestId)` / `interactivePermissionCard(messageId, requestId)` / `permissionAnswers(messageId, requestId)` | 读审批状态。`permissionCard` 只返回时间线上的**记录卡**（等待期间是 `None`），还在 dock 里等回复的交互卡用 `interactivePermissionCard`。`permissionAnswers` 给**未塌缩**的 `{key: [label, ...]}`，用于「答到一半还没提交」时看进度 |
 | `beginCompaction(messageId, reason)` / `appendCompactionSummary(...)` / `endCompaction(...)` | 上下文压缩在时间线上的表达。**库不实现压缩算法**，只负责「能表达 + 能持久化」 |
@@ -643,6 +649,51 @@ binder 和窗口（本页示例里 `worker` 就是这个角色）。
 | `messages()` / `message(id)` / `lastMessage()` | 读快照（读取时才结算派生字段） |
 | `sessionStats(contextWindow=0)` | 会话级用量汇总（`ElaChatSessionStats`）：计数 / 当前上下文四路词元与合计 / 使用率 / 累计成本 / 最后活动 / **工具调用统计**（`tool_calls` 次数、`tool_rounds` 轮数 = 有工具调用的步骤数、`tool_errors` / `tool_aborted` / `tool_unsettled` 状态分档、`tool_counts` 按名计数）/ `reasoning_ms` 思考耗时合计；口径对齐 opencode `getSessionContext`（最后一条有 tokens 的助手消息的最后一步）。**输入词元不含缓存命中**（OpenAI / DeepSeek 的 `prompt_tokens` 含缓存，binder / journal 落库前已扣掉；Anthropic 的 `input_tokens` 原样），四路互不重叠。`total_tokens` / `total_cost_usd` 可直接喂输入区圆环 |
 | `parts()` / `text()` / `reasoning()` | 纯读取；`part.text` 只含**已落定**内容，可直接序列化落库 |
+
+## Agent 可视化（计划 / 子代理 / 变更 / 轨迹）
+
+| 组件 / API | 说明 |
+|---|---|
+| `ElaChatToolKindType` / `ElaChatToolLocation` | 工具类别（ACP 对齐：read / edit / search / execute / fetch / switch_mode / subagent / other）与文件位置；`ElaChatToolCall` 还带 `kind` / `title` / `parent_id` / `started_at` / `duration_ms` |
+| `ElaChatPlan` / `ElaChatPlanItem` / `ElaChatPlanItemStatusType` | 计划 / 待办快照；`ElaChatPlan.fromMarkdown("- [x] …\n- [>] …")` 解析 checklist，`toDict/fromDict` 持久化 |
+| `PlanPanel` / `PlanListView` | 折叠计划卡 / 只读 checklist；`PlanListView` 也被 `todowrite` 内置渲染器复用 |
+| `SubagentCard` | 子代理父卡；子调用用 `parentId` 挂进来，子工具仍走 `ToolCallCard` / 渲染器注册表 |
+| `ElaChatTurnChanges` / `TurnChangesRow` | `metadata.files` 聚合后的回合变更；展开复用 `ElaChatFileChanges` |
+| `ElaChatTracePanel` / `ElaChatTraceRow` / `ElaChatTraceResult` | 独立轨迹面板 / 行快照 / 汇总；纯模型 `buildTraceRows(messages)` 不依赖 Qt |
+| `installBuiltinToolRenderers()` | 可选内置渲染器：shell / edit / read / list / search / fetch / mcp / todo；`uninstall…()` 摘掉 |
+
+```python
+# 计划：反复更新同一张卡
+view.setPlan(mid, ElaChatPlan.fromMarkdown(
+    "- [x] 读实现\n- [>] 改工具卡\n- [ ] 补测试"
+))
+
+# 子代理：父卡 + 子工具
+parent = view.addToolCall(mid, "delegate_task", '{"task": "查资料"}', "p1")
+view.addToolCall(mid, "read", '{"path": "a.py"}', "c1", parentId="p1")
+view.setToolCallResult(mid, "c1", "文件内容")
+view.setToolCallResult(mid, "p1", "结论")
+
+# 工具类别 / 跟随位置
+view.addToolCall(
+    mid, "read", '{"path": "a.py"}', "r1",
+    kind="read", locations=[ElaChatToolLocation("a.py", 12)],
+)
+
+# 回合变更汇总
+changes = view.turnChanges(mid)
+view.setChangeSummaryEnabled(True)
+
+# 运行轨迹（独立面板；窗口用 ElaDialogBase / ElaContentDialog，别用裸 QDialog）
+dialog = ElaDialogBase(title="运行轨迹", parent=self.window())
+panel = ElaChatTracePanel(view)
+panel.rowActivated.connect(view.scrollToMessage)
+dialog.setParamWidget(panel)
+dialog.show()
+```
+
+> 计划 / 子代理 / 变更汇总都随 `exportSession` / journal 走；变更汇总本身是派生数据，
+> 恢复时从工具 `metadata` 重新计算。轨迹面板不接聊天虚拟列表，适合放对话框或侧栏。
 
 ## 持久化与崩溃恢复
 
@@ -708,8 +759,9 @@ view.beginPermission(messageId, ElaChatPermission(
 - **多选发整个数组** —— `{"scope": ["tests/", "example/"]}`；
 - **未答题整条不进 payload** —— 不是空串、不是空数组（空数组会被模型读成
   「用户答了『一个都不选』」）；
-- **自定义答案与候选项互斥** —— 写了自定义答案，这道题就答它（多选时仍是单元素
-  数组），因为「选项 A 或我自己的话」没法同时成立。
+- **自定义答案与候选项：单选互斥、多选共存** —— 单选下写了自定义答案就答它
+  （「选项 A 或我自己的话」只能二选一）；多选下自定义只是数组里额外的一项，
+  勾选它不会取消已选的候选项。
 
 **交互**：标题行是「需要你回答 · 短标签」+ 右侧「N / M」+ 可点的进度段胶囊
 （仅多题时出现）；`1`–`9` 选中对应行、`Space` 切换、`↑↓←→` / `Home` / `End` 移

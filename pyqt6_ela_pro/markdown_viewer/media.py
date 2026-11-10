@@ -20,6 +20,7 @@ from PyQt6.QtGui import (
 from PyQt6.QtWidgets import QApplication, QFileDialog
 
 from ..math_lite import render_formula
+from ..tooltip_targets import DOCUMENT_TOOLTIP_PROPERTY
 from .syntax import _clamp_pos
 from .tokens import _MERMAID_IMAGE_PREFIX, _MERMAID_TIP_PREFIX
 
@@ -82,7 +83,11 @@ class _MarkdownMediaMixin:
                 continue
             image_format = fmt.toImageFormat()
             name = image_format.name()
-            tooltip = image_format.toolTip()
+            tooltip = str(
+                image_format.property(DOCUMENT_TOOLTIP_PROPERTY)
+                or image_format.toolTip()
+                or ""
+            )
             if name.startswith("elamath://"):
                 if tooltip.startswith("LaTeX: "):
                     latex = tooltip[len("LaTeX: ") :]
@@ -191,7 +196,7 @@ class _MarkdownMediaMixin:
             image_format.setName(url)
             image_format.setWidth(image.width() / 2.0)
             image_format.setHeight(image.height() / 2.0)
-            image_format.setToolTip(f"LaTeX: {latex}")
+            image_format.setProperty(DOCUMENT_TOOLTIP_PROPERTY, f"LaTeX: {latex}")
             image_format.setVerticalAlignment(
                 QTextCharFormat.VerticalAlignment.AlignMiddle
             )
@@ -224,7 +229,11 @@ class _MarkdownMediaMixin:
             return ""
         if not image_format.name().startswith(url_prefix):
             return ""
-        tooltip = image_format.toolTip()
+        tooltip = str(
+            image_format.property(DOCUMENT_TOOLTIP_PROPERTY)
+            or image_format.toolTip()
+            or ""
+        )
         if tooltip.startswith(tip_prefix):
             return tooltip[len(tip_prefix) :]
         return ""

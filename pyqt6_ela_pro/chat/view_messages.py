@@ -553,6 +553,7 @@ class _ViewMessagesMixin:
         bubble.setDisclaimerVisible(self._disclaimer_visible)
         bubble.setCopyNotificationEnabled(self._copy_notification_enabled)
         bubble.setWaitingPlaceholderEnabled(self._waiting_placeholder_enabled)
+        bubble.setChangeSummaryEnabled(self._change_summary_enabled)
         has_previous = bool(self._messages) and not (
             len(self._messages) == 1 and self._messages[0].id == messageId
         )

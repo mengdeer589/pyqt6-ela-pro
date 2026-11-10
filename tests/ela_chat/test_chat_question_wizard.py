@@ -363,7 +363,9 @@ class TestAnswerPayload:
         card._go_next()
         assert seen == [{"q0": "none of them"}]
 
-    def test_custom_multi_becomes_single_element_array(self, qapp, make):
+    def test_custom_multi_without_options_becomes_single_element_array(
+        self, qapp, make
+    ):
         seen = []
         chat = make(ElaChatWidget)
         chat.permissionReplied.connect(
@@ -377,8 +379,8 @@ class TestAnswerPayload:
         card._go_next()
         assert seen == [{"q0": ["all of them"]}]
 
-    def test_custom_and_option_are_exclusive(self, qapp, make):
-        """选了候选项就取消自定义选中 —— 二者没法同时成立。"""
+    def test_single_custom_and_option_are_exclusive(self, qapp, make):
+        """单选：选了候选项就取消自定义选中 —— 二者没法同时成立。"""
         chat = make(ElaChatWidget)
         card = _single(chat, _turn(chat), options=(("A", ""),))
         custom = card._option_buttons[-1]
@@ -387,7 +389,66 @@ class TestAnswerPayload:
         custom.commitEdit()
         assert card.answers() == {"q0": ["mine"]}
         card._option_buttons[0].activate.emit("A")
-        assert card.answers() == {"q0": ["A"]}, "选了候选项就应丢掉自定义"
+        assert card.answers() == {"q0": ["A"]}, "单选下选了候选项就应丢掉自定义"
+
+    def test_multi_opening_custom_keeps_options(self, qapp, make):
+        """多选：展开自定义输入框这一步不能取消已勾选的候选项。"""
+        chat = make(ElaChatWidget)
+        card = _single(chat, _turn(chat), multiple=True, options=(("A", ""), ("B", "")))
+        option = card._option_buttons[0]
+        custom = card._option_buttons[-1]
+        option.activate.emit("A")
+        custom.activate.emit("")
+        assert card.answers() == {"q0": ["A"]}
+        assert option.isPicked(), "自定义只是额外一项，已选项必须保持勾选"
+        assert custom.isPicked()
+
+    def test_multi_custom_keeps_selected_options(self, qapp, make):
+        """多选：自定义答案与已选候选项一起进 payload。"""
+        seen = []
+        chat = make(ElaChatWidget)
+        chat.permissionReplied.connect(
+            lambda i, r, rep, a, f: seen.append(json.loads(a))
+        )
+        card = _single(chat, _turn(chat), multiple=True, options=(("A", ""), ("B", "")))
+        option = card._option_buttons[0]
+        custom = card._option_buttons[-1]
+        option.activate.emit("A")
+        custom.activate.emit("")
+        custom.setEditorText("mine")
+        custom.commitEdit()
+        assert card.answers() == {"q0": ["A", "mine"]}
+        assert option.isPicked() and custom.isPicked()
+        card._go_next()
+        assert seen == [{"q0": ["A", "mine"]}]
+
+    def test_multi_option_keeps_custom_answer(self, qapp, make):
+        """多选：提交自定义后再勾普通候选项，自定义答案不能消失（对称方向）。"""
+        chat = make(ElaChatWidget)
+        card = _single(chat, _turn(chat), multiple=True, options=(("A", ""), ("B", "")))
+        option = card._option_buttons[1]
+        custom = card._option_buttons[-1]
+        custom.activate.emit("")
+        custom.setEditorText("mine")
+        custom.commitEdit()
+        option.activate.emit("B")
+        assert card.answers() == {"q0": ["B", "mine"]}
+        assert option.isPicked() and custom.isPicked()
+
+    def test_multi_uncheck_custom_keeps_options(self, qapp, make):
+        """多选：取消自定义勾选只去掉自定义，已选候选项不受影响。"""
+        chat = make(ElaChatWidget)
+        card = _single(chat, _turn(chat), multiple=True, options=(("A", ""),))
+        option = card._option_buttons[0]
+        custom = card._option_buttons[-1]
+        option.activate.emit("A")
+        custom.activate.emit("")
+        custom.setEditorText("mine")
+        custom.commitEdit()
+        card._on_mark_clicked(card._questions()[0], "")
+        assert card.answers() == {"q0": ["A"]}
+        assert option.isPicked()
+        assert not custom.isPicked()
 
     def test_custom_draft_survives_tab_switch(self, qapp, make):
         chat = make(ElaChatWidget)
@@ -1473,14 +1534,18 @@ class TestCustomEditorHeight:
         editor.setPlainText("一\n二\n三\n四\n五\n六")
         assert _wait_until(
             qapp,
-            lambda: editor.height() > base + 20
-            and editor.height() == editor.sizeHint().height(),
+            lambda: (
+                editor.height() > base + 20
+                and editor.height() == editor.sizeHint().height()
+            ),
         )
 
         # 长单段（折行）同样要长高；旧实现按 blockCount 算，永远只报一行。
         editor.setPlainText("这是一段很长的自定义答案，" * 40)
         assert _wait_until(
             qapp,
-            lambda: editor.height() > base + 60
-            and editor.height() == editor.sizeHint().height(),
+            lambda: (
+                editor.height() > base + 60
+                and editor.height() == editor.sizeHint().height()
+            ),
         )

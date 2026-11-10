@@ -19,6 +19,7 @@ from PyQt6ElaWidgetTools import (
 from .._ownership import ContentSlot, ElaWidgetOwnershipType
 from .._styles import BareButton, ColorText
 from ..ela_button import ElaButton
+from ..tooltips import ElaToolTipPositionType, set_tooltip
 from ._theme import muted_color, text_color
 from .message import _as_int
 
@@ -87,7 +88,7 @@ class ElaChatQueueDock(_ThemeAwareMixin, ElaScrollPageArea):
             ElaIconType.IconName.ArrowRotateLeft, 12, 18, 18, self
         )
         self._undo_button.setBorderRadius(4)
-        self._undo_button.setToolTip("撤销上一次队列操作")
+        set_tooltip(self._undo_button, "撤销上一次队列操作", ElaToolTipPositionType.Top)
         self._undo_button.hide()
         safe_connect(
             self._undo_button,
@@ -208,7 +209,14 @@ class ElaChatQueueDock(_ThemeAwareMixin, ElaScrollPageArea):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(6)
         label = ColorText(self._row_text(message), row)
-        label.setToolTip(message["text"])
+        if message["text"]:
+            set_tooltip(
+                label,
+                message["text"],
+                ElaToolTipPositionType.Top,
+                maxWidth=520,
+                wordWrap=True,
+            )
         row._queue_label = label
         layout.addWidget(label, 1)
         send = ElaButton(
@@ -217,8 +225,10 @@ class ElaChatQueueDock(_ThemeAwareMixin, ElaScrollPageArea):
             size="small",
             parent=row,
         )
-        send.setToolTip(
-            "送进当前回合，不打断生成" if self._working else "立即发送这一条"
+        set_tooltip(
+            send,
+            "送进当前回合，不打断生成" if self._working else "立即发送这一条",
+            ElaToolTipPositionType.Top,
         )
         safe_connect(
             send,
@@ -236,7 +246,7 @@ class ElaChatQueueDock(_ThemeAwareMixin, ElaScrollPageArea):
         )
         remove = ElaIconButton(ElaIconType.IconName.Xmark, 12, 18, 18, row)
         remove.setBorderRadius(4)
-        remove.setToolTip("移除")
+        set_tooltip(remove, "移除", ElaToolTipPositionType.Top)
         safe_connect(
             remove,
             "clicked",

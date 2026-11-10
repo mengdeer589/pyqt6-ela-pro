@@ -11,6 +11,7 @@ from PyQt6.QtGui import (
 
 from ..._internal import is_deleted
 from ..._styles import coerceElaIcon
+from ...tooltips import ElaToolTipPositionType, set_tooltip
 from .._utils import warn_key, warn_once
 
 
@@ -141,7 +142,7 @@ class ToolboxComponent:
             return None
         # 图表是「画布型」控件：按钮不参与 Tab 焦点链（键盘交互归宿主）
         button.setFocusPolicy(Qt.FocusPolicy.NoFocus)
-        button.setToolTip(self.TIPS.get(name, name))
+        set_tooltip(button, self.TIPS.get(name, name), ElaToolTipPositionType.Top)
         button.setAccessibleName(self.TIPS.get(name, name))
         button.clicked.connect(lambda _checked=False, n=name: self.trigger(n))
         self._widgets[name] = button
@@ -191,8 +192,10 @@ class ToolboxComponent:
             button = self._widgets.get("dataZoom")
             if button is not None and not is_deleted(button):
                 button.setIsSelected(not cur)
-                button.setToolTip(
-                    f"{self.TIPS['dataZoom']}（当前：{'开' if not cur else '关'}）"
+                set_tooltip(
+                    button,
+                    f"{self.TIPS['dataZoom']}（当前：{'开' if not cur else '关'}）",
+                    ElaToolTipPositionType.Top,
                 )
             self.chart.update()
 

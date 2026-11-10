@@ -14,6 +14,7 @@ from PyQt6ElaWidgetTools import eTheme, ElaThemeType
 from ._colors import parse_color
 
 __all__ = [
+    "ElaSeverity",
     "ElaStatusRoleType",
     "accent",
     "blend",
@@ -24,6 +25,7 @@ __all__ = [
     "relativeLuminance",
     "resetAccentColor",
     "setAccentColor",
+    "severityColor",
     "statusColor",
     "surface",
     "surfaceDialog",
@@ -157,6 +159,15 @@ class ElaStatusRoleType(IntEnum):
     Success = 3
 
 
+class ElaSeverity(IntEnum):
+    """消息提示的严重等级（toast / 通知弹窗共用）。"""
+
+    Info = 0
+    Success = 1
+    Warning = 2
+    Error = 3
+
+
 #: ``Warning`` / ``Success`` 的定值，**刻意不从强调色派生**：状态语义来自色相
 #: （琥珀 / 绿），换强调色不该把它染成同色；色值取 Fluent 对比度调校过的一组。
 _STATUS_COLORS = {
@@ -208,6 +219,31 @@ def statusColor(mode, role: ElaStatusRoleType) -> QColor:
         return _color(mode, _TC.StatusDanger)
     table = _STATUS_COLORS.get(mode) or _STATUS_COLORS[_TM.Light]
     return QColor(table.get(role, table[ElaStatusRoleType.Warning]))
+
+
+#: 消息等级 → 状态角色。``Info`` 没有对应状态色，单独走强调色。
+_SEVERITY_ROLE = {
+    ElaSeverity.Success: ElaStatusRoleType.Success,
+    ElaSeverity.Warning: ElaStatusRoleType.Warning,
+    ElaSeverity.Error: ElaStatusRoleType.Error,
+}
+
+
+def severityColor(mode, severity: ElaSeverity) -> QColor:
+    """消息等级的图标 / 指示色：``Info`` 用强调色，其余走状态色。
+
+    :param mode: ``None`` = 当前模式。
+    :param severity: 也接受裸 int；非法值按 ``Info`` 处理。
+    """
+    if mode is None:
+        mode = currentMode()
+    try:
+        severity = ElaSeverity(severity)
+    except (TypeError, ValueError):
+        severity = ElaSeverity.Info
+    if severity == ElaSeverity.Info:
+        return accent(mode)
+    return statusColor(mode, _SEVERITY_ROLE[severity])
 
 
 # ── 分类调色板（头像兜底色等） ────────────────────────────────

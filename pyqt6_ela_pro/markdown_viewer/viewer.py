@@ -36,6 +36,7 @@ from ..math_lite import (
     clear_cache as clear_math_cache,
 )
 from ..mermaid_support import ElaMermaidRenderer
+from ..tooltip_targets import install_document_tooltips
 from ..widget_base import ElaThemeWidget
 from .appearance import _MarkdownAppearanceMixin
 from .code import (
@@ -340,6 +341,7 @@ class ElaMarkdownViewer(
         self._text_browser.imageClicked.connect(self._on_image_clicked)
         self._text_browser.installEventFilter(self)
         self._text_browser.viewport().installEventFilter(self)
+        self._document_tooltip_adapter = install_document_tooltips(self._text_browser)
         self._text_browser.verticalScrollBar().valueChanged.connect(
             self._on_view_scrolled
         )

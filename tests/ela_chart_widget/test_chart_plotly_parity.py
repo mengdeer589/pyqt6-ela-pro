@@ -15,6 +15,7 @@ from PyQt6.QtGui import QMouseEvent, QWheelEvent
 from PyQt6ElaWidgetTools import ElaIconButton
 
 from pyqt6_ela_pro import ElaChartWidget
+from pyqt6_ela_pro.tooltips import _tooltip_dict
 
 
 def _chart(make, **option) -> ElaChartWidget:
@@ -716,7 +717,7 @@ class TestToolboxElaIconButtons:
             widget = box.buttonWidget(name)
             assert isinstance(widget, ElaIconButton), name
             assert widget.parent() is chart
-            assert widget.toolTip() == box.TIPS[name]
+            assert _tooltip_dict[widget]._text == box.TIPS[name]
         icons = {box.buttonWidget(n).getAwesome() for n in self.FEATURES}
         assert len(icons) == len(self.FEATURES), "每个功能应有自己的图标"
 

@@ -7,14 +7,20 @@ from typing import Optional
 from uuid import uuid4
 
 
+from .._internal import is_deleted
+from ._changes import ElaChatTurnChanges, changesFromParts
 from .blocks import (
     CompactionSeparator,
     ElaChatNotice,
+    PlanPanel,
     SteerNotice,
+    TurnChangesRow,
 )
 from .message import (
     ElaChatPart,
     ElaChatPartKindType,
+    ElaChatPlan,
+    ElaChatRoleType,
     ElaChatStatusType,
 )
 
@@ -70,6 +76,103 @@ class _BubbleMiscMixin:
         )
         self._append_part(part, widget)
         return partId
+
+    def setPlan(
+        self,
+        plan,
+        partId: Optional[str] = None,
+    ) -> str:
+        """插入 / 更新一张计划卡，返回分段 id。
+
+        ``partId`` 为空时复用消息里最后一张计划卡（反复上报不会堆一摞卡）；
+        传新 id 可显式新建。计划内容不并入 ``message.text``。
+        """
+        if self._role != ElaChatRoleType.Assistant:
+            return ""
+        self._ensure_parts_materialized()
+        self._mark_generation_started()
+        value = ElaChatPlan.coerce(plan)
+        if value is None:
+            return ""
+        if partId is None:
+            for part in reversed(self._parts):
+                if part.kind == ElaChatPartKindType.Plan:
+                    partId = part.id
+                    break
+        partId = partId or uuid4().hex[:12]
+        part = self._find_part(partId)
+        if part is not None and part.kind == ElaChatPartKindType.Plan:
+            self._replace_part(partId, part.withPlan(value))
+            widget = self._part_widgets.get(partId)
+            if isinstance(widget, PlanPanel):
+                widget.setPlan(value)
+            return partId
+        widget = PlanPanel(self._parts_container or self._content or self, plan=value)
+        part = ElaChatPart(
+            id=partId,
+            kind=ElaChatPartKindType.Plan,
+            status=ElaChatStatusType.Done,
+            plan=value,
+            step=self._step_index,
+        )
+        self._append_part(part, widget)
+        return partId
+
+    def plan(self) -> Optional[ElaChatPlan]:
+        """获取最后一张计划卡的快照（无则 ``None``）。"""
+        part = self.planPart()
+        return part.plan if part is not None else None
+
+    def planPart(self) -> Optional[ElaChatPart]:
+        """获取最后一个计划分段（无则 ``None``）。"""
+        for part in reversed(self._parts):
+            if part.kind == ElaChatPartKindType.Plan:
+                return part
+        return None
+
+    def clearPlan(self) -> None:
+        """移除全部计划卡。"""
+        self._remove_parts({ElaChatPartKindType.Plan})
+
+    def turnChanges(self) -> ElaChatTurnChanges:
+        """获取当前回合的文件变更汇总（从工具 metadata 派生）。"""
+        return changesFromParts(self._parts)
+
+    def setChangeSummaryEnabled(self, on: bool) -> None:
+        """设置是否在回合末显示文件变更汇总（默认开）。"""
+        self._change_summary_enabled = bool(on)
+        self._sync_changes_row()
+
+    def changeSummaryEnabled(self) -> bool:
+        """回合末是否显示文件变更汇总。"""
+        return self._change_summary_enabled
+
+    def _sync_changes_row(self) -> None:
+        """按状态 / 变更数据显隐汇总行；流式期间不显示（避免计数跳动）。"""
+        host = self._changes_host
+        if host is None:
+            return
+        if (
+            not self._change_summary_enabled
+            or self._role != ElaChatRoleType.Assistant
+            or self._status == ElaChatStatusType.Streaming
+            or self._parts_deferred
+        ):
+            host.hide()
+            return
+        changes = self.turnChanges()
+        if changes.isEmpty():
+            host.hide()
+            return
+        row = self._changes_row
+        if row is None or is_deleted(row):
+            row = TurnChangesRow(host)
+            host.layout().addWidget(row)
+            self._changes_row = row
+        row.setChanges(changes)
+        host.show()
+        if not row.isVisible():
+            row.show()
 
     def beginCompaction(
         self,

@@ -10,13 +10,14 @@ from uuid import uuid4
 from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import QWidget
 
-from .._internal import safe_connect
+from .._internal import is_deleted, safe_connect
 from ..ela_button import ElaButton
 from ..ela_markdown_viewer import ElaMarkdownViewer
 from .blocks import (
     CompactionSeparator,
     ElaChatNotice,
     PermissionRecord,
+    PlanPanel,
     ReasoningBlock,
     ToolCallCard,
 )
@@ -49,6 +50,9 @@ def estimate_parts_height(parts, width: int, stats_mode: str = "footer") -> int:
             last_step = step
         kind = getattr(part, "kind", "")
         if kind == ElaChatPartKindType.Tool:
+            call = getattr(part, "tool_call", None)
+            if call is not None and getattr(call, "parent_id", ""):
+                continue
             total += 40
         elif kind == ElaChatPartKindType.Reasoning:
             total += 36
@@ -65,6 +69,8 @@ def estimate_parts_height(parts, width: int, stats_mode: str = "footer") -> int:
             total += 96
         elif kind == ElaChatPartKindType.Notice:
             total += 30
+        elif kind == ElaChatPartKindType.Plan:
+            total += 34
         else:
             total += 40
     return max(40, total)
@@ -139,7 +145,7 @@ class ChatPartTimeline:
             self._bubble._discard_part_state(part.id)
             self._bubble._suspended_viewers.pop(part.id, None)
             widget = self._bubble._part_widgets.pop(part.id, None)
-            if widget is None or id(widget) in seen:
+            if widget is None or id(widget) in seen or is_deleted(widget):
                 continue
             seen.add(id(widget))
             widget.hide()
@@ -161,7 +167,7 @@ class ChatPartTimeline:
         self._bubble._discard_part_state(partId)
         self._bubble._suspended_viewers.pop(partId, None)
         widget = self._bubble._part_widgets.pop(partId, None)
-        if widget is not None:
+        if widget is not None and not is_deleted(widget):
             widget.hide()
             widget.setParent(None)
             widget.deleteLater()
@@ -273,6 +279,7 @@ class ChatPartTimeline:
         self._bubble._header.show()
         if self._bubble._footer is not None:
             self._bubble._sync_footer()
+        self._bubble._sync_changes_row()
         self._bubble.updateGeometry()
         if self._bubble.layout() is not None:
             self._bubble.layout().activate()
@@ -439,6 +446,7 @@ class ChatPartTimeline:
                 call.arguments,
                 toolCallId=call.id or None,
                 tool_call=call,
+                parentId=call.parent_id,
             )
             if not callId:
                 return
@@ -480,6 +488,14 @@ class ChatPartTimeline:
             request = part.permission
             if request is not None:
                 self._bubble._restore_permission(part.id, request)
+        elif kind == ElaChatPartKindType.Plan:
+            if part.plan is not None:
+                widget = PlanPanel(
+                    self._bubble._parts_container or self._bubble._content or self,
+                    plan=part.plan,
+                )
+                self._bubble._append_part(part, widget)
+                self._bubble._apply_part_visibility(part.id)
 
     def _restore_compaction(self, part) -> None:
         """重放压缩分段（恢复路径：直接建卡并灌摘要，不走流式接口）。"""

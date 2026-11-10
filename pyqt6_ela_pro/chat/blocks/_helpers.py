@@ -26,6 +26,8 @@ from ...svg_icon import svg_to_pixmap
 from .. import _json
 from ..message import (
     ElaChatRoleType,
+    ElaChatToolKindType,
+    ElaChatToolLocation,
 )
 from ..renderers import (
     parseToolArguments,
@@ -56,10 +58,54 @@ TOOL_ICONS = {
     "patch": ElaIconType.IconName.Code,
     "apply_patch": ElaIconType.IconName.Code,
     "todowrite": ElaIconType.IconName.SquareCheck,
+    "todo_write": ElaIconType.IconName.SquareCheck,
+    "update_todo_list": ElaIconType.IconName.SquareCheck,
     "question": ElaIconType.IconName.Comment,
     "skill": ElaIconType.IconName.Brain,
+    "delegate_task": ElaIconType.IconName.UserRobot,
+    "subagent": ElaIconType.IconName.UserRobot,
+    "agent": ElaIconType.IconName.UserRobot,
+    "fetch": ElaIconType.IconName.Globe,
 }
 CONTEXT_TOOLS = ("read", "glob", "grep", "list")
+#: 子代理类工具（建 ``SubagentCard`` 而不是普通工具卡）
+SUBAGENT_TOOLS = frozenset({"task", "subagent", "agent", "delegate_task"})
+#: 工具类别 → 默认图标
+TOOL_KIND_ICONS = {
+    ElaChatToolKindType.Read: ElaIconType.IconName.Glasses,
+    ElaChatToolKindType.Edit: ElaIconType.IconName.Code,
+    ElaChatToolKindType.Delete: ElaIconType.IconName.Trash,
+    ElaChatToolKindType.Move: ElaIconType.IconName.ArrowRightArrowLeft,
+    ElaChatToolKindType.Search: ElaIconType.IconName.MagnifyingGlass,
+    ElaChatToolKindType.Execute: ElaIconType.IconName.Terminal,
+    ElaChatToolKindType.Think: ElaIconType.IconName.Brain,
+    ElaChatToolKindType.Fetch: ElaIconType.IconName.Globe,
+    ElaChatToolKindType.SwitchMode: ElaIconType.IconName.Shuffle,
+    ElaChatToolKindType.Subagent: ElaIconType.IconName.UserRobot,
+    ElaChatToolKindType.Other: ElaIconType.IconName.Cube,
+}
+#: 工具名关键词 → 类别（按顺序匹配，先命中先返回）
+_KIND_RULES = (
+    (ElaChatToolKindType.Subagent, ("delegate_task", "subagent", "task", "agent")),
+    (ElaChatToolKindType.Read, ("read", "cat", "head", "tail", "view", "open")),
+    (
+        ElaChatToolKindType.Edit,
+        ("write", "edit", "patch", "apply_patch", "replace", "create"),
+    ),
+    (ElaChatToolKindType.Delete, ("delete", "remove", "rm")),
+    (ElaChatToolKindType.Move, ("move", "rename", "mv")),
+    (
+        ElaChatToolKindType.Search,
+        ("glob", "grep", "search", "find", "list", "ls"),
+    ),
+    (
+        ElaChatToolKindType.Execute,
+        ("shell", "bash", "execute", "run", "exec", "cmd", "powershell", "terminal"),
+    ),
+    (ElaChatToolKindType.Fetch, ("fetch", "http", "web", "curl", "browser")),
+    (ElaChatToolKindType.SwitchMode, ("switch_mode", "mode")),
+    (ElaChatToolKindType.Think, ("think", "reason", "plan")),
+)
 RETRYABLE_ERROR_TYPES = frozenset(
     {
         "ratelimit",
@@ -261,6 +307,110 @@ def toolIconName(name: str):
     return TOOL_ICONS.get((name or "").lower(), ElaIconType.IconName.Cube)
 
 
+#: 先按精确名匹配的类别（处理 ``webfetch`` / ``todowrite`` 这类复合名）
+_EXACT_KINDS = {
+    "webfetch": ElaChatToolKindType.Fetch,
+    "web_fetch": ElaChatToolKindType.Fetch,
+    "fetch_url": ElaChatToolKindType.Fetch,
+    "websearch": ElaChatToolKindType.Search,
+    "web_search": ElaChatToolKindType.Search,
+    "todowrite": ElaChatToolKindType.Other,
+    "todo_write": ElaChatToolKindType.Other,
+    "update_todo_list": ElaChatToolKindType.Other,
+    "submit_plan": ElaChatToolKindType.Think,
+    "ask_user": ElaChatToolKindType.Other,
+    "load_skill": ElaChatToolKindType.Other,
+    "delegate_task": ElaChatToolKindType.Subagent,
+}
+
+
+def inferToolKind(name: str, arguments=None) -> str:
+    """按工具名推导类别（``sandbox_`` / ``mcp_`` 前缀会先剥掉）。"""
+    key = str(name or "").strip().lower()
+    if not key:
+        return ElaChatToolKindType.Other
+    for prefix in ("sandbox_", "mcp_", "tool_"):
+        if key.startswith(prefix):
+            key = key[len(prefix) :]
+            break
+    exact = _EXACT_KINDS.get(key)
+    if exact is not None:
+        return exact
+    parts = {part for part in re.split(r"[^a-z0-9]+", key) if part}
+    if not parts:
+        return ElaChatToolKindType.Other
+    for kind, tokens in _KIND_RULES:
+        if any(token in parts for token in tokens):
+            return kind
+    return ElaChatToolKindType.Other
+
+
+def toolKindOf(call) -> str:
+    """工具调用的有效类别：显式 ``kind`` 优先，否则按名字推导。"""
+    if call is None:
+        return ElaChatToolKindType.Other
+    kind = str(getattr(call, "kind", "") or "")
+    if kind in ElaChatToolKindType.All:
+        return kind
+    return inferToolKind(getattr(call, "name", ""), getattr(call, "arguments", ""))
+
+
+def toolIconFor(name: str, kind: str = ""):
+    """工具名 / 类别 → 图标（名字优先，类别兜底，最后 Cube）。"""
+    key = (name or "").lower()
+    icon = TOOL_ICONS.get(key)
+    if icon is not None:
+        return icon
+    kind = kind if kind in ElaChatToolKindType.All else inferToolKind(name)
+    return TOOL_KIND_ICONS.get(kind, ElaIconType.IconName.Cube)
+
+
+def toolLocationsOf(call) -> tuple:
+    """工具访问的文件位置：显式 ``locations`` 优先，其次 metadata / 参数。"""
+    if call is None:
+        return ()
+    items = []
+    seen = set()
+
+    def push(path, line=0):
+        path = str(path or "").strip()
+        if not path:
+            return
+        try:
+            line = max(0, int(line or 0))
+        except (TypeError, ValueError, OverflowError):
+            line = 0
+        key = (path, line)
+        if key in seen:
+            return
+        seen.add(key)
+        items.append(ElaChatToolLocation(path=path, line=line))
+
+    for item in getattr(call, "locations", ()) or ():
+        if isinstance(item, ElaChatToolLocation):
+            push(item.path, item.line)
+        elif isinstance(item, dict):
+            push(item.get("path"), item.get("line"))
+    metadata = getattr(call, "metadata", None)
+    if isinstance(metadata, dict):
+        raw = metadata.get("locations")
+        if isinstance(raw, (list, tuple)):
+            for item in raw:
+                if isinstance(item, dict):
+                    push(item.get("path"), item.get("line"))
+    if not items:
+        data = parseToolArguments(getattr(call, "arguments", ""))
+        path = data.get("path") or data.get("file") or data.get("file_path")
+        if not path:
+            target = data.get("target")
+            if isinstance(target, str):
+                path = target
+        line = data.get("line") or data.get("start_line") or 0
+        if isinstance(path, str) and path.strip():
+            push(path, line)
+    return tuple(items[:8])
+
+
 def toolSubtitleParts(arguments) -> tuple:
     """返回 ``(命中的键, 值)``；未命中返回 ``("", "")``。
 
@@ -315,7 +465,12 @@ def _preview_value(value) -> str:
         return str(head) + suffix
 
 
-def toolArgumentPairs(arguments, limit: int = 3, excludeKey: str = "") -> list:
+def toolArgumentPairs(
+    arguments,
+    limit: int = 3,
+    excludeKey: str = "",
+    value_limit: int = 48,
+) -> list:
     """提取 ``key=value`` 形式的参数摘要（最多 ``limit`` 个）。
 
     副标题已展示过的值不再重复（``read(path="a.py")`` 只显示一次 ``a.py``）；
@@ -324,6 +479,7 @@ def toolArgumentPairs(arguments, limit: int = 3, excludeKey: str = "") -> list:
     :param limit: 最多返回几条
     :param excludeKey: 要排除的键；调用方自己决定传什么（``toolSubtitleParts`` 探测到的键，
         或宿主渲染器 ``subtitle`` 声明的来源键）。留空则不做排除。
+    :param value_limit: 单个值保留的字符数（``0`` = 不截断，供 tooltip 显示全文）
     """
     data = parseToolArguments(arguments)
     pairs = []
@@ -336,8 +492,8 @@ def toolArgumentPairs(arguments, limit: int = 3, excludeKey: str = "") -> list:
             text = str(value)
         else:
             text = _preview_value(value)
-        if len(text) > 48:
-            text = text[:47] + "…"
+        if value_limit and len(text) > value_limit:
+            text = text[: value_limit - 1] + "…"
         pairs.append(f"{key}={text}")
         if len(pairs) >= limit:
             break

@@ -226,7 +226,11 @@ class _MarkdownExportMixin:
                     break
                 painter.save()
                 painter.translate(0, -page * content_height)
-                context.clip = QRectF(0, 0, content_width, content_height)
+                # clip 是文档坐标：必须随 translate 按页偏移，固定从 0 开始会把
+                # 第 2 页起整页裁掉（文字命令仍在内容流里，按提取文本断言会假绿）。
+                context.clip = QRectF(
+                    0, page * content_height, content_width, content_height
+                )
                 layout.draw(painter, context)
                 painter.restore()
                 if pageNumbers:

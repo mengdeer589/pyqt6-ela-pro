@@ -20,7 +20,7 @@
 
 ## 缺字形兜底（Win7）
 
-中文系统默认对主字体（`Microsoft YaHei`）没有的字符（LLM 输出里的 `↔` / `⇒` / `✓` 等）
+中文系统默认对主字体（`Microsoft YaHei`；GDI 中文系统登记为「微软雅黑」）没有的字符（LLM 输出里的 `↔` / `⇒` / `✓` 等）
 套单族符号字体（`Segoe UI Symbol` / `Cambria Math`）——只改 `QTextCharFormat` 的字体族，
 **不改文本**，复制 / 导出仍保真；没有候选字体覆盖的字符保持原样，不会静默替换成 `?`。
 
@@ -157,7 +157,8 @@ viewer.setBodyFontFamily(family)
 - 图片基准路径与超宽缩放；
 - 远程图片默认拦截（需要时由宿主放开）；
 - 图片点击信号与预览；本地图片右键另存为；
-- 公式 / Mermaid 悬浮显示源码，点击或右键复制。
+- 公式 / Mermaid / 外链悬浮显示源码或 URL（`install_document_tooltips`
+  + 库内 `ElaToolTip`，不弹原生 QToolTip），点击或右键复制。
 
 ## 搜索 / 导出 / 打印
 

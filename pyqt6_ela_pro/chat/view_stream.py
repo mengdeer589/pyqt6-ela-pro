@@ -131,22 +131,31 @@ class _ViewStreamMixin:
         toolCallId: Optional[str] = None,
         *,
         metadata=None,
+        kind: str = "",
+        title: str = "",
+        locations=None,
+        parentId: str = "",
     ) -> Optional[str]:
         """为指定消息添加工具调用卡片，返回调用 id。
         ``metadata`` 是结构化附加数据（文件变更 / shell 状态 / 诊断等），
-        原样进入渲染器上下文与工具调用快照。
+        原样进入渲染器上下文与工具调用快照；``parentId`` 用于子代理嵌套。
         """
         bubble = self._require_bubble(messageId, "addToolCall")
         if bubble is None:
             return None
-        if metadata is not None:
+        if metadata is not None or kind or title or locations or parentId:
             call = ElaChatToolCall(
                 id=str(toolCallId or ""),
                 name=str(name or ""),
                 arguments=str(arguments or ""),
                 status=ElaChatToolStatusType.Running,
                 metadata=dict(metadata) if isinstance(metadata, dict) else {},
+                kind=str(kind or ""),
+                title=str(title or ""),
+                parent_id=str(parentId or ""),
             )
+            if locations:
+                call = call.withLocations(locations)
             callId = bubble.addToolCall(name, arguments, toolCallId, tool_call=call)
         else:
             callId = bubble.addToolCall(name, arguments, toolCallId)
