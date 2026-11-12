@@ -93,8 +93,10 @@ C++ 对象（0xC0000005）。
 
 提供 `ElaToolTip`（8 种显示位置）与 `ElaStateToolTip`（加载 / 完成状态卡片）。
 `set_tooltip(widget, text, position)` 会复用已有提示框、只更新配置；绑定后吞掉
-`QEvent.ToolTip`，避免原生 `QToolTip` 与自定义提示同时弹出。`ElaStateToolTip`
-的关闭按钮与超长省略标题也走同一套库内提示。
+`QEvent.ToolTip`，避免原生 `QToolTip` 与自定义提示同时弹出。提示框显示期间有
+120ms 光标看门狗：目标滚出光标 / 布局重排 / 被禁用 / 窗口失活时自动收起
+（Qt 只在鼠标真正换 widget 或目标 `hide()` 时补发 `Leave`，不能只靠它）。
+`ElaStateToolTip` 的关闭按钮与超长省略标题也走同一套库内提示。
 
 长文本用 `maxWidth` + `wordWrap` 控制折行；`contentWidget` 给定时用它替代文本。
 非 QWidget 目标用 `tooltip_targets` 的适配器（内部持有单个 `ElaToolTip`，

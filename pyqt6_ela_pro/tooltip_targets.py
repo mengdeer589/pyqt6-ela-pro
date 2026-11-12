@@ -9,12 +9,12 @@ from __future__ import annotations
 from typing import Callable, Optional
 import weakref
 
-from PyQt6.QtCore import QEvent, QModelIndex, QObject, QPoint, Qt
-from PyQt6.QtGui import QAction, QTextCharFormat, QTextCursor, QTextFormat
+from PyQt6.QtCore import QEvent, QModelIndex, QObject, QPoint, Qt, QTimer
+from PyQt6.QtGui import QAction, QCursor, QTextCharFormat, QTextCursor, QTextFormat
 from PyQt6.QtWidgets import QAbstractItemView, QMenu, QTextEdit, QWidget
 
-from ._internal import is_deleted
-from .tooltips import ElaToolTip
+from ._internal import is_deleted, safe_connect
+from .tooltips import TOOLTIP_WATCH_INTERVAL, ElaToolTip
 
 __all__ = [
     "ACTION_TOOLTIP_PROPERTY",
@@ -91,7 +91,11 @@ class ElaToolTipAdapter(QObject):
         self._max_width = int(max_width or 0)
         self._word_wrap = bool(word_wrap)
         self._tooltip = ElaToolTip("", target.window())
+        self._shown_text = ""
         self._disposed = False
+        self._watch = QTimer(self)
+        self._watch.setInterval(TOOLTIP_WATCH_INTERVAL)
+        safe_connect(self._watch, "timeout", self._check_still_hovered, "tooltip_watch")
         self._mouse_tracking_before = target.hasMouseTracking()
         self._restore_mouse_tracking = False
         if not self._mouse_tracking_before:
@@ -118,8 +122,42 @@ class ElaToolTipAdapter(QObject):
 
     def hide(self) -> None:
         """隐藏提示框。"""
+        self._stop_watch()
+        self._shown_text = ""
         if self._tooltip is not None and not is_deleted(self._tooltip):
             self._tooltip.hide()
+
+    def _stop_watch(self) -> None:
+        if not is_deleted(self._watch):
+            self._watch.stop()
+
+    def _check_still_hovered(self) -> None:
+        """看门狗：光标下的提示文本变了 / 目标不可见或禁用时收起。"""
+        if self._disposed:
+            self._stop_watch()
+            return
+        tooltip = self._tooltip
+        if tooltip is None or is_deleted(tooltip):
+            self._stop_watch()
+            return
+        if not tooltip.isVisible():
+            self._stop_watch()
+            return
+        target = self._target
+        try:
+            if not target.isVisible() or not target.isEnabled():
+                self.hide()
+                return
+            pos = target.mapFromGlobal(QCursor.pos())
+            if not target.rect().contains(pos):
+                self.hide()
+                return
+            text = str(self._text_at(pos) or "")
+        except Exception:
+            self.hide()
+            return
+        if not text or text != self._shown_text:
+            self.hide()
 
     def eventFilter(self, a0, a1) -> bool:  # noqa: N802 (Qt 命名)
         """截获 ToolTip 显示库内提示；移动 / 离开 / 点击时收起。"""
@@ -134,10 +172,12 @@ class ElaToolTipAdapter(QObject):
             if text:
                 self._tooltip.setWordWrap(self._word_wrap)
                 self._tooltip.setMaxWidth(self._max_width)
-                self._tooltip.setText(str(text))
+                self._shown_text = str(text)
+                self._tooltip.setText(self._shown_text)
                 self._tooltip.showAtPoint(a1.globalPos())
+                self._watch.start()
             else:
-                self._tooltip.hide()
+                self.hide()
             # 必须吞掉：否则 QTextBrowser / item view / QMenu 还会弹原生 QToolTip。
             return True
         if event_type in (
@@ -148,7 +188,7 @@ class ElaToolTipAdapter(QObject):
             QEvent.Type.MouseButtonPress,
             QEvent.Type.WindowDeactivate,
         ):
-            self._tooltip.hide()
+            self.hide()
         return False
 
     def dispose(self) -> None:
@@ -175,6 +215,7 @@ class ElaToolTipAdapter(QObject):
         self._drop_tooltip()
 
     def _drop_tooltip(self) -> None:
+        self._stop_watch()
         tooltip = self._tooltip
         self._tooltip = None
         if tooltip is not None and not is_deleted(tooltip):

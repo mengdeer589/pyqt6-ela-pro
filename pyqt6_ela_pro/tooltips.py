@@ -21,7 +21,7 @@ from PyQt6.QtCore import (
 )
 
 from ._colors import parse_color
-from ._internal import connect_theme_signal, is_deleted, single_shot_on
+from ._internal import connect_theme_signal, is_deleted, safe_connect, single_shot_on
 from ._motion import Duration, start_idle_loop, start_transition
 from ._styles import (
     SHADOW_MARGIN,
@@ -45,6 +45,7 @@ from PyQt6.QtGui import (
     QFont,
     QBrush,
     QColor,
+    QCursor,
     QPaintEvent,
     QHideEvent,
     QShowEvent,
@@ -56,6 +57,9 @@ from PyQt6ElaWidgetTools import eTheme, ElaThemeType, ElaIconType, ElaIconButton
 
 TOOLTIP_BORDER_RADIUS: int = 8
 TOOLTIP_SHADOW_BORDER_WIDTH: int = 3
+#: 提示框显示期间的光标看门狗间隔（ms）。滚动 / 重排 / 禁用 / 窗口失活不会
+#: 补发 ``Leave``（Qt 只在鼠标真正换 widget 或目标被 hide 时派发）。
+TOOLTIP_WATCH_INTERVAL: int = 120
 TOOLTIP_LIGHT_BG_COLOR: str = "#ffffff"
 TOOLTIP_DARK_BG_COLOR: str = "#202020"
 #: ``Full`` 模式下的淡出时长。实际时长受全局动效策略约束
@@ -447,23 +451,75 @@ class _TooltipEventFilter(QObject):
     ) -> None:
         super().__init__(target_widget)
         self._tooltip: weakref.ref[ElaToolTip] = weakref.ref(tooltip)
+        self._target: weakref.ref[QWidget] = weakref.ref(target_widget)
         self._position = position
+        # 显示期看门狗：目标滚出光标 / 重排 / 禁用 / 窗口失活时 Qt 不会补发
+        # ``Leave``，不轮询的话提示框会一直停在原地。
+        self._watch = QTimer(self)
+        self._watch.setInterval(TOOLTIP_WATCH_INTERVAL)
+        safe_connect(self._watch, "timeout", self._check_still_hovered, "tooltip_watch")
 
     def setPosition(self, position: ElaToolTipPositionType) -> None:
         """更新显示位置（同一 widget 重新绑定时复用提示框）。"""
         self._position = position
 
+    def stop(self) -> None:
+        """停止看门狗（解除绑定 / 目标销毁时调用）。"""
+        if not is_deleted(self._watch):
+            self._watch.stop()
+
+    def _live_tooltip(self) -> Optional[ElaToolTip]:
+        tooltip = self._tooltip()
+        if tooltip is None or is_deleted(tooltip):
+            return None
+        return tooltip
+
+    def _hide(self) -> None:
+        self.stop()
+        tooltip = self._live_tooltip()
+        if tooltip is not None:
+            tooltip.hide()
+
+    def _check_still_hovered(self) -> None:
+        """看门狗：目标已不在光标下 / 不可见 / 禁用时收起提示框。"""
+        tooltip = self._live_tooltip()
+        target = self._target()
+        if tooltip is None or target is None or is_deleted(target):
+            self.stop()
+            return
+        if not tooltip.isVisible():
+            self.stop()
+            return
+        try:
+            hovered = (
+                target.isVisible()
+                and target.isEnabled()
+                and QRect(target.mapToGlobal(QPoint(0, 0)), target.size()).contains(
+                    QCursor.pos()
+                )
+            )
+        except RuntimeError:
+            hovered = False
+        if not hovered:
+            self._hide()
+
     def eventFilter(self, a0: Optional[QObject], a1: Optional[QEvent]) -> bool:
         """进入显示、离开隐藏；``QEvent.Type.ToolTip`` 一律吞掉（否则原生提示会一起弹出）。"""
-        tooltip = self._tooltip()
+        tooltip = self._live_tooltip()
         if tooltip is None or a0 is None or a1 is None:
             return False
         eventType = a1.type()
         if eventType == QEvent.Type.Enter:
             if isinstance(a0, QWidget):
                 tooltip.showAt(a0, self._position)
-        elif eventType == QEvent.Type.Leave:
-            tooltip.hide()
+                self._watch.start()
+        elif eventType in (
+            QEvent.Type.Leave,
+            QEvent.Type.Wheel,
+            QEvent.Type.MouseButtonPress,
+            QEvent.Type.WindowDeactivate,
+        ):
+            self._hide()
         elif eventType == QEvent.Type.ToolTip:
             return True
         return False
@@ -471,6 +527,9 @@ class _TooltipEventFilter(QObject):
 
 def remove_tooltip_from_dict(widget: QWidget) -> None:
     """内部用：从全局字典移除并销毁 widget 的 tooltip（:func:`remove_tooltip` 会调）。"""
+    filter_instance = _filter_dict.pop(widget, None)
+    if filter_instance is not None and not is_deleted(filter_instance):
+        filter_instance.stop()
     if widget in _tooltip_dict:
         tooltip = _tooltip_dict.pop(widget)
         try:
@@ -478,8 +537,6 @@ def remove_tooltip_from_dict(widget: QWidget) -> None:
             tooltip.deleteLater()
         except RuntimeError:
             pass
-    if widget in _filter_dict:
-        _filter_dict.pop(widget)
 
 
 def set_tooltip(
@@ -491,7 +548,7 @@ def set_tooltip(
     wordWrap: bool = False,
     contentWidget: Optional[QWidget] = None,
 ) -> None:
-    """为 widget 绑定悬浮提示（鼠标进入显示、离开隐藏）。
+    """为 widget 绑定悬浮提示（鼠标进入显示、离开隐藏；显示期看门狗兜底收起）。
     重复调用复用已有提示框，只更新配置；绑定后吞掉 ``QEvent.ToolTip``。
     ``maxWidth`` / ``wordWrap`` 控制长文本折行；``contentWidget`` 给定时代替文本。
     """
@@ -548,14 +605,19 @@ def set_tooltip(
 
 def remove_tooltip(widget: QWidget) -> None:
     """解除 widget 的悬浮提示绑定。"""
-    if widget in _filter_dict:
-        widget.removeEventFilter(_filter_dict[widget])
-        del _filter_dict[widget]
-    if widget in _tooltip_dict:
-        tooltip = _tooltip_dict.pop(widget)
-        if not is_deleted(tooltip):
-            tooltip.hide()
-            tooltip.deleteLater()
+    filter_instance = _filter_dict.pop(widget, None)
+    if filter_instance is not None:
+        try:
+            widget.removeEventFilter(filter_instance)
+        except RuntimeError:
+            pass
+        if not is_deleted(filter_instance):
+            filter_instance.stop()
+            filter_instance.deleteLater()
+    tooltip = _tooltip_dict.pop(widget, None)
+    if tooltip is not None and not is_deleted(tooltip):
+        tooltip.hide()
+        tooltip.deleteLater()
 
 
 class ElaStateToolTip(ElaThemeWidget):

@@ -11,6 +11,7 @@ from PyQt6ElaWidgetTools import ElaIconButton, ElaThemeType, eTheme
 
 import pyqt6_ela_pro._internal as internal_module
 import pyqt6_ela_pro.tooltips as tooltips_module
+from _qthelpers import wait_until
 from pyqt6_ela_pro._styles import SHADOW_MARGIN
 from pyqt6_ela_pro._theme import (
     ElaStatusRoleType,
@@ -359,6 +360,140 @@ class TestSetTooltipReuse:
         remove_tooltip(widget)
         widget.deleteLater()
         qapp.processEvents()
+
+
+class _FakeCursor:
+    """测试用光标替身：只实现看门狗用到的 ``pos()``。"""
+
+    pos_value = QPoint(0, 0)
+
+    @classmethod
+    def pos(cls) -> QPoint:
+        return cls.pos_value
+
+
+class TestToolTipWatchdog:
+    """提示框显示期的光标看门狗。
+
+    回归：Qt 只在鼠标真正换 widget 或目标被 hide 时补发 ``Leave``；滚动 /
+    重排 / 禁用 / 窗口失活时目标已不在光标下，但 ``Leave`` 不会来，提示框
+    会一直停在原地。
+    """
+
+    @staticmethod
+    def _bound(make, window_widget, monkeypatch, interval=120):
+        monkeypatch.setattr(tooltips_module, "TOOLTIP_WATCH_INTERVAL", interval)
+        child = make(QWidget, window_widget)
+        child.setGeometry(20, 20, 80, 24)
+        set_tooltip(child, "提示")
+        window_widget.show()
+        QApplication.processEvents()
+        return child, _tooltip_dict[child], _filter_dict[child]
+
+    @staticmethod
+    def _cursor_at(monkeypatch, point):
+        monkeypatch.setattr(tooltips_module, "QCursor", _FakeCursor)
+        _FakeCursor.pos_value = point
+
+    def test_cursor_inside_keeps_tooltip(self, qapp, make, window_widget, monkeypatch):
+        child, tooltip, filter_instance = self._bound(make, window_widget, monkeypatch)
+        self._cursor_at(monkeypatch, child.mapToGlobal(child.rect().center()))
+        tooltip.showAt(child)
+        filter_instance._watch.start()
+
+        filter_instance._check_still_hovered()
+
+        assert tooltip.isVisible()
+        assert filter_instance._watch.isActive()
+
+    def test_cursor_outside_hides_tooltip(self, qapp, make, window_widget, monkeypatch):
+        child, tooltip, filter_instance = self._bound(make, window_widget, monkeypatch)
+        self._cursor_at(monkeypatch, QPoint(-10000, -10000))
+        tooltip.showAt(child)
+        filter_instance._watch.start()
+
+        filter_instance._check_still_hovered()
+
+        assert tooltip.isVisible() is False
+        assert filter_instance._watch.isActive() is False
+
+    def test_target_moved_under_stationary_cursor_hides(
+        self, qapp, make, window_widget, monkeypatch
+    ):
+        child, tooltip, filter_instance = self._bound(make, window_widget, monkeypatch)
+        old_center = child.mapToGlobal(child.rect().center())
+        self._cursor_at(monkeypatch, old_center)
+        tooltip.showAt(child)
+        filter_instance._watch.start()
+
+        child.move(200, 200)
+        filter_instance._check_still_hovered()
+
+        assert tooltip.isVisible() is False
+        assert filter_instance._watch.isActive() is False
+
+    def test_disabled_target_hides_tooltip(
+        self, qapp, make, window_widget, monkeypatch
+    ):
+        child, tooltip, filter_instance = self._bound(make, window_widget, monkeypatch)
+        self._cursor_at(monkeypatch, child.mapToGlobal(child.rect().center()))
+        tooltip.showAt(child)
+        filter_instance._watch.start()
+
+        child.setEnabled(False)
+        filter_instance._check_still_hovered()
+
+        assert tooltip.isVisible() is False
+
+    def test_window_deactivate_hides_tooltip(
+        self, qapp, make, window_widget, monkeypatch
+    ):
+        child, tooltip, filter_instance = self._bound(make, window_widget, monkeypatch)
+        self._cursor_at(monkeypatch, child.mapToGlobal(child.rect().center()))
+        tooltip.showAt(child)
+        filter_instance._watch.start()
+
+        QApplication.sendEvent(child, QEvent(QEvent.Type.WindowDeactivate))
+
+        assert tooltip.isVisible() is False
+        assert filter_instance._watch.isActive() is False
+
+    def test_enter_starts_and_leave_stops_watch(
+        self, qapp, make, window_widget, monkeypatch
+    ):
+        child, tooltip, filter_instance = self._bound(make, window_widget, monkeypatch)
+        self._cursor_at(monkeypatch, child.mapToGlobal(child.rect().center()))
+
+        QApplication.sendEvent(child, QEvent(QEvent.Type.Enter))
+        assert tooltip.isVisible()
+        assert filter_instance._watch.isActive()
+
+        QApplication.sendEvent(child, QEvent(QEvent.Type.Leave))
+        assert tooltip.isVisible() is False
+        assert filter_instance._watch.isActive() is False
+
+    def test_remove_tooltip_stops_watch(self, qapp, make, window_widget, monkeypatch):
+        child, _tooltip, filter_instance = self._bound(make, window_widget, monkeypatch)
+        self._cursor_at(monkeypatch, child.mapToGlobal(child.rect().center()))
+        QApplication.sendEvent(child, QEvent(QEvent.Type.Enter))
+        assert filter_instance._watch.isActive()
+
+        remove_tooltip(child)
+
+        assert filter_instance._watch.isActive() is False
+
+    def test_watchdog_timer_hides_when_cursor_leaves(
+        self, qapp, make, window_widget, monkeypatch
+    ):
+        child, tooltip, _filter_instance = self._bound(
+            make, window_widget, monkeypatch, interval=20
+        )
+        self._cursor_at(monkeypatch, QPoint(-10000, -10000))
+
+        QApplication.sendEvent(child, QEvent(QEvent.Type.Enter))
+
+        assert tooltip.isVisible()
+        assert wait_until(qapp, lambda: not tooltip.isVisible(), timeout_ms=1000)
 
 
 class TestRemoveTooltip:
