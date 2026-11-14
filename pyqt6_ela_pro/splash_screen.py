@@ -330,7 +330,7 @@ class ElaSplashScreen(ElaThemeWidget):
         path.addRoundedRect(QRectF(fg), br, br)
         painter.setClipPath(path)
         painter.setPen(Qt.PenStyle.NoPen)
-        painter.setBrush(eTheme.getThemeColor(mode, ElaThemeType.ThemeColor.DialogBase))
+        painter.setBrush(eTheme.getThemeColor(mode, ElaThemeType.ThemeColor.PopupBase))
         painter.drawRoundedRect(QRectF(fg), br, br)
 
         if not self._logo.isNull():
@@ -348,6 +348,6 @@ class ElaSplashScreen(ElaThemeWidget):
 
         painter.setBrush(Qt.BrushStyle.NoBrush)
         painter.setPen(
-            QPen(eTheme.getThemeColor(mode, ElaThemeType.ThemeColor.PopupBorder), 1)
+            QPen(eTheme.getThemeColor(mode, ElaThemeType.ThemeColor.BasicBorder), 1)
         )
         painter.drawRoundedRect(QRectF(fg), br, br)

@@ -179,7 +179,7 @@ class ElaTimeline(ElaThemeWidget):
         primary = eTheme.getThemeColor(mode, ElaThemeType.ThemeColor.PrimaryNormal)
         border = eTheme.getThemeColor(mode, ElaThemeType.ThemeColor.BasicBorder)
         text = eTheme.getThemeColor(mode, ElaThemeType.ThemeColor.BasicText)
-        details = eTheme.getThemeColor(mode, ElaThemeType.ThemeColor.BasicDetailsText)
+        details = eTheme.getThemeColor(mode, ElaThemeType.ThemeColor.BasicTextNoFocus)
 
         if self._orientation == "horizontal":
             self._paint_horizontal(painter, primary, border, text, details)

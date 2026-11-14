@@ -140,7 +140,7 @@ class ElaSteps(ElaThemeWidget):
             eTheme.getThemeColor(mode, ElaThemeType.ThemeColor.PrimaryNormal),
             eTheme.getThemeColor(mode, ElaThemeType.ThemeColor.BasicBase),
             eTheme.getThemeColor(mode, ElaThemeType.ThemeColor.BasicBorder),
-            eTheme.getThemeColor(mode, ElaThemeType.ThemeColor.BasicDetailsText),
+            eTheme.getThemeColor(mode, ElaThemeType.ThemeColor.BasicTextNoFocus),
             eTheme.getThemeColor(mode, ElaThemeType.ThemeColor.BasicText),
         )
 

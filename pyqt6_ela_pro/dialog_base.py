@@ -49,7 +49,7 @@ class ElaDialogBase(ElaContentDialog):
         # 且没有 NOTIFY、宿主还原不回去；构造期的作用域是「用了本组件的对话框」。
         eTheme.setThemeColor(
             ElaThemeType.ThemeMode.Light,
-            ElaThemeType.ThemeColor.DialogBase,
+            ElaThemeType.ThemeColor.PopupBase,
             QColor("#fafafa"),
         )
         super().__init__(parent)

@@ -17,7 +17,6 @@ from PyQt6ElaWidgetTools import (
     ElaProgressRingType,
     ElaPromotionCard,
     ElaPushButton,
-    ElaReminderCard,
 )
 from .base_page import ExamplePage, _res
 from PyQt6.QtGui import QColor, QLinearGradient, QPainter, QPixmap, QRadialGradient
@@ -80,7 +79,6 @@ class ProgressFeedbackPage(ExamplePage):
         self._demoInteractiveCard(main_layout)
         self._demoPopularCard(main_layout)
         self._demoPromotionCard(main_layout)
-        self._demoReminderCard(main_layout)
         self._demoAcrylicUrlCard(main_layout)
         self._demoInfoBadge(main_layout)
         self._demoChip(main_layout)
@@ -277,28 +275,10 @@ class ProgressFeedbackPage(ExamplePage):
         parent_layout.addWidget(card)
         parent_layout.addSpacing(30)
 
-    def _demoReminderCard(self, parent_layout):
-        parent_layout.addLayout(
-            self._createHeaderRow(
-                "07. PyQt6ElaWidgetTools - ElaReminderCard 提醒卡片",
-                self._demoReminderCard,
-            )
-        )
-        self._addInfoText("提醒通知类卡片组件", parent_layout)
-        parent_layout.addSpacing(10)
-        card = ElaReminderCard(self)
-        card.setTitle("会议提醒")
-        card.setSubTitle("下午3点有一场会议")
-        card.setBorderRadius(8)
-        self._setCardPixmap(card, "miku.png")
-        card.setFixedSize(320, 100)
-        parent_layout.addWidget(card)
-        parent_layout.addSpacing(30)
-
     def _demoAcrylicUrlCard(self, parent_layout):
         parent_layout.addLayout(
             self._createHeaderRow(
-                "08. PyQt6ElaWidgetTools - ElaAcrylicUrlCard 亚克力URL卡片",
+                "07. PyQt6ElaWidgetTools - ElaAcrylicUrlCard 亚克力URL卡片",
                 self._demoAcrylicUrlCard,
             )
         )

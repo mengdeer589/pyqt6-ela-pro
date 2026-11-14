@@ -52,7 +52,7 @@ class _TagBoxThemeMixin:
             )
         if self.hasFocus():
             return eTheme.getThemeColor(
-                self._theme_mode, ElaThemeType.ThemeColor.DialogBase
+                self._theme_mode, ElaThemeType.ThemeColor.PopupBase
             )
         if self.underMouse():
             return eTheme.getThemeColor(

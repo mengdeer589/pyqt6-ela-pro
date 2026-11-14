@@ -207,7 +207,7 @@ class ElaSelectionPopup(ElaThemeWidget):
         painter.setPen(
             QPen(
                 eTheme.getThemeColor(
-                    self._theme_mode, ElaThemeType.ThemeColor.PopupBorder
+                    self._theme_mode, ElaThemeType.ThemeColor.BasicBorder
                 ),
                 1,
             )

@@ -113,7 +113,7 @@ class ChatGalleryDialog(ElaDialogBase):
         setTextBaseColor(
             scroll,
             eTheme.getThemeColor(
-                eTheme.getThemeMode(), ElaThemeType.ThemeColor.DialogBase
+                eTheme.getThemeMode(), ElaThemeType.ThemeColor.PopupBase
             ),
         )
         self._scroll = scroll
@@ -132,7 +132,7 @@ class ChatGalleryDialog(ElaDialogBase):
             return
         self._apply_content_palette(content, mode)
         setTextBaseColor(
-            scroll, eTheme.getThemeColor(mode, ElaThemeType.ThemeColor.DialogBase)
+            scroll, eTheme.getThemeColor(mode, ElaThemeType.ThemeColor.PopupBase)
         )
 
     @staticmethod

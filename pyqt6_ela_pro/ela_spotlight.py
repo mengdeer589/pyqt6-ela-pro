@@ -49,8 +49,8 @@ class _TipCard(_ThemeAwareMixin, QWidget):
         paintRoundedCard(
             painter,
             self.rect(),
-            background=eTheme.getThemeColor(mode, ElaThemeType.ThemeColor.DialogBase),
-            border=eTheme.getThemeColor(mode, ElaThemeType.ThemeColor.PopupBorder),
+            background=eTheme.getThemeColor(mode, ElaThemeType.ThemeColor.PopupBase),
+            border=eTheme.getThemeColor(mode, ElaThemeType.ThemeColor.BasicBorder),
             radius=self._radius,
         )
 

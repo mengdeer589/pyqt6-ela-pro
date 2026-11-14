@@ -35,7 +35,7 @@ dependencies = [
     "PyQt6-Qt6==6.8.2",
     "pyqt6-sip==13.13.0",
     "pypinyin>=0.50.0",
-    "pyqt6-elawidgettools==0.13.0",
+    "pyqt6-elawidgettools==0.14.0",
 ]
 
 [project.optional-dependencies]
@@ -106,7 +106,7 @@ pyqt6-sip = [
     # 镜像站的官方轮（13.13.0 也有 cp312 / cp313）。
     { path = "PyElaWidgetTools/wheels/pyqt6-win7/pyqt6_sip-13.13.0-cp311-cp311-win_amd64.whl", marker = "python_full_version < '3.12'" },
 ]
-pyqt6-elawidgettools = { path = "PyElaWidgetTools/wheels/pyqt6-win7/pyqt6_elawidgettools-0.13.0-cp39-abi3-win_amd64.whl" }
+pyqt6-elawidgettools = { path = "PyElaWidgetTools/wheels/pyqt6-win7/pyqt6_elawidgettools-0.14.0-cp39-abi3-win_amd64.whl" }
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

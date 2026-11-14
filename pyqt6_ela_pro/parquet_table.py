@@ -101,7 +101,7 @@ class ElaInfoBarWidget(ElaThemeWidget):
     def _apply_colors(self) -> None:
         mode = self._theme_mode
 
-        col_color = eTheme.getThemeColor(mode, ElaThemeType.ThemeColor.BasicDetailsText)
+        col_color = eTheme.getThemeColor(mode, ElaThemeType.ThemeColor.BasicTextNoFocus)
         self._set_label_color(self._col_label, col_color)
 
         col_index_color = eTheme.getThemeColor(

@@ -33,11 +33,11 @@ __all__ = ["ElaNodeCreationMenu", "ElaNodeContextMenu", "ElaEdgeContextMenu"]
 #: 语义槽位（**必须是枚举成员**：PyQt6 的 getThemeColor 只接受枚举，
 #: 传位次数字直接 `TypeError: argument 2 has unexpected type 'int'`）
 _TC_POPUP_BASE = ElaThemeType.ThemeColor.PopupBase
-_TC_POPUP_BORDER = ElaThemeType.ThemeColor.PopupBorder
+_TC_POPUP_BORDER = ElaThemeType.ThemeColor.BasicBorder
 #: 节点类型描述的自定义 role（不写 Qt.ToolTipRole，避免原生 QToolTip）
 _ITEM_TOOLTIP_ROLE = int(Qt.ItemDataRole.UserRole) + 1
 _TC_TEXT = ElaThemeType.ThemeColor.BasicText
-_TC_TEXT_CATEGORY = ElaThemeType.ThemeColor.BasicTextCategory
+_TC_TEXT_CATEGORY = ElaThemeType.ThemeColor.BasicTextNoFocus
 
 #: 分类 → 列表项图标（未知分类回退 Circle）
 _CATEGORY_ICONS = {

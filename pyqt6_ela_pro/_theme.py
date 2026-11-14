@@ -102,8 +102,8 @@ def surfacePopup(mode) -> QColor:
 
 
 def surfaceDialog(mode) -> QColor:
-    """对话框表面。``DialogBase``"""
-    return _color(mode, _TC.DialogBase)
+    """对话框表面。``PopupBase``"""
+    return _color(mode, _TC.PopupBase)
 
 
 # ── 边 ────────────────────────────────────────────────────────
@@ -128,8 +128,8 @@ def text(mode) -> QColor:
 
 
 def textMuted(mode) -> QColor:
-    """次要 / 说明文字。``BasicDetailsText``"""
-    return _color(mode, _TC.BasicDetailsText)
+    """次要 / 说明文字。``BasicTextNoFocus``"""
+    return _color(mode, _TC.BasicTextNoFocus)
 
 
 def textDisabled(mode) -> QColor:
@@ -269,7 +269,7 @@ _ACCENT_STEPS = {
     _TM.Dark: {"hover": (-0.1376, -0.0353), "press": (-0.2999, -0.0883)},
 }
 
-#: ``ToggleSwitchNoToggledCenter``（开关未激活的圆点）跟随强调色。它在上游是中性灰，
+#: ``BasicAltBase``（开关未激活的圆点）跟随强调色。它在上游是中性灰，
 #: 不跟着走就会出现「强调色换了、开关圆点还是灰的」。
 _SWITCH_CENTER_DS = -0.55
 
@@ -305,7 +305,7 @@ def setAccentColor(color, modes=None) -> None:
             d_s, d_l = steps[key]
             eTheme.setThemeColor(mode, slot, _shift(value, d_s, d_l))
         eTheme.setThemeColor(
-            mode, _TC.ToggleSwitchNoToggledCenter, _shift(value, _SWITCH_CENTER_DS, 0.0)
+            mode, _TC.BasicAltBase, _shift(value, _SWITCH_CENTER_DS, 0.0)
         )
 
 
@@ -318,7 +318,7 @@ def resetAccentColor(modes=None) -> None:
             continue
         eTheme.setThemeColor(mode, _TC.PrimaryNormal, QColor(base))
         eTheme.setThemeColor(
-            mode, _TC.ToggleSwitchNoToggledCenter, QColor(_DEFAULT_SWITCH_CENTER[mode])
+            mode, _TC.BasicAltBase, QColor(_DEFAULT_SWITCH_CENTER[mode])
         )
         # hover / press 一并回到出厂值，换回后视觉与「从未换过色」完全相同
         steps = _ACCENT_STEPS.get(mode, _ACCENT_STEPS[_TM.Light])

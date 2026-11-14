@@ -100,7 +100,7 @@ class _GhostHeaderDelegate(QStyledItemDelegate):
         font = QFont(option.font)
         font.setPixelSize(self._HEADER_FONT_SIZE)
         painter.setFont(font)
-        painter.setPen(_theme_color(ElaThemeType.ThemeColor.BasicTextCategory))
+        painter.setPen(_theme_color(ElaThemeType.ThemeColor.BasicTextNoFocus))
         rect = QRect(option.rect)
         rect.setLeft(rect.left() + 15)
         rect.setRight(rect.right() - 15)
@@ -759,7 +759,7 @@ class ElaGhostBox(ElaSearchBox):
 
         if enabled and (self._popup_open or self.underMouse()):
             color = (
-                _theme_color(ElaThemeType.ThemeColor.BasicSelectedAlpha)
+                _theme_color(ElaThemeType.ThemeColor.BasicHoverAlpha)
                 if self._popup_open
                 else _theme_color(ElaThemeType.ThemeColor.BasicHoverAlpha)
             )
@@ -792,7 +792,7 @@ class ElaGhostBox(ElaSearchBox):
             x += pixmap.width() + 6
 
         painter.setPen(
-            _theme_color(ElaThemeType.ThemeColor.BasicTextCategory)
+            _theme_color(ElaThemeType.ThemeColor.BasicTextNoFocus)
             if is_placeholder
             else text_color
         )

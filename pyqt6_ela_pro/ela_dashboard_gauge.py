@@ -352,7 +352,7 @@ class ElaDashboardGauge(ElaThemeWidget):
 
         # ── Track arc ──
         track_pen = QPen(
-            eTheme.getThemeColor(self._theme_mode, ElaThemeType.ThemeColor.BasicChute),
+            eTheme.getThemeColor(self._theme_mode, ElaThemeType.ThemeColor.BasicIndicator),
             aw,
         )
         track_pen.setCapStyle(Qt.PenCapStyle.RoundCap)
@@ -462,7 +462,7 @@ class ElaDashboardGauge(ElaThemeWidget):
             painter.setFont(title_font)
             painter.setPen(
                 eTheme.getThemeColor(
-                    self._theme_mode, ElaThemeType.ThemeColor.BasicDetailsText
+                    self._theme_mode, ElaThemeType.ThemeColor.BasicTextNoFocus
                 )
             )
             painter.drawText(

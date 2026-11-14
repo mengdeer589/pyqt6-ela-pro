@@ -178,6 +178,14 @@ class _SearchComboMixin:
         if isinstance(layout, QBoxLayout):
             layout.insertWidget(0, self._searchWidget)
         self._searchWidget.show()
+        # 展开动画期间 C++ 会禁用布局，把附件手动摆到预留的顶部区域
+        margins = container.contentsMargins()
+        self._searchWidget.setGeometry(
+            margins.left(),
+            margins.top(),
+            max(0, container.width() - margins.left() - margins.right()),
+            _SEARCH_WIDGET_HEIGHT,
+        )
         # 列表在动画期间从上方滑下来，搜索框保持在最上层（否则会被列表短暂盖住）
         self._searchWidget.raise_()
         if self._searchEdit:

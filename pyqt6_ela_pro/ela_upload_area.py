@@ -326,13 +326,13 @@ class ElaUploadArea(ElaThemeWidget):
                 )
             )
             painter.setBrush(
-                eTheme.getThemeColor(mode, ElaThemeType.ThemeColor.BasicBaseDeepAlpha)
+                eTheme.getThemeColor(mode, ElaThemeType.ThemeColor.BasicBaseAlpha)
             )
         elif self._is_hover:
             painter.setPen(
                 QPen(
                     eTheme.getThemeColor(
-                        mode, ElaThemeType.ThemeColor.BasicBorderHover
+                        mode, ElaThemeType.ThemeColor.BasicBorder
                     ),
                     2,
                     Qt.PenStyle.DashLine,

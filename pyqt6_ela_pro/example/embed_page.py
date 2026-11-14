@@ -412,7 +412,7 @@ class EmbedPage(ExamplePage):
         setPlainFrame(
             self._embedderContainer,
             eTheme.getThemeColor(_mode, ElaThemeType.ThemeColor.PopupBase),
-            eTheme.getThemeColor(_mode, ElaThemeType.ThemeColor.PopupBorder),
+            eTheme.getThemeColor(_mode, ElaThemeType.ThemeColor.BasicBorder),
         )
         self._embedderContainer.setFixedHeight(300)
         parent_layout.addWidget(self._embedderContainer)
@@ -435,7 +435,7 @@ class EmbedPage(ExamplePage):
         self._infoText.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._infoText.setTextPixelSize(13)
         self._infoText.setTextColor(
-            eTheme.getThemeColor(_mode, ElaThemeType.ThemeColor.BasicTextCategory)
+            eTheme.getThemeColor(_mode, ElaThemeType.ThemeColor.BasicTextNoFocus)
         )
         self._infoText.setFixedSize(350, 30)
 
@@ -461,7 +461,7 @@ class EmbedPage(ExamplePage):
         setPlainFrame(
             container,
             eTheme.getThemeColor(mode, ElaThemeType.ThemeColor.PopupBase),
-            eTheme.getThemeColor(mode, ElaThemeType.ThemeColor.PopupBorder),
+            eTheme.getThemeColor(mode, ElaThemeType.ThemeColor.BasicBorder),
         )
         container.setFixedHeight(300)
         parent_layout.addWidget(container)
@@ -504,7 +504,7 @@ class EmbedPage(ExamplePage):
         info.setAlignment(Qt.AlignmentFlag.AlignCenter)
         info.setTextPixelSize(13)
         info.setTextColor(
-            eTheme.getThemeColor(mode, ElaThemeType.ThemeColor.BasicTextCategory)
+            eTheme.getThemeColor(mode, ElaThemeType.ThemeColor.BasicTextNoFocus)
         )
         info.setFixedSize(350, 30)
 

@@ -52,7 +52,7 @@ _ELA_COLOR_KEYS = {
     "color.border": "BasicBorder",  # 网格线
     "color.border.strong": "BasicBorderDeep",  # 轴线 / 引线
     "color.text.primary": "BasicText",  # 主文本
-    "color.text.secondary": "BasicDetailsText",  # 次级文本（刻度标签）
+    "color.text.secondary": "BasicTextNoFocus",  # 次级文本（V3.0 起与弱文本同源）
     "color.text.tertiary": "BasicTextNoFocus",  # 弱文本（轴名）
     "color.text.disabled": "BasicTextDisable",  # 禁用态文本（图例隐藏项）
     "color.primary": "PrimaryNormal",  # 主题主色
