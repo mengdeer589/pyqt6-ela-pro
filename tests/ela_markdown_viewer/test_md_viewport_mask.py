@@ -1,7 +1,8 @@
 """圆角视口底色与 mask（bug 报告 §4）。
 
-圆角形态不再切透明视口：保持与自绘圆角背景同色的不透明 ``BasicPress``
-（走快重绘路径），四角由 ``QRegion`` mask 裁掉后透出外层自绘背景；
+圆角形态不再切透明视口：保持与自绘圆角背景同色的不透明卡片表面
+（``_theme.surfaceRaised``，V3.0 起由 ``BasicBase`` 叠在 ``WindowBase`` 上合成；
+走快重绘路径），四角由 ``QRegion`` mask 裁掉后透出外层自绘背景；
 嵌入模式保持透明，由宿主传自己的背景色作不透明底色。
 """
 
@@ -9,9 +10,10 @@ from __future__ import annotations
 
 from PyQt6.QtCore import QPoint
 from PyQt6.QtGui import QColor, QPalette
-from PyQt6ElaWidgetTools import ElaThemeType, eTheme
+from PyQt6ElaWidgetTools import ElaThemeType
 
 from pyqt6_ela_pro import ElaMarkdownViewer
+from pyqt6_ela_pro._theme import surfaceRaised
 
 
 def _base(viewer: ElaMarkdownViewer) -> QColor:
@@ -19,16 +21,16 @@ def _base(viewer: ElaMarkdownViewer) -> QColor:
     return palette.color(palette.ColorRole.Base)
 
 
-def _basic_press(mode) -> QColor:
-    return eTheme.getThemeColor(mode, ElaThemeType.ThemeColor.BasicPress)
+def _surface_raised(mode) -> QColor:
+    return surfaceRaised(mode)
 
 
 class TestViewportBase:
-    def test_plain_is_opaque_basic_press(self, make):
+    def test_plain_is_opaque_surface(self, make):
         v = make(ElaMarkdownViewer)
         color = _base(v)
         assert color.alpha() == 255
-        assert color.name() == _basic_press(v._theme_mode).name()
+        assert color.name() == _surface_raised(v._theme_mode).name()
         assert v.textBrowser().mask().isEmpty()
 
     def test_radius_keeps_opaque_base_with_mask(self, make):
@@ -36,7 +38,7 @@ class TestViewportBase:
         v.setBorderRadius(6)
         color = _base(v)
         assert color.alpha() == 255
-        assert color.name() == _basic_press(v._theme_mode).name()
+        assert color.name() == _surface_raised(v._theme_mode).name()
         assert not v.textBrowser().mask().isEmpty()
 
     def test_radius_zero_clears_mask(self, make):
@@ -81,7 +83,7 @@ class TestViewportBase:
         v._onThemeChanged(ElaThemeType.ThemeMode.Dark)
         color = _base(v)
         assert color.alpha() == 255
-        assert color.name() == _basic_press(ElaThemeType.ThemeMode.Dark).name()
+        assert color.name() == _surface_raised(ElaThemeType.ThemeMode.Dark).name()
         assert not v.textBrowser().mask().isEmpty()
         # 视口自己的 palette 也要跟上（它带 WA_SetPalette、不跟随控件 setPalette）
         viewport = v.textBrowser().viewport()

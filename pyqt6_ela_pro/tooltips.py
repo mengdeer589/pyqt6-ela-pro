@@ -287,7 +287,8 @@ class ElaToolTip(QWidget):
             painter, self.rect(), self._shadowBorderWidth, self._borderRadius
         )
 
-        bgColor = eTheme.getThemeColor(themeMode, ElaThemeType.ThemeColor.BasicBase)
+        # V3.0 的 BasicBase 是 alpha 叠色，浮层必须用不透明弹层表面
+        bgColor = surfacePopup(themeMode)
         borderColor = eTheme.getThemeColor(
             themeMode, ElaThemeType.ThemeColor.BasicBaseLine
         )

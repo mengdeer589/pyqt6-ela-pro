@@ -201,12 +201,20 @@ class TestJumpButtonAppearance:
 
 class TestAppearancePropagation:
     def test_content_background_follows_theme(self, qapp, make):
+        from pyqt6_ela_pro._theme import surfaceRaised
+
         view = make(ElaChatView)
         content = view.contentWidget()
         content._onThemeChanged(ElaThemeType.ThemeMode.Light)
-        assert content.palette().color(QPalette.ColorRole.Window).name() == "#f7f7f7"
+        assert (
+            content.palette().color(QPalette.ColorRole.Window).name()
+            == surfaceRaised(ElaThemeType.ThemeMode.Light).name()
+        )
         content._onThemeChanged(ElaThemeType.ThemeMode.Dark)
-        assert content.palette().color(QPalette.ColorRole.Window).name() == "#3a3a3a"
+        assert (
+            content.palette().color(QPalette.ColorRole.Window).name()
+            == surfaceRaised(ElaThemeType.ThemeMode.Dark).name()
+        )
 
     def test_avatar_and_ratio_applied(self, qapp, make):
         view = make(ElaChatView)

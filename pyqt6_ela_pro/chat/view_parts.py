@@ -12,10 +12,11 @@ from PyQt6.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
-from PyQt6ElaWidgetTools import ElaIconType, ElaThemeType, eTheme
+from PyQt6ElaWidgetTools import ElaIconType, ElaThemeType
 
 from .._internal import safe_connect
 from .._styles import ColorText
+from .._theme import surfaceRaised
 from ..ela_button import ElaButton
 from ..widget_base import ElaThemeWidget
 from ._theme import muted_color, text_color
@@ -56,9 +57,7 @@ class ChatContent(ElaThemeWidget):
         return hint
 
     def _apply_theme(self) -> None:
-        color = eTheme.getThemeColor(
-            self._theme_mode, ElaThemeType.ThemeColor.BasicPress
-        )
+        color = surfaceRaised(self._theme_mode)
         palette = self.palette()
         palette.setColor(QPalette.ColorRole.Window, color)
         palette.setColor(QPalette.ColorRole.Base, color)

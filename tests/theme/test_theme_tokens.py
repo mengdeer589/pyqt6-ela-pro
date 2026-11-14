@@ -110,7 +110,7 @@ class TestAccentDerivation:
     def test_set_accent_moves_switch_center(self):
         """开关未激活圆点也是跟随强调色的角色，不同步就会出现「强调色换了、圆点还是灰的」。"""
         T.setAccentColor(QColor("#c0392b"))
-        center = QColor(eTheme.getThemeColor(_L, _TC.ToggleSwitchNoToggledCenter))
+        center = QColor(eTheme.getThemeColor(_L, _TC.BasicAltBase))
         assert center != QColor("#6a6a6a")
 
     def test_reset_round_trip_is_visually_identical(self):

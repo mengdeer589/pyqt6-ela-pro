@@ -19,10 +19,10 @@ from PyQt6ElaWidgetTools import (
     ElaLineEdit,
     ElaListView,
     ElaMenu,
-    ElaThemeType,
     eTheme,
 )
 
+from .._theme import border, surfacePopup, text, textMuted
 from ..tooltip_targets import install_item_view_tooltips
 from ._tokens import theme_changed_slot
 from .model import ElaPinDirectionType, types_compatible
@@ -30,14 +30,8 @@ from .registry import ElaNodeRegistry
 
 __all__ = ["ElaNodeCreationMenu", "ElaNodeContextMenu", "ElaEdgeContextMenu"]
 
-#: 语义槽位（**必须是枚举成员**：PyQt6 的 getThemeColor 只接受枚举，
-#: 传位次数字直接 `TypeError: argument 2 has unexpected type 'int'`）
-_TC_POPUP_BASE = ElaThemeType.ThemeColor.PopupBase
-_TC_POPUP_BORDER = ElaThemeType.ThemeColor.BasicBorder
 #: 节点类型描述的自定义 role（不写 Qt.ToolTipRole，避免原生 QToolTip）
 _ITEM_TOOLTIP_ROLE = int(Qt.ItemDataRole.UserRole) + 1
-_TC_TEXT = ElaThemeType.ThemeColor.BasicText
-_TC_TEXT_CATEGORY = ElaThemeType.ThemeColor.BasicTextNoFocus
 
 #: 分类 → 列表项图标（未知分类回退 Circle）
 _CATEGORY_ICONS = {
@@ -51,11 +45,6 @@ _DEFAULT_CATEGORY_ICON = ElaIconType.IconName.Circle
 _CATEGORY_ICON_CACHE = {}
 
 
-def _theme_color(color: ElaThemeType.ThemeColor) -> str:
-    """按主题槽位取色（hex 字符串）。"""
-    return eTheme.getThemeColor(eTheme.getThemeMode(), color).name()
-
-
 def _category_icon(category: str):
     """分类对应的列表项图标。"""
     return _CATEGORY_ICONS.get(category, _DEFAULT_CATEGORY_ICON)
@@ -63,7 +52,7 @@ def _category_icon(category: str):
 
 def _item_icon(category: str) -> None:
     """生成分类项图标（按 图标名 + 主题色 缓存，主题切换后键变化自动重建）。"""
-    key = (_category_icon(category), _theme_color(_TC_TEXT))
+    key = (_category_icon(category), text(eTheme.getThemeMode()).name())
     icon = _CATEGORY_ICON_CACHE.get(key)
     if icon is None:
         icon = ElaIcon.getInstance().getElaIcon(key[0], 14, QColor(key[1]))
@@ -154,9 +143,9 @@ class ElaNodeCreationMenu(QDialog):
         painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
         rect = QRectF(self.rect()).adjusted(0.5, 0.5, -0.5, -0.5)
         painter.setPen(Qt.PenStyle.NoPen)
-        painter.setBrush(QColor(_theme_color(_TC_POPUP_BASE)))
+        painter.setBrush(surfacePopup(eTheme.getThemeMode()))
         painter.drawRoundedRect(rect, 6.0, 6.0)
-        painter.setPen(QPen(QColor(_theme_color(_TC_POPUP_BORDER)), 1.0))
+        painter.setPen(QPen(border(eTheme.getThemeMode()), 1.0))
         painter.setBrush(Qt.BrushStyle.NoBrush)
         painter.drawRoundedRect(rect, 6.0, 6.0)
         painter.end()
@@ -165,7 +154,7 @@ class ElaNodeCreationMenu(QDialog):
         """主题感知的外框重绘与搜索图标色（内容控件自绘随主题）。"""
         self.update()
         icon = ElaIcon.getInstance().getElaIcon(
-            ElaIconType.IconName.MagnifyingGlass, 14, QColor(_theme_color(_TC_TEXT))
+            ElaIconType.IconName.MagnifyingGlass, 14, text(eTheme.getThemeMode())
         )
         self._search_icon_action.setIcon(icon)
 
@@ -218,7 +207,7 @@ class ElaNodeCreationMenu(QDialog):
             f = QFont(self.font())
             f.setWeight(QFont.Weight.DemiBold)
             header.setFont(f)
-            header.setForeground(QColor(_theme_color(_TC_TEXT_CATEGORY)))
+            header.setForeground(textMuted(eTheme.getThemeMode()))
             self._model.appendRow(header)
             for spec in cat_specs:
                 item = QStandardItem(f"  {spec.title}")

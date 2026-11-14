@@ -7,7 +7,7 @@ from PyQt6ElaWidgetTools import ElaThemeType, eTheme
 
 # ``blend`` 复用共享层 ``pyqt6_ela_pro._theme``，chat 内部的语义色统一从本模块取。
 from .._internal import system_cjk_font_family
-from .._theme import blend
+from .._theme import blend, surfaceRaised
 
 __all__ = ["MONO_FONT_STACK", "blend", "mono_font"]
 
@@ -28,8 +28,12 @@ def mono_font(size_px: int = 11) -> QFont:
 
 
 def base_color(mode) -> QColor:
-    """基础背景色（``BasicPress`` 令牌）。"""
-    return eTheme.getThemeColor(mode, ElaThemeType.ThemeColor.BasicPress)
+    """基础背景色（卡片 / 气泡表面）。
+
+    V3.0 的 ``BasicPress`` 是 alpha 叠色，不能直接当底色；用读取层合成的
+    不透明卡片表面（``BasicBase`` 叠 ``WindowBase``）。
+    """
+    return surfaceRaised(mode)
 
 
 def text_color(mode) -> QColor:

@@ -10,6 +10,7 @@ from PyQt6.QtWidgets import QWidget, QSizePolicy
 
 from PyQt6ElaWidgetTools import eTheme, ElaThemeType
 
+from ._theme import surfaceRaised
 from .widget_base import ElaThemeWidget
 
 
@@ -71,7 +72,7 @@ class ElaGroupBox(ElaThemeWidget):
         title_text_w = fm.horizontalAdvance(self._title) if self._title else 0
         title_h = fm.height()
 
-        bg_color = eTheme.getThemeColor(mode, ElaThemeType.ThemeColor.BasicPress)
+        bg_color = surfaceRaised(mode)
         border_color = eTheme.getThemeColor(mode, ElaThemeType.ThemeColor.BasicBaseLine)
         title_color = eTheme.getThemeColor(mode, ElaThemeType.ThemeColor.BasicText)
 

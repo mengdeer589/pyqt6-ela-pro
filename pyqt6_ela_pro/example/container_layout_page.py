@@ -403,7 +403,7 @@ class ContainerLayoutPage(ExamplePage):
         area_layout = QVBoxLayout(area)
         area_layout.setContentsMargins(16, 16, 16, 16)
         area_layout.addWidget(
-            ElaText("内容放在 ElaScrollPageArea 里，自动获得主题底色与圆角边框。", self)
+            ElaText("内容放在 ElaScrollPageArea 里，自动获得主题底色与圆角边框。", 13, self)
         )
         parent_layout.addWidget(area)
         parent_layout.addSpacing(20)

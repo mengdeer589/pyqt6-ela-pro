@@ -23,6 +23,19 @@ class TestThemeWidget:
     def test_theme_widget_sets_object_name(self, tw):
         assert tw.objectName() == "ElaThemeWidget"
 
+    def test_background_palette_is_opaque_surface(self, tw):
+        """V3.0 的 BasicPress 是 alpha 叠色，基类底色必须走合成后的不透明表面。"""
+        from PyQt6.QtGui import QPalette
+        from PyQt6ElaWidgetTools import ElaThemeType
+
+        from pyqt6_ela_pro._theme import surfaceRaised
+
+        for mode in (ElaThemeType.ThemeMode.Light, ElaThemeType.ThemeMode.Dark):
+            tw._onThemeChanged(mode)
+            color = tw.palette().color(QPalette.ColorRole.Window)
+            assert color.alpha() == 255
+            assert color.name() == surfaceRaised(mode).name()
+
     @pytest.mark.parametrize(
         ("orientation", "layout_type"),
         [

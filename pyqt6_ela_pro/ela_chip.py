@@ -24,7 +24,7 @@ from PyQt6ElaWidgetTools import eTheme, ElaIconType, ElaThemeType
 from ._colors import accent_text, get_color_scheme
 from ._motion import Duration, start_transition
 from ._styles import drawElaIcon
-from ._theme import blend
+from ._theme import blend, surfaceRaised
 from .widget_base import ElaThemeWidget
 
 
@@ -213,8 +213,12 @@ class ElaChip(ElaThemeWidget):
         return 55 if dark else 25
 
     def _surface_color(self) -> QColor:
-        """chip 所在的主题表面（文字对比度按「半透明底合成到它上面」计算）。"""
-        return eTheme.getThemeColor(self._theme_mode, ElaThemeType.ThemeColor.BasicBase)
+        """chip 所在的主题表面（文字对比度按「半透明底合成到它上面」计算）。
+
+        V3.0 的 ``BasicBase`` 是 alpha 叠色，直接当合成底会把颜色算白；
+        用读取层合成的卡片表面。
+        """
+        return surfaceRaised(self._theme_mode)
 
     def _getBackgroundColor(self) -> QColor:
         """空闲态底色（彩色为 accent 半透明 tint，随所在表面透出）。"""

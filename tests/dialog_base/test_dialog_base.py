@@ -34,12 +34,12 @@ class TestElaDialogBase:
         from PyQt6ElaWidgetTools import ElaThemeType, eTheme
 
         before = QColor(eTheme.getThemeColor(ElaThemeType.ThemeMode.Light,
-                                             ElaThemeType.ThemeColor.DialogBase))
+                                             ElaThemeType.ThemeColor.PopupBase))
         import importlib
 
         importlib.reload(importlib.import_module("pyqt6_ela_pro.dialog_base"))
         after = QColor(eTheme.getThemeColor(ElaThemeType.ThemeMode.Light,
-                                            ElaThemeType.ThemeColor.DialogBase))
+                                            ElaThemeType.ThemeColor.PopupBase))
         assert after.name() == before.name()
 
     def test_instance_sets_light_dialog_base(self, qapp):
@@ -51,12 +51,12 @@ class TestElaDialogBase:
         # 构造对话框后再用 getThemeColor 读回，验证确实被组件改成浅灰白。
         eTheme.setThemeColor(
             ElaThemeType.ThemeMode.Light,
-            ElaThemeType.ThemeColor.DialogBase,
+            ElaThemeType.ThemeColor.PopupBase,
             QColor("#123456"),
         )
         dlg = ElaDialogBase(parent=parent)
         color = eTheme.getThemeColor(
-            ElaThemeType.ThemeMode.Light, ElaThemeType.ThemeColor.DialogBase
+            ElaThemeType.ThemeMode.Light, ElaThemeType.ThemeColor.PopupBase
         )
         assert QColor(color).name() == "#fafafa"
         dlg.deleteLater()

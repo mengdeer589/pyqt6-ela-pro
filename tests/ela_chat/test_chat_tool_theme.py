@@ -23,10 +23,10 @@
 from __future__ import annotations
 
 import pytest
-from PyQt6.QtGui import QColor
 from PyQt6ElaWidgetTools import ElaThemeType, eTheme
 
 from pyqt6_ela_pro._styles import ColorText
+from pyqt6_ela_pro._theme import ElaStatusRoleType, statusColor
 from pyqt6_ela_pro.chat import ElaChatWidget
 from pyqt6_ela_pro.chat._theme import (
     accent_color,
@@ -234,5 +234,7 @@ class TestToolAreaLegibility:
         assert card is not None
         mode = eTheme.getThemeMode()
         title = card._title_label.textColor()
-        assert title == blend(text_color(mode), QColor("#e81123"), 0.45)
+        assert title == blend(
+            text_color(mode), statusColor(mode, ElaStatusRoleType.Error), 0.45
+        )
         assert title.lightness() > 60, "错误标题在深色下太暗"

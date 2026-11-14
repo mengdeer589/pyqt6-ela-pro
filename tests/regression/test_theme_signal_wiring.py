@@ -447,8 +447,23 @@ class TestTagBoxFollowsTheme:
             eTheme.setThemeMode(previous)
             qapp.processEvents()
 
-        light = seen[ElaThemeType.ThemeMode.Light]
-        dark = seen[ElaThemeType.ThemeMode.Dark]
+        # V3.0 的底色令牌是 alpha 叠色：先合成到主题窗口表面再比深浅，
+        # 直接比 RGB 会得到「亮/暗都是 #ffffff」的假相等。
+        from PyQt6.QtGui import QColor
+
+        from pyqt6_ela_pro._theme import surface
+
+        def _composited(color, mode):
+            base = surface(mode)
+            a = color.alphaF()
+            return QColor(
+                round(base.red() * (1 - a) + color.red() * a),
+                round(base.green() * (1 - a) + color.green() * a),
+                round(base.blue() * (1 - a) + color.blue() * a),
+            )
+
+        light = _composited(seen[ElaThemeType.ThemeMode.Light], ElaThemeType.ThemeMode.Light)
+        dark = _composited(seen[ElaThemeType.ThemeMode.Dark], ElaThemeType.ThemeMode.Dark)
         assert light.name() != dark.name(), (
             "{} 在深浅两种模式下底色相同（{}）—— 自绘配色根本没跟着主题走".format(
                 name, light.name()

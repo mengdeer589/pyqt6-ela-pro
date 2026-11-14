@@ -76,6 +76,27 @@ def relativeLuminance(color: QColor) -> float:  # noqa: N802 (与数学名一致
     return 0.2126 * color.redF() + 0.7152 * color.greenF() + 0.0722 * color.blueF()
 
 
+def _composite(base: QColor, overlay: QColor) -> QColor:
+    """把半透明 ``overlay`` 按 source-over 压到不透明 ``base`` 上，返回不透明色。
+
+    V3.0 起 ``BasicBase`` / ``BasicBorder`` / ``BasicText*`` 都是 alpha 叠色；
+    读取层必须给不透明色 —— ``QTextDocument`` 的 CSS、matplotlib 的 ``.name()``
+    等场景会直接丢弃 alpha，半透明色在那里会退化成纯白/纯黑。
+    """
+    a = overlay.alphaF()
+    result = QColor(overlay)
+    if a >= 1.0:
+        result.setAlpha(255)
+        return result
+    base = QColor(base)
+    base.setAlpha(255)
+    return QColor(
+        round(base.red() * (1 - a) + overlay.red() * a),
+        round(base.green() * (1 - a) + overlay.green() * a),
+        round(base.blue() * (1 - a) + overlay.blue() * a),
+        255,
+    )
+
 def _color(mode, token) -> QColor:
     """读一个上游槽位并**拷贝**成新的 QColor。``mode=None`` = 当前模式。"""
     if mode is None:
@@ -92,8 +113,8 @@ def surface(mode) -> QColor:
 
 
 def surfaceRaised(mode) -> QColor:
-    """抬起一层的表面（卡片 / 输入框）。``BasicBase``"""
-    return _color(mode, _TC.BasicBase)
+    """抬起一层的表面（卡片 / 输入框）。``BasicBase`` 叠在 ``WindowBase`` 上。"""
+    return _composite(surface(mode), _color(mode, _TC.BasicBase))
 
 
 def surfacePopup(mode) -> QColor:
@@ -110,31 +131,31 @@ def surfaceDialog(mode) -> QColor:
 
 
 def border(mode) -> QColor:
-    """常规描边。``BasicBorder``"""
-    return _color(mode, _TC.BasicBorder)
+    """常规描边。``BasicBorder`` 叠在卡片表面上。"""
+    return _composite(surfaceRaised(mode), _color(mode, _TC.BasicBorder))
 
 
 def borderStrong(mode) -> QColor:
-    """强调描边（聚焦态外圈等）。``BasicBorderDeep``"""
-    return _color(mode, _TC.BasicBorderDeep)
+    """强调描边（聚焦态外圈等）。``BasicBorderDeep`` 叠在卡片表面上。"""
+    return _composite(surfaceRaised(mode), _color(mode, _TC.BasicBorderDeep))
 
 
 # ── 文字 ──────────────────────────────────────────────────────
 
 
 def text(mode) -> QColor:
-    """正文主色。``BasicText``"""
-    return _color(mode, _TC.BasicText)
+    """正文主色。``BasicText`` 叠在卡片表面上。"""
+    return _composite(surfaceRaised(mode), _color(mode, _TC.BasicText))
 
 
 def textMuted(mode) -> QColor:
-    """次要 / 说明文字。``BasicTextNoFocus``"""
-    return _color(mode, _TC.BasicTextNoFocus)
+    """次要 / 说明文字。``BasicTextNoFocus`` 叠在卡片表面上。"""
+    return _composite(surfaceRaised(mode), _color(mode, _TC.BasicTextNoFocus))
 
 
 def textDisabled(mode) -> QColor:
-    """禁用文字。``BasicTextDisable``"""
-    return _color(mode, _TC.BasicTextDisable)
+    """禁用文字。``BasicTextDisable`` 叠在卡片表面上。"""
+    return _composite(surfaceRaised(mode), _color(mode, _TC.BasicTextDisable))
 
 
 def accent(mode) -> QColor:

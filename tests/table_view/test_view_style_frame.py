@@ -14,7 +14,7 @@ from collections import Counter
 import pytest
 from PyQt6.QtCore import QPoint, QRect, Qt
 from PyQt6.QtGui import QImage, QPainter
-from PyQt6.QtWidgets import QLabel, QStyle, QStyleOptionFrame
+from PyQt6.QtWidgets import QFrame, QLabel, QStyle, QStyleOptionFrame
 from PyQt6ElaWidgetTools import (
     ElaListView,
     ElaTableView,
@@ -41,6 +41,8 @@ def _painted_pixels(view, target, width: int = 100, height: int = 30) -> int:
     painter = QPainter(image)
     option = QStyleOptionFrame()
     option.rect = QRect(0, 0, width, height)
+    # V3.0 的 TreeView 样式在 frameShape == NoFrame 时直接返回，按真实绘制场景给一个框形状
+    option.frameShape = QFrame.Shape.StyledPanel
     view.style().drawControl(
         QStyle.ControlElement.CE_ShapedFrame, option, painter, target
     )

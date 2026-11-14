@@ -14,6 +14,7 @@ from PyQt6.QtWidgets import QWidget, QHBoxLayout, QVBoxLayout, QGridLayout
 from PyQt6ElaWidgetTools import eTheme, ElaThemeType, ElaMessageBar, ElaMessageBarType
 
 from ._internal import _ThemeAwareMixin
+from ._theme import surfaceRaised
 
 
 class ElaThemeWidget(_ThemeAwareMixin, QWidget):
@@ -35,8 +36,12 @@ class ElaThemeWidget(_ThemeAwareMixin, QWidget):
         self._update_bg_color(mode)
 
     def _update_bg_color(self, mode: ElaThemeType.ThemeMode) -> None:
-        """按主题模式更新 widget 的背景调色板。"""
-        bg_color = eTheme.getThemeColor(mode, ElaThemeType.ThemeColor.BasicPress)
+        """按主题模式更新 widget 的背景调色板。
+
+        V3.0 的 ``BasicPress`` 是 alpha 叠色，直接设进 palette 会变成半透明；
+        用读取层合成的卡片表面（``BasicBase`` 叠 ``WindowBase``）。
+        """
+        bg_color = surfaceRaised(mode)
         palette = self.palette()
         palette.setColor(QPalette.ColorRole.Window, bg_color)
         self.setPalette(palette)

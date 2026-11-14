@@ -13,6 +13,7 @@ from PyQt6ElaWidgetTools import ElaScrollArea, ElaThemeType, eTheme
 from pyqt6_ela_pro import ElaButton, ElaDialogBase, ElaThemeWidget
 from pyqt6_ela_pro._internal import connect_theme_signal, safe_connect
 from pyqt6_ela_pro._styles import ColorText, setTextBaseColor
+from pyqt6_ela_pro._theme import surfaceRaised, text as text_color
 from pyqt6_ela_pro.chat import (
     ElaChatFileChanges,
     ElaChatNotice,
@@ -137,8 +138,8 @@ class ChatGalleryDialog(ElaDialogBase):
 
     @staticmethod
     def _apply_content_palette(content: QWidget, mode) -> None:
-        background = eTheme.getThemeColor(mode, ElaThemeType.ThemeColor.BasicPress)
-        text = eTheme.getThemeColor(mode, ElaThemeType.ThemeColor.BasicText)
+        background = surfaceRaised(mode)
+        text = text_color(mode)
         palette = content.palette()
         palette.setColor(QPalette.ColorRole.Window, background)
         palette.setColor(QPalette.ColorRole.Base, background)

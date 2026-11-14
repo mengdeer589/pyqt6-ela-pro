@@ -9,6 +9,7 @@ from PyQt6.QtGui import QColor
 from PyQt6ElaWidgetTools import eTheme, ElaThemeType
 
 from .._colors import parse_color
+from .._theme import surfaceRaised
 from ._theme import (
     ECHARTS_PALETTE,
     theme_override,
@@ -127,6 +128,9 @@ def chart_token(mode, key, chart=None):
         return derived
     if key == "color.primary.subtle":
         return _subtle_primary(mode, chart)
+    if key == "color.bg.base":
+        # V3.0 的 BasicBase 是 alpha 叠色：画布底必须不透明，否则导出图/抓图半透明
+        return surfaceRaised(mode)
     member = _ELA_COLOR_KEYS.get(key)
     if member is not None:
         return _ela_color(mode, member)
@@ -175,10 +179,15 @@ def theme_ramp(chart=None) -> list:
     colors = theme_ramp_override(chart, mode)
     if colors:
         return colors
-    return [
+    ramp = [
         QColor(chart_token(mode, "color.primary.subtle", chart)),
         QColor(chart_token(mode, "color.primary", chart)),
     ]
+    # V3.0 的 PrimaryHover/PrimaryPress 带 alpha：渐变/热力图要的是实色，
+    # 否则渲染出的图像整体半透明
+    for color in ramp:
+        color.setAlpha(255)
+    return ramp
 
 
 __all__ = [

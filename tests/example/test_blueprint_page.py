@@ -25,6 +25,7 @@ _SECTION_METHODS = (
     "_demoDistributed",
     "_demoNodeBody",
     "_demoPersistence",
+    "_demoContextMenus",
 )
 _PLAY_METHODS = (
     "_playPipeline",

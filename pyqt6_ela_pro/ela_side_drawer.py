@@ -22,12 +22,13 @@ from PyQt6.QtGui import (
 )
 from PyQt6.QtWidgets import QWidget, QVBoxLayout
 
-from PyQt6ElaWidgetTools import eTheme, ElaThemeType
+from PyQt6ElaWidgetTools import ElaThemeType
 
 from ._colors import parse_color
 from ._motion import Duration, Easing, start_transition
 from ._ownership import ContentSlot, ElaWidgetOwnershipType
 from ._styles import SHADOW_MARGIN, paintOverlayShadow
+from ._theme import surfaceRaised
 from .widget_base import ElaThemeWidget
 
 logger = logging.getLogger(__name__)
@@ -207,9 +208,9 @@ class ElaDrawer(ElaThemeWidget):
         self._onThemeChanged(self._theme_mode)
 
     def _onThemeChanged(self, mode: ElaThemeType.ThemeMode) -> None:
-        # 表面跟内容基面（ElaThemeWidget 的 BasicPress）一致：QScrollArea.setWidget()
-        # 会强制内容 autoFillBackground(True)，用 DialogBase 会在暗色下露出一块更亮的底。
-        bg_color = eTheme.getThemeColor(mode, ElaThemeType.ThemeColor.BasicPress)
+        # 表面跟内容基面一致：V3.0 的 BasicPress 是 alpha 叠色，改用读取层合成的
+        # 不透明卡片表面，否则抽屉会透出下面的页面
+        bg_color = surfaceRaised(mode)
         self._drawer_widget.setBgColor(bg_color)
         dim_color = QColor(0, 0, 0, 102)
         self._dim_widget.setBgColor(dim_color)

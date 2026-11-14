@@ -874,7 +874,7 @@ python llm_test\agent_demo.py                 # 等价入口（直接起 AgentWo
 
     def _demoWidgets(self, main_layout):
         main_layout.addWidget(
-            ElaText("聊天与浮层组件可脱离 ElaChatWidget 单独嵌入。", self)
+            ElaText("聊天与浮层组件可脱离 ElaChatWidget 单独嵌入。", 13, self)
         )
         main_layout.addSpacing(8)
 
@@ -895,7 +895,7 @@ python llm_test\agent_demo.py                 # 等价入口（直接起 AgentWo
 
         dock = ElaChatInputDock(self)
         dock.setTitle("附件")
-        dock.setWidget(ElaText("ElaChatInputDock 承载输入区上方可替换的附件面板。", self))
+        dock.setWidget(ElaText("ElaChatInputDock 承载输入区上方可替换的附件面板。", 13, self))
         main_layout.addWidget(dock)
         main_layout.addSpacing(12)
 

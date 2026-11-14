@@ -24,6 +24,7 @@ from .._colors import parse_color
 from .._content_colors import calloutColors, diffColors
 from .._internal import is_deleted, system_cjk_font_family
 from .._styles import setTextBaseColor, setTextSelectionColors
+from .._theme import surfaceRaised
 from .code import (
     _default_code_font_family,
     _default_latin_code_font_family,
@@ -253,9 +254,7 @@ class _MarkdownAppearanceMixin:
         else:
             color = getattr(self, "_base_bg", None)
             if color is None:
-                color = eTheme.getThemeColor(
-                    self._theme_mode, ElaThemeType.ThemeColor.BasicPress
-                )
+                color = surfaceRaised(self._theme_mode)
             setTextBaseColor(self._text_browser, color)
         self._sync_viewport_mask()
 
@@ -529,13 +528,13 @@ class _MarkdownAppearanceMixin:
         ``defer_layout=True`` 时不启动布局刷新定时器（离屏查看器的切主题路径）。
         """
         mode = self._theme_mode
+        self._is_dark_theme = mode == ElaThemeType.ThemeMode.Dark
         self._text_color = eTheme.getThemeColor(mode, ElaThemeType.ThemeColor.BasicText)
         self._code_text = self._text_color
         # 表格 / 代码背景：与查看器背景预混合成不透明色
-        # （QTextDocument 的 CSS 不支持 alpha 通道，且纯 BasicBaseDeep 在
-        # 暗色主题下过亮，代码块与表格色块连片会显得"重"）
-        background = eTheme.getThemeColor(mode, ElaThemeType.ThemeColor.BasicPress)
-        self._is_dark_theme = background.lightness() < 128
+        # （QTextDocument 的 CSS 不支持 alpha 通道；V3.0 的 BasicPress/BasicBase
+        # 都是 alpha 叠色，必须用读取层合成后的不透明卡片表面）
+        background = surfaceRaised(mode)
         # 语义配色 / 语法高亮走 markdown 主题注册表（10 套内置）；surface 可选
         # 覆盖页面底色，未覆盖时继续用 eTheme，保证与 Ela 整体协调
         self._md_layout = _md_layout_spec(self._md_theme)
@@ -703,9 +702,7 @@ class _MarkdownAppearanceMixin:
         if not self._embedded:
             bg_color = getattr(self, "_base_bg", None)
             if bg_color is None:
-                bg_color = eTheme.getThemeColor(
-                    self._theme_mode, ElaThemeType.ThemeColor.BasicPress
-                )
+                bg_color = surfaceRaised(self._theme_mode)
             if self._border_radius > 0:
                 path = QPainterPath()
                 path.addRoundedRect(

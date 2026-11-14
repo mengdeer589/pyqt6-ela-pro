@@ -1934,7 +1934,7 @@ class ElaChatTracePanel(ElaThemeWidget):
         speeds = (0.5, 1.0, 2.0, 5.0, 10.0, 20.0)
         try:
             value = float(speed)
-        except (TypeError, ValueError):
+        except (TypeError, ValueError, OverflowError):
             value = 1.0
         value = min(speeds, key=lambda item: abs(item - value))
         current = self._currentReplayMs() if self._replay_active else 0.0
@@ -2075,7 +2075,7 @@ class ElaChatTracePanel(ElaThemeWidget):
             value = 1.0
         try:
             self.setReplaySpeed(float(value))
-        except (TypeError, ValueError):
+        except (TypeError, ValueError, OverflowError):
             self.setReplaySpeed(1.0)
 
     def _sync_options(self) -> None:

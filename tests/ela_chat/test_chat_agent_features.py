@@ -508,14 +508,17 @@ class TestFontScale:
                 )
         assert not bad, f"字号失控（上限 {self.MAX_PX}px）：{bad}"
 
-    def test_the_default_really_is_huge(self, qapp, make):
-        """把「默认到底多大」钉住 —— 这是上面那条测试存在的原因。"""
+    def test_the_default_follows_app_font_size(self, qapp, make):
+        """V3.0 起 ``ElaText`` 默认字号跟随 ``eApp.getFontPixelSize()``（旧版硬编码 28px）。
+
+        默认已小于 ``MAX_PX``，上面那条上限检查现在只约束显式放大。
+        """
+        from PyQt6ElaWidgetTools import eApp
         from pyqt6_ela_pro._styles import ColorText
 
         probe = make(ColorText, "probe")
-        assert probe.font().pixelSize() > self.MAX_PX, (
-            "ElaText 默认字号变小了的话，上面那条测试的上限可以再降"
-        )
+        assert probe.font().pixelSize() == eApp.getFontPixelSize()
+        assert probe.font().pixelSize() <= self.MAX_PX
 
 
 class TestCompactionLabel:
