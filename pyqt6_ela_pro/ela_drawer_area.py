@@ -49,8 +49,12 @@ class ElaDrawerArea(_ElaDrawerArea):
     / ``removeDrawer`` / ``expand`` / ``collapse`` / ``getIsExpand`` /
     ``expandStateChanged``），并额外保证：
 
-    - 设置任意自定义标题栏组件后，点击标题栏非交互区域可展开/收起；
+    - 设置自定义标题栏后，点击标题栏里的非交互控件（如 ``ElaText``）也能展开/收起；
     - ``toggle()`` 便捷切换展开状态。
+
+    上游只对「无 objectName 的标题栏子控件」自行切换；自定义标题栏（如
+    ``ElaThemeWidget``）带 objectName 时不会处理，这里补做并**吞掉事件**，
+    避免上游再切一次互相抵消。
 
     :param parent: 父控件
     """
@@ -82,19 +86,23 @@ class ElaDrawerArea(_ElaDrawerArea):
 
     def eventFilter(self, watched: QObject, event: QEvent) -> bool:
         if watched is self._header and event.type() == QEvent.Type.MouseButtonRelease:
-            # 只认左键。基类 _ElaDrawerArea 自己在 header 上按任意键切换，
+            # 只认左键。上游基类自己在 header 上按任意键切换，
             # 所以非左键必须**吞掉事件**，否则仍会被基类切换。
             if event.button() != Qt.MouseButton.LeftButton:
                 event.accept()
                 return True
-            if self._should_toggle_on(event.position().toPoint()):
+            # 用全局坐标换算，事件从子控件冒泡上来时 local pos 可能还是子控件坐标系
+            pos = self._header.mapFromGlobal(event.globalPosition().toPoint())
+            if self._should_toggle_on(pos):
                 self.toggle()
+                return True  # 吞掉：否则上游会再切一次，两次抵消
         return super().eventFilter(watched, event)
 
     def _should_toggle_on(self, pos: QPoint) -> bool:
         """是否应由本组件补做切换。
-        原生实现在 ``childAt`` 为 ``None`` 或 objectName 为空时自行切换，
-        此处避让这些情况以防双重切换；命中带 objectName 的交互控件
+
+        上游在 ``childAt`` 为 ``None`` 或 objectName 为空时会自行切换，这里避让；
+        命中带 objectName 的交互控件时不切换（点击该控件有自己的行为）。
         """
         if self._header is None:
             return False

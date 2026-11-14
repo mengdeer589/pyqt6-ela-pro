@@ -361,9 +361,9 @@ class TestExtensionLayer:
     def test_figure_canvas_style_api(self):
         pytest.importorskip("matplotlib")
 
-        # setStyleParams（不是 setStyle —— 别遮蔽 QWidget.setStyle(QStyle)）
+        # setStyleParams（不是自定义 setStyle —— 别遮蔽 QWidget.setStyle(QStyle)）
         assert hasattr(ElaFigureCanvas, "setStyleParams")
-        assert not hasattr(ElaFigureCanvas, "setStyle")
+        assert "setStyle" not in vars(ElaFigureCanvas)
 
 
 class TestEChartsInstanceApi:

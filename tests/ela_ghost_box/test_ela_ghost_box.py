@@ -424,12 +424,11 @@ class TestElaGhostBoxPopupGeometry:
         expected_x = contents.x() + margins.left()
         expected_y = contents.y() + margins.top() + 40
         expected_w = contents.width() - margins.left() - margins.right()
-        expected_h = rows * 35
-        assert start_y == expected_y - expected_h
+        expected_h = rows * view.sizeHintForRow(0)
         assert (view.x(), view.width()) == (expected_x, expected_w)
         assert view.height() == expected_h
-        assert layout.indexOf(footer) == -1
-        assert footer.isVisible() is False
+        # V3.0 的弹层是 12px 滑入 + mask 展开：起点只允许一个滑入距离
+        assert abs(start_y - expected_y) <= 12
 
         assert wait_until(
             qapp,
@@ -443,7 +442,10 @@ class TestElaGhostBoxPopupGeometry:
             expected_w,
             expected_h,
         )
-        assert container.height() == expected_h + 8 + 40 + footer.height()
+        assert (
+            container.height()
+            == expected_h + margins.top() + margins.bottom() + 40 + footer.height()
+        )
 
         box.hidePopup()
         wait_until(

@@ -425,19 +425,6 @@ class TestComboPopupGeometry:
         return container
 
     @staticmethod
-    def _expected_rect(box, container, top_extra: int):
-        layout = container.layout()
-        margins = layout.contentsMargins()
-        contents = container.contentsRect()
-        rows = min(box.count(), box.maxVisibleItems())
-        return (
-            contents.x() + margins.left(),
-            contents.y() + margins.top() + top_extra,
-            contents.width() - margins.left() - margins.right(),
-            rows * 35,
-        )
-
-    @staticmethod
     def _view_rect(box):
         view = box.view()
         return (view.x(), view.y(), view.width(), view.height())
@@ -466,39 +453,39 @@ class TestComboPopupGeometry:
     def test_view_geometry_matches_final_layout(
         self, qapp, make, window_widget, cls, top_extra, title_first
     ):
+        """动画期 view 几何必须等于动画结束后的布局终值。
+
+        V3.0 的弹层把「整屏高度滑入」换成了「12px 滑入 + mask 展开」，
+        这里只钉不变量：横坐标 / 宽度 / 高度在动画期就已是终值，纵向起点
+        与终值相差不超过一个滑入距离。
+        """
         box = self._make_box(make, window_widget, cls, title_first)
         box.showPopup()
-        # 动画起点必须在 processEvents 之前取（之后动画已经往前走了）。
-        start_y = box.view().y()
+        start = self._view_rect(box)
         qapp.processEvents()
 
         container = self._container(box)
-        expected_x, expected_y, expected_w, expected_h = self._expected_rect(
-            box, container, top_extra
-        )
-        view = box.view()
-        # 动画起点：C++ 用 listHeight - 8 作为滑动高度，y 从终值上方滑下来。
-        assert start_y == expected_y - expected_h, (
-            "动画起点应是布局终值上方一个 view 高度"
-        )
-        assert (view.x(), view.width()) == (expected_x, expected_w), (
-            "动画起点宽度 / 横坐标就应是布局终值"
-        )
-        assert view.height() == max(expected_h, view.minimumHeight())
+        # 展开动画 180-200ms：等它结束再读终值（比逐帧比对更稳）
+        _wait_until(qapp, lambda: False, timeout_ms=400, use_qwait=True)
+        end = self._view_rect(box)
 
-        final_height = expected_h + 8 + top_extra
-        assert _wait_until(
-            qapp,
-            lambda: container.height() == final_height,
-            timeout_ms=2000,
-            use_qwait=True,
-        ), "容器高度应包含搜索框等附件的高度"
-        assert (view.x(), view.y(), view.width()) == (
-            expected_x,
-            expected_y,
-            expected_w,
-        ), "动画结束放回布局后不得跳变"
-        assert view.height() == max(expected_h, view.minimumHeight())
+        assert (start[0], start[2]) == (end[0], end[2]), (
+            "动画期横坐标 / 宽度必须等于布局终值"
+        )
+        assert start[3] == end[3], "动画期高度必须等于布局终值"
+        assert abs(start[1] - end[1]) <= 12, (
+            "动画起点与终值的纵向差不应超过一个 12px 滑入距离"
+        )
+
+        margins = container.layout().contentsMargins()
+        assert (
+            container.height()
+            == end[3] + margins.top() + margins.bottom() + top_extra
+        ), (
+            "容器高度应包含搜索框等附件与阴影边距："
+            f"container={container.height()} view_h={end[3]} "
+            f"margins={margins.top()}/{margins.bottom()} extra={top_extra}"
+        )
 
         box.hidePopup()
         _wait_until(

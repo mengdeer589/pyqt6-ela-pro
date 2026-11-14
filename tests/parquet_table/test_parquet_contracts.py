@@ -167,8 +167,15 @@ class TestInfoBarAppearance:
     def test_five_labels_get_distinct_colors(self, table):
         # 读 textColor()（意图色）而不是 palette()：ColorText 是**绘制前**才把
         # palette 自愈回显式色，绘制之外读到的是陈旧值
+        # V3.0 的主/次文本、强调色普通/按压只有 alpha 差异：按 RGBA 比
         colors = {
-            getattr(table._info_bar, name).textColor().name() for name in self.LABELS
+            (
+                getattr(table._info_bar, name).textColor().red(),
+                getattr(table._info_bar, name).textColor().green(),
+                getattr(table._info_bar, name).textColor().blue(),
+                getattr(table._info_bar, name).textColor().alpha(),
+            )
+            for name in self.LABELS
         }
         assert len(colors) == 5, f"5 种语义色应各不相同，实得 {colors}"
 

@@ -5,11 +5,12 @@ from __future__ import annotations
 import pytest
 from _pixels import skip_if_no_pixels
 from PyQt6.QtCore import QEvent, Qt
-from PyQt6.QtGui import QFocusEvent
+from PyQt6.QtGui import QFocusEvent, QImage, QPainter
 from PyQt6.QtTest import QTest
 from PyQt6ElaWidgetTools import eApp, eTheme, ElaIconType, ElaPushButton, ElaThemeType
 
 from pyqt6_ela_pro._colors import _contrast_ratio
+from pyqt6_ela_pro._theme import surface
 from pyqt6_ela_pro.ela_button import ElaButton
 
 VARIANTS = ["solid", "dashed", "filled", "text", "link"]
@@ -289,6 +290,13 @@ class TestElaButtonMatchesPushButton:
             btn.show()
             qapp.processEvents()
             image = btn.grab().toImage()
+            # V3.0 的按钮面是 alpha 叠色：先合成到主题表面，否则量不到面
+            canvas = QImage(image.size(), QImage.Format.Format_ARGB32)
+            canvas.fill(surface(ElaThemeType.ThemeMode.Dark))
+            painter = QPainter(canvas)
+            painter.drawImage(0, 0, image)
+            painter.end()
+            image = canvas
             x = 8
             center = image.pixelColor(x, image.height() // 2)
             return [
