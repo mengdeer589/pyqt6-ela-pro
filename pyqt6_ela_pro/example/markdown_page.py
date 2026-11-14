@@ -520,7 +520,7 @@ def _ensure_demo_image() -> str:
 
 
 class MarkdownPage(ExamplePage):
-    """ElaMarkdownViewer 长文阅读：正文占满页面，设置收进 ElaDrawer。"""
+    """ElaMarkdownViewer 长文阅读：正文占满页面，设置收进无遮罩 ElaDrawer。"""
 
     PAGE_TITLE = "Markdown 渲染"
 
@@ -635,12 +635,13 @@ class MarkdownPage(ExamplePage):
         self._create_settings_drawer()
 
     def _create_settings_drawer(self):
-        """把主题、行号、折叠、缩放、搜索和流式演示收进右侧抽屉。"""
+        """把主题、行号、折叠、缩放、搜索和流式演示收进右侧无遮罩抽屉。"""
         drawer = ElaDrawer(
             position=ElaDrawerPositionType.Right,
             drawer_size=360,
             parent=self,
         )
+        drawer.setMaskEnabled(False)
         content = ElaThemeWidget()
         outer = QVBoxLayout(content)
         outer.setContentsMargins(18, 16, 18, 16)

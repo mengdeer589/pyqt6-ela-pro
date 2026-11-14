@@ -162,6 +162,12 @@ class _BubbleToolsMixin:
         if call.parent_id:
             parent = self._tool_cards.get(call.parent_id)
             if isinstance(parent, SubagentCard):
+                # 父调用可能尚未物化（``_tool_cards`` 暂时指向它的父卡）：
+                # 先按 id 取到真正的嵌套子代理卡，再挂当前子调用。
+                nested = parent.childCard(call.parent_id)
+                if isinstance(nested, SubagentCard):
+                    parent = nested
+                    self._tool_cards[call.parent_id] = nested
                 failed = call.status == ElaChatToolStatusType.Error
                 child = parent.addChild(
                     call,
@@ -169,14 +175,18 @@ class _BubbleToolsMixin:
                         call.name, call.arguments, not failed
                     ),
                 )
-                safe_connect(
-                    child,
-                    "toggled",
-                    self._on_tool_card_toggled,
-                    "bubble.subagent_child",
-                    receiver=child,
-                )
-                self._tool_cards[callId] = child
+                if child is not None:
+                    safe_connect(
+                        child,
+                        "toggled",
+                        self._on_tool_card_toggled,
+                        "bubble.subagent_child",
+                        receiver=child,
+                    )
+                    self._tool_cards[callId] = child
+                else:
+                    # 子卡尚未物化：登记到父卡，结果更新 / toolCall 查询走父卡。
+                    self._tool_cards[callId] = parent
                 self._parts.append(
                     ElaChatPart(
                         id=callId,
@@ -190,8 +200,8 @@ class _BubbleToolsMixin:
                         step=self._step_index,
                     )
                 )
-                self._part_widgets[callId] = child
-                self._move_step_stats_to_end(self._step_index)
+                self._part_widgets[callId] = child if child is not None else parent
+                # 子工具卡在子代理卡内部，不改主时间线布局；不再逐个挪统计徽标。
                 return callId
             # 父卡不存在（坏数据 / 乱序）：回落顶层，避免子调用丢失。
             call = call.withParent("")
@@ -240,6 +250,14 @@ class _BubbleToolsMixin:
                     allowOpenWhilePending=key in SHELL_TOOLS,
                     # 建卡时结果还没到，ok 传 True（失败展开由 setResult 单独处理）
                     defaultOpen=default_open,
+                )
+            if isinstance(card, SubagentCard):
+                safe_connect(
+                    card,
+                    "childToggled",
+                    self._on_tool_card_toggled,
+                    "bubble.subagent_child_toggle",
+                    receiver=card,
                 )
             card.setMessageId(self._message_id)
             safe_connect(

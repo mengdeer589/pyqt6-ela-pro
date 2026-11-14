@@ -4,21 +4,18 @@ from __future__ import annotations
 
 from typing import Optional
 
-from PyQt6.QtCore import QEvent, QObject, QRectF, QSize, Qt, pyqtSignal
+from PyQt6.QtCore import QEvent, QObject, QRectF, Qt, pyqtSignal
 from PyQt6.QtGui import QColor, QFont, QPainter, QPalette
 from PyQt6.QtWidgets import (
     QAbstractScrollArea,
-    QLabel,
-    QPushButton,
     QSizePolicy,
     QVBoxLayout,
     QWidget,
 )
 from PyQt6ElaWidgetTools import ElaIconType, ElaThemeType, eTheme
 
-from .._internal import _ThemeAwareMixin, safe_connect
-from .._styles import elaIconPixmap, paintRoundedCard, setTextColor
-from .._theme import textOnAccent
+from .._internal import safe_connect
+from .._styles import ColorText
 from ..ela_button import ElaButton
 from ..widget_base import ElaThemeWidget
 from ._theme import muted_color, text_color
@@ -104,12 +101,14 @@ class EmptyState(ElaThemeWidget):
         layout.setSpacing(8)
         layout.addStretch(1)
 
-        self._title_label = QLabel(self)
+        self._title_label = ColorText(self)
+        self._title_label.setTextFormat(Qt.TextFormat.PlainText)
         self._title_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._title_label.setWordWrap(True)
         layout.addWidget(self._title_label)
 
-        self._subtitle_label = QLabel(self)
+        self._subtitle_label = ColorText(self)
+        self._subtitle_label.setTextFormat(Qt.TextFormat.PlainText)
         self._subtitle_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._subtitle_label.setWordWrap(True)
         layout.addWidget(self._subtitle_label)
@@ -171,75 +170,31 @@ class EmptyState(ElaThemeWidget):
 
     def _apply_theme(self) -> None:
         mode = self._theme_mode
-        setTextColor(self._title_label, text_color(mode))
-        title_font = QFont(self._title_label.font())
-        title_font.setPixelSize(19)
-        title_font.setWeight(QFont.Weight.DemiBold)
-        self._title_label.setFont(title_font)
-        setTextColor(self._subtitle_label, muted_color(mode, 0.5))
-        subtitle_font = QFont(self._subtitle_label.font())
-        subtitle_font.setPixelSize(13)
-        self._subtitle_label.setFont(subtitle_font)
+        self._title_label.setTextColor(text_color(mode))
+        self._title_label.setTextPixelSize(19)
+        self._title_label.setTextWeight(QFont.Weight.DemiBold)
+        self._subtitle_label.setTextColor(muted_color(mode, 0.5))
+        self._subtitle_label.setTextPixelSize(13)
 
 
-class JumpToBottomButton(_ThemeAwareMixin, QPushButton):
-    """「回到底部」浮动按钮：实心强调色 + 对比色箭头。"""
+class JumpToBottomButton(ElaButton):
+    """「回到底部」浮动按钮：ElaButton 实心强调色 + 箭头。"""
 
     def __init__(self, parent: Optional[QWidget] = None) -> None:
-        super().__init__(parent)
-        self._theme_mode = eTheme.getThemeMode()
+        super().__init__(
+            "",
+            ElaIconType.IconName.ArrowDown,
+            JUMP_ICON_SIZE,
+            variant="solid",
+            color="primary",
+            size="middle",
+            parent=parent,
+        )
         self.setFixedSize(JUMP_BUTTON_WIDTH, JUMP_BUTTON_HEIGHT)
+        self.setBorderRadius(8)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         self.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self.setAccessibleName("回到底部")
-
-    def _onThemeChanged(self, mode: ElaThemeType.ThemeMode) -> None:
-        super()._onThemeChanged(mode)
-        self._theme_mode = mode
-        self.update()
-
-    def _fill_color(self) -> QColor:
-        """当前状态的实心底色（强调色三档）。"""
-        mode = self._theme_mode
-        if self.isDown():
-            slot = ElaThemeType.ThemeColor.PrimaryPress
-        elif self.underMouse():
-            slot = ElaThemeType.ThemeColor.PrimaryHover
-        else:
-            slot = ElaThemeType.ThemeColor.PrimaryNormal
-        return QColor(eTheme.getThemeColor(mode, slot))
-
-    def enterEvent(self, event) -> None:  # noqa: N802 (Qt 命名)
-        self.update()
-        super().enterEvent(event)
-
-    def leaveEvent(self, event) -> None:  # noqa: N802 (Qt 命名)
-        self.update()
-        super().leaveEvent(event)
-
-    def paintEvent(self, _event) -> None:  # noqa: N802 (Qt 命名)
-        painter = QPainter(self)
-        try:
-            painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
-            fill = self._fill_color()
-            paintRoundedCard(painter, QRectF(self.rect()), background=fill, radius=8)
-            pixmap = elaIconPixmap(
-                ElaIconType.IconName.ArrowDown,
-                textOnAccent(fill),
-                QSize(JUMP_ICON_SIZE, JUMP_ICON_SIZE),
-                self.devicePixelRatioF(),
-            )
-            if pixmap.isNull():
-                return
-            target = QRectF(
-                (self.width() - JUMP_ICON_SIZE) / 2.0,
-                (self.height() - JUMP_ICON_SIZE) / 2.0,
-                JUMP_ICON_SIZE,
-                JUMP_ICON_SIZE,
-            )
-            painter.drawPixmap(target, pixmap, QRectF(pixmap.rect()))
-        finally:
-            painter.end()
 
 
 class DeferredPlaceholder(QWidget):

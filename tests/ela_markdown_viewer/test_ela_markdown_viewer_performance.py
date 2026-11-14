@@ -185,13 +185,56 @@ class TestLargeRender:
         return text
 
 
+class TestFragmentColorGate:
+    def test_plain_table_has_no_fragment_markup(self):
+        v = ElaMarkdownViewer()
+        v.setMarkdown("| A | B |\n|---|---|\n| 1 | 2 |")
+        assert v._has_fragment_markup() is False
+        v.setMarkdown("**bold**")
+        assert v._has_fragment_markup() is True
+        v.deleteLater()
+
+    def test_autolinks_and_emails_are_fragment_markup(self):
+        v = ElaMarkdownViewer()
+        for md in (
+            "https://example.com",
+            "www.example.com",
+            "foo@example.com",
+            "ftp://example.com",
+        ):
+            v.setMarkdown(md)
+            assert v._has_fragment_markup() is True, md
+        v.deleteLater()
+
+    def test_bare_url_uses_theme_link_color(self, qapp, make):
+        viewer = make(ElaMarkdownViewer)
+        viewer.setMarkdown("https://example.com")
+        qapp.processEvents()
+
+        color = None
+        block = viewer.document().begin()
+        while block.isValid():
+            iterator = block.begin()
+            while not iterator.atEnd():
+                fragment = iterator.fragment()
+                if fragment.isValid() and fragment.charFormat().isAnchor():
+                    color = fragment.charFormat().foreground().color().name()
+                iterator += 1
+            block = block.next()
+
+        assert color == viewer._link_color.name()
+
+
 class TestCacheGovernance:
     def test_highlight_cache_cleared(self):
+        pytest.importorskip("pygments")
         v = ElaMarkdownViewer()
         v.setMarkdown("```python\nx = 1\n```")
         assert v._highlight_cache
+        assert v._highlight_token_cache
         v.clearCache()
         assert not v._highlight_cache
+        assert not v._highlight_token_cache
         v.deleteLater()
 
     def test_highlight_cache_cap(self):
@@ -219,9 +262,12 @@ class TestCacheGovernance:
     def test_zero_capacity_disables_highlight_cache(self):
         pytest.importorskip("pygments")
         v = ElaMarkdownViewer()
+        v.setMarkdown("```python\na = 1\n```")
+        assert v._highlight_token_cache
         v.setHighlightCacheSize(0)
         v.setMarkdown("```python\na = 1\n```")
         assert not v._highlight_cache
+        assert not v._highlight_token_cache
         v.deleteLater()
 
 
@@ -453,14 +499,14 @@ class TestCodeGeometryCulling:
     def test_stream_flush_reuses_buttons(self, qapp, monkeypatch):
         """流式每次 flush 不得全量重建按钮（旧实现 10 秒 2 万+ 控件创建）。"""
         created = []
-        real = paint_module.FlatIconButton
+        real = paint_module.ElaIconButton
 
         class _Counting(real):
             def __init__(self, *args, **kwargs):
                 super().__init__(*args, **kwargs)
                 created.append(self)
 
-        monkeypatch.setattr(paint_module, "FlatIconButton", _Counting)
+        monkeypatch.setattr(paint_module, "ElaIconButton", _Counting)
         v = ElaMarkdownViewer()
         v.resize(500, 400)
         v.show()

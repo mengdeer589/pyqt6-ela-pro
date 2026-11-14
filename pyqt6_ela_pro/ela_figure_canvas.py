@@ -10,6 +10,7 @@ from PyQt6.QtWidgets import QWidget, QSizePolicy
 from PyQt6ElaWidgetTools import eTheme, ElaThemeType
 
 from ._internal import connect_theme_signal, disconnect_theme
+from ._theme import blend, border, surface, surfaceRaised, text, textMuted
 
 # ── Optional matplotlib import ──────────────────────────
 
@@ -25,27 +26,21 @@ except ImportError:
     mpl = None
 
 
-_LIGHT_RC_PARAMS: dict = {
-    "figure.facecolor": "#FFFFFF",
-    "axes.facecolor": "#FFFFFF",
-    "axes.edgecolor": "#D9D9D9",
-    "axes.labelcolor": "#333333",
-    "xtick.color": "#333333",
-    "ytick.color": "#333333",
-    "grid.color": "#F0F0F0",
-    "text.color": "#333333",
-}
+def _rc_params(mode) -> dict:
+    """按 Ela 主题生成 Matplotlib rcParams（UI chrome，不含数据系列色）。"""
+    base = surface(mode)
+    line = border(mode)
+    return {
+        "figure.facecolor": base.name(),
+        "axes.facecolor": surfaceRaised(mode).name(),
+        "axes.edgecolor": line.name(),
+        "axes.labelcolor": text(mode).name(),
+        "xtick.color": textMuted(mode).name(),
+        "ytick.color": textMuted(mode).name(),
+        "grid.color": blend(base, line, 0.5).name(),
+        "text.color": text(mode).name(),
+    }
 
-_DARK_RC_PARAMS: dict = {
-    "figure.facecolor": "#1E1E2E",
-    "axes.facecolor": "#2A2A3C",
-    "axes.edgecolor": "#424242",
-    "axes.labelcolor": "#E0E0E0",
-    "xtick.color": "#E0E0E0",
-    "ytick.color": "#E0E0E0",
-    "grid.color": "#333333",
-    "text.color": "#E0E0E0",
-}
 
 _CJK_FONTS = [
     "Microsoft YaHei",
@@ -122,8 +117,7 @@ if _FigureCanvas is not None:
         def _apply_theme(self) -> None:
             if not mpl:
                 return
-            is_dark = self._theme_mode == ElaThemeType.ThemeMode.Dark
-            rc = _DARK_RC_PARAMS if is_dark else _LIGHT_RC_PARAMS
+            rc = _rc_params(self._theme_mode)
             mpl.rcParams.update(rc)
             self.figure.set_facecolor(rc["figure.facecolor"])
             for ax in self.figure.axes:
@@ -132,8 +126,18 @@ if _FigureCanvas is not None:
                     colors=rc["xtick.color"],
                     which="both",
                 )
+                ax.title.set_color(rc["text.color"])
+                ax.xaxis.label.set_color(rc["axes.labelcolor"])
+                ax.yaxis.label.set_color(rc["axes.labelcolor"])
                 for spine in ax.spines.values():
                     spine.set_color(rc["axes.edgecolor"])
+                legend = ax.get_legend()
+                if legend is not None:
+                    frame = legend.get_frame()
+                    frame.set_facecolor(rc["axes.facecolor"])
+                    frame.set_edgecolor(rc["axes.edgecolor"])
+                    for legend_text in legend.get_texts():
+                        legend_text.set_color(rc["axes.labelcolor"])
 
 
 else:

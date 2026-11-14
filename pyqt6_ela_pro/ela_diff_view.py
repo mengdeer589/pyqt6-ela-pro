@@ -11,17 +11,17 @@ from PyQt6.QtGui import (
     QFont,
     QFontMetrics,
     QPainter,
-    QPalette,
     QSyntaxHighlighter,
     QTextCharFormat,
     QTextCursor,
 )
 from PyQt6.QtWidgets import QFrame, QPlainTextEdit, QWidget
-from PyQt6ElaWidgetTools import ElaMenu, ElaScrollBar, ElaThemeType, eTheme
+from PyQt6ElaWidgetTools import ElaPlainTextEdit, ElaThemeType, eTheme
 
-from ._internal import _ThemeAwareMixin, execElaMenu, system_cjk_font_family
-from ._styles import setTextBaseColor
-from ._theme import surfaceRaised, text as text_color, textMuted
+from ._content_colors import diffColors
+from ._internal import _ThemeAwareMixin, system_cjk_font_family
+from ._styles import editBorderlessStyle, setTextBaseColor
+from ._theme import surfaceRaised, textMuted
 from ._diff import (
     DIFF_ADD,
     DIFF_CONTEXT,
@@ -292,8 +292,8 @@ class _DiffHighlighter(QSyntaxHighlighter):
             self.setFormat(start, min(size, length - start), fmt)
 
 
-class ElaDiffView(_ThemeAwareMixin, QPlainTextEdit):
-    """只读 diff / 代码查看器（统一视图）。"""
+class ElaDiffView(_ThemeAwareMixin, ElaPlainTextEdit):
+    """只读 diff / 代码查看器（ElaPlainTextEdit + 自绘行号 / 折叠）。"""
 
     #: 点击文件头 / 行（参数：路径、行号；暂无行号时为空）
     fileClicked = pyqtSignal(str)
@@ -318,18 +318,18 @@ class ElaDiffView(_ThemeAwareMixin, QPlainTextEdit):
         self._gutter_new_width = 24
         self._gutter_marker_width = 12
 
+        self.setStyle(editBorderlessStyle())
         self.setReadOnly(True)
         self.setFrameShape(QFrame.Shape.NoFrame)
         self.setLineWrapMode(QPlainTextEdit.LineWrapMode.NoWrap)
         self.setUndoRedoEnabled(False)
+        self.document().setDocumentMargin(4)
         self.setTextInteractionFlags(
             Qt.TextInteractionFlag.TextSelectableByMouse
             | Qt.TextInteractionFlag.TextSelectableByKeyboard
         )
         self.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
-        self.setVerticalScrollBar(ElaScrollBar(Qt.Orientation.Vertical, self))
-        self.setHorizontalScrollBar(ElaScrollBar(Qt.Orientation.Horizontal, self))
         self.setTabChangesFocus(False)
 
         self._gutter = _LineNumberArea(self)
@@ -783,26 +783,18 @@ class ElaDiffView(_ThemeAwareMixin, QPlainTextEdit):
                     self.fileClicked.emit(item.file_path)
         super().mousePressEvent(event)
 
-    def contextMenuEvent(self, event) -> None:  # noqa: N802
-        menu = ElaMenu(self)
-        copy = menu.addAction("复制")
-        copy.setEnabled(self.textCursor().hasSelection())
-        copy.triggered.connect(self.copy)
-        select_all = menu.addAction("全选")
-        select_all.triggered.connect(self.selectAll)
-        execElaMenu(menu, event.globalPos())
-        event.accept()
+    def showEvent(self, event) -> None:  # noqa: N802 (Qt 命名)
+        super().showEvent(event)
+        # ElaPlainTextEdit 自带 QSS：首次 polish 可能把视口 Base 重置回应用色。
+        setTextBaseColor(self, self._gutter_bg)
 
     def _apply_theme(self) -> None:
         mode = self._theme_mode
         base = surfaceRaised(mode)
+        colors = diffColors(mode, base)
         self._gutter_bg = base
-        self._add_fg = QColor(
-            "#2da44e" if mode == ElaThemeType.ThemeMode.Light else "#3fb950"
-        )
-        self._del_fg = QColor(
-            "#cf222e" if mode == ElaThemeType.ThemeMode.Light else "#f85149"
-        )
+        self._add_fg = colors["add"]
+        self._del_fg = colors["delete"]
         self._add_bg = self._blend(
             base, self._add_fg, 0.12 if mode == ElaThemeType.ThemeMode.Light else 0.16
         )
@@ -811,23 +803,13 @@ class ElaDiffView(_ThemeAwareMixin, QPlainTextEdit):
         )
         self._hunk_bg = self._blend(
             base,
-            QColor("#0969da"),
+            colors["hunk"],
             0.08 if mode == ElaThemeType.ThemeMode.Light else 0.12,
         )
         palette = self._custom_palette or (
             _SYNTAX_LIGHT if mode == ElaThemeType.ThemeMode.Light else _SYNTAX_DARK
         )
         self._syntax_palette = dict(palette)
-        text_palette = self.palette()
-        text_palette.setColor(QPalette.ColorRole.Text, text_color(mode))
-        text_palette.setColor(QPalette.ColorRole.PlaceholderText, textMuted(mode))
-        self.setPalette(text_palette)
-        viewport_palette = self.viewport().palette()
-        viewport_palette.setColor(QPalette.ColorRole.Text, text_color(mode))
-        viewport_palette.setColor(QPalette.ColorRole.PlaceholderText, textMuted(mode))
-        self.viewport().setPalette(viewport_palette)
-        # Base 最后写：setPalette 可能把 viewport 的 Base 重置回系统色，而
-        # QPlainTextEdit 读的就是 viewport Base（背景发白的根因）。
         setTextBaseColor(self, base)
         self._apply_block_backgrounds()
         self._highlighter.rehighlight()

@@ -46,8 +46,6 @@ class ElaTagSearchMultiBox(_TagBoxThemeMixin, _TagBoxAnimMixin, ElaSearchMultiBo
             return
         self._expand_mark_width = _get_target_mark_width(self)
         super().showPopup()
-        if self._searchEdit:
-            self._applySearchEditPalette()
 
     def hidePopup(self) -> None:
         self._expand_mark_width = 0.0

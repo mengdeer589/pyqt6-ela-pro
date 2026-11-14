@@ -4,11 +4,11 @@ import pytest
 
 import pyqt6_ela_pro.ela_pyqtgraph_canvas as mod
 from pyqt6_ela_pro.ela_pyqtgraph_canvas import (
-    _DARK_THEME,
-    _LIGHT_THEME,
     ElaPlotWidget,
+    _theme_for_mode,
     pg,
 )
+from PyQt6ElaWidgetTools import ElaThemeType
 
 
 class TestElaPlotWidgetNoPyqtgraph:
@@ -22,22 +22,27 @@ class TestElaPlotWidgetNoPyqtgraph:
             assert pw is not None
             pw.deleteLater()
 
-    def test_light_theme_defined(self):
+    def test_light_theme_defined(self, qapp):
 
-        assert "background" in _LIGHT_THEME
-        assert "foreground" in _LIGHT_THEME
-        assert "axis" in _LIGHT_THEME
-        assert len(_LIGHT_THEME) == 5
+        theme = _theme_for_mode(ElaThemeType.ThemeMode.Light)
+        assert "background" in theme
+        assert "foreground" in theme
+        assert "axis" in theme
+        assert len(theme) == 5
 
-    def test_dark_theme_defined(self):
+    def test_dark_theme_defined(self, qapp):
 
-        assert "background" in _DARK_THEME
-        assert "foreground" in _DARK_THEME
-        assert len(_DARK_THEME) == 5
+        theme = _theme_for_mode(ElaThemeType.ThemeMode.Dark)
+        assert "background" in theme
+        assert "foreground" in theme
+        assert len(theme) == 5
 
-    def test_light_and_dark_backgrounds_differ(self):
+    def test_light_and_dark_backgrounds_differ(self, qapp):
 
-        assert _LIGHT_THEME["background"] != _DARK_THEME["background"]
+        assert (
+            _theme_for_mode(ElaThemeType.ThemeMode.Light)["background"]
+            != _theme_for_mode(ElaThemeType.ThemeMode.Dark)["background"]
+        )
 
     def test_pg_import_handled(self):
 

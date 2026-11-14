@@ -10,10 +10,10 @@ import re
 from pathlib import Path
 from typing import Optional
 
-from PyQt6.QtCore import QRectF, QSize, Qt
-from PyQt6.QtGui import QImageReader, QPainter, QPainterPath, QPixmap
+from PyQt6.QtCore import QSize, Qt
+from PyQt6.QtGui import QImageReader
 from PyQt6.QtWidgets import QSizePolicy, QVBoxLayout, QWidget
-from PyQt6ElaWidgetTools import eTheme
+from PyQt6ElaWidgetTools import ElaImageCard, eTheme
 
 from .._diff import diffLines, filesFromMetadata, parseUnifiedDiff
 from .._internal import _ThemeAwareMixin
@@ -84,12 +84,15 @@ class _EmptyBody(_ThemeAwareMixin, QWidget):
         self._apply_theme()
 
 
-class _ImageBody(QWidget):
-    """图片预览：圆角、DPR 感知、小图不放大。"""
+class _ImageBody(ElaImageCard):
+    """图片预览：ElaImageCard + DPR 感知、小图不放大。"""
 
     def __init__(self, path, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
-        self._pixmap = QPixmap()
+        self._has_image = False
+        self.setMinimumSize(0, 0)
+        self.setIsPreserveAspectCrop(False)
+        self.setBorderRadius(IMAGE_RADIUS)
         self._load(path)
         self.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed)
 
@@ -111,25 +114,13 @@ class _ImageBody(QWidget):
         image = reader.read()
         if image.isNull():
             return
-        pixmap = QPixmap.fromImage(image)
-        pixmap.setDevicePixelRatio(dpr)
-        self._pixmap = pixmap
+        self._has_image = True
         self.setFixedSize(width, height)
+        self.setCardImage(image)
 
     def hasImage(self) -> bool:
         """图片是否加载成功（失败时工厂落回文本）。"""
-        return not self._pixmap.isNull()
-
-    def paintEvent(self, event) -> None:  # noqa: N802 (Qt 命名)
-        if self._pixmap.isNull():
-            return
-        painter = QPainter(self)
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-        clip = QPainterPath()
-        clip.addRoundedRect(QRectF(self.rect()), IMAGE_RADIUS, IMAGE_RADIUS)
-        painter.setClipPath(clip)
-        painter.drawPixmap(0, 0, self._pixmap)
-        painter.end()
+        return self._has_image
 
 
 def cleanAnsi(text: str) -> str:

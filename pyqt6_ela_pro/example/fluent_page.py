@@ -44,7 +44,8 @@ class FluentPage(ExamplePage):
             )
         )
         self._addInfoText(
-            "三档尺寸 / 圆形与圆角方 / 在线状态圆点；名字会自动生成首字母。",
+            "4 档尺寸或任意边长 / 圆形、4px 与 8px 圆角方 / 在线状态圆点；"
+            "名字自动生成首字母。",
             main_layout,
         )
         row = QHBoxLayout()
@@ -81,6 +82,12 @@ class FluentPage(ExamplePage):
             avatar.setShape(shape)
             avatar.setPresence(presence)
             row.addWidget(avatar)
+        compact = ElaAvatar(self)
+        compact.setAvatarExtent(30)
+        compact.setShape(ElaAvatarShapeType.Rounded)
+        compact.setIconName(ElaIconType.IconName.Robot)
+        compact.setPresence(ElaAvatarPresenceType.Available)
+        row.addWidget(compact)
         row.addStretch()
         main_layout.addLayout(row)
         main_layout.addSpacing(20)

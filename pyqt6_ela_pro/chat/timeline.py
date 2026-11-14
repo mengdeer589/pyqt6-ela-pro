@@ -450,7 +450,12 @@ class ChatPartTimeline:
             )
             if not callId:
                 return
-            current = self._bubble._find_part(callId)
+            parts = self._bubble._parts
+            current = (
+                parts[-1]
+                if parts and parts[-1].id == callId
+                else self._bubble._find_part(callId)
+            )
             card = self._bubble._tool_cards.get(callId)
             # 以卡片里的归一化快照为准：addToolCall 会给缺失的 tool_call.id 补上 callId。
             stored = card.toolCall(callId) if card is not None else None

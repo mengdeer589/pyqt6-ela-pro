@@ -61,6 +61,9 @@ _STREAM_HIGHLIGHT_MAX_CHARS = 4096
 
 _HIGHLIGHT_CACHE_CAP = 32
 
+#: 词法 token 缓存按源码字符数限额（与主题无关，避免主题切换重新 lex）。
+_HIGHLIGHT_TOKEN_CACHE_CHARS = 1_000_000
+
 _PYGMENTS_STATE = {"loaded": False, "module": None}
 
 _DEFAULT_CODE_FONT_FAMILY: Optional[str] = None
@@ -504,38 +507,27 @@ class _MarkdownCodeMixin:
         module = _load_pygments()
         if module is None or not lang or len(code) > _HIGHLIGHT_MAX_CHARS:
             return [(code, self._code_text_format(self._font_for_code(code)))]
-        get_lexer_by_name, token_module = module
+        token_module = module[1]
         theme_key = (self._md_theme, "dark" if self._is_dark_theme else "light")
         cache_key = (lang, code, theme_key)
         cached = self._highlight_cache.get(cache_key)
         if cached is not None:
             return cached
-        lexer = _LEXER_CACHE.get(lang, _LEXER_MISS)
-        if lexer is _LEXER_MISS:
-            try:
-                lexer = get_lexer_by_name(lang, stripnl=False, ensurenl=False)
-            except Exception:
-                lexer = None
-            _LEXER_CACHE[lang] = lexer
         base = self._code_text_format(self._font_for_code(code))
-        if lexer is None:
+        tokens = self._highlight_tokens(code, lang, module)
+        if not tokens:
             return [(code, base)]
         palette = self._token_palette
         result = []
-        try:
-            for token_type, value in lexer.get_tokens(code):
-                if not value:
-                    continue
-                fmt = QTextCharFormat(base)
-                style = _token_style(token_type, token_module, palette)
-                if style is not None:
-                    color, italic = style
-                    fmt.setForeground(parse_color(color))
-                    if italic:
-                        fmt.setFontItalic(True)
-                result.append((value, fmt))
-        except Exception:
-            return [(code, base)]
+        for token_type, value in tokens:
+            fmt = QTextCharFormat(base)
+            style = _token_style(token_type, token_module, palette)
+            if style is not None:
+                color, italic = style
+                fmt.setForeground(parse_color(color))
+                if italic:
+                    fmt.setFontItalic(True)
+            result.append((value, fmt))
         if not result:
             return [(code, base)]
         if self._highlight_cache_cap > 0:
@@ -543,6 +535,56 @@ class _MarkdownCodeMixin:
                 self._highlight_cache.pop(next(iter(self._highlight_cache)))
             self._highlight_cache[cache_key] = result
         return result
+
+    def _highlight_tokens(self, code: str, lang: str, module) -> tuple:
+        """Pygments token 流（主题无关）；按源码字符数做进程内缓存。"""
+        key = (lang, code)
+        cached = self._highlight_token_cache.get(key)
+        if cached is not None:
+            return cached
+        get_lexer_by_name, _token_module = module
+        lexer = _LEXER_CACHE.get(lang, _LEXER_MISS)
+        if lexer is _LEXER_MISS:
+            try:
+                lexer = get_lexer_by_name(lang, stripnl=False, ensurenl=False)
+            except Exception:
+                lexer = None
+            _LEXER_CACHE[lang] = lexer
+        if lexer is None:
+            return ()
+        try:
+            tokens = tuple(
+                (token_type, value)
+                for token_type, value in lexer.get_tokens(code)
+                if value
+            )
+        except Exception:
+            return ()
+        self._cache_highlight_tokens(key, tokens)
+        return tokens
+
+    def _cache_highlight_tokens(self, key: tuple, tokens: tuple) -> None:
+        if self._highlight_cache_cap <= 0 or not tokens:
+            return
+        chars = len(key[1])
+        if chars > _HIGHLIGHT_TOKEN_CACHE_CHARS:
+            return
+        cache = self._highlight_token_cache
+        if key in cache:
+            return
+        while (
+            cache
+            and self._highlight_token_cache_chars + chars > _HIGHLIGHT_TOKEN_CACHE_CHARS
+        ):
+            old_key = next(iter(cache))
+            cache.pop(old_key)
+            self._highlight_token_cache_chars -= len(old_key[1])
+        cache[key] = tokens
+        self._highlight_token_cache_chars += chars
+
+    def _clear_highlight_token_cache(self) -> None:
+        self._highlight_token_cache.clear()
+        self._highlight_token_cache_chars = 0
 
     def _in_code_table(self, cursor: QTextCursor) -> bool:
         """游标是否位于代码块包裹表内。"""

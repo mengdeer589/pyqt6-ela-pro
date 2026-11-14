@@ -9,6 +9,9 @@ _CODE_TOKEN_PREFIX = "\ue000elacode"
 
 _CODE_TOKEN_SUFFIX = "\ue001"
 
+#: 行内语法转换期间保护链接目标 / 裸 URL / HTML 标签的占位符（guard 前还原）
+_PROTECT_TOKEN_PREFIX = "\ue000elaprot"
+
 _INLINE_CODE_TOKEN_PREFIX = "\ue000elainline"
 
 _MERMAID_TOKEN_PREFIX = "\ue000elamermaid"

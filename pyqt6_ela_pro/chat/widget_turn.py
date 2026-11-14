@@ -66,10 +66,13 @@ class _WidgetTurnMixin:
         self.sendUserMessage(text, attachments, mentions=mentions)
 
     def _on_alternate_submitted(self, text: str, attachments: list) -> None:
-        """``Ctrl+Enter``：生成中走插话，空闲时普通发送。"""
+        """``Ctrl+Enter``：生成中走插话，插话关闭时回退排队，空闲时普通发送。"""
         mentions = self._input.mentionSpans(text)
         if self._generating:
-            self.steerMessage(text, attachments, mentions=mentions)
+            if self.steerEnabled():
+                self.steerMessage(text, attachments, mentions=mentions)
+            else:
+                self.enqueueMessage(text, attachments, mentions=mentions)
         else:
             self.sendUserMessage(text, attachments, mentions=mentions)
 

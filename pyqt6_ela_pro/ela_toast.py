@@ -23,24 +23,22 @@ from PyQt6.QtGui import (
 )
 from PyQt6.QtWidgets import QApplication, QWidget
 
-from PyQt6ElaWidgetTools import ElaIconType, ElaThemeType
+from PyQt6ElaWidgetTools import ElaThemeType
 
 from ._internal import is_deleted
 from ._motion import Duration, Easing, start_transition
-from ._styles import (
-    SHADOW_MARGIN,
-    paintOverlayShadow,
-    paintRoundedCard,
-    paintSeverityBadge,
+from ._notify_common import (
+    BADGE_SIZE,
+    GAP,
+    SEVERITY_ICONS,
+    STACK_GAP,
+    liveItems,
+    paintNotificationCard,
+    stackOffset,
+    stackStep,
 )
-from ._theme import (
-    ElaSeverity,
-    blend,
-    border,
-    severityColor,
-    surfacePopup,
-    text,
-)
+from ._styles import SHADOW_MARGIN, paintOverlayShadow, paintSeverityBadge
+from ._theme import ElaSeverity, text
 from .widget_base import ElaThemeWidget
 
 #: 同一锚点（父控件，None 表示屏幕）下当前存活的 toast，按创建顺序排列。
@@ -48,29 +46,21 @@ from .widget_base import ElaThemeWidget
 _LIVE_TOASTS: dict = {}
 
 #: 同锚点 toast 之间的视觉间距（像素）
-_TOAST_GAP = 10
+_TOAST_GAP = STACK_GAP
 
 #: 卡片高度（不含上下阴影边距）
 _TOAST_HEIGHT = 40
 #: 卡片左右内边距
 _PAD_X = 14
 #: 等级圆直径
-_BADGE_SIZE = 20
+_BADGE_SIZE = BADGE_SIZE
 #: 等级圆与文本间距
-_GAP = 10
+_GAP = GAP
 #: 文本额外留白（避免刚好卡在宽度上限时频繁省略）
 _TEXT_SLACK = 12
 #: 卡片宽度上下限
 _MIN_WIDTH = 200
 _MAX_WIDTH = 400
-
-#: 实心圆内的字形用「非圆形」图标，避免与圆底重复。
-_SEVERITY_ICONS = {
-    ElaSeverity.Info: ElaIconType.IconName.Info,
-    ElaSeverity.Success: ElaIconType.IconName.Check,
-    ElaSeverity.Warning: ElaIconType.IconName.Exclamation,
-    ElaSeverity.Error: ElaIconType.IconName.Xmark,
-}
 
 
 def _prune_toasts(anchor) -> None:
@@ -82,7 +72,7 @@ def _prune_toasts(anchor) -> None:
     live = _LIVE_TOASTS.get(anchor)
     if not live:
         return
-    kept = [t for t in live if not is_deleted(t)]
+    kept = liveItems(live)
     if kept:
         _LIVE_TOASTS[anchor] = kept
     else:
@@ -94,20 +84,16 @@ def _reflow_toasts(anchor) -> None:
 
     不重排会在关闭中间一条后留出空洞，下一条 toast 顺延时与存活项重叠。
     """
-    live = _LIVE_TOASTS.get(anchor)
+    live = liveItems(_LIVE_TOASTS.get(anchor, ()))
     if not live:
         return
-    base = None
+    base = getattr(live[0], "_toast_base_y", None)
+    if base is None:
+        return
     y = 0
     for toast in live:
-        if is_deleted(toast):
-            continue
-        if base is None:
-            base = getattr(toast, "_toast_base_y", None)
-            if base is None:
-                return
         toast.move(toast.x(), base + y)
-        y += toast.height() - 2 * SHADOW_MARGIN + _TOAST_GAP
+        y += stackStep(toast, gap=_TOAST_GAP)
 
 
 class ElaToast(ElaThemeWidget):
@@ -161,9 +147,7 @@ class ElaToast(ElaThemeWidget):
         anchor = parent if parent is not None else None
         self._toast_anchor = anchor
         _prune_toasts(anchor)
-        offset = 0
-        for other in _LIVE_TOASTS.get(anchor, ()):
-            offset += other.height() - 2 * SHADOW_MARGIN + _TOAST_GAP
+        offset = stackOffset(_LIVE_TOASTS.get(anchor, ()), gap=_TOAST_GAP)
 
         pos = QPoint()
         if parent:
@@ -304,27 +288,21 @@ class ElaToast(ElaThemeWidget):
         br = self._border_radius
         card_w = self.width() - 2 * sb
         card_h = self.height() - 2 * sb
-        sev_color = severityColor(mode, self._severity)
 
         # 阴影：窗口尺寸已按 _shadow_border 撑开，此处必须画出阴影，
         # 否则 toast 看起来比别的弹层「扁」一层。
         paintOverlayShadow(painter, self.rect(), margin=sb, radius=br)
         painter.translate(sb, sb)
 
-        tint = 0.06 if mode == ElaThemeType.ThemeMode.Light else 0.10
-        paintRoundedCard(
-            painter,
-            QRectF(0, 0, card_w, card_h),
-            background=blend(surfacePopup(mode), sev_color, tint),
-            border=border(mode),
-            radius=br,
+        sev_color = paintNotificationCard(
+            painter, QRectF(0, 0, card_w, card_h), self._severity, radius=br
         )
 
         badge_rect = QRectF(
             _PAD_X, (card_h - _BADGE_SIZE) / 2, _BADGE_SIZE, _BADGE_SIZE
         )
         paintSeverityBadge(
-            painter, badge_rect, sev_color, _SEVERITY_ICONS[self._severity]
+            painter, badge_rect, sev_color, SEVERITY_ICONS[self._severity]
         )
 
         text_left = _PAD_X + _BADGE_SIZE + _GAP

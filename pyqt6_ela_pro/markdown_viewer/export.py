@@ -7,6 +7,7 @@ import math
 import mimetypes
 import os
 import re
+from contextlib import contextmanager
 from typing import Optional
 
 from PyQt6.QtCore import QBuffer, QIODevice, QMarginsF, QRectF, QSizeF, Qt
@@ -29,22 +30,67 @@ from .tokens import _CODE_CELL_LEFT_PADDING
 
 
 class _MarkdownExportMixin:
+    @contextmanager
+    def _expanded_for_export(self):
+        """导出 / 复制全文时临时展开折叠内容（代码折叠 / details / 推理）。
+
+        折叠内容不在文档里（代码折叠只插入前 N 行、details / 推理块删除内容），
+        不展开会把隐藏内容从 HTML / PDF / 打印 / 复制全文中丢掉。
+        """
+        if getattr(self, "_export_expanding", False):
+            yield
+            return
+        collapsed_folds = bool(self._fold_blocks) and len(self._expanded_folds) < len(
+            self._fold_blocks
+        )
+        collapsed_code = False
+        if self._code_collapse_lines > 0 and not self._stream_active:
+            limit = self._code_collapse_lines + 1
+            for index, (_lang, code, _closed) in enumerate(self._fenced_blocks):
+                if index in self._expanded_code_blocks:
+                    continue
+                if code.count("\n") + 1 > limit:
+                    collapsed_code = True
+                    break
+        if not collapsed_folds and not collapsed_code:
+            yield
+            return
+        old_folds = set(self._expanded_folds)
+        old_code = set(self._expanded_code_blocks)
+        bar = self._text_browser.verticalScrollBar()
+        value = bar.value()
+        self._export_expanding = True
+        try:
+            if collapsed_folds:
+                self._expanded_folds = set(range(len(self._fold_blocks)))
+            if collapsed_code:
+                self._expanded_code_blocks = set(range(len(self._fenced_blocks)))
+            self._render()
+            yield
+        finally:
+            self._expanded_folds = old_folds
+            self._expanded_code_blocks = old_code
+            self._export_expanding = False
+            self._render()
+            bar.setValue(min(value, bar.maximum()))
+
     def toHtml(self, embedImages: bool = False) -> str:
         """导出当前渲染结果为 HTML；``embedImages=True`` 时把公式 / Mermaid /
         本地图片内嵌成 data URI（单文件分享用，远程图片保持原样），默认关闭。
         """
         self._finish_pending_render()
-        html = self._document_for_export().toHtml()
-        if not embedImages:
-            return html
+        with self._expanded_for_export():
+            html = self._document_for_export().toHtml()
+            if not embedImages:
+                return html
 
-        def replace(match: re.Match) -> str:
-            embedded = self._embed_image_data_uri(match.group(2))
-            if not embedded:
-                return match.group(0)
-            return match.group(1) + embedded + match.group(3)
+            def replace(match: re.Match) -> str:
+                embedded = self._embed_image_data_uri(match.group(2))
+                if not embedded:
+                    return match.group(0)
+                return match.group(1) + embedded + match.group(3)
 
-        return re.sub(r'(<img\b[^>]*?\ssrc=")([^"]*)(")', replace, html)
+            return re.sub(r'(<img\b[^>]*?\ssrc=")([^"]*)(")', replace, html)
 
     def _embed_image_data_uri(self, name: str) -> str:
         """图片名 → data URI（生成图片 / 本地文件；远程或缺失返回空串）。"""
@@ -286,9 +332,10 @@ class _MarkdownExportMixin:
                 writer.setTitle(str(title))
             if creator:
                 writer.setCreator(str(creator))
-            document = self._document_for_export()
-            self._apply_export_line_spacing(document, lineSpacing)
-            self._paint_pdf_pages(writer, document, scale, bool(pageNumbers))
+            with self._expanded_for_export():
+                document = self._document_for_export()
+                self._apply_export_line_spacing(document, lineSpacing)
+                self._paint_pdf_pages(writer, document, scale, bool(pageNumbers))
         except Exception:
             return False
         return os.path.exists(path)
@@ -307,7 +354,8 @@ class _MarkdownExportMixin:
                 dialog = QPrintDialog(printer, self)
                 if dialog.exec() != QDialog.DialogCode.Accepted:
                     return False
-            self.document().print(printer)
+            with self._expanded_for_export():
+                self.document().print(printer)
         except Exception:
             return False
         return True

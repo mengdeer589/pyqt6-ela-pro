@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import re
+
 from PyQt6.QtCore import QElapsedTimer, QRectF
 from PyQt6.QtGui import (
     QPainter,
@@ -14,7 +16,14 @@ from PyQt6.QtGui import (
 
 from .._internal import is_deleted
 from .._motion import start_idle_loop
-from .syntax import _stable_cut
+from ..math_lite import MATH_ENVS
+from .syntax import (
+    _DETAILS_CLOSE_RE,
+    _DETAILS_OPEN_RE,
+    _fence_close,
+    _fence_open,
+    _stable_cut,
+)
 
 _SCROLL_MARGIN = 4
 
@@ -221,26 +230,76 @@ class _MarkdownStreamMixin:
         self._caret_visible = not self._caret_visible
         self.update()
 
-    @staticmethod
-    def _split_large_chunks(text: str) -> list:
-        """按空行 / 换行 / 空白边界把超长文本切成渲染块。"""
+    def _split_large_chunks(self, text: str) -> list:
+        """按安全空行切分大文档：围栏 / 公式 / details / 推理块内不切。
+
+        空行是 Markdown 的块边界；只在这里切，表格（无空行）与缩进代码
+        （空行后仍是缩进行）不会被拆开。找不到安全空行时整段并入下一块，
+        宁可单块大一点，也不能把一个代码块 / 表格切成两半。
+        """
+        lines = text.splitlines(keepends=True)
         chunks: list[str] = []
         start = 0
-        length = len(text)
-        while start < length:
-            end = min(start + _LARGE_RENDER_CHUNK, length)
-            if end < length:
-                floor = start + _LARGE_RENDER_CHUNK // 2
-                cut = text.rfind("\n\n", floor, end)
-                if cut == -1:
-                    cut = text.rfind("\n", floor, end)
-                if cut == -1:
-                    cut = text.rfind(" ", floor, end)
-                if cut != -1:
-                    end = cut + 1
-            chunks.append(text[start:end])
-            start = end
-        return chunks
+        size = 0
+        fence = None
+        math_closer = None
+        details_depth = 0
+        reasoning_open = False
+        tag = (self._reasoning_tag or "").strip().lower()
+        open_tag = f"<{tag}>" if tag else ""
+        close_tag = f"</{tag}>" if tag else ""
+        i = 0
+        n = len(lines)
+        while i < n:
+            line = lines[i]
+            stripped = line.strip()
+            if fence is not None:
+                if _fence_close(line, fence):
+                    fence = None
+            elif math_closer is not None:
+                if stripped == math_closer:
+                    math_closer = None
+            else:
+                opened, _lang = _fence_open(line)
+                if opened:
+                    fence = opened
+                elif stripped in ("$$", "\\["):
+                    math_closer = "$$" if stripped == "$$" else "\\]"
+                else:
+                    env = re.match(r"\\begin\{(\w+\*?)\}\s*$", stripped)
+                    if env and env.group(1).rstrip("*") in MATH_ENVS:
+                        math_closer = "\\end{" + env.group(1) + "}"
+                    elif _DETAILS_OPEN_RE.match(stripped):
+                        details_depth += 1
+                    elif _DETAILS_CLOSE_RE.match(stripped):
+                        details_depth = max(0, details_depth - 1)
+                    elif open_tag and stripped.lower() == open_tag:
+                        reasoning_open = True
+                    elif close_tag and stripped.lower() == close_tag:
+                        reasoning_open = False
+            size += len(line)
+            safe = (
+                fence is None
+                and math_closer is None
+                and details_depth == 0
+                and not reasoning_open
+                and not stripped
+            )
+            if safe and i + 1 < n and lines[i + 1].startswith(("    ", "\t")):
+                # 空行后的缩进行仍是同一个缩进代码块
+                safe = False
+            if safe and size >= _LARGE_RENDER_CHUNK:
+                # 空行本身丢掉：块间由 _render_large_step 的 insertBlock 分隔
+                chunks.append("".join(lines[start:i]))
+                start = i + 1
+                size = 0
+            i += 1
+        tail = "".join(lines[start:])
+        if tail:
+            chunks.append(tail)
+        chunks = [chunk for chunk in chunks if chunk]
+        # 全空白文档（> 阈值）没有安全空行可切：整篇作为一个块，保证收尾能结束
+        return chunks or [text]
 
     def _begin_large_render(self, reset_position: bool = False) -> None:
         """启动分块渲染：清空文档后按时间片逐块提交。"""
@@ -305,6 +364,7 @@ class _MarkdownStreamMixin:
         self._schedule_layout_refresh()
         old_value, old_max = self._large_render_scroll
         self._apply_render_scroll(old_value, old_max, self._large_render_reset)
+        self._refresh_search_after_render()
         self.renderingFinished.emit()
 
     def _cancel_large_render(self) -> None:

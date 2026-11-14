@@ -35,7 +35,9 @@ class ElaTagSearchBox(_TagBoxThemeMixin, _TagBoxAnimMixin, ElaSearchBox):
     ) -> None:
         super().__init__(parent)
         self._tag_box_init(title)
-        self._indexChangedSlot = self._onCurrentIndexChanged  # 断连要同一对象（lambda / partial 必须存引用）
+        self._indexChangedSlot = (
+            self._onCurrentIndexChanged
+        )  # 断连要同一对象（lambda / partial 必须存引用）
         self.currentIndexChanged.connect(self._indexChangedSlot)
 
     def showPopup(self) -> None:
@@ -43,9 +45,6 @@ class ElaTagSearchBox(_TagBoxThemeMixin, _TagBoxAnimMixin, ElaSearchBox):
             return
         self._animate_popup_open()
         super().showPopup()
-
-        if self._searchEdit:
-            self._applySearchEditPalette()
 
     def hidePopup(self) -> None:
         self._animate_popup_close()
@@ -61,7 +60,7 @@ class ElaTagSearchBox(_TagBoxThemeMixin, _TagBoxAnimMixin, ElaSearchBox):
         _paint_tag_single(painter, self)
 
     def deleteLater(self) -> None:
-        slot = getattr(self, '_indexChangedSlot', None)
+        slot = getattr(self, "_indexChangedSlot", None)
         if slot is not None:
             try:
                 self.currentIndexChanged.disconnect(slot)

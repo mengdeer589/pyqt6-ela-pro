@@ -18,6 +18,7 @@ from __future__ import annotations
 import pytest
 from PyQt6.QtCore import QRect, QRectF, Qt
 from PyQt6.QtGui import QColor, QPainter, QPixmap
+from PyQt6ElaWidgetTools import ElaIconType
 
 from pyqt6_ela_pro._styles import drawCoverPixmap
 from pyqt6_ela_pro._theme import (
@@ -442,3 +443,31 @@ class TestLayoutDirection:
         assert avatar.effectiveInitials() == "SJ"
         avatar.setLayoutDirection(Qt.LayoutDirection.LeftToRight)
         assert avatar.effectiveInitials() == "JS"
+
+
+class TestExtendedAvatar:
+    def test_custom_extent_overrides_tier(self, avatar):
+        avatar.setAvatarExtent(30)
+        assert avatar.extent() == 30
+        assert avatar.width() == 30
+        assert avatar.height() == 30
+        assert avatar.sizeHint().width() == 30
+        avatar.setAvatarSize(ElaAvatarSizeType.Large)
+        assert avatar.extent() == 40
+        assert avatar.width() == 40
+
+    def test_rounded_shape(self, avatar):
+        avatar.setShape(ElaAvatarShapeType.Rounded)
+        assert avatar.shape() == ElaAvatarShapeType.Rounded
+        avatar.setShape(ElaAvatarShapeType.Square)
+        assert avatar.shape() == ElaAvatarShapeType.Square
+
+    def test_explicit_icon_name(self, avatar):
+        hits = []
+        avatar.iconChanged.connect(hits.append)
+        avatar.setIconName(ElaIconType.IconName.Robot)
+        assert avatar.iconName() == ElaIconType.IconName.Robot
+        assert hits == [ElaIconType.IconName.Robot]
+        avatar.setIconName(None)
+        assert avatar.iconName() is None
+        assert hits[-1] is None

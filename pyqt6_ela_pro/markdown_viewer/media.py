@@ -117,6 +117,12 @@ class _MarkdownMediaMixin:
             raise TypeError(f"url 应为 str 或 QUrl，收到 {type(url).__name__}")
         if qurl.isLocalFile() and not qurl.path().endswith("/"):
             qurl.setPath(qurl.path() + "/")
+        elif not qurl.isLocalFile() and not qurl.isEmpty():
+            # 远程目录（最后一段无扩展名）补尾斜杠，否则相对图片会解析到上一级
+            path = qurl.path()
+            last = path.rsplit("/", 1)[-1]
+            if not path.endswith("/") and "." not in last:
+                qurl.setPath(path + "/")
         self._base_url = qurl
         self._text_browser.document().setBaseUrl(qurl)
 

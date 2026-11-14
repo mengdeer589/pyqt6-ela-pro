@@ -12,7 +12,6 @@ from PyQt6.QtCore import (
     QPropertyAnimation,
     QRect,
     QRectF,
-    QSize,
     Qt,
     QTimer,
     pyqtProperty,
@@ -20,7 +19,6 @@ from PyQt6.QtCore import (
 )
 from PyQt6.QtGui import (
     QColor,
-    QEnterEvent,
     QFont,
     QFontMetrics,
     QIcon,
@@ -37,10 +35,16 @@ from PyQt6.QtWidgets import (
 )
 from PyQt6ElaWidgetTools import ElaIcon, ElaIconType, ElaThemeType, eTheme
 
-from ._internal import POPUP_FOOTER_OBJECT_NAME, hideComboboxPopup, is_deleted
+from ._internal import (
+    POPUP_FOOTER_OBJECT_NAME,
+    hideComboboxPopup,
+    is_deleted,
+    safe_connect,
+)
 from ._motion import Duration, Easing, start_transition
 from ._ownership import ElaWidgetOwnershipType, releaseWidget
 from .combo_box import ElaSearchBox, _match_item, _split_keyword
+from .ela_button import ElaButton
 
 _GROUP_HEADER_ROLE = Qt.ItemDataRole.UserRole + 100
 
@@ -122,111 +126,41 @@ class _GhostSeparator(QWidget):
         )
 
 
-class _GhostFooterButton(QWidget):
-    """底栏按钮：自绘、无焦点，hover 显示半透明底色。"""
-
-    clicked = pyqtSignal()
+class _GhostFooterButton(ElaButton):
+    """底栏按钮：复用 ElaButton 的 ``text`` 样式，只补 footer key。"""
 
     def __init__(
         self,
         text: str,
-        icon: _IconSource = None,
+        icon: Optional[ElaIconType.IconName] = None,
         key: str = "",
         parent: Optional[QWidget] = None,
     ) -> None:
-        super().__init__(parent)
-        self._text = text
-        self._icon = icon
+        super().__init__(
+            text,
+            icon,
+            14,
+            variant="text",
+            size="small",
+            parent=parent,
+        )
         self._key = key
-        self._hovered = False
+        self.setBorderRadius(4)
         self.setFixedHeight(28)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         self.setFocusPolicy(Qt.FocusPolicy.NoFocus)
-        self.setAttribute(Qt.WidgetAttribute.WA_Hover, True)
-        self.setMouseTracking(True)
 
-    def text(self) -> str:
-        """返回按钮文字。"""
-        return self._text
-
-    def setText(self, text: str) -> None:
-        """设置按钮文字。"""
-        if text != self._text:
-            self._text = text
-            self.updateGeometry()
-            self.update()
-
-    def icon(self) -> _IconSource:
+    def icon(self) -> Optional[ElaIconType.IconName]:
         """返回按钮图标。"""
-        return self._icon
+        return self._icon_name
 
-    def setIcon(self, icon: _IconSource) -> None:
-        """设置按钮图标（``ElaIconType.IconName`` / ``QIcon`` / ``QPixmap``）。"""
-        self._icon = icon
-        self.updateGeometry()
-        self.update()
+    def setIcon(self, icon: Optional[ElaIconType.IconName]) -> None:  # noqa: N802
+        """设置按钮图标（``ElaIconType.IconName``）。"""
+        self.setElaIcon(icon, 14)
 
     def footerKey(self) -> str:
         """返回点击上报用的 key。"""
         return self._key
-
-    def sizeHint(self) -> QSize:  # noqa: N802 (Qt 命名)
-        width = 16
-        if self._icon is not None:
-            width += 14 + 6
-        width += QFontMetrics(self.font()).horizontalAdvance(self._text)
-        return QSize(width, self.height())
-
-    def enterEvent(self, _event: QEnterEvent) -> None:  # noqa: N802 (Qt 命名)
-        self._hovered = True
-        self.update()
-
-    def leaveEvent(self, _event: QEvent) -> None:  # noqa: N802 (Qt 命名)
-        self._hovered = False
-        self.update()
-
-    def mousePressEvent(self, event) -> None:  # noqa: N802 (Qt 命名)
-        event.accept()
-
-    def mouseReleaseEvent(self, event) -> None:  # noqa: N802 (Qt 命名)
-        if event.button() == Qt.MouseButton.LeftButton and self.rect().contains(
-            event.position().toPoint()
-        ):
-            self.clicked.emit()
-        event.accept()
-
-    def paintEvent(self, _event: QPaintEvent) -> None:  # noqa: N802 (Qt 命名)
-        painter = QPainter(self)
-        painter.setRenderHints(
-            QPainter.RenderHint.Antialiasing | QPainter.RenderHint.TextAntialiasing
-        )
-        text_color = (
-            _theme_color(ElaThemeType.ThemeColor.BasicText)
-            if self.isEnabled()
-            else _theme_color(ElaThemeType.ThemeColor.BasicTextDisable)
-        )
-        if self.isEnabled() and self._hovered:
-            painter.setPen(Qt.PenStyle.NoPen)
-            painter.setBrush(_theme_color(ElaThemeType.ThemeColor.BasicHoverAlpha))
-            painter.drawRoundedRect(QRectF(self.rect()), 4, 4)
-
-        rect = self.rect()
-        pixmap = _icon_pixmap(self._icon, 14, text_color)
-        text_width = QFontMetrics(self.font()).horizontalAdvance(self._text)
-        content_width = text_width + (pixmap.width() + 6 if pixmap is not None else 0)
-        # 底栏按钮会被布局拉伸到整行宽：内容整体水平居中
-        x = rect.left() + max(0, (rect.width() - content_width) // 2)
-        if pixmap is not None:
-            painter.drawPixmap(
-                x, rect.top() + (rect.height() - pixmap.height()) // 2, pixmap
-            )
-            x += pixmap.width() + 6
-        painter.setPen(text_color)
-        painter.drawText(
-            QRect(x, rect.top(), max(0, rect.right() - x), rect.height()),
-            Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft,
-            self._text,
-        )
 
 
 def _release_custom_widget(widget, ownership, original) -> None:
@@ -451,7 +385,6 @@ class ElaGhostBox(ElaSearchBox):
 
     def _onThemeChanged(self, mode=None) -> None:  # type: ignore[override]
         # 不调 super()：MRO 上的 _ThemeAwareMixin._onThemeChanged 是空实现
-        self._applySearchEditPalette()
         self.update()
         if self._footer is not None:
             self._footer.update()
@@ -577,15 +510,20 @@ class ElaGhostBox(ElaSearchBox):
     def addPopupFooterButton(  # noqa: N802 (Qt 命名)
         self,
         text: str,
-        icon: _IconSource = None,
+        icon: Optional[ElaIconType.IconName] = None,
         key: str = "",
     ) -> QWidget:
         """在弹层底部固定区追加按钮，返回按钮句柄；``key`` 是点击时随
-        ``footerTriggered`` 上报的标识。
+        ``footerTriggered`` 上报的标识，``icon`` 只接受 ``ElaIconType.IconName``。
         """
         footer = self._ensure_footer()
         button = _GhostFooterButton(text, icon, key, footer)
-        button.clicked.connect(partial(self._on_footer_button_clicked, key))
+        safe_connect(
+            button,
+            "clicked",
+            lambda _checked=False, k=key: self._on_footer_button_clicked(k),
+            "ghost.footer",
+        )
         footer.addButton(button)
         self._sync_footer_visibility()
         return button

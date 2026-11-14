@@ -28,22 +28,6 @@ class _WidgetInputApiMixin:
         """获取命令提交方式。"""
         return self._input.commandSubmitMode()
 
-    def addSelector(self, key: str, title: str, items=None, current: str = ""):
-        """在输入区发送键之前添加下拉选择器。"""
-        return self._input.addSelector(key, title, items, current)
-
-    def setSelectorItems(self, key: str, items, current=None) -> bool:
-        """替换某个选择器的选项。"""
-        return self._input.setSelectorItems(key, items, current)
-
-    def selector(self, key: str):
-        """获取选择器句柄。"""
-        return self._input.selector(key)
-
-    def selectorValue(self, key: str) -> str:
-        """获取某个选择器的当前 id。"""
-        return self._input.selectorValue(key)
-
     def setShellMode(self, on: bool) -> None:
         """进入 / 退出输入区 shell 模式。"""
         self._input.setShellMode(on)

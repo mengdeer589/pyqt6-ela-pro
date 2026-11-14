@@ -269,6 +269,9 @@ bench("QWidget()", lambda: QWidget())
 - **随库分发**（`tools/perf/`）：
   `bench_micro.py`（底层原语：对象创建 / 虚调用 / 参数转换，PyQt5/PyQt6/PySide6 都能跑，历史对照用）、
   `bench_components.py`（本库组件的构造成本表）、`bench_chat.py` / `bench_markdown_paint.py`（聊天与 Markdown 滚动基线）；
+- **真实会话回放**（`benchmarks/opencode_chat_replay/`）：opencode bundle 的聊天滚动
+  （`bench_chat.py`）与运行轨迹面板（`bench_trace.py`：时间轴 / 回放 / 流程图 / RSS /
+  控件数）。
 - 本仓库开发时用的宿主级 harness（仓库外）：`bench_example.py` / `bench_lazy.py`（启动与
   首访）、`bench_anim.py`（侧边栏动画帧间隔）、`bench_theme_icons.py`（主题切换 + 图标
   视图）、`probe_win7_kernel.py`（目标机开关探针）、`watch_windows.py`（窗口出现 / 消失

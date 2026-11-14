@@ -11,7 +11,7 @@ import logging
 from enum import IntEnum
 from typing import Optional
 
-from PyQt6.QtCore import Qt, QPropertyAnimation, pyqtSignal, QRect, QEvent
+from PyQt6.QtCore import Qt, QPropertyAnimation, pyqtSignal, QRect, QRectF, QEvent
 from PyQt6.QtGui import (
     QColor,
     QMouseEvent,
@@ -20,13 +20,14 @@ from PyQt6.QtGui import (
     QPaintEvent,
     QRegion,
 )
-from PyQt6.QtWidgets import QWidget, QVBoxLayout, QGraphicsDropShadowEffect
+from PyQt6.QtWidgets import QWidget, QVBoxLayout
 
 from PyQt6ElaWidgetTools import eTheme, ElaThemeType
 
 from ._colors import parse_color
 from ._motion import Duration, Easing, start_transition
 from ._ownership import ContentSlot, ElaWidgetOwnershipType
+from ._styles import SHADOW_MARGIN, paintOverlayShadow
 from .widget_base import ElaThemeWidget
 
 logger = logging.getLogger(__name__)
@@ -50,6 +51,7 @@ class ElaDrawerPanel(QWidget):
         self._corner_radius = corner_radius
         self._position = position
         self._bg_color = QColor(0, 0, 0, 0)
+        self._shadow_margin = SHADOW_MARGIN
 
     def setBgColor(self, color: QColor) -> None:
         self._bg_color = parse_color(color)
@@ -63,46 +65,67 @@ class ElaDrawerPanel(QWidget):
         self._corner_radius = int(radius)
         self.update()
 
-    def paintEvent(self, _event: QPaintEvent) -> None:
-        painter = QPainter(self)
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-        painter.setPen(Qt.PenStyle.NoPen)
+    def _card_rect(self) -> QRectF:
+        m = self._shadow_margin
+        return QRectF(self.rect()).adjusted(m, m, -m, -m)
 
-        path = QPainterPath()
+    def _shape_path(self) -> QPainterPath:
+        rect = self._card_rect()
+        left, top, right, bottom = (
+            rect.left(),
+            rect.top(),
+            rect.right(),
+            rect.bottom(),
+        )
         r = self._corner_radius
-        w, h = self.width(), self.height()
+        path = QPainterPath()
 
         if self._position == ElaDrawerPositionType.Left:
-            path.moveTo(w, r)
-            path.quadTo(w, 0, w - r, 0)
-            path.lineTo(0, 0)
-            path.lineTo(0, h)
-            path.lineTo(w - r, h)
-            path.quadTo(w, h, w, h - r)
+            path.moveTo(right, top + r)
+            path.quadTo(right, top, right - r, top)
+            path.lineTo(left, top)
+            path.lineTo(left, bottom)
+            path.lineTo(right - r, bottom)
+            path.quadTo(right, bottom, right, bottom - r)
         elif self._position == ElaDrawerPositionType.Right:
-            path.moveTo(0, r)
-            path.quadTo(0, 0, r, 0)
-            path.lineTo(w, 0)
-            path.lineTo(w, h)
-            path.lineTo(r, h)
-            path.quadTo(0, h, 0, h - r)
+            path.moveTo(left, top + r)
+            path.quadTo(left, top, left + r, top)
+            path.lineTo(right, top)
+            path.lineTo(right, bottom)
+            path.lineTo(left + r, bottom)
+            path.quadTo(left, bottom, left, bottom - r)
         elif self._position == ElaDrawerPositionType.Top:
-            path.moveTo(r, h)
-            path.quadTo(0, h, 0, h - r)
-            path.lineTo(0, 0)
-            path.lineTo(w, 0)
-            path.lineTo(w, h - r)
-            path.quadTo(w, h, w - r, h)
+            path.moveTo(left + r, bottom)
+            path.quadTo(left, bottom, left, bottom - r)
+            path.lineTo(left, top)
+            path.lineTo(right, top)
+            path.lineTo(right, bottom - r)
+            path.quadTo(right, bottom, right - r, bottom)
         else:  # Bottom
-            path.moveTo(r, 0)
-            path.quadTo(0, 0, 0, r)
-            path.lineTo(0, h)
-            path.lineTo(w, h)
-            path.lineTo(w, r)
-            path.quadTo(w, 0, w - r, 0)
+            path.moveTo(left + r, top)
+            path.quadTo(left, top, left, top + r)
+            path.lineTo(left, bottom)
+            path.lineTo(right, bottom)
+            path.lineTo(right, top + r)
+            path.quadTo(right, top, right - r, top)
 
         path.closeSubpath()
-        painter.fillPath(path, self._bg_color)
+        return path
+
+    def paintEvent(self, _event: QPaintEvent) -> None:
+        painter = QPainter(self)
+        try:
+            painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+            paintOverlayShadow(
+                painter,
+                self.rect(),
+                margin=self._shadow_margin,
+                radius=self._corner_radius,
+            )
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.fillPath(self._shape_path(), self._bg_color)
+        finally:
+            painter.end()
 
 
 class ElaDrawerDim(QWidget):
@@ -161,21 +184,10 @@ class ElaDrawer(ElaThemeWidget):
             corner_radius=self._corner_radius, position=self._position, parent=self
         )
 
-        shadow = QGraphicsDropShadowEffect(self._drawer_widget)
-        shadow.setColor(QColor(0, 0, 0, 60))
-        if self._position == ElaDrawerPositionType.Left:
-            shadow.setOffset(4, 0)
-        elif self._position == ElaDrawerPositionType.Right:
-            shadow.setOffset(-4, 0)
-        elif self._position == ElaDrawerPositionType.Top:
-            shadow.setOffset(0, 4)
-        else:
-            shadow.setOffset(0, -4)
-        shadow.setBlurRadius(16)
-        self._drawer_widget.setGraphicsEffect(shadow)
-
         self._main_layout = QVBoxLayout(self._drawer_widget)
-        self._main_layout.setContentsMargins(0, 0, 0, 0)
+        # 面板四周预留阴影边距；内容槽与可见卡片重合。
+        m = SHADOW_MARGIN
+        self._main_layout.setContentsMargins(m, m, m, m)
         self._main_layout.setSpacing(0)
 
         self._content_slot = ContentSlot(self, "drawer-content")
@@ -203,33 +215,37 @@ class ElaDrawer(ElaThemeWidget):
         self._dim_widget.setBgColor(dim_color)
 
     def _getStartRect(self, parent: QWidget) -> QRect:
+        m = SHADOW_MARGIN
+        size = self._drawer_size
         if self._position == ElaDrawerPositionType.Left:
-            return QRect(-self._drawer_size, 0, self._drawer_size, parent.height())
+            return QRect(-size - m, -m, size + 2 * m, parent.height() + 2 * m)
         elif self._position == ElaDrawerPositionType.Right:
-            return QRect(parent.width(), 0, self._drawer_size, parent.height())
+            return QRect(parent.width(), -m, size + 2 * m, parent.height() + 2 * m)
         elif self._position == ElaDrawerPositionType.Top:
-            return QRect(0, -self._drawer_size, parent.width(), self._drawer_size)
+            return QRect(-m, -size - m, parent.width() + 2 * m, size + 2 * m)
         else:  # Bottom
-            return QRect(0, parent.height(), parent.width(), self._drawer_size)
+            return QRect(-m, parent.height(), parent.width() + 2 * m, size + 2 * m)
 
     def _getEndRect(self, parent: QWidget) -> QRect:
+        m = SHADOW_MARGIN
+        size = self._drawer_size
         if self._position == ElaDrawerPositionType.Left:
-            return QRect(0, 0, self._drawer_size, parent.height())
+            return QRect(-m, -m, size + 2 * m, parent.height() + 2 * m)
         elif self._position == ElaDrawerPositionType.Right:
             return QRect(
-                parent.width() - self._drawer_size,
-                0,
-                self._drawer_size,
-                parent.height(),
+                parent.width() - size - m,
+                -m,
+                size + 2 * m,
+                parent.height() + 2 * m,
             )
         elif self._position == ElaDrawerPositionType.Top:
-            return QRect(0, 0, parent.width(), self._drawer_size)
+            return QRect(-m, -m, parent.width() + 2 * m, size + 2 * m)
         else:  # Bottom
             return QRect(
-                0,
-                parent.height() - self._drawer_size,
-                parent.width(),
-                self._drawer_size,
+                -m,
+                parent.height() - size - m,
+                parent.width() + 2 * m,
+                size + 2 * m,
             )
 
     def contentWidget(self) -> Optional[QWidget]:
@@ -304,7 +320,7 @@ class ElaDrawer(ElaThemeWidget):
         """无遮罩模式下只保留抽屉一侧的命中区域，外部点击穿透。"""
         if self._mask_enabled:
             return
-        margin = 28  # 阴影余量（blur 16 + offset 4）
+        margin = SHADOW_MARGIN
         width = min(self.width(), self._drawer_size + margin)
         height = min(self.height(), self._drawer_size + margin)
         if self._position == ElaDrawerPositionType.Left:

@@ -5,9 +5,7 @@ from __future__ import annotations
 import re
 from typing import Callable, Optional
 
-from .._internal import safe_connect
 from .message import ElaChatMention
-from .selector import ElaChatSelector
 from .suggestions import ElaChatSuggestion
 
 _MENTION_RE = re.compile(r"(?:^|\s)@([^\s@]*)$")
@@ -191,61 +189,3 @@ class _InputCompletionMixin:
     def clearMentions(self) -> None:
         """清空引用记录。"""
         self._mentions.clear()
-
-    def addSelector(
-        self,
-        key: str,
-        title: str,
-        items=None,
-        current: str = "",
-    ) -> ElaChatSelector:
-        """在发送键之前添加一个下拉选择器，返回控件句柄。"""
-        selector_key = str(key or "")
-        if not selector_key:
-            raise ValueError("addSelector: key 不能为空")
-        if selector_key in self._selectors:
-            raise ValueError(f"addSelector: selector {selector_key!r} 已存在")
-        selector = ElaChatSelector(title, items or [], current, self._surface)
-        safe_connect(
-            selector,
-            "selectionChanged",
-            lambda itemId, k=selector_key: self.selectorChanged.emit(k, itemId),
-            "input.selector",
-            receiver=selector,
-        )
-        self._toolbar.insertWidget(
-            self._button, selector, key=f"selector:{selector_key}"
-        )
-        self._selectors[selector_key] = selector
-        return selector
-
-    def setSelectorItems(self, key: str, items, current: Optional[str] = None) -> bool:
-        """替换某个选择器的选项（不存在返回 ``False``）。"""
-        selector = self._selectors.get(str(key or ""))
-        if selector is None:
-            return False
-        selector.setItems(items, current)
-        return True
-
-    def removeSelector(self, key: str) -> bool:
-        """移除选择器（销毁控件）。"""
-        selector_key = str(key or "")
-        selector = self._selectors.pop(selector_key, None)
-        if selector is None:
-            return False
-        self._toolbar.removeItem(selector)
-        selector.deleteLater()
-        return True
-
-    def selector(self, key: str) -> Optional[ElaChatSelector]:
-        """获取选择器句柄。"""
-        return self._selectors.get(str(key or ""))
-
-    def selectors(self) -> dict:
-        """获取全部选择器（副本）。"""
-        return dict(self._selectors)
-
-    def selectorValue(self, key: str) -> str:
-        """获取某个选择器的当前 id（不存在返回空串）。"""
-        selector = self._selectors.get(str(key or ""))
-        return selector.current() if selector is not None else ""

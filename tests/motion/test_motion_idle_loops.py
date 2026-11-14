@@ -61,7 +61,9 @@ class TestStartIdleLoop:
         assert t.isActive()
         assert t.interval() == 50
 
-    @pytest.mark.parametrize("mode", [ElaMotionModeType.Reduced, ElaMotionModeType.Disabled])
+    @pytest.mark.parametrize(
+        "mode", [ElaMotionModeType.Reduced, ElaMotionModeType.Disabled]
+    )
     def test_reduced_and_disabled_stop(self, qapp, mode):
         previous = motion.mode()
         motion.setMode(mode)
@@ -309,7 +311,8 @@ class TestRealIdleLoops:
 
         arc = SpinnerArc(size=24)
         assert arc.isRunning() is False
-        assert arc._angle == 0.0, "冻结在起始角度，仍会被画出来"
+        assert arc.getIsBusying() is False
+        assert arc.getValue() > 0, "静态基态仍要画出一段可见的弧"
 
     def test_stream_caret_stays_visible(self, qapp, reduced_motion):
         """回归：光标闪烁停掉后必须**留在可见态**。

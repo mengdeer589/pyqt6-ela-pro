@@ -267,10 +267,10 @@ class TestScrollIsNotHijacked:
         assert view.isFollowing() is False
         return view
 
-    def test_palette_change_keeps_position(self, scrolled_up, qapp):
+    def test_theme_change_keeps_position(self, scrolled_up, qapp):
         _scrollbar(scrolled_up).setValue(0)
         _drain(qapp)
-        scrolled_up.setPaletteName("classic")
+        scrolled_up.setTerminalTheme("classic")
         _drain(qapp)
         assert _scrollbar(scrolled_up).value() == 0
         assert scrolled_up.isFollowing() is False
@@ -333,12 +333,12 @@ class TestHighlightColor:
         )
         assert view._highlight == derived
 
-    def test_override_survives_palette_change(self, make):
+    def test_override_survives_theme_change(self, make):
         view = make(ElaTerminalView)
         view.setHighlightColor(QColor("#ff0000"))
-        view.setPaletteName("classic")
+        view.setTerminalTheme("classic")
         assert view._highlight == QColor("#ff0000")
-        view.setPaletteName("default")
+        view.setTerminalTheme("one-dark")
         assert view._highlight == QColor("#ff0000")
 
     @pytest.mark.parametrize("bad", ["not-a-color", "#12345", QColor()])

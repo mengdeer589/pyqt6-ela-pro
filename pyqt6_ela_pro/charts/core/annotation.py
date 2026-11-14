@@ -7,10 +7,10 @@ from PyQt6.QtCore import (
     Qt,
     pyqtSignal,
 )
-from PyQt6.QtWidgets import QLineEdit
+from PyQt6ElaWidgetTools import ElaLineEdit
 
 
-class _AnnotationEditor(QLineEdit):
+class _AnnotationEditor(ElaLineEdit):
     """标注标签的行内编辑器：Enter 提交、Esc 取消（失焦也提交）。"""
 
     cancelled = pyqtSignal()

@@ -26,7 +26,6 @@ from PyQt6.QtGui import (
     QEnterEvent,
     QFont,
     QPainter,
-    QPainterPath,
     QPaintEvent,
     QResizeEvent,
 )
@@ -36,22 +35,25 @@ from PyQt6ElaWidgetTools import ElaIconButton, ElaIconType, ElaThemeType, eTheme
 
 from ._internal import connect_theme_signal, disconnect_theme, is_deleted
 from ._motion import Duration, start_transition
+from ._notify_common import (
+    BADGE_SIZE,
+    GAP,
+    RADIUS,
+    STACK_GAP,
+    coerceSeverity,
+    liveItems,
+    paintNotificationCard,
+    severityIcon,
+    stackOffset,
+    stackStep,
+)
 from ._styles import (
     SHADOW_MARGIN,
     ColorText,
     paintOverlayShadow,
-    paintRoundedCard,
     paintSeverityBadge,
 )
-from ._theme import (
-    ElaSeverity,
-    blend,
-    border,
-    severityColor,
-    surfacePopup,
-    text,
-    textMuted,
-)
+from ._theme import ElaSeverity, severityColor, text, textMuted
 
 #: 卡片内容宽（不含两侧阴影边距）
 _CONTENT_WIDTH = 300
@@ -59,53 +61,17 @@ _CONTENT_WIDTH = 300
 _PAD_X = 16
 _PAD_Y = 14
 #: 卡片圆角
-_RADIUS = 8
+_RADIUS = RADIUS
 #: 等级圆直径
-_BADGE_SIZE = 20
+_BADGE_SIZE = BADGE_SIZE
 #: 等级圆与标题 / 标题与关闭键的间距
-_GAP = 10
+_GAP = GAP
 #: 关闭键热区
 _CLOSE_SIZE = 24
 #: 卡片最小高度（不含阴影边距）
 _MIN_CARD_HEIGHT = 76
-#: 底部剩余时间条高度
-_PROGRESS_HEIGHT = 2
 #: 同屏通知的视觉间距（不含两侧阴影边距）
-_STACK_GAP = 10
-
-_SEVERITY_ALIASES = {
-    "info": ElaSeverity.Info,
-    "success": ElaSeverity.Success,
-    "warning": ElaSeverity.Warning,
-    "error": ElaSeverity.Error,
-}
-
-#: 实心圆内的字形用「非圆形」图标，避免与圆底重复。
-_SEVERITY_ICONS = {
-    ElaSeverity.Info: ElaIconType.IconName.Info,
-    ElaSeverity.Success: ElaIconType.IconName.Check,
-    ElaSeverity.Warning: ElaIconType.IconName.Exclamation,
-    ElaSeverity.Error: ElaIconType.IconName.Xmark,
-}
-
-
-def _coerceSeverity(value) -> ElaSeverity:
-    """把 ``ElaSeverity`` / 字符串 / 整数归一成枚举；非法值抛 ``ValueError``。"""
-    if isinstance(value, ElaSeverity):
-        return value
-    if isinstance(value, str):
-        try:
-            return _SEVERITY_ALIASES[value.strip().lower()]
-        except KeyError:
-            raise ValueError(
-                f"未知的通知等级 {value!r}；可用：info / success / warning / error"
-            ) from None
-    try:
-        return ElaSeverity(int(value))
-    except (TypeError, ValueError, OverflowError):
-        raise ValueError(
-            f"未知的通知等级 {value!r}；可用：info / success / warning / error"
-        ) from None
+_STACK_GAP = STACK_GAP
 
 
 class _SeverityBadge(QWidget):
@@ -133,7 +99,7 @@ class _SeverityBadge(QWidget):
             painter,
             self.rect(),
             severityColor(mode, self._severity),
-            _SEVERITY_ICONS[self._severity],
+            severityIcon(self._severity),
         )
 
 
@@ -156,7 +122,7 @@ class ElaNotifyPopup(QWidget):
         self._title = title
         self._content = content
         self._timeout = timeout
-        self._severity = _coerceSeverity(severity)
+        self._severity = coerceSeverity(severity)
         self._y_offset = y_offset
         self._is_closing = False
         self._animation = None
@@ -449,7 +415,7 @@ class ElaNotifyPopup(QWidget):
 
     def setSeverity(self, severity) -> None:
         """设置消息等级（``ElaSeverity`` 或 info/success/warning/error）。"""
-        self._severity = _coerceSeverity(severity)
+        self._severity = coerceSeverity(severity)
         self._badge.setSeverity(self._severity)
         self.update()
 
@@ -491,40 +457,19 @@ class ElaNotifyPopup(QWidget):
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         painter.setRenderHint(QPainter.RenderHint.TextAntialiasing)
 
-        mode = self._theme_mode
         sm = self._shadow_margin
         card_w = self.width() - 2 * sm
         card_h = self.height() - 2 * sm
-        sev_color = severityColor(mode, self._severity)
 
         paintOverlayShadow(painter, self.rect(), margin=sm, radius=_RADIUS)
         painter.translate(sm, sm)
-
-        tint = 0.08 if mode == ElaThemeType.ThemeMode.Light else 0.12
-        paintRoundedCard(
+        paintNotificationCard(
             painter,
             QRectF(0, 0, card_w, card_h),
-            background=blend(surfacePopup(mode), sev_color, tint),
-            border=border(mode),
+            self._severity,
+            progress=self._progress,
             radius=_RADIUS,
         )
-
-        if self._progress >= 0.0:
-            clip = QPainterPath()
-            clip.addRoundedRect(QRectF(0, 0, card_w, card_h), _RADIUS, _RADIUS)
-            painter.save()
-            painter.setClipPath(clip)
-            painter.setPen(Qt.PenStyle.NoPen)
-            painter.setBrush(sev_color)
-            painter.drawRect(
-                QRectF(
-                    0,
-                    card_h - _PROGRESS_HEIGHT,
-                    card_w * self._progress,
-                    _PROGRESS_HEIGHT,
-                )
-            )
-            painter.restore()
 
 
 class ElaNotifyManager:
@@ -546,15 +491,13 @@ class ElaNotifyManager:
         severity: ElaSeverity = ElaSeverity.Info,
     ) -> None:
         """创建并显示通知弹窗；多条通知从屏幕右下角向上堆叠避让。"""
-        self._popups = [
-            popup
-            for popup in self._popups
-            if not is_deleted(popup) and popup.isVisible()
-        ]
+        self._popups = liveItems(self._popups, lambda popup: popup.isVisible())
         # 窗口高度含上下各一格阴影边距，堆叠偏移要把它扣掉才是视觉间距。
-        y_offset = sum(
-            popup.height() - 2 * popup._shadow_margin + _STACK_GAP
-            for popup in self._popups
+        y_offset = stackOffset(
+            self._popups,
+            gap=_STACK_GAP,
+            margin=SHADOW_MARGIN,
+            predicate=lambda popup: not popup._is_closing,
         )
         popup = ElaNotifyPopup(
             title=title,
@@ -577,11 +520,12 @@ class ElaNotifyManager:
     def _reflow(self) -> None:
         """把剩余通知紧凑回落，避免关掉中间一条后留下空洞。"""
         offset = 0
-        for popup in list(self._popups):
-            if is_deleted(popup) or not popup.isVisible() or popup._is_closing:
-                continue
+        for popup in liveItems(
+            self._popups,
+            lambda item: item.isVisible() and not item._is_closing,
+        ):
             popup.setYOffset(offset)
-            offset += popup.height() - 2 * popup._shadow_margin + _STACK_GAP
+            offset += stackStep(popup, gap=_STACK_GAP)
 
 
 def show_notify(

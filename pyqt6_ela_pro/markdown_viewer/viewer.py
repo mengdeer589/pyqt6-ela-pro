@@ -206,8 +206,11 @@ class ElaMarkdownViewer(
         self._token_palette: dict = {}
         #: 公式占位标记模板（实例唯一，跨实例零碰撞；结尾 q 是终止符）
         self._math_mark = f"elamath{id(self):x}z{{}}q"
-        #: 高亮结果缓存 {(lang, code, theme_key): [(text, QColor, bold, italic)]}
+        #: 高亮结果缓存 {(lang, code, theme_key): [(text, QTextCharFormat)]}
         self._highlight_cache: dict = {}
+        #: 词法 token 缓存（与主题无关，主题切换不重新 lex）
+        self._highlight_token_cache: dict = {}
+        self._highlight_token_cache_chars = 0
         self._highlight_cache_cap = _HIGHLIGHT_CACHE_CAP
         #: 主题 / 配色族变更时若不可见则只标记，等 showEvent 补渲染（见 _ensure_rendered）
         self._needs_render = False
@@ -236,10 +239,11 @@ class ElaMarkdownViewer(
         self._callout_warning_color = QColor()
         self._callout_caution_color = QColor()
         self._search_bg = QColor()
+        self._selection_bg = QColor()
+        self._selection_text = QColor()
         self._inline_code_bg = QColor()
         self._inline_code_border = QColor()
         self._code_button_hover_bg = QColor()
-        self._code_button_press_bg = QColor()
         self._diff_add_bg = QColor()
         self._diff_del_bg = QColor()
         self._diff_hunk_bg = QColor()
@@ -252,6 +256,8 @@ class ElaMarkdownViewer(
         self._zoom_factor = 1.0
         self._search_selections: list = []
         self._last_search = ""
+        self._last_search_case_sensitive = False
+        self._export_expanding = False
         #: 内部锚点跳转前的滚动位置栈（供 backToPreviousAnchor 返回）
         self._anchor_back_stack: list[int] = []
 
@@ -281,6 +287,7 @@ class ElaMarkdownViewer(
         #: （h1/h2、hr、引用）与带行内代码的块 marks。滚动帧命中后只做集合查找，
         #: 不再逐块逐片段读字符格式 —— Win7 上每次跨绑定取值都比桌面机贵一个量级。
         self._paint_index_revision = -1
+        self._paint_index_key = None
         self._paint_index_decorations: set = set()
         self._paint_index_inline: dict = {}
         #: 一次绘制内复用 ``_visible_blocks`` 的命中测试（同一帧里装饰层与
@@ -427,18 +434,21 @@ class ElaMarkdownViewer(
     def clearCache(self) -> None:
         """清空代码高亮、公式与 Mermaid 渲染缓存。"""
         self._highlight_cache.clear()
+        self._clear_highlight_token_cache()
         clear_math_cache()
         if self._mermaid_renderer is not None:
             self._mermaid_renderer.clearCache()
 
     def setHighlightCacheSize(self, size: int) -> None:
-        """代码高亮缓存条数上限（``<= 0`` 时清空并停止缓存）。"""
+        """代码高亮格式缓存条数上限（``<= 0`` 时同时停止词法 token 缓存）。"""
         self._highlight_cache_cap = max(0, int(size))
         while (
             self._highlight_cache
             and len(self._highlight_cache) > self._highlight_cache_cap
         ):
             self._highlight_cache.pop(next(iter(self._highlight_cache)))
+        if self._highlight_cache_cap <= 0:
+            self._clear_highlight_token_cache()
 
     def highlightCacheSize(self) -> int:
         """获取代码高亮缓存条数上限（0 表示不缓存）。"""

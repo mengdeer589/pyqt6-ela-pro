@@ -54,11 +54,13 @@ tests/                     回归测试（按组件 / 家族目录组织；`-m "
 - **AI 对话栈**：命令式回合 API + `ElaChatStreamBinder` 一键接线、分段时间线
   （思考 / 正文 / 工具 / 步骤用量 / 通知 / 压缩 / 计划）、工具结果富渲染注册表 + **可选内置
   diff / shell / read / 搜索 / fetch / MCP / todo 渲染器**、子代理嵌套卡、回合文件变更汇总、
-  独立运行轨迹面板、审批（批准型 + 问答型逐题向导）、自动重试倒计时、运行态活动行、
+  独立运行轨迹面板（每轮瀑布时间轴 + 当前轮只读流程图 + 回放 / token / 上下文轨道）、审批（批准型 + 问答型逐题向导）、自动重试倒计时、运行态活动行、
   时间线密度（hidden / collapsed / expanded × 六类）、会话内搜索、`/` 命令、模型 / agent
   选择器、shell 模式、提示历史与草稿、队列排序 / 插话 / 撤销、待发送消息、@ 提及高亮、
   多话题与崩溃恢复日志、会话导出导入。
   性能基线可复跑：`tools/perf/bench_chat.py`（构造 / 流式 / 历史 / 滚动 / 主题）与
+  `benchmarks/opencode_chat_replay/bench_trace.py`（真实 opencode 会话的轨迹面板
+  时间轴 / 回放 / 流程图 / RSS），
   `tools/perf/bench_markdown_paint.py`（原生浏览器 vs 查看器的滚动绘制分项，Win7 排查字体慢路径）。
   详见 [docs/chat.md](docs/chat.md) 与 [docs/performance.md](docs/performance.md)。
 - **图表引擎**：`ElaChartWidget` 对齐 ECharts 的 `setOption`（22 种系列、tooltip / dataZoom /
@@ -259,8 +261,8 @@ sys.exit(app.exec())
 | **ElaMermaidRenderer** | Mermaid 渲染器（可选依赖 `mermaidx`，缺浏览器；供 `ElaMarkdownViewer` 调用，也可单独用） |
 | **ElaShimmer** | 骨架屏 / 微光加载占位：4 种内置排版模板 + 手工元素、静态绘制入口（可铺在 delegate / 表格单元格里）、相位可手动驱动 |
 | **ElaShimmerShapeType / ElaShimmerTemplateType / ShimmerElement / ShimmerPalette** | 骨架的元素形状（矩形 / 圆角矩形 / 圆 / 药丸）、内置模板（文本块 / 头像行 / 图片卡 / 自定义）、单块元素、绘制配色 |
-| **ElaAvatar** | 头像：4 档尺寸 × 圆形/圆角方，图片（cover 裁剪）/ 首字母（字素簇感知）/ 人形字形三级回退，5 档在线状态圆点（环画成**周围表面色**） |
-| **ElaAvatarSizeType / ElaAvatarShapeType / ElaAvatarPresenceType** | 尺寸档位（24/32/40/56，控件被硬锁）/ 形状 / 在线状态（可用 / 离开 / 忙碌 / 免打扰 / 离线） |
+| **ElaAvatar** | 头像：4 档尺寸或任意边长（`setAvatarExtent`）× 圆形 / 4px 圆角方 / 8px 圆角方，图片（cover 裁剪）/ 显式图标 / 首字母（字素簇感知）/ 人形字形回退，5 档在线状态圆点（环画成**周围表面色**） |
+| **ElaAvatarSizeType / ElaAvatarShapeType / ElaAvatarPresenceType** | 尺寸档位（24/32/40/56，控件被硬锁）/ 形状（Circular / Square / Rounded）/ 在线状态（可用 / 离开 / 忙碌 / 免打扰 / 离线） |
 | **ElaDataTable** | 数据表格控件 |
 | **ElaRowColorDelegate** | 表格行底色 delegate（跨行分组着色用） |
 | **ElaParquetTable** | Parquet 文件分页查看 |
@@ -285,7 +287,7 @@ sys.exit(app.exec())
 | **ElaChatInput** | 分层输入区（补全 / 附件 / 拖放粘贴 / 发送↔停止 / 新建话题与清空上下文） |
 | **ElaChatToolBar** | 可复用聊天工具栏（自定义按钮 / 控件 / 分隔线，两段布局） |
 | **ElaChatBubble** | 步骤化消息气泡（分段：思考 / 正文 / 每步工具面板 / 步骤统计 / 底部操作） |
-| **ElaChatQueueDock** | 排队消息 dock（立即发送 / 插话 / 编辑 / 移除 / 撤销，宿主驱动发送时机） |
+| **ElaChatQueueDock** | 排队消息 dock（立即发送 / 插话 / 编辑 / 移除 / 撤销，宿主驱动发送时机；`setSteerEnabled(False)` 时插话置灰、消息保留在队列） |
 | **ElaDiffView** | 只读 diff / 代码查看器（双行号 / +/- 底色 / Pygments 着色 / 折叠上下文 / 大 diff 上限） |
 | **ElaChatFileChange / ElaChatFileChangeLine / ElaChatFileChanges** | 文件变更数据（单文件 / 单行 / 列表）与列表控件（每个文件一个懒建 `ElaDiffView`，`+N/-N` + 状态） |
 | **ElaDiffFile / ElaDiffLine** | 纯 diff 模型（`parseUnifiedDiff` / `diffLines` / `filesFromMetadata`），可脱离控件单测与复用 |
@@ -304,7 +306,7 @@ sys.exit(app.exec())
 | **ElaChatPlan / ElaChatPlanItem / ElaChatPlanItemStatusType / PlanPanel / PlanListView** | 计划 / 待办：`view.setPlan` 写入 `Plan` 分段，折叠显示当前项 + 进度；`fromMarkdown` 解析 checklist、`toDict/fromDict` 持久化 |
 | **SubagentCard** | 子代理父卡：`parent_id` 嵌套子工具（普通 `ToolCallCard`），头部显示任务 / 状态 / 工具数与耗时 |
 | **ElaChatTurnChanges / TurnChangesRow** | 回合文件变更汇总：从 `metadata.files` 按路径合并，回合结束显示「N 个文件变更 +x −y」，展开复用 `ElaChatFileChanges`；派生数据不落库 |
-| **ElaChatTracePanel / ElaChatTraceRow / ElaChatTraceResult / buildTraceRows** | 独立运行轨迹：turn → step → tool / reasoning / plan / permission / compaction 树 + 耗时条 / 词元 / 成本，点行回跳消息 |
+| **ElaChatTracePanel / ElaChatTraceOptions / ElaChatTraceRow / ElaChatTraceResult / buildTraceRows** | 独立运行轨迹：用户提问 → 助手响应 → 步骤 / 工具；轮头响应密度条 + 每个响应独立局部标尺，回放 0.5×–20× 跨响应连续推进；ElaPivot 切换 / ElaToolTip hover / Ela 语义色，点行回跳消息 |
 | **ElaChatMention / ElaChatNoticeType** | 用户文本里的 @ 引用区间 / 时间线通知类型 |
 | **ElaChatPermission / ElaChatQuestion / ElaChatOption** | 审批请求；**`questions` 非空 = 问答型逐题向导**，为空 = 批准型三键。候选项**必须带 description**，自定义答案与候选项单选互斥、多选共存 |
 | **ElaChatSuggestion** | 空态建议项 |
@@ -456,7 +458,7 @@ Windows AMD64（**Windows 7 SP1+**；交付线使用 PyQt6 6.8.1 + 自编译 Qt 
 | `ElaDrawerArea` | 上游 `ElaDrawerArea` 子类化修复（点击标题栏展开 / 收起） |
 | `ElaButton`、`ElaDivider`、`ElaChip` 等 | Ant Design 风格自研（对照 ElaWidgetTools 既有组件） |
 | `ElaChartWidget`（`charts/`） | InstructionX_UIKit `charts` 移植（类 ECharts `setOption` 引擎） |
-| 蓝图节点图编辑器（`blueprint/`） | InstructionX_UIKit `blueprint` + `anim.painted.SpinnerArc` 移植 |
+| 蓝图节点图编辑器（`blueprint/`） | InstructionX_UIKit `blueprint` 移植（加载圈改用 `ElaProgressRing`） |
 | `ElaMarkdownViewer` 流式增量渲染 / 公式提取 | InstructionX_UIKit `components.markdown_view` 思路移植；公式渲染为自研 `math_lite.py` |
 | 聊天栈（`chat/`） | 自研（助手消息复用 `ElaMarkdownViewer` 嵌入模式；工具卡 / 补全 / 排队 / 审批交互对齐 opencode 会话 UI） |
 | `ElaTerminalView`、`ElaTrayIcon`、`ElaMenuItem` | 自研 |

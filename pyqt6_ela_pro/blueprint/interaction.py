@@ -36,6 +36,7 @@ class CanvasInteraction:
         if etype not in (
             QEvent.Type.MouseButtonPress,
             QEvent.Type.MouseButtonRelease,
+            QEvent.Type.MouseButtonDblClick,
             QEvent.Type.MouseMove,
         ):
             return False
@@ -63,6 +64,8 @@ class CanvasInteraction:
                 if c._space_down:
                     self.start_pan(self.view_pos_of_event(obj, event))
                     return True
+                if c.isReadOnly():
+                    return True
                 self.begin_wire(obj)
                 return True
             if c._wire is not None:
@@ -77,6 +80,15 @@ class CanvasInteraction:
                     return True
             return False
         if isinstance(obj, ElaNodeWidget):
+            if (
+                etype == QEvent.Type.MouseButtonDblClick
+                and event.button() == Qt.MouseButton.LeftButton
+            ):
+                try:
+                    c.node_activated.emit(obj.node.id)
+                except Exception:
+                    pass
+                return True
             if etype == QEvent.Type.MouseButtonPress:
                 view_pos = self.view_pos_of_event(obj, event)
                 if event.button() == Qt.MouseButton.LeftButton:
@@ -125,7 +137,7 @@ class CanvasInteraction:
                     if was_pan:
                         c.unsetCursor()
                         c._settle_view_gesture()
-                    elif target_node is obj:
+                    elif not c.isReadOnly() and target_node is obj:
                         c._open_node_menu(obj, event.globalPosition().toPoint())
                     return True
         return False
@@ -144,6 +156,8 @@ class CanvasInteraction:
             c.toggle_node_selected(nid)
         elif nid not in c._selected_nodes:
             c.select_nodes([nid])
+        if c.isReadOnly():
+            return
         if nid in c._selected_nodes:
             starts = {
                 i: QPointF(c.graph.node(i).pos)
@@ -218,6 +232,8 @@ class CanvasInteraction:
 
     def begin_wire(self, handle: ElaPinHandle) -> None:
         c = self._canvas
+        if c.isReadOnly():
+            return
         pin = handle.pin
         node = handle.node_widget.node
         start = node.pos + handle.logical_center()
@@ -335,6 +351,8 @@ class CanvasInteraction:
             c._update_scene_rects(dirty)
 
     def create_node_for_wire(self, type_name: str) -> None:
+        if self._canvas.isReadOnly():
+            return
         """拖线松开菜单回调：创建节点并自动连接对应引脚。"""
         c = self._canvas
         pending = c._pending_wire
@@ -462,7 +480,7 @@ class CanvasInteraction:
             elif edge_id is not None:
                 c._select_edge(edge_id, False)
                 c._open_edge_menu(edge_id, event.globalPosition().toPoint())
-            else:
+            elif not c.isReadOnly():
                 scene_pt = c.view_to_scene(pos)
                 menu = ElaNodeCreationMenu(c, owner=c._owner)
                 menu.type_chosen.connect(lambda t, sp=scene_pt: c.create_node(t, sp))
@@ -542,6 +560,8 @@ class CanvasInteraction:
             c._space_down = True
             return
         if key in (Qt.Key.Key_Delete, Qt.Key.Key_Backspace):
+            if c.isReadOnly():
+                return
             c.delete_selection()
             return
         if key == Qt.Key.Key_Escape:
@@ -553,7 +573,8 @@ class CanvasInteraction:
                 c.select_all()
                 return
             if key == Qt.Key.Key_D:
-                c.duplicate_selection()
+                if not c.isReadOnly():
+                    c.duplicate_selection()
                 return
         if key in (
             Qt.Key.Key_Left,
@@ -561,7 +582,8 @@ class CanvasInteraction:
             Qt.Key.Key_Up,
             Qt.Key.Key_Down,
         ):
-            self.nudge(key, bool(mods & Qt.KeyboardModifier.ShiftModifier))
+            if not c.isReadOnly():
+                self.nudge(key, bool(mods & Qt.KeyboardModifier.ShiftModifier))
             return
         QWidget.keyPressEvent(c, event)
 

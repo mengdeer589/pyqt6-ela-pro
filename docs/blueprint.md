@@ -55,6 +55,18 @@ canvas.show()
 - 编辑：网格吸附、框选、复制 / 粘贴、方向键微调；
 - 连线：从输出引脚拖到输入引脚，非法连接抛 `ValueError`（原因可读）。
 
+## 只读模式
+
+```python
+canvas.setReadOnly(True)
+canvas.isReadOnly()          # True
+canvas.node_activated.connect(lambda node_id: ...)   # 双击节点
+```
+
+只读下禁创建 / 删除 / 拖动 / 连线 / 右键菜单；平移、缩放、选中、hover 与
+`execution()` 运行指示保留。节点体内的控件不再接收鼠标事件（点击冒泡给节点
+做选中 / 双击），适合把节点图当只读视图嵌入其它面板（如运行轨迹流程图）。
+
 ## GL 视口与性能
 
 `ElaBlueprintCanvas` 保持 `QWidget` 基类与全部公共 API 不变，自绘内容可由私有视口

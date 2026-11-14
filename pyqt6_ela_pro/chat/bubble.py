@@ -26,7 +26,6 @@ from PyQt6.QtWidgets import (
     QApplication,
     QGraphicsOpacityEffect,
     QHBoxLayout,
-    QLabel,
     QSizePolicy,
     QVBoxLayout,
     QWidget,
@@ -34,7 +33,7 @@ from PyQt6.QtWidgets import (
 from PyQt6ElaWidgetTools import ElaIconType, ElaMenu, ElaText, ElaThemeType
 
 from .._colors import accent_text
-from .._styles import ColorText, setTextColor
+from .._styles import ColorText
 from ..ela_markdown_viewer import ElaMarkdownViewer
 from ..ela_shimmer import ElaShimmer, ElaShimmerTemplateType
 from ..widget_base import ElaThemeWidget
@@ -85,13 +84,15 @@ _ROW_MARGIN = (12, 2, 12, 2)
 _ROW_SPACING = 10
 #: 助手消息底部「AI 生成」提示的默认文案
 DISCLAIMER_TEXT = "内容由 AI 生成，仅供参考"
+#: 用户 / 系统纯文本气泡字号
+_BODY_PIXEL_SIZE = 13
 #: 底部「AI 生成」提示字号
 _DISCLAIMER_PIXEL_SIZE = 12
 #: 右键菜单行高（与 markdown viewer / 终端一致）
 _CONTEXT_MENU_ITEM_HEIGHT = 28
 
 
-class _SelectableLabel(QLabel):
+class _SelectableLabel(ColorText):
     """可选中纯文本标签：右键菜单走库内 ``ElaMenu``（不用 Qt 原生菜单）。"""
 
     def contextMenuEvent(self, event: QContextMenuEvent) -> None:  # noqa: N802
@@ -274,7 +275,7 @@ class ElaChatBubble(
         self._duration_ms = 0.0
         self._reasoning_style = ElaChatReasoningStyleType.Collapse
         self._actions_hover_reveal = True
-        self._label: Optional[QLabel] = None
+        self._label: Optional[_SelectableLabel] = None
         self._body: Optional[_BubbleBody] = None
         self._content: Optional[QWidget] = None
         self._content_layout: Optional[QVBoxLayout] = None
@@ -1015,10 +1016,11 @@ class ElaChatBubble(
             else:
                 self._body.setBorder(QColor(0, 0, 0, 0))
         if self._label is not None:
+            self._label.setTextPixelSize(_BODY_PIXEL_SIZE)
             if self._role == ElaChatRoleType.System:
-                setTextColor(self._label, muted_color(mode, 0.45))
+                self._label.setTextColor(muted_color(mode, 0.45))
             else:
-                setTextColor(self._label, text)
+                self._label.setTextColor(text)
         if self._disclaimer is not None:
             self._disclaimer.setTextColor(muted_color(mode, 0.55))
         if self._role == ElaChatRoleType.User and self._label is not None:

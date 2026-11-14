@@ -10,7 +10,7 @@ from typing import Optional
 
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import QImage, QKeySequence, QShortcut
-from PyQt6.QtWidgets import QVBoxLayout, QWidget
+from PyQt6.QtWidgets import QHBoxLayout, QVBoxLayout, QWidget
 
 from .._internal import safe_connect
 from .._ownership import ElaWidgetOwnershipType
@@ -97,8 +97,6 @@ class ElaChatWidget(
     commandSelected = pyqtSignal(str)
     #: ``/`` 命令被提交（``setCommandSubmitMode("signal")`` 时）
     commandSubmitted = pyqtSignal(str)
-    #: 输入区下拉选择器变化（参数：key、item id）
-    selectorChanged = pyqtSignal(str, str)
     #: shell 模式提交（参数：命令行文本）
     shellSubmitted = pyqtSignal(str)
     #: 输入草稿变化（防抖）
@@ -137,19 +135,18 @@ class ElaChatWidget(
         self._view = ElaChatView(self)
         layout.addWidget(self._view, 1)
         self._input_dock = ElaChatInputDock(self)
-        layout.addWidget(self._input_dock, 0, Qt.AlignmentFlag.AlignHCenter)
         # 审批交互卡的专用 dock（不占用输入区）
         self._permission_dock = ElaChatPermissionDock(self)
-        layout.addWidget(self._permission_dock, 0, Qt.AlignmentFlag.AlignHCenter)
         self._queue_dock = ElaChatQueueDock(self)
-        layout.addWidget(self._queue_dock, 0, Qt.AlignmentFlag.AlignHCenter)
         self._input = ElaChatInput(self)
-        layout.addWidget(self._input, 0, Qt.AlignmentFlag.AlignHCenter)
         self._composer_widgets = (
             self._input_dock,
             self._permission_dock,
             self._queue_dock,
             self._input,
+        )
+        self._composer_rows = tuple(
+            self._add_composer_row(layout, widget) for widget in self._composer_widgets
         )
         self._sync_composer_width()
         #: 当前占据审批 dock 的 partId（空 = dock 上没有审批卡）
@@ -194,7 +191,6 @@ class ElaChatWidget(
         self._input.mentionSelected.connect(self.mentionSelected)
         self._input.commandSelected.connect(self.commandSelected)
         self._input.commandSubmitted.connect(self.commandSubmitted)
-        self._input.selectorChanged.connect(self.selectorChanged)
         self._input.shellSubmitted.connect(self.shellSubmitted)
         self._input.draftChanged.connect(self.draftChanged)
         safe_connect(
@@ -281,15 +277,32 @@ class ElaChatWidget(
         super().resizeEvent(event)
         self._sync_composer_width()
 
+    def _add_composer_row(self, layout: QVBoxLayout, widget: QWidget) -> QWidget:
+        """给 composer 套一行居中容器；宽度只钉上限，下限交给内容。"""
+        row = QWidget(self)
+        row_layout = QHBoxLayout(row)
+        row_layout.setContentsMargins(10, 0, 10, 0)
+        row_layout.setSpacing(0)
+        row_layout.addStretch(0)
+        row_layout.addWidget(widget, 1)
+        row_layout.addStretch(0)
+        layout.addWidget(row, 0)
+        return row
+
     def _sync_composer_width(self) -> None:
-        """输入区 / dock 与阅读列同宽并居中（ChatGPT 式版心）。"""
-        available = max(120, self.width() - 20)
+        """输入区 / dock 与阅读列同宽并居中（只钉上限，不钉下限）。"""
+        width = max(0, self.width() - 20)
         max_width = self._view.contentMaxWidth() if hasattr(self, "_view") else 0
-        width = available if max_width <= 0 else min(max_width, available)
+        if max_width > 0:
+            width = min(max_width, width)
         for widget in getattr(self, "_composer_widgets", ()):
-            if widget.minimumWidth() == width and widget.maximumWidth() == width:
-                continue
-            widget.setFixedWidth(width)
+            if widget.minimumWidth() != 0:
+                widget.setMinimumWidth(0)
+            if widget.maximumWidth() != width:
+                widget.setMaximumWidth(width)
+            # max 已正确但实际宽滞后时也要唤醒行布局，否则只能等下一次无关重排
+            if widget.width() != width:
+                widget.updateGeometry()
 
     def chatView(self) -> ElaChatView:
         """获取消息列表视图。"""

@@ -21,15 +21,15 @@ from PyQt6.QtGui import (
 )
 
 from .._colors import parse_color
+from .._content_colors import calloutColors, diffColors
 from .._internal import is_deleted, system_cjk_font_family
-from .._styles import setTextBaseColor
+from .._styles import setTextBaseColor, setTextSelectionColors
 from .code import (
     _default_code_font_family,
     _default_latin_code_font_family,
     _font_family_available,
 )
 from .fonts import _normalize_font_family, _warn_once, isFontFamilyAvailable
-from .preprocess import _CALLOUT_CAUTION_COLORS, _CALLOUT_WARNING_COLORS
 from .themes import _md_layout_spec, _md_theme_spec
 
 
@@ -44,6 +44,10 @@ _DEBUG_LAYOUT = os.environ.get("ELACHAT_DEBUG_LAYOUT", "").strip().lower() not i
     "no",
     "off",
 )
+
+#: 选中底色 = 主题强调色混入页面底色的比例（深色底需要更明显）
+_SELECTION_ALPHA_DARK = 0.40
+_SELECTION_ALPHA_LIGHT = 0.30
 
 _SERIF_CJK_FONTS = ("SimSun", "NSimSun", "宋体", "新宋体")
 _SERIF_LATIN_FONTS = ("Georgia", "Cambria", "Times New Roman")
@@ -88,6 +92,8 @@ class _MarkdownAppearanceMixin:
         font = self.document().defaultFont()
         font.setPointSizeF(self._base_font_point_size * factor)
         self.document().setDefaultFont(font)
+        # 代码高亮格式缓存不含字号：缩放后必须丢弃，否则代码块停在旧字号
+        self._highlight_cache.clear()
         if self._source:
             self._render()
 
@@ -603,15 +609,18 @@ class _MarkdownAppearanceMixin:
         self._callout_bg = self._blend(
             background, self._text_color, 0.06 if self._is_dark_theme else 0.035
         )
-        self._callout_warning_color = parse_color(
-            _CALLOUT_WARNING_COLORS["dark" if self._is_dark_theme else "light"]
-        )
-        self._callout_caution_color = parse_color(
-            _CALLOUT_CAUTION_COLORS["dark" if self._is_dark_theme else "light"]
-        )
+        callouts = calloutColors(mode, self._callout_bg)
+        self._callout_warning_color = QColor(callouts["warning"])
+        self._callout_caution_color = QColor(callouts["caution"])
         self._search_bg = self._blend(
             background, QColor("#ff922b"), 0.4 if self._is_dark_theme else 0.5
         )
+        self._selection_bg = self._blend(
+            background,
+            self._link_color,
+            _SELECTION_ALPHA_DARK if self._is_dark_theme else _SELECTION_ALPHA_LIGHT,
+        )
+        self._selection_text = QColor(self._text_color)
         self._inline_code_bg = self._blend(
             background, self._text_color, inline_layout["background_alpha"]
         )
@@ -623,15 +632,15 @@ class _MarkdownAppearanceMixin:
             else QColor(self._inline_code_bg)
         )
         self._code_button_hover_bg = self._blend(background, self._text_color, 0.16)
-        self._code_button_press_bg = self._blend(background, self._text_color, 0.24)
+        diff = diffColors(mode, self._code_bg)
         self._diff_add_bg = self._blend(
-            self._code_bg, QColor("#2da44e"), 0.16 if self._is_dark_theme else 0.12
+            self._code_bg, diff["add"], 0.16 if self._is_dark_theme else 0.12
         )
         self._diff_del_bg = self._blend(
-            self._code_bg, QColor("#cf222e"), 0.14 if self._is_dark_theme else 0.1
+            self._code_bg, diff["delete"], 0.14 if self._is_dark_theme else 0.1
         )
         self._diff_hunk_bg = self._blend(
-            self._code_bg, QColor("#0969da"), 0.12 if self._is_dark_theme else 0.08
+            self._code_bg, diff["hunk"], 0.12 if self._is_dark_theme else 0.08
         )
         # 刻意**不清** ``_highlight_cache``：它的 key 是 (lang, code, theme_key)，
         # 本来就按主题分键；清掉等于把上一次主题的高亮结果扔掉（反复切换会永远命中
@@ -647,6 +656,11 @@ class _MarkdownAppearanceMixin:
         palette.setColor(QPalette.ColorRole.Link, self._link_color)
         self._text_browser.setPalette(palette)
         self._apply_viewport_base()
+        # 选中色固定到 Markdown 主题：Win7 与 Win11 的系统 Highlight 不同，
+        # 失焦后还会切到 Inactive 组（见 setTextSelectionColors）
+        setTextSelectionColors(
+            self._text_browser, self._selection_bg, self._selection_text
+        )
 
         on_screen = self._is_on_screen()
         if self._source:

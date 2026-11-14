@@ -9,6 +9,7 @@ from PyQt6.QtWidgets import QWidget
 from PyQt6ElaWidgetTools import ElaThemeType, eTheme
 
 from pyqt6_ela_pro._ownership import ElaWidgetOwnershipType
+from pyqt6_ela_pro._styles import SHADOW_MARGIN
 from pyqt6_ela_pro.ela_side_drawer import (
     ElaDrawerPositionType,
     ElaDrawerPanel,
@@ -83,6 +84,11 @@ class TestElaDrawerPanel:
     def test_set_position(self, panel):
         panel.setPosition(ElaDrawerPositionType.Top)
         assert panel._position == ElaDrawerPositionType.Top
+
+    def test_uses_shared_shadow_margin(self, panel):
+        """阴影走共享 paintOverlayShadow，面板四周预留同一圈边距。"""
+        assert panel._shadow_margin == SHADOW_MARGIN
+        assert panel.graphicsEffect() is None
 
 
 class TestElaDrawerDim:

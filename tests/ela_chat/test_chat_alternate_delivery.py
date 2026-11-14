@@ -54,6 +54,29 @@ class TestAlternateDelivery:
         mention = message.mentions[0]
         assert message.text[mention.start : mention.end] == "@Al"
 
+    def test_steer_disabled_falls_back_to_queue(self, qapp, make):
+        chat = make(ElaChatWidget)
+        chat.setGenerating(True)
+        chat.setSteerEnabled(False)
+        chat.chatInput().setText("排队去")
+        _ctrl_enter(chat)
+        assert chat.steerCount() == 0
+        assert chat.queueCount() == 1
+        assert chat.queuedMessages()[0]["text"] == "排队去"
+        assert chat.chatInput().text() == ""
+
+    def test_steer_disabled_falls_back_to_queue_even_when_queue_disabled(
+        self, qapp, make
+    ):
+        chat = make(ElaChatWidget)
+        chat.setGenerating(True)
+        chat.setSteerEnabled(False)
+        chat.setQueueEnabled(False)
+        chat.chatInput().setText("排队去")
+        _ctrl_enter(chat)
+        assert chat.steerCount() == 0
+        assert chat.queueCount() == 1
+
     def test_steer_keeps_mentions(self, qapp, make):
         chat = make(ElaChatWidget)
         chat.setGenerating(True)

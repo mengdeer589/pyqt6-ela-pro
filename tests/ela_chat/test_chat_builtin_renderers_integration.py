@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 
 from PyQt6.QtGui import QColor, QImage
+from PyQt6ElaWidgetTools import ElaImageCard
 from _qthelpers import wait_until as _wait_until
 
 from pyqt6_ela_pro.chat import (
@@ -225,6 +226,7 @@ class TestBuiltinRendererStyle:
             card = self._open(qapp, make, "read", json.dumps({"path": str(path)}), "")
             body = card._renderer_widget
             assert isinstance(body, _ImageBody)
+            assert isinstance(body, ElaImageCard)
             assert (body.width(), body.height()) == (20, 10)
         finally:
             uninstallBuiltinToolRenderers()

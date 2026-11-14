@@ -265,6 +265,86 @@ class TestPaintIndex:
         # 引用竖线 + hr；Bear / Ink 标题不再画分隔线
         assert len(viewer._paint_index_decorations) == 2
 
+    def test_index_scans_only_requested_block_range(self, qapp, make):
+        viewer = make(ElaMarkdownViewer)
+        viewer.resize(600, 400)
+        viewer.show()
+        viewer.setMarkdown(
+            "首段 `top`\n\n" + "\n\n".join(f"段 {i} `c{i}`" for i in range(50))
+        )
+        qapp.processEvents()
+
+        document = viewer.document()
+        first = document.begin()
+        last = document.findBlockByNumber(2)
+        viewer._paint_index_key = None
+        viewer._ensure_paint_index(first, last)
+        assert 0 in viewer._paint_index_inline
+        assert 2 in viewer._paint_index_inline
+        assert max(viewer._paint_index_inline) <= last.blockNumber()
+
+        viewer._paint_index_key = None
+        viewer._ensure_paint_index()
+        assert max(viewer._paint_index_inline) > last.blockNumber()
+
+
+class TestVisibleBlockRange:
+    """表格 / 代码卡块必须落在可见块范围内。
+
+    回归：``_visible_blocks`` 曾用 ``cursorForPosition(QPoint(0, y))`` 采样，
+    x=0 落在表格左侧边距时会命中表格前面的块，表格行被排除在索引范围外，
+    行内代码底 / 装饰线整片不画。
+    """
+
+    @staticmethod
+    def _table_document(rows: int) -> str:
+        lines = ["| 方法 | 说明 |", "|---|---|"]
+        for index in range(rows):
+            lines.append(f"| `method_{index}()` | 说明 {index} |")
+        return "\n".join(lines)
+
+    @staticmethod
+    def _block_with(viewer: ElaMarkdownViewer, needle: str):
+        block = viewer.document().begin()
+        while block.isValid():
+            if needle in block.text():
+                return block
+            block = block.next()
+        return None
+
+    def test_table_blocks_are_in_range_at_top(self, qapp, make):
+        viewer = make(ElaMarkdownViewer)
+        viewer.resize(600, 400)
+        viewer.show()
+        viewer.setMarkdown(self._table_document(20))
+        qapp.processEvents()
+        viewer._text_browser.verticalScrollBar().setValue(0)
+        qapp.processEvents()
+
+        target = self._block_with(viewer, "method_5")
+        assert target is not None
+        first, last = viewer._visible_blocks(viewer._text_browser)
+        assert first.blockNumber() <= target.blockNumber() <= last.blockNumber()
+        viewer._ensure_paint_index(first, last)
+        assert target.blockNumber() in viewer._paint_index_inline
+
+    def test_table_blocks_are_in_range_at_bottom(self, qapp, make):
+        viewer = make(ElaMarkdownViewer)
+        viewer.resize(600, 400)
+        viewer.show()
+        viewer.setMarkdown(self._table_document(40))
+        qapp.processEvents()
+        bar = viewer._text_browser.verticalScrollBar()
+        bar.setValue(bar.maximum())
+        qapp.processEvents()
+
+        target = self._block_with(viewer, "method_39")
+        assert target is not None
+        first, last = viewer._visible_blocks(viewer._text_browser)
+        assert first.blockNumber() <= target.blockNumber() <= last.blockNumber()
+        viewer._ensure_paint_index(first, last)
+        assert target.blockNumber() in viewer._paint_index_inline
+
 
 class TestCodeCardCulling:
     def test_code_card_chrome_only_paints_visible_tables(self, qapp, make):

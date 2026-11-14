@@ -15,6 +15,14 @@ RADIUS = {"sm": 4, "md": 6, "lg": 8}
 #: 间距令牌（对齐源库 space.* 值）
 SPACE = {"0": 0, "05": 2, "1": 4, "2": 8, "3": 12, "4": 16, "5": 20}
 
+#: 蓝图专有语义色（Ela 主题无对应槽位）：key -> (light, dark)。
+#: 引脚圆点铺在节点体 PopupBase 上，Light/Dark 两组都 ≥3:1。
+_PIN_COLOR_PAIRS = {
+    "color.pin.image": ("#8B4FA8", "#C79AE8"),
+    "color.pin.tensor": ("#177A72", "#5FC6BC"),
+    "color.pin.warning": ("#A06E1F", "#D2A668"),
+}
+
 
 def T(key):
     """读取令牌：颜色返回 hex 字符串，数值返回 int（对齐源库调用面）。
@@ -31,6 +39,10 @@ def T(key):
         if name in SPACE:
             return SPACE[name]
         raise KeyError(f"未知间距令牌: {key!r}")
+    pair = _PIN_COLOR_PAIRS.get(key)
+    if pair is not None:
+        dark = eTheme.getThemeMode() == ElaThemeType.ThemeMode.Dark
+        return QColor(pair[1] if dark else pair[0]).name()
     v = chart_token(eTheme.getThemeMode(), key)
     if isinstance(v, QColor):
         return v.name()

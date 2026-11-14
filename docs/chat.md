@@ -36,7 +36,7 @@
   `queueChanged` / `mentionSelected` / `imagePasted` / `filesAdded` /
   `clearRequested` / `newTopicRequested` / `cleared` / `sessionChanged` /
   `batchRenderFinished` / `suggestionClicked`
-- **模块分工（`chat/`）** — `widget*.py`：宿主组装 / 队列 / 插话 / 回合；`input*.py`：输入区（`input_parts` 内部控件、`input_completion` 补全 / 命令 / 选择器、`input_attachments` 附件 / 拖放、`input_history` 历史草稿、`input_toolbar` 工具栏 / 占用环）；`view*.py`：消息列表 / 虚拟化 / 搜索；`bubble*.py`：单条消息；`blocks/`：可复用块；`message` / `store` / `timeline`：数据层；`binder` / `worker` / `journal`：后端接入。
+- **模块分工（`chat/`）** — `widget*.py`：宿主组装 / 队列 / 插话 / 回合；`input*.py`：输入区（`input_parts` 内部控件、`input_completion` 补全 / 命令、`input_attachments` 附件 / 拖放、`input_history` 历史草稿、`input_toolbar` 工具栏 / 占用环；选择器是独立组件 `selector.py`）；`view*.py`：消息列表 / 虚拟化 / 搜索；`bubble*.py`：单条消息；`blocks/`：可复用块；`message` / `store` / `timeline`：数据层；`binder` / `worker` / `journal`：后端接入。
 - **工具结果富渲染（`registerToolRenderer`）** — 宿主按工具名注册渲染器，库只
   替换工具卡的**内容区**（头部 / 折叠 / 错误竖线 / 忙碌环 / 展开策略仍由
   `ToolCallCard` 负责，故现有工具卡回归行为不变）：
@@ -150,11 +150,12 @@
   类可重试，参数错误 / 鉴权失败 / 内容过滤不点）；
   上下文占用圆环 `setContextUsage(used, window, costUsd)`；
   头像自定义 `setUserAvatar` / `setAssistantAvatar`（SVG / 路径 / `QPixmap` 等）、
-  形状 `setAvatarShape`（默认圆形 / `rounded` / `square`）；
+  形状 `setAvatarShape`（默认圆形 / `rounded` 8px 圆角 / `square` 4px 圆角）；
   免责提示文案 / 显隐 `setDisclaimer(text)` / `setDisclaimerVisible(on)`
   （默认 `DISCLAIMER_TEXT`，只作用于助手消息，空文案自动隐藏）；
   阅读列默认 768px 居中（`setContentMaxWidth()`，`0` 恢复全宽），
   用户气泡 / 助手正文 / 工具卡共用同一条列；输入区与 dock 同宽居中
+  （只钉最大宽，不向宿主贡献固定下限）
 - **ElaChatInput** — 单卡片输入区（对齐 opencode：附件条 / 多行输入 / 工具栏
   同在一个圆角卡片内——`inputSurface()`；聚焦时边框转强调色，空草稿时发送
   按钮置灰）；卡片上方是补全浮层（`@` 引用，provider 接口）；
@@ -185,7 +186,7 @@
 - **ElaChatBubble** — 步骤化消息气泡（可独立复用）：头部（头像 + 名称 +
   时间 / 状态；头像支持内置图标与自定义图 `setAvatarImage`——SVG 数据 /
   SVG 或位图路径 / `bytes` / `QPixmap` / `QImage` / `QIcon`，默认圆形裁切，
-  `setAvatarShape` 可切圆角方形 / 直角方形）、
+  `setAvatarShape` 可切 8px / 4px 圆角方形）、
   内容分段（按加入顺序组成时间线：`ElaChatPart` 的
   reasoning / text / tool / stats 四类，正文段可多段；另有 `Permission`（审批 / 问答向导）、`Compaction`
    （压缩分隔）、`Synthetic`（steer 回执）三种「非正文段」—— **它们的 `text`
@@ -388,8 +389,9 @@ chat.sendNextQueued()                         # 或手动触发
   `view.searchText(query, caseSensitive=False)` 搜索助手正文 + 用户文本，
   `searchNext` / `searchPrev` 循环跳转并高亮；`view.showSearchBar()` /
   `hideSearchBar()`，`ElaChatWidget` 的 `Ctrl+F` 走同一入口。
-- **Diff / 文件变更** — 顶层 `ElaDiffView`（统一 diff：双行号、+/- 底色、
-  Pygments 着色、折叠上下文、大 diff 上限），`ElaChatFileChanges` 是工具 body
+- **Diff / 文件变更** — 顶层 `ElaDiffView`（基于 `ElaPlainTextEdit` +
+  `editBorderlessStyle()`，继承 ElaScrollBar / ElaMenu；统一 diff：双行号、
+  +/- 底色、Pygments 着色、折叠上下文、大 diff 上限），`ElaChatFileChanges` 是工具 body
   用的文件列表（每文件懒建 diff）；纯模型在 `pyqt6_ela_pro/_diff.py`
   （`parseUnifiedDiff` / `diffLines` / `filesFromMetadata`）。
   `ElaChatToolCall.metadata` 由宿主填写，约定：
@@ -403,14 +405,15 @@ chat.sendNextQueued()                         # 或手动触发
   `todo_write` / `update_todo_list`（只读 checklist）。**默认不注册**，
   同名宿主渲染器优先，`uninstallBuiltinToolRenderers()` 可整体摘掉。
   文本 body 统一走 `ElaTerminalView.setEmbedded`（去自带边框、12px、raised
-  表面）；`glob` / `list` / `ls` 与 `mcp` 的高度上限 420，其它文本 320，
-  shell 仍为 260。JSON 结果会缩进展示（超过 256KB 跳过多余序列化）。
+  表面），图片预览走 `ElaImageCard`（保持比例、不放大）；`glob` / `list` /
+  `ls` 与 `mcp` 的高度上限 420，其它文本 320，shell 仍为 260。JSON 结果会
+  缩进展示（超过 256KB 跳过多余序列化）。
 - **工具模型扩展** — `ElaChatToolCall` 增加 `kind`（`ElaChatToolKindType`，
   对齐 ACP：read / edit / delete / move / search / execute / think / fetch /
   switch_mode / subagent / other，空值按工具名推导）、`title`、`locations`
   （`ElaChatToolLocation{path, line}`）、`parent_id`（子代理嵌套）、
   `started_at` / `duration_ms`。`view.addToolCall(..., kind=, title=,
-  locations=, parentId=)` 可直接传；`ToolRenderContext` 同步暴露这些字段。
+  locations=, parentId=, startedAt=, durationMs=)` 可直接传；`ToolRenderContext` 同步暴露这些字段。
 - **计划 / 待办（`Plan` 分段）** — `view.setPlan(messageId, plan, partId=None)`
   接受 `ElaChatPlan` / dict / list / Markdown（`- [ ]` / `- [x]` / `- [>]`）；
   默认复用消息最后一张计划卡，反复上报不会堆卡。折叠态显示「当前项 + n/m」，
@@ -418,8 +421,10 @@ chat.sendNextQueued()                         # 或手动触发
   `view.plan(messageId)` / `view.planPart(messageId)`，清空 `view.clearPlan`。
 - **子代理嵌套** — 子调用 `parentId` 指向父工具（`task` / `subagent` / `agent` /
   `delegate_task`），父卡用 `SubagentCard`：头部任务 / 状态 / 统计，主体挂子
-  `ToolCallCard` 与最终结果。组头只统计顶层工具；`estimate_parts_height` 跳过
-  子分段；删除 / 清空有 `is_deleted` 守卫。
+  `ToolCallCard` 与最终结果。父卡收起时子工具只登记数据、不建卡；首次展开按
+  16 个一页物化，其余走「显示其余 N 个工具」，点击后按页异步补齐。`childCard()`
+  会按需物化（兼容入口），`childCalls()` 返回全部快照。组头只统计顶层工具；
+  `estimate_parts_height` 跳过子分段；删除 / 清空有 `is_deleted` 守卫。
 - **回合变更汇总** — `view.turnChanges(messageId)` 从 `metadata["files"]`
   （参数兜底）按路径合并；回合结束后气泡底部自动显示
   「N 个文件变更 +x −y」，展开复用 `ElaChatFileChanges` /
@@ -427,21 +432,43 @@ chat.sendNextQueued()                         # 或手动触发
   恢复时从工具 metadata 重新派生。
 - **运行轨迹（`ElaChatTracePanel`）** — 独立面板（宿主放进 `ElaDialogBase` /
   `ElaContentDialog` 或 `QSplitter`；**别用裸 `QDialog`**，否则标题栏与底色都不跟主题）：
-  `buildTraceRows(messages)` 把 turn → step → tool / reasoning /
-  plan / permission / compaction 整理成树，`ElaChatTracePanel(view)` 展示
-  状态 / 耗时 / 时间条 / 词元 / 成本，`rowActivated(messageId)` 供宿主
-  `scrollToMessage`。纯模型在 `chat/_trace.py`，不依赖 Qt。面板自带「刷新」
-  按钮；放进 `ElaContentDialog` 时右键固定走关闭动画，示例隐藏对话框右键、
-  只用面板内的刷新，避免两个按钮都关窗。
+  `buildTraceRows(messages)` 按 **用户提问 → 助手响应 → 步骤 → 工具 /
+  reasoning / plan / permission / compaction** 整理成树：一条用户消息开启一轮，
+  其后的全部助手消息作为该轮的「响应」子节点。行带 `start_ms` / `span_ms` /
+  `clipped` / `estimated` / `error_below` / `stats`。
+  主视图**每轮一条响应密度条、每个响应独立局部时间标尺**（7071 行也只画可视区，
+  不再逐行建控件）；异常耗时按全局 p99×2 裁剪、响应内空闲间隔压缩，真实值留在
+  ElaToolTip 与轮头统计里。分类色只用 Ela 的 accent / status / muted（不走
+  ECharts 分类色板），浅色 / 深色和宿主 `setAccentColor` 都会跟随。
+  「流程图」页复用**只读** `ElaBlueprintCanvas`（`use_gl=False`，只画当前轮，
+  120 节点上限；双击节点回跳消息）。视图 / 筛选用 `ElaPivot`，hover 详情用
+  `ElaToolTip`，倍速用 `ElaDropDownButton` + `ElaMenu`。底部会话轨道按轮次画
+  工具密度 / token 分层 / 上下文压力（`setContextWindow()` 给 70% / 90% 阈值线）；
+  时间轴与 86px 趋势条是**性能例外的自绘视图**：Ela 没有 7000 行树形瀑布，
+  3 个 `ElaChartWidget` 的原型 `setOption` 约 20ms 且丢失共享游标 / 点击跳转。
+  `ElaChatTraceOptions(view/effects/replay/tracks)` + `setOptions()` /
+  `setOption()` 热切换；`effects=False` 走纯平色无动画，适合弱机 / Win7。
+  回放按**响应**从当前可见位置连续播到末尾（跨轮 / 跨响应自动推进、自动滚动跟随）：
+  `startReplay()` / `stopReplay()` / `setReplaySpeed()` / `cycleReplaySpeed()`，
+  速度 0.5×–20×；playhead 只重绘当前响应条带。`refresh()` 手动触发（流式分片不自动重建）；
+  `rowActivated(messageId)` / `partActivated(messageId, partId)` 供宿主
+  `scrollToMessage`；`turnChanged(index)` 给侧栏 / 外部导航。工具计时可经
+  `view.addToolCall(..., startedAt=, durationMs=)` 传入。性能口径见
+  `benchmarks/opencode_chat_replay/bench_trace.py` 与 `PERFORMANCE.md`。
 - **输入区增强** — `ElaChatInput` 增加：
   - `setCommandProvider(provider)`：`/` 命令补全（`commandSelected`）；
     `setCommandSubmitMode("signal")` 时提交发 `commandSubmitted(text)` 且不落消息；
-  - `addSelector(key, title, items, current)` / `setSelectorItems`：模型 / agent /
-    变体下拉（`ElaChatSelectorItem`，`selectorChanged(key, id)`）；
+  - 下拉选择器：直接实例化 `ElaChatSelector`（模型 / agent / 变体），用
+    `chat.toolBar().addWidget(selector, zone="leading")` 放进工具栏；与新建话题 /
+    附件 / 清空 / 上下文圆环同排，追加在圆环右侧。`ElaChatSelectorItem(icon=...)`
+    的图标同时显示在菜单项与当前项按钮上。组件直接发 `selectionChanged(itemId)`，
+    输入区不维护选择器注册表；shell 模式会自动隐藏工具栏里的 `ElaChatSelector`；
   - `setShellMode(True)`：等宽字体、`Esc` 退出、提交走 `shellSubmitted(text)`；
   - `setHistory(ElaChatPromptHistory)`：↑/↓ 浏览提示历史，保留当前草稿；
   - `draftState()` / `setDraftState()` + 300ms `draftChanged`：宿主按会话保存草稿。
 - **队列增强** — `ElaChatQueueDock` 增加「插话」（生成中）/ 撤销；
+  `setSteerEnabled(False)` 时行按钮置灰、`steerQueued(queueId)` 返回 `False`
+  （消息留在队列），`Ctrl+Enter` 回退排队（不受 `setQueueEnabled(False)` 限制）；
   `ElaChatWidget.moveQueued(queueId, toIndex)` / `steerQueued(queueId)` /
   `undoQueueChange()`（快照栈上限 20）。撤销覆盖队列增删改 / 排序 / 转为插话；
   `steerMessage` / `clearSteer` / `dequeueSteer` 不进撤销栈。`steerMessage` 在时间线上
@@ -455,7 +482,11 @@ chat.sendNextQueued()                         # 或手动触发
   引用。用户气泡按区间高亮，复制仍取纯文本。
 
 **延伸阅读**：应用内 API 指南见 `pyqt6_ela_pro/example/chat_guide_page.py`；可运行示例是
-`example/chat_playground_page.py` 的 **AI 聊天实验台**（多话题聊天 + 输入区 +
-右侧 `ElaSplitter` 特性面板，`ElaPivot` 分基础 / 工具 / Agent / 时间线 / 会话 / 输入，
-按 tab 把演示插入当前话题）；旧七工作区页面已移除。
+`example/chat_playground_page.py` 的 **AI 组件实验台**：多话题聊天 + 输入区 + 右侧
+`ElaSplitter` 面板。第一个 tab「快速体验」是 6 张引导场景（流式回合 / 批准审批 /
+问答审批 / 工具链 / 消息操作 / 输入区），按脚本播放、可重放；后面 7 个 tab 是
+API 实验台（基础 / 工具 / Agent / 消息 / 外观 / 输入 / 会话·高级），每项都有内联反馈。
+页头「组件画廊」打开独立弹框，直接摆出 PlanPanel / ToolCallCard / PermissionCard /
+文件变更 / 状态行 / 附件与队列 dock 等块组件。宿主的撤回 / 重新生成 / 重试 /
+停止 / 建议 / 命令 / shell / 上下文占用点击都已接线；旧七工作区页面已移除。
 最小接入示例在仓库 `llm_test/`（不入库）。

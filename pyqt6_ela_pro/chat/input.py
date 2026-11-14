@@ -93,8 +93,6 @@ class ElaChatInput(
     commandSelected = pyqtSignal(str)
     #: 提交了一个 ``/`` 命令（``setCommandSubmitMode("signal")`` 时）
     commandSubmitted = pyqtSignal(str)
-    #: 下拉选择器变化（参数：选择器 key、item id）
-    selectorChanged = pyqtSignal(str, str)
     #: shell 模式提交（参数：命令行文本）
     shellSubmitted = pyqtSignal(str)
     #: 草稿变化（防抖；参数：``draftState()`` 快照）
@@ -124,7 +122,6 @@ class ElaChatInput(
         self._command_submit_mode = "send"
         self._popup_kind = ""
         self._mentions: list = []
-        self._selectors: dict = {}
         self._shell_mode = False
         self._add_file_visible_before_shell = True
         self._history = None

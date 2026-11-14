@@ -9,6 +9,8 @@
 from __future__ import annotations
 
 from _qthelpers import wait_until as _wait_until
+from PyQt6ElaWidgetTools import ElaComboBox
+
 from pyqt6_ela_pro import ElaButton, ElaTerminalView, terminalThemes
 from pyqt6_ela_pro.example.terminal_page import TerminalPage
 
@@ -28,13 +30,24 @@ class TestTerminalPageLayout:
         page = make(TerminalPage)
         _single_view(page)
 
-    def test_scenario_and_palette_buttons_present(self, qapp, make):
+    def test_scenario_buttons_present(self, qapp, make):
         page = make(TerminalPage)
         labels = set(_buttons(page))
         assert {"ANSI 色彩样例", "进度条", "流式输出", "停止"} <= labels
-        # 调色板按钮各一个（都作用在同一个输出框上）
-        for name in terminalThemes():
-            assert name in labels
+
+    def test_theme_combo_present(self, qapp, make):
+        page = make(TerminalPage)
+        combo = page.findChild(ElaComboBox)
+        assert combo is not None
+        assert [combo.itemText(i) for i in range(combo.count())] == terminalThemes()
+
+    def test_theme_combo_switches_view(self, qapp, make):
+        page = make(TerminalPage)
+        combo = page.findChild(ElaComboBox)
+        view = _single_view(page)
+        combo.setCurrentText("solarized")
+        qapp.processEvents()
+        assert view.terminalTheme() == "solarized"
 
 
 class TestTerminalPageScenarios:

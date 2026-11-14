@@ -7,8 +7,9 @@ from PyQt6.QtCore import QEvent, QObject, QPoint, QPointF, Qt
 from PyQt6.QtGui import QMouseEvent, QPalette, QWheelEvent
 from PyQt6.QtTest import QTest
 from PyQt6.QtWidgets import QTextEdit
-from PyQt6ElaWidgetTools import ElaThemeType, eTheme
+from PyQt6ElaWidgetTools import ElaIconType, ElaThemeType
 
+from pyqt6_ela_pro._styles import ColorText
 from pyqt6_ela_pro.chat import (
     ElaChatReasoningStyleType,
     DISCLAIMER_TEXT,
@@ -44,7 +45,10 @@ class TestMessages:
         assert view.count() == 2
         snapshot = view.messages()
         assert [m.text for m in snapshot] == ["你好", "提示"]
-        assert [m.role for m in snapshot] == [ElaChatRoleType.User, ElaChatRoleType.System]
+        assert [m.role for m in snapshot] == [
+            ElaChatRoleType.User,
+            ElaChatRoleType.System,
+        ]
         assert view.message(second).text == "提示"
         assert view.message(99) is None
         assert view.lastMessage().id == second
@@ -126,6 +130,8 @@ class TestEmptyState:
         view.setEmptyTitle("标题")
         view.setEmptySubtitle("副标题")
         view.setSuggestions(["A", "B", ""])
+        assert isinstance(view._empty._title_label, ColorText)
+        assert isinstance(view._empty._subtitle_label, ColorText)
         assert view.emptyTitle() == "标题"
         assert view.emptySubtitle() == "副标题"
         assert view.suggestions() == ["A", "B"]
@@ -170,45 +176,18 @@ class TestStickToBottom:
 
 
 class TestJumpButtonAppearance:
-    """「回到底部」浮动按钮用**实心强调色**（旧版透明底裸图标不够醒目）。"""
+    """「回到底部」浮动按钮复用 ElaButton 的实心强调色。"""
 
-    def _token(self, mode, slot):
-        return eTheme.getThemeColor(mode, slot).name()
+    def test_is_solid_primary_ela_button(self, qapp, make):
+        from pyqt6_ela_pro.ela_button import ElaButton
 
-    def test_fill_uses_accent_and_state_slots(self, qapp, make):
         view = make(ElaChatView)
         button = view._jump_button
-        mode = eTheme.getThemeMode()
-
-        assert button._fill_color().name() == self._token(
-            mode, ElaThemeType.ThemeColor.PrimaryNormal
-        )
-
-        button.setDown(True)
-        assert button._fill_color().name() == self._token(
-            mode, ElaThemeType.ThemeColor.PrimaryPress
-        )
-        button.setDown(False)
-
-        # ``underMouse()`` 读的就是 WA_UnderMouse —— 离屏用例里直接置位即可
-        button.setAttribute(Qt.WidgetAttribute.WA_UnderMouse, True)
-        try:
-            assert button._fill_color().name() == self._token(
-                mode, ElaThemeType.ThemeColor.PrimaryHover
-            )
-        finally:
-            button.setAttribute(Qt.WidgetAttribute.WA_UnderMouse, False)
-
-    def test_theme_switch_uses_dark_accent(self, qapp, make):
-        view = make(ElaChatView)
-        button = view._jump_button
-
-        button._onThemeChanged(ElaThemeType.ThemeMode.Dark)
-
-        assert button._theme_mode == ElaThemeType.ThemeMode.Dark
-        assert button._fill_color().name() == self._token(
-            ElaThemeType.ThemeMode.Dark, ElaThemeType.ThemeColor.PrimaryNormal
-        )
+        assert isinstance(button, ElaButton)
+        assert button.variant() == "solid"
+        assert button.color() == "primary"
+        assert button.borderRadius() == 8
+        assert button._icon_name == ElaIconType.IconName.ArrowDown
 
     def test_button_keeps_geometry_and_focus_policy(self, qapp, make):
         view = make(ElaChatView)

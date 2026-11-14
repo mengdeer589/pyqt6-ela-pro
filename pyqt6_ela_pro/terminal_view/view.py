@@ -21,8 +21,6 @@ from PyQt6.QtGui import (
     QFont,
     QFontMetrics,
     QPainter,
-    QPainterPath,
-    QPen,
     QShowEvent,
     QTextCharFormat,
     QTextCursor,
@@ -52,7 +50,7 @@ from .._internal import (
     is_deleted,
     system_cjk_font_family,
 )
-from .._styles import editBorderlessStyle
+from .._styles import editBorderlessStyle, paintRoundedCard
 from .._theme import surfaceRaised
 from ..ela_button import ElaButton
 from ..tooltips import ElaToolTipPositionType, set_tooltip
@@ -165,18 +163,16 @@ class _TerminalCard(QWidget):
 
     def paintEvent(self, _event) -> None:  # noqa: N802 (Qt 命名)
         painter = QPainter(self)
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-        rect = QRectF(self.rect()).adjusted(0.5, 0.5, -0.5, -0.5)
-        path = QPainterPath()
-        path.addRoundedRect(rect, _CARD_RADIUS, _CARD_RADIUS)
-        painter.fillPath(path, self._bg)
-        if self._border.alpha() > 0:
-            pen = QPen(self._border)
-            pen.setWidthF(1.0)
-            painter.setPen(pen)
-            painter.setBrush(Qt.BrushStyle.NoBrush)
-            painter.drawPath(path)
-        painter.end()
+        try:
+            paintRoundedCard(
+                painter,
+                QRectF(self.rect()),
+                background=self._bg,
+                border=self._border,
+                radius=_CARD_RADIUS,
+            )
+        finally:
+            painter.end()
 
 
 class _Gutter(QWidget):
@@ -234,7 +230,7 @@ class ElaTerminalView(ElaThemeWidget):
     ``filterChanged`` / ``matchPositionChanged``。
 
     :param maxLines: 保留行数上限，``0`` 表示不限
-    :param paletteName: 调色板名称（见 :func:`terminalThemes`）
+    :param theme: 终端主题名（见 :func:`terminalThemes`）
     """
 
     linesAppended = pyqtSignal(int)
@@ -245,7 +241,7 @@ class ElaTerminalView(ElaThemeWidget):
     def __init__(
         self,
         maxLines: int = _DEFAULT_MAX_LINES,  # noqa: N803 (Qt 命名)
-        paletteName: str = "",  # noqa: N803 (Qt 命名)
+        theme: str = "",
         parent: Optional[QWidget] = None,
     ) -> None:
         super().__init__(parent)
@@ -268,8 +264,8 @@ class ElaTerminalView(ElaThemeWidget):
         self._missing_glyph_fallback = system_cjk_font_family() is not None
         #: 已做过缺字形兜底的文档位置（尾行重写 / 裁头时回退）
         self._glyph_guard_pos = 0
-        self._palette_name = (
-            paletteName if paletteName in _TERMINAL_THEMES else defaultTerminalTheme()
+        self._theme_name = (
+            theme if theme in _TERMINAL_THEMES else defaultTerminalTheme()
         )
         self._palette: dict = {}
         self._format_cache: dict = {}
@@ -863,24 +859,28 @@ class ElaTerminalView(ElaThemeWidget):
         """工具条是否处于显示态（不受父级可见性影响）。"""
         return self._toolbar_visible
 
-    def setPaletteName(self, name: str) -> None:  # noqa: N802 (Qt 命名)
-        """切换调色板（未注册名称回退到默认）；可见时就地重渲染，隐藏时只标记待补。"""
+    def setTerminalTheme(self, name: str) -> bool:  # noqa: N802 (Qt 命名)
+        """切换终端主题；未知名称返回 ``False`` 且保持当前主题。
+
+        可见时就地重渲染，隐藏时只标记待补。
+        """
         if name not in _TERMINAL_THEMES:
-            name = defaultTerminalTheme()
-        if name == self._palette_name:
-            return
-        self._palette_name = name
+            return False
+        if name == self._theme_name:
+            return True
+        self._theme_name = name
         self._refresh_palette()
         self._rebuild_when_visible()
+        return True
 
-    def paletteName(self) -> str:  # noqa: N802 (Qt 命名)
-        """获取当前调色板名称。"""
-        return self._palette_name
+    def terminalTheme(self) -> str:  # noqa: N802 (Qt 命名)
+        """获取当前终端主题名。"""
+        return self._theme_name
 
     def setHighlightColor(self, color) -> None:  # noqa: N802
         """设置搜索命中高亮色（``QColor`` 或色串），并就地重渲染。
 
-        覆盖值会**跨换肤保留**（``setPaletteName`` / 主题切换只重算背景派生的
+        覆盖值会**跨换肤保留**（``setTerminalTheme`` / 主题切换只重算背景派生的
         默认黄，不动用户设过的色）；传 ``None`` 清除覆盖、回到派生默认黄。
 
         :param color: 高亮色；传 ``None`` 恢复按背景派生的默认黄色
@@ -935,7 +935,7 @@ class ElaTerminalView(ElaThemeWidget):
 
     def _refresh_palette(self) -> None:
         light = self._theme_mode == ElaThemeType.ThemeMode.Light
-        self._palette = _resolve_palette(self._palette_name, light)
+        self._palette = _resolve_palette(self._theme_name, light)
         self._format_cache.clear()
         self._refresh_highlight()
         if _alive(self._card):
@@ -1136,7 +1136,7 @@ class ElaTerminalView(ElaThemeWidget):
             改高亮色 / 改行数上限都不是「用户要看新内容」，原先无条件
             ``_scroll_to_bottom()`` 会把用户上滚到的位置拽回底部、并把
             ``_following`` 重新置 True —— 用户正在回看的那段历史被强行抢走
-            （实测：滚到顶后 ``setPaletteName()`` 直接跳到底）。
+            （实测：滚到顶后 ``setTerminalTheme()`` 直接跳到底）。
             只有「过滤词变了」和「首次构建」才该强制回到底部。
         """
         if not _alive(self) or not _alive(self._edit):

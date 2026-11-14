@@ -25,15 +25,15 @@ __all__ = [
 # 引脚类型配色
 
 #: 引脚类型 → 颜色。值可以是令牌键（如 ``"success"`` 即 ``color.success``）
-#: 或 ``#hex`` 颜色字符串。``exec`` 为执行流引脚（浅灰白）。
+#: 或 ``#hex`` 颜色字符串。``exec`` 与 ``any`` 都为弱文本色（浅色下仍 ≥3:1）。
 PIN_COLORS = {
     "any": "text.tertiary",
     "int": "success",
     "float": "primary",
-    "str": "warning",
-    "image": "#C080D0",
-    "tensor": "#4FA8A0",
-    "exec": "#E8E8E8",
+    "str": "pin.warning",
+    "image": "pin.image",
+    "tensor": "pin.tensor",
+    "exec": "text.tertiary",
 }
 
 

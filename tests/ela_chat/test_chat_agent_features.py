@@ -34,6 +34,7 @@ from pyqt6_ela_pro.chat.blocks import (
     CompactionSeparator,
     PermissionRecord,
 )
+from pyqt6_ela_pro.chat.view_parts import EmptyState
 from pyqt6_ela_pro.chat.message import (
     ElaChatMessage,
     ElaChatOption,
@@ -442,6 +443,8 @@ class TestFontScale:
 
     #: chat 允许的字号上限（工具卡头部 13px 是最大的正文级文字）
     MAX_PX = 14
+    #: 空态是独立视觉档：标题 19px，不属于正文
+    EMPTY_STATE_MAX_PX = 19
 
     @staticmethod
     def _populate(chat):
@@ -488,11 +491,21 @@ class TestFontScale:
         qapp.processEvents()
         labels = chat.findChildren(ColorText)
         assert labels, "没抓到任何 ColorText，测试本身失效了"
-        bad = [
-            (label.font().pixelSize(), type(label.parent()).__name__, label.text()[:30])
-            for label in labels
-            if not 0 < label.font().pixelSize() <= self.MAX_PX
-        ]
+        bad = []
+        for label in labels:
+            limit = (
+                self.EMPTY_STATE_MAX_PX
+                if isinstance(label.parent(), EmptyState)
+                else self.MAX_PX
+            )
+            if not 0 < label.font().pixelSize() <= limit:
+                bad.append(
+                    (
+                        label.font().pixelSize(),
+                        type(label.parent()).__name__,
+                        label.text()[:30],
+                    )
+                )
         assert not bad, f"字号失控（上限 {self.MAX_PX}px）：{bad}"
 
     def test_the_default_really_is_huge(self, qapp, make):

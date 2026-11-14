@@ -85,12 +85,50 @@ class _MarkdownSelectionMixin:
                 for number in range(first, last + 1):
                     code_ranges[number] = code_range
         mapping: dict = {}
+        # 普通表格：单元格块 → 整张表的源行范围（选单元格时仍返回合法 Markdown）
+        table_ranges: dict = {}
+        for table in self._iter_tables(self.document()):
+            if self._is_code_table(table) or table.rows() < 1 or table.columns() < 1:
+                continue
+            header = ""
+            for column in range(table.columns()):
+                header = (
+                    table.cellAt(0, column).firstCursorPosition().block().text().strip()
+                )
+                if header:
+                    break
+            if not header:
+                continue
+            start = None
+            for index, line in enumerate(lines):
+                if "|" in line and header in line:
+                    start = index
+                    break
+            if start is None:
+                continue
+            end = start
+            cursor = start + 1
+            while (
+                cursor < len(lines) and "|" in lines[cursor] and lines[cursor].strip()
+            ):
+                end = cursor
+                cursor += 1
+            for row in range(table.rows()):
+                cell = table.cellAt(row, 0)
+                first = cell.firstCursorPosition().blockNumber()
+                last = cell.lastCursorPosition().blockNumber()
+                for number in range(first, last + 1):
+                    table_ranges[number] = (start, end + 1)
         source_index = 0
         block = self.document().begin()
         while block.isValid():
             number = block.blockNumber()
+            table_range = table_ranges.get(number)
             code_range = code_ranges.get(number)
-            if code_range is not None:
+            if table_range is not None:
+                mapping[number] = table_range
+                source_index = max(source_index, table_range[1])
+            elif code_range is not None:
                 mapping[number] = code_range
                 source_index = max(source_index, code_range[1])
             else:

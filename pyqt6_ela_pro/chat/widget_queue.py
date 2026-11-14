@@ -67,8 +67,8 @@ class _WidgetQueueMixin:
         return False
 
     def steerQueued(self, queueId: str) -> bool:
-        """把排队消息转为插话（仅生成中可用）。"""
-        if not self._generating:
+        """把排队消息转为插话（生成中且插话可用时）。"""
+        if not self._generating or not self.steerEnabled():
             return False
         for index, item in enumerate(self._queue):
             if item["id"] != queueId:
@@ -196,6 +196,7 @@ class _WidgetQueueMixin:
     def _sync_queue(self) -> None:
         self._queue_dock.setMessages(self._queue)
         self._queue_dock.setWorking(bool(self._generating))
+        self._queue_dock.setSteerEnabled(self.steerEnabled())
         self._queue_dock.setUndoAvailable(self.canUndoQueue())
         self.queueChanged.emit(self.queuedMessages())
 

@@ -20,7 +20,6 @@ from PyQt6.QtCore import (
     QRectF,
 )
 
-from ._colors import parse_color
 from ._internal import connect_theme_signal, is_deleted, safe_connect, single_shot_on
 from ._motion import Duration, start_idle_loop, start_transition
 from ._styles import (
@@ -50,7 +49,7 @@ from PyQt6.QtGui import (
     QHideEvent,
     QShowEvent,
 )
-from PyQt6.QtWidgets import QApplication, QWidget, QLabel, QGraphicsOpacityEffect
+from PyQt6.QtWidgets import QApplication, QWidget, QGraphicsOpacityEffect
 
 from PyQt6ElaWidgetTools import eTheme, ElaThemeType, ElaIconType, ElaIconButton
 
@@ -115,35 +114,6 @@ class ElaToolTipPositionType(Enum):
     """显示在目标右下方"""
 
 
-class _ToolTipLabel(QLabel):
-    """提示文本标签：绘制前自愈显式色。
-    提示框是原生 ``Qt.Tool`` 顶层窗；创建 / 改窗口标志 / 平台样式切换都可能把
-    子标签的 palette 刷回应用默认色（深色下就是黑字）。和 ``ColorText`` 同一套
-    """
-
-    def __init__(self, text: str = "", parent: Optional[QWidget] = None) -> None:
-        super().__init__(text, parent)
-        self.setTextFormat(Qt.TextFormat.PlainText)
-        self._text_color: Optional[QColor] = None
-
-    def setTextColor(self, color) -> None:  # noqa: N802 (Qt 命名)
-        self._text_color = parse_color(color)
-        self._apply_text_color()
-
-    def _apply_text_color(self) -> None:
-        if self._text_color is None:
-            return
-        palette = self.palette()
-        role = self.foregroundRole()
-        if palette.color(role) != self._text_color:
-            palette.setColor(role, self._text_color)
-            self.setPalette(palette)
-
-    def paintEvent(self, event) -> None:  # noqa: N802 (Qt 命名)
-        self._apply_text_color()
-        super().paintEvent(event)
-
-
 class ElaToolTip(QWidget):
     """轻量级悬浮提示组件。
 
@@ -172,7 +142,8 @@ class ElaToolTip(QWidget):
         # 建聊天页 / 工具栏时必中）。
         self.hide()
 
-        self._label = _ToolTipLabel(text, self)
+        self._label = ColorText(text, self)
+        self._label.setTextFormat(Qt.TextFormat.PlainText)
         self._label.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
 
         font = QFont()

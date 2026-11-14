@@ -21,7 +21,7 @@ from PyQt6.QtWidgets import QWidget
 from PyQt6ElaWidgetTools import ElaIconType
 
 from ._colors import parse_color
-from ._styles import drawCoverPixmap, drawElaIcon
+from ._styles import coerceElaIcon, drawCoverPixmap, drawElaIcon
 from ._theme import (
     ElaStatusRoleType,
     accent,
@@ -41,6 +41,8 @@ __all__ = ["ElaAvatar", "ElaAvatarPresenceType", "ElaAvatarShapeType", "ElaAvata
 
 #: 「圆角方」的圆角（对齐 Fluent ``CornerRadius::Control``）。
 _SQUARE_RADIUS = 4.0
+#: ``Rounded`` 形状的圆角（聊天头像的 8px 圆角）。
+_ROUNDED_RADIUS = 8.0
 
 #: 内缩半像素，让 1px 描边落在设备像素上不糊。
 _STROKE_INSET = 0.5
@@ -82,6 +84,9 @@ class ElaAvatarShapeType(IntEnum):
 
     Square = 1
     """4px 圆角方。"""
+
+    Rounded = 2
+    """8px 圆角方。"""
 
 
 class ElaAvatarPresenceType(IntEnum):
@@ -183,8 +188,10 @@ class ElaAvatar(ElaThemeWidget):
     nameChanged = pyqtSignal(str)
     initialsChanged = pyqtSignal(str)
     imageChanged = pyqtSignal(object)
+    iconChanged = pyqtSignal(object)
     shapeChanged = pyqtSignal(object)
     avatarSizeChanged = pyqtSignal(object)
+    extentChanged = pyqtSignal(int)
     presenceChanged = pyqtSignal(object)
     backgroundColorChanged = pyqtSignal(object)
     foregroundColorChanged = pyqtSignal(object)
@@ -194,8 +201,10 @@ class ElaAvatar(ElaThemeWidget):
         self._name = ""
         self._initials = ""
         self._image: Optional[QPixmap] = None
+        self._icon_name: Optional[ElaIconType.IconName] = None
         self._shape = ElaAvatarShapeType.Circular
         self._size = ElaAvatarSizeType.Medium
+        self._avatar_extent: Optional[int] = None
         self._presence = ElaAvatarPresenceType.None_
         self._background_color = QColor()
         self._foreground_color = QColor()
@@ -265,6 +274,18 @@ class ElaAvatar(ElaThemeWidget):
         self.imageChanged.emit(new)
         self.update()
 
+    def iconName(self) -> Optional[ElaIconType.IconName]:
+        """显式设置的角色 / 类型图标（未设置时为 ``None``）。"""
+        return self._icon_name
+
+    def setIconName(self, iconName) -> None:  # noqa: N802
+        """设置显式图标；设置后优先于首字母（图片仍最优先）。"""
+        value = None if iconName is None else coerceElaIcon(iconName)
+        if value == self._icon_name:
+            return
+        self._icon_name = value
+        self.iconChanged.emit(value)
+        self.update()
 
     def shape(self) -> ElaAvatarShapeType:
         return self._shape
@@ -282,7 +303,10 @@ class ElaAvatar(ElaThemeWidget):
 
     def setAvatarSize(self, size) -> None:  # noqa: N802
         value = ElaAvatarSizeType(size)
+        self._avatar_extent = None
         if value == self._size:
+            self._applyExtent()
+            self.update()
             return
         self._size = value
         self._applyExtent()
@@ -290,8 +314,23 @@ class ElaAvatar(ElaThemeWidget):
         self.update()
 
     def extent(self) -> int:
-        """当前档位的边长（px）。"""
+        """当前边长（px）：优先 ``setAvatarExtent``，否则取尺寸档位。"""
+        if self._avatar_extent is not None:
+            return int(self._avatar_extent)
         return int(self._size)
+
+    def setAvatarExtent(self, extent: int) -> None:  # noqa: N802
+        """显式指定边长（px），用于聊天 30px 这类非预设档位。"""
+        try:
+            value = max(16, min(256, int(extent)))
+        except (TypeError, ValueError, OverflowError):
+            return
+        if value == self.extent():
+            return
+        self._avatar_extent = value
+        self._applyExtent()
+        self.extentChanged.emit(value)
+        self.update()
 
     def presence(self) -> ElaAvatarPresenceType:
         return self._presence
@@ -362,6 +401,8 @@ class ElaAvatar(ElaThemeWidget):
             return path
         if self._shape == ElaAvatarShapeType.Circular:
             path.addEllipse(rect)
+        elif self._shape == ElaAvatarShapeType.Rounded:
+            path.addRoundedRect(rect, _ROUNDED_RADIUS, _ROUNDED_RADIUS)
         else:
             path.addRoundedRect(rect, _SQUARE_RADIUS, _SQUARE_RADIUS)
         return path
@@ -442,6 +483,25 @@ class ElaAvatar(ElaThemeWidget):
                 painter.setOpacity(_DISABLED_IMAGE_ALPHA)
             drawCoverPixmap(painter, inner, self._image)
             painter.restore()
+        elif self._icon_name is not None:
+            icon_px = max(12, int(round(self.extent() * 0.62)))
+            color = (
+                foreground
+                if foreground is not None
+                else contrastingText(self.effectiveBackgroundColor())
+            )
+            drawElaIcon(
+                painter,
+                QRectF(
+                    (self.width() - icon_px) / 2.0,
+                    (self.height() - icon_px) / 2.0,
+                    icon_px,
+                    icon_px,
+                ),
+                self._icon_name,
+                color,
+                ratio=self.devicePixelRatioF(),
+            )
         else:
             initials = self.effectiveInitials()
             if initials:

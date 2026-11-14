@@ -118,11 +118,12 @@ class TestDiffView:
             eTheme.setThemeMode(previous)
 
     def test_uses_ela_scrollbars(self, qapp, make):
-        from PyQt6ElaWidgetTools import ElaScrollBar
+        from PyQt6ElaWidgetTools import ElaPlainTextEdit
 
         view = make(ElaDiffView)
-        assert isinstance(view.verticalScrollBar(), ElaScrollBar)
-        assert isinstance(view.horizontalScrollBar(), ElaScrollBar)
+        assert isinstance(view, ElaPlainTextEdit)
+        assert view.verticalScrollBar().objectName() == "ElaScrollBar"
+        assert view.horizontalScrollBar().objectName() == "ElaScrollBar"
 
     def test_height_fits_short_diff_and_caps_long_diff(self, qapp, make):
         """短 diff 贴合内容，只有超过最大高度才出现滚动条。"""
@@ -175,6 +176,31 @@ class TestDiffView:
         assert view._spans_by_block == {}
         view.setTokenColors({"keyword": "#ff0000"})
         assert view.syntaxPalette()["keyword"] == "#ff0000"
+
+    def test_diff_colors_use_status_tokens(self, qapp, make):
+        from PyQt6ElaWidgetTools import ElaThemeType, eTheme
+
+        from pyqt6_ela_pro._theme import ElaStatusRoleType, statusColor
+
+        previous = eTheme.getThemeMode()
+        try:
+            for mode in (ElaThemeType.ThemeMode.Light, ElaThemeType.ThemeMode.Dark):
+                eTheme.setThemeMode(mode)
+                view = make(ElaDiffView)
+                assert (
+                    view._add_fg.hue()
+                    == statusColor(mode, ElaStatusRoleType.Success).hue()
+                )
+                assert (
+                    view._del_fg.hue()
+                    == statusColor(mode, ElaStatusRoleType.Error).hue()
+                )
+                from pyqt6_ela_pro._colors import _contrast_ratio
+
+                for color in (view._add_fg, view._del_fg):
+                    assert _contrast_ratio(color, view._gutter_bg) >= 4.5
+        finally:
+            eTheme.setThemeMode(previous)
 
 
 class TestFileChanges:

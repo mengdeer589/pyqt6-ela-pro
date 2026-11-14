@@ -51,14 +51,12 @@ class TestInit:
     def test_custom_max_lines(self, make):
         assert make(ElaTerminalView, maxLines=42).maxLines() == 42
 
-    def test_custom_palette(self, make):
-        assert make(ElaTerminalView, paletteName="solarized").paletteName() == (
-            "solarized"
-        )
+    def test_custom_theme(self, make):
+        assert make(ElaTerminalView, theme="solarized").terminalTheme() == "solarized"
 
-    def test_unknown_palette_falls_back(self, make):
-        view = make(ElaTerminalView, paletteName="does-not-exist")
-        assert view.paletteName() == defaultTerminalTheme()
+    def test_unknown_theme_falls_back(self, make):
+        view = make(ElaTerminalView, theme="does-not-exist")
+        assert view.terminalTheme() == defaultTerminalTheme()
 
     def test_readonly(self, view):
         assert view._edit.isReadOnly() is True
@@ -366,7 +364,7 @@ class TestFilter:
     @pytest.mark.parametrize(
         "mutate",
         [
-            pytest.param(lambda v: v.setPaletteName("classic"), id="palette"),
+            pytest.param(lambda v: v.setTerminalTheme("classic"), id="theme"),
             pytest.param(lambda v: v.setFontSize(20), id="font"),
             pytest.param(lambda v: v.setHighlightColor(QColor("#00ff00")), id="hilite"),
             pytest.param(lambda v: v.setMaxLines(1), id="maxLines"),
@@ -523,9 +521,9 @@ class TestAppearance:
 
     def test_font_is_monospace(self, view):
         view.setFontSize(14)
-        assert (
-            view._edit.font().styleHint() == QFont.StyleHint.Monospace
-        ), "Qt6 里 Monospace 是 StyleHint（旧写法 QFont.StyleHint.Monospace 已移除）"
+        assert view._edit.font().styleHint() == QFont.StyleHint.Monospace, (
+            "Qt6 里 Monospace 是 StyleHint（旧写法 QFont.StyleHint.Monospace 已移除）"
+        )
 
     def test_word_wrap(self, view):
         assert view.wordWrap() is False
@@ -548,11 +546,12 @@ class TestAppearance:
         view.setToolbarVisible(True)
         assert view.toolbarVisible() is True
 
-    def test_palette_switch(self, view):
-        view.setPaletteName("classic")
-        assert view.paletteName() == "classic"
-        view.setPaletteName("nope")
-        assert view.paletteName() == defaultTerminalTheme()
+    def test_terminal_theme_switch(self, view):
+        assert view.setTerminalTheme("classic") is True
+        assert view.terminalTheme() == "classic"
+        assert view.setTerminalTheme("classic") is True
+        assert view.setTerminalTheme("nope") is False
+        assert view.terminalTheme() == "classic"
 
     def test_gutter_colors_are_valid(self, view):
         assert isinstance(view._gutter_text_color(), QColor)
@@ -574,12 +573,12 @@ class TestAppearance:
         assert view._highlight.isValid(), "None 必须回到有效色，不能是 QColor()"
         assert view._highlight == derived
 
-    def test_highlight_override_survives_palette_change(self, view):
+    def test_highlight_override_survives_theme_change(self, view):
         # 覆盖值是持久的：换配色 / 切主题只重算派生默认黄
         view.setHighlightColor(QColor("#ff0000"))
-        view.setPaletteName("classic")
+        view.setTerminalTheme("classic")
         assert view._highlight == QColor("#ff0000")
-        view.setPaletteName("default")
+        view.setTerminalTheme("one-dark")
         assert view._highlight == QColor("#ff0000")
         view.setHighlightColor(None)
         assert view._highlight == _blend(
@@ -624,8 +623,8 @@ class TestThemeRegistry:
             {"foreground": "#eeeeee", "background": "#111111"},
         )
         try:
-            view.setPaletteName("unit-test-palette")
-            assert view.paletteName() == "unit-test-palette"
+            view.setTerminalTheme("unit-test-palette")
+            assert view.terminalTheme() == "unit-test-palette"
             # 具体取哪档由当前应用主题决定
             assert view._palette["background"].name() in {"#eeeeee", "#111111"}
         finally:
@@ -640,7 +639,7 @@ class TestThemeRegistry:
             "dup", {"background": "#020202"}, {"background": "#020202"}
         )
         try:
-            view.setPaletteName("dup")
+            view.setTerminalTheme("dup")
             assert view._palette["background"].name() == "#020202"
         finally:
             unregisterTerminalTheme("dup")
@@ -650,7 +649,7 @@ class TestThemeRegistry:
             "partial-palette", {"foreground": "#123456"}, {"foreground": "#123456"}
         )
         try:
-            view.setPaletteName("partial-palette")
+            view.setTerminalTheme("partial-palette")
             # 未给的键回退到 one-dark，而不是 KeyError
             assert view._palette["foreground"].name() == "#123456"
             assert isinstance(view._palette["red"], QColor)
@@ -660,7 +659,7 @@ class TestThemeRegistry:
     def test_missing_foreground_falls_back_to_etheme(self, view):
         registerTerminalTheme("no-fg", {}, {})
         try:
-            view.setPaletteName("no-fg")
+            view.setTerminalTheme("no-fg")
             # 未定义前景 / 背景 → 走 eTheme 令牌，不该是调色板默认档的值
             assert view._palette["foreground"].isValid() is True
             assert view._palette["background"].isValid() is True
@@ -672,7 +671,7 @@ class TestThemeRegistry:
         try:
             setDefaultTerminalTheme("solarized")
             assert defaultTerminalTheme() == "solarized"
-            assert ElaTerminalView().paletteName() == "solarized"
+            assert ElaTerminalView().terminalTheme() == "solarized"
         finally:
             setDefaultTerminalTheme(original)
 

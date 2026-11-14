@@ -58,6 +58,53 @@ class TestQueueDock:
         assert label.text() == "你好"
         assert label.font().pixelSize() == 12
 
+    def test_rows_are_reused_and_reordered(self, qapp, make):
+        dock = make(ElaChatQueueDock)
+        dock.setMessages([{"id": "q1", "text": "one"}])
+        row1 = dock._rows_layout.itemAt(0).widget()
+        dock.setMessages(
+            [
+                {"id": "q1", "text": "one"},
+                {"id": "q2", "text": "two"},
+            ]
+        )
+        assert dock._rows_layout.itemAt(0).widget() is row1
+        row2 = dock._rows_layout.itemAt(1).widget()
+
+        dock.setMessages(
+            [
+                {"id": "q2", "text": "two"},
+                {"id": "q1", "text": "one updated"},
+            ]
+        )
+        assert dock._rows_layout.itemAt(0).widget() is row2
+        assert dock._rows_layout.itemAt(1).widget() is row1
+        assert row1._queue_label.text() == "one updated"
+
+        dock.setMessages([{"id": "q2", "text": "two"}])
+        assert dock.count() == 1
+        assert dock._rows_layout.itemAt(0).widget() is row2
+
+    def test_steer_disabled_disables_row_action(self, qapp, make):
+        dock = make(ElaChatQueueDock)
+        dock.setMessages([{"id": "q1", "text": "x"}])
+        dock.setWorking(True)
+        dock.setSteerEnabled(False)
+        assert dock.steerEnabled() is False
+        row = dock._rows_layout.itemAt(0).widget()
+        send = row.layout().itemAt(1).widget()
+        assert send.text() == "插话"
+        assert send.isEnabled() is False
+
+        steers = []
+        dock.steerRequested.connect(steers.append)
+        dock._activate_row("q1")
+        assert steers == []
+
+        dock.setSteerEnabled(True)
+        row = dock._rows_layout.itemAt(0).widget()
+        assert row.layout().itemAt(1).widget().isEnabled() is True
+
 
 class TestInputDock:
     def test_replace_and_clear(self, qapp, make):
@@ -128,6 +175,24 @@ class TestWidgetQueue:
         chat.dequeueMessage(chat.queuedMessages()[0]["id"])
         chat.clearQueue()
         assert changes == [1, 2, 1, 0]
+
+    def test_steer_queued_disabled_keeps_message(self, qapp, make):
+        chat = self._generating_chat(qapp, make)
+        chat.setSteerEnabled(False)
+        chat.enqueueMessage("第二问")
+        queueId = chat.queuedMessages()[0]["id"]
+        assert chat.steerQueued(queueId) is False
+        assert chat.queueCount() == 1
+        assert chat.steerCount() == 0
+        assert chat.queuedMessages()[0]["text"] == "第二问"
+
+    def test_widget_steer_disabled_propagates_to_dock(self, qapp, make):
+        chat = self._generating_chat(qapp, make)
+        chat.enqueueMessage("第二问")
+        chat.queueDock().setExpanded(True)
+        chat.setSteerEnabled(False)
+        row = chat.queueDock()._rows_layout.itemAt(0).widget()
+        assert row.layout().itemAt(1).widget().isEnabled() is False
 
     def test_input_dock_disables_composer(self, qapp, make):
         chat = make(ElaChatWidget)

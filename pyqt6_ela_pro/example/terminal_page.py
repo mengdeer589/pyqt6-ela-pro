@@ -4,7 +4,7 @@ import random
 
 from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtWidgets import QHBoxLayout, QWidget
-from PyQt6ElaWidgetTools import ElaIconType
+from PyQt6ElaWidgetTools import ElaComboBox, ElaIconType, ElaText
 
 from pyqt6_ela_pro import (
     ElaButton,
@@ -84,8 +84,8 @@ class TerminalPage(ExamplePage):
         self._addInfoText(
             "只读展示、不执行任何命令。下面每个按钮把一种场景喂进同一个输出框："
             "ANSI 色彩样例、\\r 进度条、流式输出；输出框顶部工具栏是组件自带的"
-            "搜索过滤、复制、导出、字号与跟随。调色板按钮切换实例配色"
-            "（内置 one-dark / solarized / classic，应用主题切换时自动跟随）。",
+            "搜索过滤、复制、导出、字号与跟随。底部「终端配色」下拉框切换实例配色"
+            "（内置 one-dark / solarized / classic，应用暗色 / 亮色切换时自动跟随）。",
             main_layout,
         )
 
@@ -132,23 +132,24 @@ class TerminalPage(ExamplePage):
         row_layout.addStretch(1)
         main_layout.addWidget(row)
 
-        palette_row = QWidget(self)
-        palette_layout = QHBoxLayout(palette_row)
-        palette_layout.setContentsMargins(0, 0, 0, 0)
-        palette_layout.setSpacing(8)
+        theme_row = QWidget(self)
+        theme_layout = QHBoxLayout(theme_row)
+        theme_layout.setContentsMargins(0, 0, 0, 0)
+        theme_layout.setSpacing(8)
+        theme_label = ElaText("终端配色", theme_row)
+        theme_label.setTextPixelSize(13)
+        theme_layout.addWidget(theme_label)
+        theme_combo = ElaComboBox(theme_row)
+        theme_combo.setMinimumWidth(180)
         for name in terminalThemes():
-            btn = ElaButton(
-                name,
-                variant="outlined",
-                color="primary",
-                size="small",
-                parent=palette_row,
-            )
-            btn.setFocusPolicy(Qt.FocusPolicy.NoFocus)
-            btn.clicked.connect(lambda _c=False, n=name: view.setPaletteName(n))
-            palette_layout.addWidget(btn)
-        palette_layout.addStretch(1)
-        main_layout.addWidget(palette_row)
+            theme_combo.addItem(name)
+        theme_combo.setCurrentIndex(max(0, theme_combo.findText(view.terminalTheme())))
+        theme_combo.currentIndexChanged.connect(
+            lambda _index=0: view.setTerminalTheme(theme_combo.currentText())
+        )
+        theme_layout.addWidget(theme_combo)
+        theme_layout.addStretch(1)
+        main_layout.addWidget(theme_row)
 
         progress_state = {"percent": 0}
         stream_state = {"index": 0}

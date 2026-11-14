@@ -4,7 +4,7 @@
 的嵌入模式）。本页是能力清单；API 细节见 `pyqt6_ela_pro/markdown_viewer/viewer.py`
 的类 docstring，可运行示例见 `example/markdown_page.py`。示例页是长文阅读器：
 正文由单个查看器占满页面，主题 / 行号 / 折叠 / 缩放 / 搜索 / 流式重放收在右上角
-「阅读设置」`ElaDrawer` 中。
+「阅读设置」`ElaDrawer` 中（`setMaskEnabled(False)`，无遮罩、不挡正文操作）。
 
 ## 排版
 
@@ -64,6 +64,10 @@ viewer.missingGlyphFallbackEnabled()           # 查询
 - `surface`：`{"light": ..., "dark": ...}`，覆盖查看器页面底色（`None` =
   跟随 eTheme 的 `BasicPress`）；`paper` 用它实现暖纸底。
 
+选中文字的高亮底色 / 文字色固定跟随 Markdown 主题（主题强调色混入页面底色），
+不取系统 `Highlight` —— Win7 / Win11、窗口失焦前后观感一致；高亮文字沿用正文色，
+加粗 / 链接等自带前景色的片段仍保留自身颜色。
+
 颜色值接受 `#rgb` / `#rrggbb` / 具名色 / `rgb()` / `rgba()`（`setCodeTokenColors` 与
 `registerMarkdownTheme` 的自定义色同样支持）—— 库内统一过 `_colors.parse_color`。
 正文片段不写显式前景色（颜色由控件 palette 的 `Text` 提供、随主题切换）；
@@ -113,19 +117,27 @@ viewer.setBodyFontFamily(family)
 
 ## GFM 与扩展语法
 
-- GFM：表格 / 任务列表 / 删除线；
+- GFM：表格 / 任务列表（含引用块内的任务列表）/ 删除线；
 - GitHub Alert 提示块（`> [!NOTE]` / `[!TIP]` / `[!WARNING]` 等）；
-- 脚注：跳转与回跳；
+- 脚注：跳转与回跳，编号按**首次引用顺序**（不是定义顺序）；
 - 行内高亮 `==text==`；上下标 `~x~` `^x^`（**内容限字母数字**：`H~2~O`、`x^2^`；
   正文里的其它 `~`（如范围值 `1~23、45~67`）按字面渲染）；emoji 短代码；
+  链接目标 / 裸 URL / HTML 标签内的这些字符按字面保留，不参与行内转换；
 - 推理块（`think` 围栏）：折叠展示，流式未闭合时标签显示「思考中…」，
   可用 `setReasoningTag` / `setReasoningLabel` 修改或关闭；
-- `diff` 围栏行级着色；链接悬浮显示地址。
+- 裸 HTML 标签守卫：未配对的开 / 闭标签按字面文本渲染；`<br>` / `<img>` 等
+  void 开标签自动补成自闭合，避免 Qt 导入器吞掉后续正文；成对标签、自闭合
+  标签、autolink、围栏 / 行内 / 缩进代码块不受影响；
+- `diff` 围栏行级着色；链接悬浮显示地址；
+- Callout 的 warning / caution 与 diff 增删色走 Ela 状态色，语法 token 仍由 Markdown 主题决定。
 
 ## 代码块
 
 - 语法高亮与语言标签（可选依赖 `pygments`，缺失自动降级为纯文本）；
-- 悬停复制按钮；超长折叠；
+- 高亮缓存分两层：与主题无关的词法 token（主题切换不重新 lex）+
+  最终字符格式（`setHighlightCacheSize()` 控条数，`0` 同时关闭两层）；
+- 悬停复制按钮；超长折叠（**导出 / 打印 / 复制全文会临时展开**，
+  `toPlainText()` 仍返回当前视图，折叠内容不在其中）；
 - 行号是**绘制层**：代码卡左侧预留行号槽，`setLineNumbersEnabled()` 只重绘，
   不重渲染文档；行号不进入复制、搜索、`toPlainText()`、HTML 或 PDF；
 - 纯 ASCII 代码（行内 / 围栏）用 Consolas 一类 Latin 等宽字体；
@@ -149,20 +161,21 @@ viewer.setBodyFontFamily(family)
 
 - 按视口距离优先渲染可见图；
 - 主题切换时先用旧主题的图顶替；
+- `themeVariables` 默认跟随 Ela 主题（Light/Dark），仍可用 `setThemeVariables` 覆盖；
 - 光栅化倍率随显示宽度自适应；
 - 可选引擎预热 `setMermaidPrewarm(True)`。
 
 ## 图片与媒体
 
 - 图片基准路径与超宽缩放；
-- 远程图片默认拦截（需要时由宿主放开）；
+- 远程图片默认拦截（需要时由宿主放开；放开后按阅读列宽缩放）；
 - 图片点击信号与预览；本地图片右键另存为；
 - 公式 / Mermaid / 外链悬浮显示源码或 URL（`install_document_tooltips`
   + 库内 `ElaToolTip`，不弹原生 QToolTip），点击或右键复制。
 
 ## 搜索 / 导出 / 打印
 
-- 文档内搜索与缩放；
+- 文档内搜索与缩放；整篇重渲染（缩放 / 换主题 / 换内容）后搜索高亮自动重建；
 - `exportPdf(path, *, pageSize, orientation, marginsMm, fontPointSize, lineSpacing,
   pageNumbers, title, creator)`：字号 / 行距 / 方向 / 页边距 / 页码 / 元数据只影响
   导出，不改屏幕；`fontPointSize=None` 表示沿用当前正文等效字号；
@@ -183,7 +196,8 @@ viewer.setBodyFontFamily(family)
 
 ## 长文档与性能
 
-- **分块渐进渲染**：超过 64KB 的文档自动分块（每块 16KB，按空行边界切）、按时间片
+- **分块渐进渲染**：超过 64KB 的文档自动分块（每块 16KB，**只在围栏 / 公式 /
+  details / 推理块之外的空行切**，表格与长段落不会被拆开）、按时间片
   逐块提交，首屏很快出现、UI 不冻结；`isRendering()` 查询状态，`renderingProgress` /
   `renderingFinished` 回报进度，渲染途中再调 `setMarkdown` 会取消在途分块；
 - **无图片文档不做图片扫描**：布局刷新只在「processed 文本含 `![` / `<img>`，或本文档

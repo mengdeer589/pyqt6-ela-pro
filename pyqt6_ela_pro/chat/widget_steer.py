@@ -5,6 +5,8 @@ from __future__ import annotations
 from typing import Optional
 from uuid import uuid4
 
+from .._internal import is_deleted
+
 
 class _WidgetSteerMixin:
     def steerMessage(
@@ -111,14 +113,22 @@ class _WidgetSteerMixin:
         self.steerChanged.emit(self.steerMessages())
 
     def setSteerEnabled(self, on: bool) -> None:
-        """是否在 step 边界自动投递插话（默认开）。
+        """是否允许插话（默认开）。
 
-        关掉后插话只堆积，宿主得自己调 :meth:`drainSteer`。
+        关掉后 binder 不再在 step 边界自动投递，内置排队 dock 也不提供「插话」
+        （``steerQueued`` 返回 False）；宿主自定义插话 UI 仍可用
+        :meth:`steerMessage` + :meth:`drainSteer`。
         """
-        self._steer_enabled = bool(on)
+        on = bool(on)
+        if on == self._steer_enabled:
+            return
+        self._steer_enabled = on
+        dock = getattr(self, "_queue_dock", None)
+        if dock is not None and not is_deleted(dock):
+            dock.setSteerEnabled(on)
 
     def steerEnabled(self) -> bool:
-        """是否在 step 边界自动投递插话。"""
+        """是否允许插话。"""
         return self._steer_enabled
 
     def drainSteer(self) -> Optional[dict]:

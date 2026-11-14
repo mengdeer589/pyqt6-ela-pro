@@ -7,7 +7,7 @@
 
 - `_lines`（`TerminalLine` 列表）是唯一真相，`QTextDocument` 只是派生渲染。
 - 过滤 = 按模型重建；导出 = 拼接模型；行数上限 = 淘汰模型头部。
-- ANSI 解析器只产出颜色索引，不碰具体颜色，切换调色板无需重新解析。
+- ANSI 解析器只产出颜色索引，不碰具体颜色，切换主题无需重新解析。
 - `append` 按帧合并提交，避免逐片重排的 O(n²)。
 
 ## 用法
@@ -15,7 +15,7 @@
 ```python
 from pyqt6_ela_pro import ElaTerminalView
 
-view = ElaTerminalView(maxLines=5000, paletteName="opencode")
+view = ElaTerminalView(maxLines=5000, theme="one-dark")
 view.append("\x1b[32mok\x1b[0m\n")
 view.setLineNumbersVisible(True)
 view.setFilter("error")
@@ -25,12 +25,15 @@ view.saveTo("output.log")
 
 常用 API：`append` / `appendLine` / `clear` / `setMaxLines` / `setFilter` /
 `findNext` / `findPrevious` / `setAutoScroll` / `setLineNumbersVisible` /
-`setWordWrap` / `saveTo` / `copyAll` / `copySelection`。
+`setWordWrap` / `setTerminalTheme` / `terminalTheme` / `saveTo` / `copyAll` /
+`copySelection`。
 
 ## 配色主题
 
-内置主题用 `terminalThemes()` 查询，`registerTerminalTheme(name, light, dark)` 注册
-自定义主题，`setDefaultTerminalTheme(name)` 改后续实例的默认值。
+内置主题用 `terminalThemes()` 查询，`setTerminalTheme(name)` 切换当前实例
+（未知名称返回 `False` 且保持原主题），`terminalTheme()` 读取当前主题；
+`registerTerminalTheme(name, light, dark)` 注册自定义主题，
+`setDefaultTerminalTheme(name)` 改后续实例的默认值。
 
 ## CJK 与缺字形
 

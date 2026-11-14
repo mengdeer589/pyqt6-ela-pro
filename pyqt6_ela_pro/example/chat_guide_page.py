@@ -471,7 +471,7 @@ class ChatGuidePage(ExamplePage):
 | `ElaChatPlan` / `PlanPanel` | 计划 / 待办：`setPlan` 写入 `Plan` 分段，折叠显示当前项 + 进度 |
 | `SubagentCard` | 子代理父卡：`parentId` 嵌套子工具，头部显示任务 / 状态 / 统计 |
 | `TurnChangesRow` | 回合文件变更汇总：从 `metadata.files` 派生，展开看合并 diff |
-| `ElaChatTracePanel` | 独立运行轨迹：turn → step → tool 树 + 耗时条 / 词元 / 成本 |
+| `ElaChatTracePanel` | 独立运行轨迹：用户提问 → 助手响应 → 步骤树；轮头响应密度条 + 每个响应独立局部标尺，ElaPivot 切换 / ElaToolTip hover / Ela 语义色，支持跨响应连续回放 |
 
 **worker 是鸭子类型**：任意对象只要满足下面的信号与方法，就能直接交给
 binder 和窗口（本页示例里 `worker` 就是这个角色）。
@@ -552,7 +552,7 @@ binder 和窗口（本页示例里 `worker` 就是这个角色）。
 | `undoMessage(id)` / `undoLastUserMessage()` | 撤回用户消息：删除该条及其后消息，原文 / 附件回填输入框。`undoMessage` **只对用户消息生效**（传助手消息返回 `None`，别拿 `messages()[-1]` 的助手回答 id 去撤）；`undoLastUserMessage()` 自己找**最后一条用户消息**，是「撤回最后一条消息」的正确入口 |
 | `regenerateFrom(id)` | 删除该回答，返回前置用户消息（**按钮与整条底部行只在回合结束后出现** —— 流式 / 排队中不显示：回答没写完点了会整段丢掉，复制到的也只是半句话） |
 | `retryMessage(id)` | **重试**（同参数重发）：清错误并把状态落成 `stopped`、**保留消息位置与 id**，返回前置用户消息。与 `regenerateFrom` 的区别就是不删消息 —— 删掉重建会让「重试」看起来像「重新生成」，也会打断用户正在读的上下文 |
-| `steerMessage(text, attachments=None, messageId=None, *, mentions=None)` / `drainSteer()` / `setSteerEnabled(on)` | 生成中插话：在 `beginStep` 安全边界把新指令送进**正在跑的这一轮**（对齐 opencode 的 `Delivery = "steer" \| "queue"`，那边 prompt 默认 steer），而不是排队等它跑完。`mentions` 是用户文本里的 `@` 区间；`drainSteer()` 一次只投一条 |
+| `steerMessage(text, attachments=None, messageId=None, *, mentions=None)` / `drainSteer()` / `setSteerEnabled(on)` | 生成中插话：在 `beginStep` 安全边界把新指令送进**正在跑的这一轮**（对齐 opencode 的 `Delivery = "steer" \| "queue"`，那边 prompt 默认 steer），而不是排队等它跑完。`mentions` 是用户文本里的 `@` 区间；`drainSteer()` 一次只投一条。`setSteerEnabled(False)` 同时关闭自动投递与内置 dock 入口：`steerQueued` 返回 `False`、`Ctrl+Enter` 回退排队 |
 | `sendNextQueued()` / `setAutoSendQueue(on)` | 排队续发（回合结束默认自动发送队首；仅空闲时发送） |
 | `sendQueuedNow(id)` | 排队 dock「立即发送」：先按 `Stopped` 收尾当前流并发出 `stopRequested`，再提交该条（同一时刻只有一个活跃流）。**只发被点的那条**，其余排队消息保持排队 |
 | `clear()` | 清空消息与排队（**输入区草稿 / 附件保留**）；生成中会发出 `stopRequested`；发出 `cleared` 信号 |
@@ -565,8 +565,8 @@ binder 和窗口（本页示例里 `worker` 就是这个角色）。
 | `enqueueMessage(text, attachments=None)` / `queuedMessages()` / `queueCount()` / `dequeueMessage(id)` / `editQueuedMessage(id)` / `clearQueue()` / `queueChanged(list)` | 排队队列的增删改查；`editQueuedMessage` 把该条回填输入框并出队（再提交就是普通发送） |
 | `generationStarted(id)` / `generationFinished(id, status)` / `messageUpdated(id)` / `messageActionTriggered(id, action)` / `sessionChanged(id)` / `attachmentsChanged(list)` / `batchRenderFinished()` | 状态 / 遥测信号：生成开始 / 结束（`status` 是字符串枚举）、消息快照更新、消息操作按钮、会话标记、附件变化、批量恢复的首批排空（**不是**「全部渲染完」） |
 | `setUserName(name)` / `setAssistantName(name)` / `setPlaceholderText(text)` / `setMentionProvider(fn)` / `mentions()` / `sendUserMessage(text, attachments=None, messageId=None)` / `addMessage(role, text)` | 外壳与程序化消息：名字作用于已有与后续消息；`@` 引用 `provider(query) -> list`，提交时用 `mentions()` 取有效 id；`sendUserMessage` 建用户消息 + 进生成态（返回 id），`addMessage` 只建消息不提交 |
-| `addSelector(key, title, items, current)` / `selectorValue(key)` / `setCommandProvider(fn)` / `setShellMode(on)` / `setHistory(history)` | 输入区命令 / 模型选择器 / shell / 提示历史的 widget 转发（**不转发 view 的同名接口**） |
-| `moveQueued(id, toIndex)` / `steerQueued(id)` / `undoQueueChange()` / `canUndoQueue()` | 队列排序 / 转插话 / 撤销（快照栈上限 20；只覆盖队列操作，直接插话不进撤销栈） |
+| `setCommandProvider(fn)` / `setShellMode(on)` / `setHistory(history)` | 输入区命令 / shell / 提示历史的 widget 转发（**不转发 view 的同名接口**）；选择器由宿主直接 `toolBar().addWidget(ElaChatSelector(...))` |
+| `moveQueued(id, toIndex)` / `steerQueued(id)` / `undoQueueChange()` / `canUndoQueue()` | 队列排序 / 转插话 / 撤销（快照栈上限 20；只覆盖队列操作，直接插话不进撤销栈）。`setSteerEnabled(False)` 时 `steerQueued` 返回 `False`，消息留在队列 |
 | `mentionSpans()` / `setMentions(mentions)` / `draftState()` / `setDraftState(state)` | @ 引用区间（带 id）/ 按文本恢复引用 / 草稿快照（宿主按会话保存） |
 | `setGenerating(on)` / `isGenerating()` / `streamingMessageId()` | 生成态与当前流式消息 id（`stopGeneration()` 见「三层边界」） |
 
@@ -601,7 +601,7 @@ binder 和窗口（本页示例里 `worker` 就是这个角色）。
 | `setMentionProvider(fn)` / `mentions()` / `clearMentions()` / `mentionSelected(text, value)` | `@` 引用：候选由宿主给；提交时用 `mentions()` 或 `mentionSelected` 拿有效 id |
 | `addFileButton()` / `setAddFileVisible(on)` / `clearButton()` / `setClearVisible(on)` / `setFilePicker(fn)` | 工具栏按钮句柄 / 显隐；`setFilePicker` 可把系统文件框换成宿主自己的选择器 |
 | `setCommandProvider(fn)` / `setCommandSubmitMode(mode)` | `/` 命令补全（`provider(query) -> list`）；`signal` 模式下提交发 `commandSubmitted(text)` 且不落消息 |
-| `addSelector(key, title, items, current)` / `setSelectorItems(key, items, current)` / `selectorValue(key)` | 模型 / agent / 变体下拉（`ElaChatSelectorItem`），变化发 `selectorChanged(key, id)` |
+| `ElaChatSelector` + `toolBar().addWidget(selector, zone="leading")` | 模型 / agent / 变体下拉（`ElaChatSelectorItem`，每项可带 `icon`，菜单与当前按钮同步显示）；与新建话题 / 附件 / 清空 / 圆环同排，追加在圆环右侧；变化发 `selectionChanged(itemId)`，shell 模式自动隐藏工具栏里的选择器 |
 | `setShellMode(on)` / `shellMode()` | 等宽字体、Esc 退出、提交走 `shellSubmitted(text)` |
 | `setHistory(history)` / `draftState()` / `setDraftState(state)` | 提示历史（`ElaChatPromptHistory`，↑/↓ 浏览）与草稿快照 |
 | `mentionSpans()` | 当前文本的 `ElaChatMention` 区间（用户消息 @ 高亮用） |
@@ -618,7 +618,7 @@ binder 和窗口（本页示例里 `worker` 就是这个角色）。
 | `setVirtualPartsEnabled(on)` | 关闭时下一次导入立即建全部工具卡 / 思考块（小会话或逐控件断言测试用）；已延迟的消息会当场物化 |
 | `setShellVirtualizationEnabled(on, minMessages=None)` | 批量恢复 ≥ 80 条时默认连气泡壳一起延迟；关闭后立即建壳。未物化消息的 `bubble(id)` 返回 `None`，`message(id)` / `messages()` / 导出仍是完整数据 |
 | `setVirtualListEnabled(on, minMessages=None)` | 批量 ≥ 200 条时默认改用 spacer 虚拟列表（只保留视口附近气泡，不逐条建占位）；关闭后当场物化全部消息 |
-| `addToolCall(messageId, name, args, toolCallId, *, metadata=None, kind="", title="", locations=None, parentId="")` | 追加工具调用（上下文工具自动归组）。`kind` 是 ACP 对齐的工具类别（空值按名字推导）；`locations` 是 `ElaChatToolLocation` 列表；`parentId` 把子代理子调用挂到父工具；`metadata` 进渲染器上下文（文件变更 / shell 状态等） |
+| `addToolCall(messageId, name, args, toolCallId, *, metadata=None, kind="", title="", locations=None, parentId="", startedAt=0.0, durationMs=0.0)` | 追加工具调用（上下文工具自动归组）。`kind` 是 ACP 对齐的工具类别（空值按名字推导）；`locations` 是 `ElaChatToolLocation` 列表；`parentId` 把子代理子调用挂到父工具；`metadata` 进渲染器上下文（文件变更 / shell 状态等）；`startedAt`（epoch 秒）/ `durationMs` 让已有计时直接进入工具卡与运行轨迹 |
 | `setPlan(messageId, plan, *, partId=None)` / `plan(messageId)` / `planPart(messageId)` / `clearPlan(messageId)` | 计划 / 待办卡：接受 `ElaChatPlan` / dict / list / Markdown；默认复用最后一张计划卡，反复 `todowrite` 不会堆卡 |
 | `turnChanges(messageId)` / `setChangeSummaryEnabled(on)` / `changeSummaryEnabled()` | 回合文件变更汇总（读 `metadata.files`，参数兜底）；开关只影响展示，数据不落库 |
 | `setTimelineDetail(detail)` / `setPartExpanded(partId, opened)` | 时间线密度 / 逐分段披露 |
@@ -659,7 +659,7 @@ binder 和窗口（本页示例里 `worker` 就是这个角色）。
 | `PlanPanel` / `PlanListView` | 折叠计划卡 / 只读 checklist；`PlanListView` 也被 `todowrite` 内置渲染器复用 |
 | `SubagentCard` | 子代理父卡；子调用用 `parentId` 挂进来，子工具仍走 `ToolCallCard` / 渲染器注册表 |
 | `ElaChatTurnChanges` / `TurnChangesRow` | `metadata.files` 聚合后的回合变更；展开复用 `ElaChatFileChanges` |
-| `ElaChatTracePanel` / `ElaChatTraceRow` / `ElaChatTraceResult` | 独立轨迹面板 / 行快照 / 汇总；纯模型 `buildTraceRows(messages)` 不依赖 Qt |
+| `ElaChatTracePanel` / `ElaChatTraceRow` / `ElaChatTraceResult` / `ElaChatTraceOptions` | 独立轨迹面板 / 行快照 / 汇总 / 显示选项；纯模型 `buildTraceRows(messages)` 不依赖 Qt |
 | `installBuiltinToolRenderers()` | 可选内置渲染器：shell / edit / read / list / search / fetch / mcp / todo；`uninstall…()` 摘掉 |
 
 ```python
@@ -687,6 +687,13 @@ view.setChangeSummaryEnabled(True)
 # 运行轨迹（独立面板；窗口用 ElaDialogBase / ElaContentDialog，别用裸 QDialog）
 dialog = ElaDialogBase(title="运行轨迹", parent=self.window())
 panel = ElaChatTracePanel(view)
+panel.setContextWindow(200_000)          # 上下文压力轨道的 70% / 90% 阈值
+panel.setOptions(ElaChatTraceOptions(    # 显示效果可整体关闭
+    view="timeline",                     # timeline | graph
+    effects=True,                        # 发光 / 渐变 / 呼吸
+    replay=True,                         # 回放控件
+    tracks=True,                         # 会话趋势轨道
+))
 panel.rowActivated.connect(view.scrollToMessage)
 dialog.setParamWidget(panel)
 dialog.show()

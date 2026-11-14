@@ -13,6 +13,7 @@ def test_reader_uses_single_full_page_viewer(qapp, make):
     assert page._reader_view.document().blockCount() > 100
     assert page._settings_drawer is not None
     assert page._settings_drawer.contentWidget() is not None
+    assert not page._settings_drawer.maskEnabled()
 
 
 def test_theme_combo_applies_to_all_viewers(qapp, make):

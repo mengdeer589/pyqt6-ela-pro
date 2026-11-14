@@ -11,6 +11,7 @@ from PyQt6.QtWidgets import QApplication, QWidget
 from PyQt6ElaWidgetTools import ElaMenu, ElaThemeType
 
 from pyqt6_ela_pro._internal import system_cjk_font_family
+from pyqt6_ela_pro._styles import ColorText
 from pyqt6_ela_pro.chat._theme import base_color, muted_color
 
 from pyqt6_ela_pro.chat import (
@@ -34,6 +35,7 @@ class TestUserBubble:
         bubble = make(ElaChatBubble, ElaChatRoleType.User, "<b>不是 HTML</b>")
         assert bubble.role() == ElaChatRoleType.User
         assert bubble.text() == "<b>不是 HTML</b>"
+        assert isinstance(bubble._label, ColorText)
         assert bubble._label.textFormat() == Qt.TextFormat.PlainText
         assert (
             bubble._label.textInteractionFlags()
@@ -383,24 +385,15 @@ class TestAssistantBubble:
         assert "font-family" not in label.styleSheet()
         assert "font-size" not in label.styleSheet()
 
-    def test_avatar_custom_image_scale_cached(self, qapp, make):
-        """自定义头像按 (宽, 高, DPR) 缓存缩放结果：paintEvent 不再每帧重采样。"""
-        from PyQt6.QtGui import QColor, QPixmap
-
+    def test_avatar_reuses_ela_avatar(self, qapp, make):
+        """聊天头像复用 ElaAvatar，并保持 30px 的聊天尺寸。"""
         from pyqt6_ela_pro.chat.blocks import AVATAR_SIZE, _AvatarBadge
+        from pyqt6_ela_pro.ela_avatar import ElaAvatar
 
         badge = make(_AvatarBadge, ElaChatRoleType.User)
-        badge.resize(AVATAR_SIZE, AVATAR_SIZE)
-        source = QPixmap(120, 120)
-        source.fill(QColor("red"))
-        badge.setImage(source)
-        badge.grab()
-        first = badge._scaled_custom
-        assert first is not None
-        badge.grab()
-        assert badge._scaled_custom is first
-        badge.setImage(source)
-        assert badge._scaled_custom is None
+        assert isinstance(badge, ElaAvatar)
+        assert badge.extent() == AVATAR_SIZE
+        assert badge.width() == AVATAR_SIZE
 
     def test_avatar_icon_pixmap_cached(self, qapp):
         """同参数的头像图标位图命中进程级缓存（切主题时几十条消息不重复光栅化）。"""
@@ -414,22 +407,6 @@ class TestAssistantBubble:
         second = avatarPixmap(ElaIconType.IconName.Robot, 18, QColor("black"))
         assert not first.isNull()
         assert first.cacheKey() == second.cacheKey()
-
-    def test_avatar_icon_offset_aligns_to_device_pixels(self, qapp):
-        """头像位图落点要对齐设备像素网格（高 DPI 下发虚 / 偏移的根因）。"""
-        from pyqt6_ela_pro.chat.blocks import AVATAR_SIZE, _AvatarBadge
-
-        badge = _AvatarBadge(ElaChatRoleType.Assistant)
-        badge.resize(AVATAR_SIZE, AVATAR_SIZE)
-        logical = AVATAR_SIZE * 0.62
-        for dpr in (1.0, 1.25, 1.5, 2.0):
-            offset = badge._device_aligned_offset(logical, logical, dpr)
-            # 落点 × dpr 必须为整数，否则 1:1 位图会被 SmoothPixmapTransform 重采样
-            assert (offset.x() * dpr).is_integer(), (dpr, offset)
-            assert (offset.y() * dpr).is_integer(), (dpr, offset)
-            # 同时仍然居中（误差不超过一个设备像素）
-            assert abs(offset.x() - (AVATAR_SIZE - logical) / 2) <= 1 / dpr + 1e-9
-        badge.deleteLater()
 
     def test_disclaimer_label(self, qapp, make):
         """底部「内容由 AI 生成，仅供参考」：只助手消息有，随整行显隐，可改可关。"""

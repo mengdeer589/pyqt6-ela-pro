@@ -8,7 +8,7 @@ from uuid import uuid4
 
 
 from .._internal import is_deleted
-from ._changes import ElaChatTurnChanges, changesFromParts
+from ._changes import ElaChatTurnChanges, changesFromParts, summaryChangesFromParts
 from .blocks import (
     CompactionSeparator,
     ElaChatNotice,
@@ -147,11 +147,30 @@ class _BubbleMiscMixin:
         """回合末是否显示文件变更汇总。"""
         return self._change_summary_enabled
 
+    def _changes_row_key(self):
+        """汇总行缓存键：parts 长度 + 工具调用对象身份；结果更新会换新对象。"""
+        parts = self._parts
+        return (
+            len(parts),
+            sum(
+                id(part.tool_call)
+                for part in parts
+                if part.kind == ElaChatPartKindType.Tool
+            ),
+            self._status,
+            self._change_summary_enabled,
+            self._parts_deferred,
+        )
+
     def _sync_changes_row(self) -> None:
         """按状态 / 变更数据显隐汇总行；流式期间不显示（避免计数跳动）。"""
         host = self._changes_host
         if host is None:
             return
+        key = self._changes_row_key()
+        if key == getattr(self, "_changes_row_last_key", None):
+            return
+        self._changes_row_last_key = key
         if (
             not self._change_summary_enabled
             or self._role != ElaChatRoleType.Assistant
@@ -160,7 +179,13 @@ class _BubbleMiscMixin:
         ):
             host.hide()
             return
-        changes = self.turnChanges()
+        # 小消息维持完整解析；工具极多时先算轻量摘要，展开再补 diff。
+        if len(self._parts) <= 64:
+            changes = self.turnChanges()
+            loader = None
+        else:
+            changes = summaryChangesFromParts(self._parts)
+            loader = self.turnChanges
         if changes.isEmpty():
             host.hide()
             return
@@ -169,7 +194,7 @@ class _BubbleMiscMixin:
             row = TurnChangesRow(host)
             host.layout().addWidget(row)
             self._changes_row = row
-        row.setChanges(changes)
+        row.setChanges(changes, loader=loader)
         host.show()
         if not row.isVisible():
             row.show()

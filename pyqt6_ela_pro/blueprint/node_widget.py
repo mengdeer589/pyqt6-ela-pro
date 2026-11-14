@@ -218,6 +218,7 @@ class ElaNodeWidget(QFrame):
         self._spinner = None
         self._pulse = 0.0
         self._body_h = 0.0
+        self._readonly = False
         # 外观位图缓存（GL 视口代理绘制用；仅 GL 模式生效）
         self._cache_pm = None
         self._cache_scale = 0.0
@@ -323,6 +324,20 @@ class ElaNodeWidget(QFrame):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(int(T("space.1")))
         spec.body_builder(self.node, self._body)
+        self._apply_readonly()
+
+    def setReadOnly(self, on: bool = True) -> None:
+        """只读：节点体及其子控件不再截获鼠标，事件冒泡到节点选中 / 双击。"""
+        self._readonly = bool(on)
+        self._apply_readonly()
+
+    def _apply_readonly(self) -> None:
+        if self._body is None:
+            return
+        attr = Qt.WidgetAttribute.WA_TransparentForMouseEvents
+        self._body.setAttribute(attr, self._readonly)
+        for child in self._body.findChildren(QWidget):
+            child.setAttribute(attr, self._readonly)
 
     def _rebuild_body(self) -> None:
         """``set_properties`` 后重建节点体控件（交互控件直接改 properties 不触发）。"""

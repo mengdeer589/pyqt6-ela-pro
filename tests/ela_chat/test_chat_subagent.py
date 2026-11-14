@@ -97,6 +97,31 @@ class TestSubagentNesting:
         assert all(not parent.childCard(f"c{index}")._body_built for index in range(30))
         assert len(parent.childCalls()) == 30
 
+    def test_large_child_set_is_paged_and_updates_pending(self, qapp, make):
+        view, messageId = _view(make)
+        view.addToolCall(messageId, "delegate_task", "{}", "p1")
+        for index in range(100):
+            view.addToolCall(
+                messageId,
+                "read",
+                '{"path": "a.py"}',
+                f"c{index}",
+                parentId="p1",
+            )
+        bubble = view.bubble(messageId)
+        parent = bubble._tool_cards["p1"]
+        assert not parent._child_cards
+        assert len(parent._pending_children) == 100
+        assert len(parent.childCalls()) == 100
+
+        view.setToolCallResult(messageId, "c0", "内容", ok=True)
+        assert not parent._child_cards
+        assert parent.childCalls()[0].result == "内容"
+
+        parent.setOpened(True)
+        assert len(parent._child_cards) == 16
+        assert len(parent._pending_children) == 84
+
     def test_nested_subagent(self, qapp, make):
         view, messageId = _view(make)
         view.addToolCall(messageId, "delegate_task", "{}", "p1")

@@ -10,15 +10,6 @@ from PyQt6.QtCore import (
     QRectF,
     Qt,
 )
-from PyQt6.QtGui import (
-    QColor,
-    QPalette,
-)
-
-from ..._styles import editBorderlessStyle
-from .._tokens import (
-    T,
-)
 from ._shared import (
     _EDITABLE_COMPONENTS,
 )
@@ -150,33 +141,24 @@ class _ChartAnnotationMixin:
         if self._annotation_editor is not None:
             return self._annotation_editor
         editor = _AnnotationEditor(self)
-        editor.setStyle(editBorderlessStyle())
-        editor.setFrame(False)
-        editor.setAutoFillBackground(True)
+        editor.setBorderRadius(4)
+        editor.setIsClearButtonEnable(False)
         editor.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
-        self._apply_annotation_editor_palette(editor)
         editor.editingFinished.connect(self._commit_annotation_edit)
         editor.cancelled.connect(self._cancel_annotation_edit)
         self._annotation_editor = editor
         return editor
 
-    def _apply_annotation_editor_palette(self, editor) -> None:
-        """编辑器调色板按当前主题刷新（主题切换后再次打开也要正确）。"""
-        palette = editor.palette()
-        palette.setColor(QPalette.ColorRole.Base, QColor(T("color.bg.elevated", self)))
-        palette.setColor(QPalette.ColorRole.Window, QColor(T("color.bg.elevated", self)))
-        palette.setColor(QPalette.ColorRole.Text, QColor(T("color.text.primary", self)))
-        editor.setPalette(palette)
-
     def _show_annotation_editor(self, target: dict) -> None:
         editor = self._ensure_annotation_editor()
-        self._apply_annotation_editor_palette(editor)
         self._annotation_target = target
         rect = QRectF(target["rect"]).adjusted(-4, -4, 4, 4)
         rect = rect.intersected(QRectF(self.rect()))
         if rect.width() < 40:
             rect.setWidth(min(160.0, max(40.0, self.width() - rect.left() - 4)))
         height = max(22.0, rect.height())
+        # ElaLineEdit 默认最小高 35px；标注行内编辑必须贴住标签高度。
+        editor.setFixedHeight(int(height))
         editor.setGeometry(
             int(rect.left()), int(rect.top()), int(rect.width()), int(height)
         )

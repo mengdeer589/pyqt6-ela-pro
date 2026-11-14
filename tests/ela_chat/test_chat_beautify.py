@@ -92,7 +92,7 @@ class TestShapes:
         _bubble_in_window(qapp, make, bubble)
         avatar = bubble.header().avatar()
         assert avatar.shape() == "circle"
-        bg = avatar._bg.name()
+        bg = avatar.backgroundColor().name()
         image = _grab(avatar)
         # 圆外：角点与左肩 (5, 2)（圆角方形时 (5, 2) 已是填充）
         assert image.pixelColor(1, 1).name() != bg
@@ -105,7 +105,7 @@ class TestShapes:
         bubble = make(ElaChatBubble, ElaChatRoleType.Assistant)
         _bubble_in_window(qapp, make, bubble)
         avatar = bubble.header().avatar()
-        bg = avatar._bg.name()
+        bg = avatar.backgroundColor().name()
 
         # 圆角方形：左肩 (5, 2) 进入 8px 圆角内，角点仍在弧外
         bubble.setAvatarShape("rounded")
@@ -115,10 +115,10 @@ class TestShapes:
         assert image.pixelColor(5, 2).name() == bg
         assert image.pixelColor(1, 1).name() != bg
 
-        # 直角方形：连角点都是填充
+        # 直角方形：内部点都是填充
         bubble.setAvatarShape("square")
         image = _grab(avatar)
-        assert image.pixelColor(1, 1).name() == bg
+        assert image.pixelColor(2, 2).name() == bg
         assert image.pixelColor(5, 2).name() == bg
 
         # 非法值回落默认圆形

@@ -1,4 +1,4 @@
-"""terminal_view.theme：终端调色板注册表。"""
+"""terminal_view.theme：终端主题注册表（每个主题含 Light/Dark ANSI 调色板）。"""
 
 from __future__ import annotations
 
@@ -179,55 +179,55 @@ _BUILTIN_THEMES = ("one-dark", "solarized", "classic")
 
 
 def terminalThemes() -> list:
-    """列出已注册的终端调色板名称。"""
+    """列出已注册的终端主题名称。"""
     return list(_TERMINAL_THEMES)
 
 
 def defaultTerminalTheme() -> str:
-    """获取新建实例默认使用的调色板名称。"""
+    """获取新建实例默认使用的终端主题名。"""
     return _DEFAULT_THEME_NAME
 
 
 def setDefaultTerminalTheme(name: str) -> None:
-    """设置新建 :class:`ElaTerminalView` 实例的默认调色板。
+    """设置新建 :class:`ElaTerminalView` 实例的默认主题。
 
-    不影响已存在的实例（用 ``view.setPaletteName()`` 单独改）。
+    不影响已存在的实例（用 ``view.setTerminalTheme()`` 单独改）。
 
-    :param name: 调色板名称，未注册时抛 ``KeyError``
+    :param name: 主题名，未注册时抛 ``KeyError``
     """
     global _DEFAULT_THEME_NAME
     if name not in _TERMINAL_THEMES:
-        raise KeyError(f"未注册的终端调色板 {name!r}，可用：{sorted(_TERMINAL_THEMES)}")
+        raise KeyError(f"未注册的终端主题 {name!r}，可用：{sorted(_TERMINAL_THEMES)}")
     _DEFAULT_THEME_NAME = name
 
 
 def registerTerminalTheme(name: str, light: dict, dark: dict) -> None:
-    """注册（或覆盖）一套终端调色板。
+    """注册（或覆盖）一套终端主题。
 
     ``light`` / ``dark`` 是「调色板键 → 十六进制色串」的字典，键见
     ``_PALETTE_KEYS``（``black`` … ``bright_white`` / ``foreground`` /
     ``background``）。**允许只给部分键**，其余回退到 ``one-dark`` 暗色档。
 
-    :param name: 调色板名称
+    :param name: 主题名
     :param light: 亮色主题下的颜色
     :param dark: 暗色主题下的颜色
     """
     if not name:
-        raise ValueError("调色板名称不能为空")
+        raise ValueError("主题名不能为空")
     _TERMINAL_THEMES[name] = {"light": dict(light), "dark": dict(dark)}
 
 
 def unregisterTerminalTheme(name: str) -> None:
-    """注销一套终端调色板。
+    """注销一套终端主题。
     内置三套、或正在作为默认的那套不可注销（抛 ``ValueError``）；名称未注册抛
     ``KeyError``。
     """
     if name in _BUILTIN_THEMES:
-        raise ValueError(f"内置调色板 {name!r} 不可注销")
+        raise ValueError(f"内置主题 {name!r} 不可注销")
     if name not in _TERMINAL_THEMES:
         raise KeyError(name)
     if _DEFAULT_THEME_NAME == name:
-        raise ValueError(f"调色板 {name!r} 正在作为默认，不可注销")
+        raise ValueError(f"主题 {name!r} 正在作为默认，不可注销")
     del _TERMINAL_THEMES[name]
 
 

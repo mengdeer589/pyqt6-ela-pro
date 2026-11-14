@@ -4,13 +4,11 @@ from __future__ import annotations
 
 from typing import Optional
 
-from PyQt6.QtGui import QColor, QPalette
-from PyQt6.QtWidgets import QBoxLayout, QLineEdit, QVBoxLayout, QWidget
+from PyQt6.QtWidgets import QBoxLayout, QVBoxLayout, QWidget
 from PyQt6ElaWidgetTools import (
     ElaComboBox,
+    ElaLineEdit,
     ElaMultiSelectComboBox,
-    ElaThemeType,
-    eTheme,
 )
 
 from ._internal import (
@@ -161,17 +159,10 @@ class _SearchComboMixin:
             self._searchWidget = None
             self._searchEdit = None
 
-    def _applySearchEditPalette(self) -> None:
-        if getattr(self, "_searchEdit", None):
-            _apply_search_edit_palette(self._searchEdit)
-
     def _onSearchTextChanged(self, text: str) -> None:
         """子类应重写此方法以响应搜索框文本变化。"""
 
     def _onThemeChanged(self, _mode=None) -> None:
-        # 本 mixin 必须排在 ``_ThemeAwareMixin`` 前面：后者也定义了同名空钩子，
-        # 排在后面会被 MRO 遮蔽成死代码，搜索框调色板切主题后不跟随。
-        self._applySearchEditPalette()
         super()._onThemeChanged(_mode)
 
     def _setupSearchInPopup(self, container: QWidget) -> None:
@@ -190,7 +181,6 @@ class _SearchComboMixin:
         # 列表在动画期间从上方滑下来，搜索框保持在最上层（否则会被列表短暂盖住）
         self._searchWidget.raise_()
         if self._searchEdit:
-            self._applySearchEditPalette()
             self._searchEdit.blockSignals(True)
             self._searchEdit.clear()
             self._searchEdit.blockSignals(False)
@@ -199,7 +189,7 @@ class _SearchComboMixin:
 def _build_search_widget(
     text_changed_callback,
     placeholder: str = "搜索...",
-) -> tuple[QWidget, QLineEdit]:
+) -> tuple[QWidget, ElaLineEdit]:
     """创建弹窗内搜索框组件，返回 ``(searchWidget, searchEdit)``。"""
     search_widget = QWidget()
     search_widget.setObjectName("SearchWidget")
@@ -209,31 +199,13 @@ def _build_search_widget(
     search_layout.setContentsMargins(6, 6, 6, 2)
     search_layout.setSpacing(0)
 
-    search_edit = QLineEdit()
+    search_edit = ElaLineEdit()
     search_edit.setPlaceholderText(placeholder)
     search_edit.setFixedHeight(28)
     search_edit.textChanged.connect(text_changed_callback)
-    _apply_search_edit_palette(search_edit)
     search_layout.addWidget(search_edit)
 
     return search_widget, search_edit
-
-
-def _apply_search_edit_palette(search_edit: QLineEdit) -> None:
-    """应用主题颜色到搜索框。"""
-    theme_mode = eTheme.getThemeMode()
-    palette = search_edit.palette()
-    palette.setColor(
-        QPalette.ColorRole.Text,
-        eTheme.getThemeColor(theme_mode, ElaThemeType.ThemeColor.BasicText),
-    )
-    palette.setColor(
-        QPalette.ColorRole.PlaceholderText,
-        QColor(0, 0, 0, 128)
-        if theme_mode == ElaThemeType.ThemeMode.Light
-        else QColor(186, 186, 186),
-    )
-    search_edit.setPalette(palette)
 
 
 class ElaSearchMultiBox(_SearchComboMixin, _ThemeAwareMixin, ElaMultiSelectComboBox):
@@ -244,7 +216,7 @@ class ElaSearchMultiBox(_SearchComboMixin, _ThemeAwareMixin, ElaMultiSelectCombo
 
     def __init__(self, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
-        self._searchEdit: Optional[QLineEdit] = None
+        self._searchEdit: Optional[ElaLineEdit] = None
         self._searchWidget: Optional[QWidget] = None
         self._currentSelection: list[str] = []
         self._isRestoringSelection = False
@@ -331,7 +303,7 @@ class ElaSearchBox(_SearchComboMixin, _ThemeAwareMixin, ElaComboBox):
 
     def __init__(self, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)  # type: ignore[arg-type]
-        self._searchEdit: Optional[QLineEdit] = None
+        self._searchEdit: Optional[ElaLineEdit] = None
         self._searchWidget: Optional[QWidget] = None
         self._pinyin_cache: dict[str, tuple[str, str]] = {}
         self._popup_search_visible = True

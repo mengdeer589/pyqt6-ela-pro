@@ -78,6 +78,7 @@ class _MarkdownRenderMixin:
         self._sync_embedded_height()
         self._schedule_layout_refresh()
         self._needs_render = False
+        self._refresh_search_after_render()
 
     def _ensure_rendered(self) -> None:
         """可见时补齐被懒掉的重建（主题 / 配色族在隐藏时只标记，见 _applyThemeStyle）。"""
@@ -273,7 +274,9 @@ class _MarkdownRenderMixin:
                 probe.setPosition(block.position())
                 table = probe.currentTable()
                 if table is not None:
-                    if self._in_code_table(probe):
+                    # 代码卡固定是 1 列表格；多列表格不可能是代码卡，
+                    # 直接跳过 _in_code_table 的 parentFrame 逐层上溯。
+                    if table.columns() == 1 and self._is_code_table(table):
                         block = block.next()
                         continue
                     table_format = block.blockFormat()
@@ -471,8 +474,10 @@ class _MarkdownRenderMixin:
     ) -> None:
         """移除单元格首尾的纯空块。
         Qt Markdown 导入器在引用块 / 代码块之后的表格首格会多插一个空块
-        （渲染时把表头首格文字挤到第二行），这里用段落合并清理
+        （渲染时把表头首格文字挤到第二行），这里用段落合并清理。
         """
+        if not self._table_needs_cell_trim(document, table):
+            return
         for row in range(table.rows()):
             for column in range(table.columns()):
                 cell = table.cellAt(row, column)
@@ -501,6 +506,27 @@ class _MarkdownRenderMixin:
                     cursor = QTextCursor(document)
                     cursor.setPosition(block.position())
                     cursor.deletePreviousChar()
+
+    @staticmethod
+    def _table_needs_cell_trim(document: QTextDocument, table: QTextTable) -> bool:
+        """快速判断表格边界是否有待清理的空块；干净表格跳过全单元格循环。"""
+        if table.rows() < 1 or table.columns() < 1:
+            return False
+        cells = []
+        last_row = table.rows() - 1
+        for column in range(table.columns()):
+            cells.append((table.cellAt(0, column), False))
+            if last_row > 0:
+                cells.append((table.cellAt(last_row, column), True))
+        for cell, trailing in cells:
+            first = cell.firstCursorPosition()
+            last = cell.lastCursorPosition()
+            if last.blockNumber() <= first.blockNumber():
+                continue
+            block = (last if trailing else first).block()
+            if not block.text().strip():
+                return True
+        return False
 
     def _set_table_margins(self, document: QTextDocument, table: QTextTable) -> None:
         """给表格前后的块留出上下间距。
@@ -638,11 +664,20 @@ class _MarkdownRenderMixin:
             f" color: {self._code_text.name()}; }}"
         )
 
+    def _has_fragment_markup(self) -> bool:
+        """源码是否可能产生链接 / 加粗 / 斜体 / 删除线 / HTML 片段颜色。"""
+        source = getattr(self, "_source", "")
+        return any(
+            token in source for token in ("[", "*", "_", "~", "<", "://", "www.", "@")
+        )
+
     def _apply_fragment_colors(self, document: QTextDocument) -> None:
         """为链接 / 加粗 / 斜体 / 删除线补上语义色（Bear / Ink）。
         正文片段刻意不加显式前景色：由控件 palette 提供，省一次文档编辑。
         列表符号吃 ``palette.Text``，字符格式染不上，``list`` 语义只留给任务勾选框。
         """
+        if not self._has_fragment_markup():
+            return
         edit_cursor = QTextCursor(document)
         edit_cursor.beginEditBlock()
         link_format = QTextCharFormat()

@@ -195,7 +195,10 @@ class TestCallout:
             background = block.blockFormat().background()
             assert background.style() != Qt.BrushStyle.NoBrush
         normal = [b for b in _blocks(v) if b.text() == "后续段落"]
-        assert normal and normal[0].blockFormat().background().style() == Qt.BrushStyle.NoBrush
+        assert (
+            normal
+            and normal[0].blockFormat().background().style() == Qt.BrushStyle.NoBrush
+        )
         v.deleteLater()
 
     def test_note_label_and_multiple_blocks(self):
@@ -213,6 +216,37 @@ class TestCallout:
         text = v.document().toPlainText()
         assert "[!NOTE]" in text
         v.deleteLater()
+
+    def test_warning_and_caution_use_status_tokens(self):
+        from PyQt6ElaWidgetTools import ElaThemeType, eTheme
+
+        from pyqt6_ela_pro._theme import ElaStatusRoleType, statusColor
+
+        previous = eTheme.getThemeMode()
+        try:
+            for mode in (ElaThemeType.ThemeMode.Light, ElaThemeType.ThemeMode.Dark):
+                eTheme.setThemeMode(mode)
+                v = ElaMarkdownViewer()
+                try:
+                    assert (
+                        v._callout_warning_color.hue()
+                        == statusColor(mode, ElaStatusRoleType.Warning).hue()
+                    )
+                    assert (
+                        v._callout_caution_color.hue()
+                        == statusColor(mode, ElaStatusRoleType.Error).hue()
+                    )
+                    from pyqt6_ela_pro._colors import _contrast_ratio
+
+                    for color in (
+                        v._callout_warning_color,
+                        v._callout_caution_color,
+                    ):
+                        assert _contrast_ratio(color, v._callout_bg) >= 4.5
+                finally:
+                    v.deleteLater()
+        finally:
+            eTheme.setThemeMode(previous)
 
 
 class TestHeadingAnchorsAndToc:

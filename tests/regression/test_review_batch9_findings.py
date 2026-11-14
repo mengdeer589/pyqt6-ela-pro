@@ -17,7 +17,7 @@ from pyqt6_ela_pro.message_dialog import ElaMessageDialog
 from pyqt6_ela_pro.notify_popup import ElaNotifyManager, ElaNotifyPopup
 from pyqt6_ela_pro.terminal_view import ElaTerminalView
 from pyqt6_ela_pro.terminal_view.ansi import AnsiColor, TerminalStyle
-from pyqt6_ela_pro.tooltips import _ToolTipLabel
+from pyqt6_ela_pro.tooltips import ElaToolTip
 from pyqt6_ela_pro.markdown_viewer import media
 
 
@@ -45,7 +45,9 @@ class TestPlainText:
         popup = ElaNotifyPopup("t", "c", parent=host)
         assert popup._title_text.textFormat() == Qt.TextFormat.PlainText
         assert popup._content_text.textFormat() == Qt.TextFormat.PlainText
-        assert _ToolTipLabel("x").textFormat() == Qt.TextFormat.PlainText
+        tip = ElaToolTip("x")
+        assert tip._label.textFormat() == Qt.TextFormat.PlainText
+        tip.deleteLater()
         dialog = ElaMessageDialog(parent=host)
         assert dialog._message_widget.textFormat() == Qt.TextFormat.PlainText
         assert dialog._titleWidget.textFormat() == Qt.TextFormat.PlainText

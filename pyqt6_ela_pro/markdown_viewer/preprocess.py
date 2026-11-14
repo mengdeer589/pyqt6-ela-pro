@@ -15,7 +15,10 @@ from PyQt6.QtGui import (
     QTextCursor,
     QTextDocument,
 )
+from PyQt6ElaWidgetTools import ElaThemeType
 
+from .._content_colors import calloutColors
+from .html_guard import guard_unpaired_html
 from .syntax import (
     _DETAILS_CLOSE_RE,
     _DETAILS_OPEN_RE,
@@ -38,6 +41,7 @@ from .tokens import (
     _INLINE_CODE_TOKEN_PREFIX,
     _MARK_TOKEN_PREFIX,
     _MERMAID_TOKEN_PREFIX,
+    _PROTECT_TOKEN_PREFIX,
     _TOC_TOKEN,
 )
 
@@ -48,7 +52,9 @@ _DEFAULT_REASONING_TAG = "think"
 
 _DEFAULT_REASONING_LABEL = "思考过程"
 
-_TASK_LIST_RE = re.compile(r"^([ \t]*(?:[-+*]|\d+[.)])[ \t]+)\[([ xX])\][ \t]?")
+_TASK_LIST_RE = re.compile(
+    r"^((?:[ \t]*>[ \t]?)*[ \t]*(?:[-+*]|\d+[.)])[ \t]+)\[([ xX])\][ \t]?"
+)
 
 _EMPTY_ALT_IMAGE_RE = re.compile(r"!\[\](?=[\(\[])")
 
@@ -156,10 +162,6 @@ _CALLOUT_LABELS = {
     "warning": "警告",
     "caution": "注意",
 }
-
-_CALLOUT_WARNING_COLORS = {"light": "#9a6700", "dark": "#d29922"}
-
-_CALLOUT_CAUTION_COLORS = {"light": "#cf222e", "dark": "#f85149"}
 
 _FOOTNOTE_REF_RE = re.compile(r"\[\^([^\]\s]+)\]")
 
@@ -310,6 +312,8 @@ class _MarkdownPreprocessMixin:
         lines, folds, index_map = self._extract_folds(raw_lines)
         fn_defs, fn_def_lines = self._collect_footnote_defs(raw_lines)
         defined = {fid for fid, _ in fn_defs}
+        #: 脚注首次引用顺序（编号按引用顺序而不是定义顺序）
+        ref_order: list[str] = []
 
         out: list[str] = []
         inline_codes: list[str] = []
@@ -317,6 +321,36 @@ class _MarkdownPreprocessMixin:
         #: 本就为文档生成了同一串，顺手存下来 —— ``_apply_inline_code_formats``
         #: 不必再逐条重建 f-string）
         inline_tokens: list[str] = []
+        #: 行内转换要跳过的片段（链接目标 / 裸 URL / HTML 标签）
+        protected: list[str] = []
+        link_dest_re = re.compile(r"\]\(([^)\n]*)\)")
+        angle_autolink_re = re.compile(r"<(?:https?|ftp)://[^>\s]+>", re.IGNORECASE)
+        tag_re = re.compile(r"<[^>\n]+>")
+        bare_url_re = re.compile(r"(?:https?://|ftp://|www\.)[^\s<>]+", re.IGNORECASE)
+
+        def protect_span(span: str) -> str:
+            token = f"{_PROTECT_TOKEN_PREFIX}{len(protected)}{_CODE_TOKEN_SUFFIX}"
+            protected.append(span)
+            return token
+
+        def protect_inline(segment: str) -> str:
+            if not segment:
+                return segment
+            # 链接目标只保护 (...) 内部；label 仍参与加粗 / 斜体等转换
+            segment = link_dest_re.sub(
+                lambda match: "](" + protect_span(match.group(1)) + ")", segment
+            )
+            segment = angle_autolink_re.sub(
+                lambda match: protect_span(match.group(0)), segment
+            )
+            segment = tag_re.sub(lambda match: protect_span(match.group(0)), segment)
+
+            def protect_bare_url(match):
+                # Qt 导入器会把裸 URL 里的 ~x~ 当上下标，转义后仍显示原文
+                return protect_span(match.group(0).replace("~", "\\~"))
+
+            return bare_url_re.sub(protect_bare_url, segment)
+
         fenced_blocks: list[tuple[str, str]] = []
         fenced_source_lines: list[tuple[int, int]] = []
         mermaid_blocks: list[str] = []
@@ -360,6 +394,8 @@ class _MarkdownPreprocessMixin:
                     fid = match.group(1)
                     if fid not in defined:
                         return match.group(0)
+                    if fid not in ref_order:
+                        ref_order.append(fid)
                     return f"{_FOOTNOTE_REF_PREFIX}{fid}{_CODE_TOKEN_SUFFIX}"
 
                 # 脚注引用先替换为占位符，避免 ``^`` 被上标规则误配
@@ -398,11 +434,11 @@ class _MarkdownPreprocessMixin:
             # 没有反引号的行直接走纯文本转换：``_INLINE_CODE_RE.finditer``
             # 每行都要起一次正则引擎（命中率低的文档是纯开销）
             if "`" not in line:
-                return transform(line)
+                return transform(protect_inline(line))
             pieces: list[str] = []
             last = 0
             for match in _INLINE_CODE_RE.finditer(line):
-                pieces.append(transform(line[last : match.start()]))
+                pieces.append(transform(protect_inline(line[last : match.start()])))
                 # 换成唯一占位符而不是把原文留在文档里：按文本 find 反推位置时，
                 # 同一串文本更早出现过就会整体错位。占位符含私有区字符，零碰撞。
                 token = (
@@ -413,7 +449,7 @@ class _MarkdownPreprocessMixin:
                 inline_tokens.append(token)
                 pieces.append(token)
                 last = match.end()
-            pieces.append(transform(line[last:]))
+            pieces.append(transform(protect_inline(line[last:])))
             return "".join(pieces)
 
         for line_no, line in enumerate(lines):
@@ -468,14 +504,23 @@ class _MarkdownPreprocessMixin:
             # 未闭合围栏：同样按代码块渲染（GitHub 语义），流式期间体验更好
             token = f"{_CODE_TOKEN_PREFIX}{len(fenced_blocks)}{_CODE_TOKEN_SUFFIX}"
             fenced_blocks.append((fence_lang, "\n".join(buffer), False))
-            fenced_source_lines.append((fence_start, len(lines)))
+            fenced_source_lines.append((fence_start, len(raw_lines)))
             out.append(token)
 
         if fn_defs:
+            by_id = dict(fn_defs)
+            seen_refs = set(ref_order)
+            ordered_defs = [(fid, by_id[fid]) for fid in ref_order if fid in by_id]
+            ordered_defs.extend(
+                (fid, body) for fid, body in fn_defs if fid not in seen_refs
+            )
+        else:
+            ordered_defs = []
+        if ordered_defs:
             out.append("")
             out.append("---")
             out.append("")
-            for index, (fid, body) in enumerate(fn_defs, start=1):
+            for index, (fid, body) in enumerate(ordered_defs, start=1):
                 out.append(
                     f"{_FOOTNOTE_DEF_PREFIX}{index}{_CODE_TOKEN_SUFFIX} [{index}] {body}"
                 )
@@ -486,12 +531,17 @@ class _MarkdownPreprocessMixin:
         self._fenced_blocks = fenced_blocks
         self._fenced_source_lines = fenced_source_lines
         self._mark_texts = marks
-        self._footnote_defs = fn_defs
+        self._footnote_defs = ordered_defs
         self._callout_types = callouts
         self._task_items = tasks
         self._mermaid_blocks = mermaid_blocks
         self._fold_blocks = folds
-        return "\n".join(out)
+        text = "\n".join(out)
+        for index, span in enumerate(protected):
+            text = text.replace(
+                f"{_PROTECT_TOKEN_PREFIX}{index}{_CODE_TOKEN_SUFFIX}", span
+            )
+        return guard_unpaired_html(text)
 
     def _replace_mark_tokens(self, document: QTextDocument) -> None:
         """把 ``==高亮==`` 占位符替换为带主题背景色的文本。"""
@@ -624,27 +674,27 @@ class _MarkdownPreprocessMixin:
             block = block.next()
 
     def _replace_toc_token(self, document: QTextDocument) -> None:
-        """把 ``[toc]`` 占位符替换为标题链接列表。"""
-        found = document.find(_TOC_TOKEN)
-        if found.isNull():
-            return
-        if not self._headings:
-            found.removeSelectedText()
-            return
-        cursor = QTextCursor(found)
-        cursor.removeSelectedText()
-        for index, (level, text, slug) in enumerate(self._headings):
-            if index > 0:
-                cursor.insertBlock(QTextBlockFormat(), QTextCharFormat())
-            indent = "  " * max(level - 1, 0)
-            if indent:
-                cursor.insertText(indent)
-            cursor.insertText("• ")
-            link_fmt = QTextCharFormat()
-            link_fmt.setAnchor(True)
-            link_fmt.setAnchorHref(f"#{slug}")
-            link_fmt.setForeground(self._link_color)
-            cursor.insertText(text or slug, link_fmt)
+        """把 ``[toc]`` 占位符替换为标题链接列表（多个 ``[toc]`` 逐个处理）。"""
+        while True:
+            found = document.find(_TOC_TOKEN)
+            if found.isNull():
+                return
+            cursor = QTextCursor(found)
+            cursor.removeSelectedText()
+            if not self._headings:
+                continue
+            for index, (level, text, slug) in enumerate(self._headings):
+                if index > 0:
+                    cursor.insertBlock(QTextBlockFormat(), QTextCharFormat())
+                indent = "  " * max(level - 1, 0)
+                if indent:
+                    cursor.insertText(indent)
+                cursor.insertText("• ")
+                link_fmt = QTextCharFormat()
+                link_fmt.setAnchor(True)
+                link_fmt.setAnchorHref(f"#{slug}")
+                link_fmt.setForeground(self._link_color)
+                cursor.insertText(text or slug, link_fmt)
 
     def _apply_folds(self, document: QTextDocument) -> None:
         """把折叠占位符替换为可点击标签，并按展开状态隐藏/展示内容。
@@ -736,6 +786,12 @@ class _MarkdownPreprocessMixin:
         if not self._callout_types:
             return
         background = QBrush(self._callout_bg)
+        colors = calloutColors(
+            ElaThemeType.ThemeMode.Dark
+            if self._is_dark_theme
+            else ElaThemeType.ThemeMode.Light,
+            self._callout_bg,
+        )
         entries = [
             (f"{_CALLOUT_TOKEN_PREFIX}{index}{_CODE_TOKEN_SUFFIX}", kind)
             for index, kind in enumerate(self._callout_types)
@@ -744,13 +800,9 @@ class _MarkdownPreprocessMixin:
         def replace(found: QTextCursor, kind: str) -> None:
             label = _CALLOUT_LABELS.get(kind, kind)
             if kind == "warning":
-                color = QColor(
-                    _CALLOUT_WARNING_COLORS["dark" if self._is_dark_theme else "light"]
-                )
+                color = QColor(colors["warning"])
             elif kind == "caution":
-                color = QColor(
-                    _CALLOUT_CAUTION_COLORS["dark" if self._is_dark_theme else "light"]
-                )
+                color = QColor(colors["caution"])
             else:
                 color = self._link_color
             label_fmt = QTextCharFormat()

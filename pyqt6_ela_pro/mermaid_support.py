@@ -13,77 +13,80 @@ from typing import Callable, Optional
 
 from PyQt6.QtCore import QObject, QRunnable, QThreadPool, pyqtSignal
 from PyQt6.QtGui import QImage
+from PyQt6ElaWidgetTools import ElaThemeType
+
+from ._theme import (
+    ElaSeverity,
+    accent,
+    blend,
+    border,
+    borderStrong,
+    severityColor,
+    surface,
+    surfaceRaised,
+    text,
+    textMuted,
+)
 
 __all__ = [
     "ElaMermaidRenderer",
+    "mermaidThemeVariables",
     "mermaidx_available",
     "mermaidx_error",
-    "MERMAID_THEME_VARIABLES",
 ]
 
 #: 渲染使用的 mermaid 基准主题（搭配 themeVariables 自定义配色）
 _MERMAID_BASE_THEME = "base"
-#: 内置美化主题变量（GitHub 风格；「light」/「dark」对应查看器主题）
-MERMAID_THEME_VARIABLES = {
-    "light": {
+
+
+def mermaidThemeVariables(theme: str) -> dict:  # noqa: N802 (与 Qt 命名一致)
+    """按 Ela 主题生成 Mermaid ``themeVariables``（``"light"`` / ``"dark"``）。
+
+    **在 GUI 线程调用**：内部读 ``eTheme``，不能放到渲染线程。
+    """
+    mode = (
+        ElaThemeType.ThemeMode.Dark
+        if str(theme).lower() == "dark"
+        else ElaThemeType.ThemeMode.Light
+    )
+    base = surface(mode)
+    raised = surfaceRaised(mode)
+    line = border(mode)
+    strong = borderStrong(mode)
+    ink = text(mode)
+    muted = textMuted(mode)
+    accent_color = accent(mode)
+    warning = severityColor(mode, ElaSeverity.Warning)
+    return {
         "fontSize": "14px",
-        "primaryColor": "#F6F8FA",
-        "primaryBorderColor": "#C9D1D9",
-        "primaryTextColor": "#1F2328",
-        "secondaryColor": "#EEF2F7",
-        "tertiaryColor": "#FFFFFF",
-        "lineColor": "#57606A",
-        "textColor": "#1F2328",
-        "edgeLabelBackground": "#F8F8F8",
-        "clusterBkg": "#FFFFFF",
-        "clusterBorder": "#D0D7DE",
-        "titleColor": "#1F2328",
-        "noteBkgColor": "#FFF8C5",
-        "noteTextColor": "#1F2328",
-        "noteBorderColor": "#D4A72C",
-        "actorBkg": "#F6F8FA",
-        "actorBorder": "#C9D1D9",
-        "actorTextColor": "#1F2328",
-        "actorLineColor": "#C9D1D9",
-        "signalColor": "#57606A",
-        "signalTextColor": "#1F2328",
-        "labelBoxBkgColor": "#F6F8FA",
-        "labelBoxBorderColor": "#C9D1D9",
-        "labelTextColor": "#1F2328",
-        "loopTextColor": "#1F2328",
-        "activationBorderColor": "#C9D1D9",
-        "activationBkgColor": "#EEF2F7",
-    },
-    "dark": {
-        "fontSize": "14px",
-        "primaryColor": "#21262D",
-        "primaryBorderColor": "#3D444D",
-        "primaryTextColor": "#E6EDF3",
-        "secondaryColor": "#30363D",
-        "tertiaryColor": "#161B22",
-        "lineColor": "#8B949E",
-        "textColor": "#E6EDF3",
-        "edgeLabelBackground": "#161B22",
-        "clusterBkg": "#161B22",
-        "clusterBorder": "#30363D",
-        "titleColor": "#E6EDF3",
-        "noteBkgColor": "#3B2E00",
-        "noteTextColor": "#E6EDF3",
-        "noteBorderColor": "#9E6A03",
-        "actorBkg": "#21262D",
-        "actorBorder": "#3D444D",
-        "actorTextColor": "#E6EDF3",
-        "actorLineColor": "#3D444D",
-        "signalColor": "#8B949E",
-        "signalTextColor": "#E6EDF3",
-        "labelBoxBkgColor": "#21262D",
-        "labelBoxBorderColor": "#3D444D",
-        "labelTextColor": "#E6EDF3",
-        "loopTextColor": "#E6EDF3",
-        "activationBorderColor": "#3D444D",
-        "activationBkgColor": "#30363D",
-    },
-}
+        "primaryColor": blend(raised, accent_color, 0.10).name(),
+        "primaryBorderColor": line.name(),
+        "primaryTextColor": ink.name(),
+        "secondaryColor": blend(base, ink, 0.04).name(),
+        "tertiaryColor": raised.name(),
+        "lineColor": muted.name(),
+        "textColor": ink.name(),
+        "edgeLabelBackground": raised.name(),
+        "clusterBkg": base.name(),
+        "clusterBorder": line.name(),
+        "titleColor": ink.name(),
+        "noteBkgColor": blend(raised, warning, 0.14).name(),
+        "noteTextColor": ink.name(),
+        "noteBorderColor": warning.name(),
+        "actorBkg": raised.name(),
+        "actorBorder": line.name(),
+        "actorTextColor": ink.name(),
+        "actorLineColor": strong.name(),
+        "signalColor": muted.name(),
+        "signalTextColor": ink.name(),
+        "labelBoxBkgColor": raised.name(),
+        "labelBoxBorderColor": line.name(),
+        "labelTextColor": ink.name(),
+        "loopTextColor": ink.name(),
+        "activationBorderColor": strong.name(),
+        "activationBkgColor": blend(raised, accent_color, 0.08).name(),
+    }
+
 
 #: 布局美化参数（曲线走向与间距）
 _FLOWCHART_CONFIG = {
@@ -150,19 +153,22 @@ _AVAILABLE: Optional[bool] = None
 _AVAILABLE_ERROR: Optional[str] = None
 
 
-def _build_config(theme: str, themeVariables: Optional[dict] = None) -> dict:
-    """构造 mermaid 初始化配置（base 主题 + 自定义 themeVariables + 布局）。"""
-    variables = dict(
-        MERMAID_THEME_VARIABLES.get(theme, MERMAID_THEME_VARIABLES["light"])
-    )
-    if themeVariables:
-        variables.update(themeVariables)
+def _config_from_variables(variables: dict) -> dict:
+    """用已解析的 themeVariables 组装 mermaid 配置（不读 eTheme，可在线程内调用）。"""
     return {
         "theme": _MERMAID_BASE_THEME,
-        "themeVariables": variables,
+        "themeVariables": dict(variables),
         "flowchart": dict(_FLOWCHART_CONFIG),
         "sequence": dict(_SEQUENCE_CONFIG),
     }
+
+
+def _build_config(theme: str, themeVariables: Optional[dict] = None) -> dict:
+    """构造 mermaid 初始化配置（base 主题 + 自定义 themeVariables + 布局）。"""
+    variables = mermaidThemeVariables(theme)
+    if themeVariables:
+        variables.update(themeVariables)
+    return _config_from_variables(variables)
 
 
 def mermaidx_available() -> bool:
@@ -212,8 +218,7 @@ def _clamp_zoom_to_budget(zoom: float, view_w: float, view_h: float) -> Optional
 
 def _render_with_mermaidx(
     code: str,
-    theme: str,
-    themeVariables: Optional[dict] = None,
+    config: dict,
     max_px: Optional[float] = None,
 ) -> Optional[QImage]:
     """用 mermaidx 渲染 Mermaid 源码为 QImage（2x 超采样，按需自适应）。
@@ -221,6 +226,7 @@ def _render_with_mermaidx(
     mermaidx 的 PNG 管线强制 DejaVu 字体（中文变方块），优先取 SVG 后用 resvg
     光栅化；两者都失败时抛异常，由调用方记录到 ``lastError``。
 
+    :param config: 已解析的 mermaid 配置（主题变量必须在 GUI 线程生成）
     :param max_px: 目标显示宽度；给出时按图宽自适应倍率，宽图降采样。
     """
     import mermaidx
@@ -228,7 +234,7 @@ def _render_with_mermaidx(
     diagram = mermaidx.render(
         code,
         theme=_MERMAID_BASE_THEME,
-        config=_build_config(theme, themeVariables),
+        config=config,
     )
     svg = diagram.svg()
     try:
@@ -366,9 +372,9 @@ class ElaMermaidRenderer(QObject):
         self._max_image_width: Optional[float] = None
         #: 引擎预热状态
         self._prewarmed = False
-        #: 每套主题的 mermaid themeVariables（默认内置美化配色，可覆盖）
+        #: 每套主题的 mermaid themeVariables（默认跟随 Ela 主题，可覆盖）
         self._theme_variables = {
-            name: dict(values) for name, values in MERMAID_THEME_VARIABLES.items()
+            name: mermaidThemeVariables(name) for name in ("light", "dark")
         }
         if themeVariables:
             for name, values in themeVariables.items():
@@ -380,15 +386,12 @@ class ElaMermaidRenderer(QObject):
         self._pool.setMaxThreadCount(2)
         self._renderedInternal.connect(self._on_rendered)
 
-
     def setThemeVariables(self, theme: str, variables: Optional[dict] = None) -> None:
         """覆盖指定主题（``"light"`` / ``"dark"``）的 mermaid ``themeVariables``，
         ``None`` 恢复内置美化配色。
         """
         if variables is None:
-            self._theme_variables[theme] = dict(
-                MERMAID_THEME_VARIABLES.get(theme, MERMAID_THEME_VARIABLES["light"])
-            )
+            self._theme_variables[theme] = mermaidThemeVariables(theme)
         else:
             self._theme_variables.setdefault(theme, {}).update(variables)
         self.clearCache()
@@ -396,7 +399,6 @@ class ElaMermaidRenderer(QObject):
     def themeVariables(self, theme: str) -> dict:
         """获取指定主题当前生效的 themeVariables 副本。"""
         return dict(self._theme_variables.get(theme, {}))
-
 
     def setRenderer(self, renderer: Optional[Callable]) -> None:
         """设置自定义渲染函数 ``(code, theme) -> QImage | None``，``None`` 回到内置后端。"""
@@ -419,7 +421,6 @@ class ElaMermaidRenderer(QObject):
     def lastError(self) -> Optional[str]:
         """最近一次渲染失败原因（成功或尚未渲染时为 ``None``）。"""
         return self._last_error
-
 
     def setMaxImageWidth(self, width: Optional[float]) -> None:
         """设置目标显示宽度（像素）。
@@ -458,12 +459,17 @@ class ElaMermaidRenderer(QObject):
         if self._override is not None:
             return self._override
         if mermaidx_available():
-            variables = self._theme_variables
+            # 快照在 GUI 线程生成；worker 只读普通 dict，不再碰 eTheme。
+            variables = {
+                name: dict(values) for name, values in self._theme_variables.items()
+            }
+            fallback = variables.get("light", {})
             return lambda code, theme: _render_with_mermaidx(
-                code, theme, variables.get(theme), self._max_image_width
+                code,
+                _config_from_variables(variables.get(theme, fallback)),
+                self._max_image_width,
             )
         return None
-
 
     def lookup(self, code: str, theme: str):
         """查缓存，返回 ``(known, image)``；``known=True`` 且 ``image=None`` = 此前渲染失败。"""
@@ -550,13 +556,17 @@ class ElaMermaidRenderer(QObject):
                 pass
         super().deleteLater()
 
-
     def currentGeneration(self) -> int:  # noqa: N802 (与 Qt 命名一致)
         """当前渲染代次（``_RenderTask`` 发起时记录，回来时比对）。"""
         return self._generation
 
     def _notify(
-        self, code: str, theme: str, image, error: Optional[str] = None, generation: int = 0
+        self,
+        code: str,
+        theme: str,
+        image,
+        error: Optional[str] = None,
+        generation: int = 0,
     ) -> None:  # 工作线程
         self._renderedInternal.emit(code, theme, image, error or "", int(generation))
 

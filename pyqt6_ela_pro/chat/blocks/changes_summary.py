@@ -22,6 +22,7 @@ class TurnChangesRow(_CollapsibleBlock):
         super().__init__(title="文件变更", opened=False, parent=parent, surface=False)
         self.setCardMargins(0, 0, 0, 0)
         self._changes = ElaChatTurnChanges()
+        self._changes_loader = None
         self._body_built = False
         self._files: Optional[ElaChatFileChanges] = None
         self._summary_label = ColorText(self)
@@ -31,9 +32,12 @@ class TurnChangesRow(_CollapsibleBlock):
         self.hide()
         self._apply_theme()
 
-    def setChanges(self, changes) -> None:
-        """替换汇总内容；空变更自动隐藏。"""
+    def setChanges(self, changes, loader=None) -> None:
+        """替换汇总内容；``loader`` 在首次展开时补齐完整 diff。"""
         self._changes = changes or ElaChatTurnChanges()
+        self._changes_loader = loader
+        if self._body_built and loader is not None:
+            self._changes = loader() or self._changes
         count = self._changes.count
         self.setTitle(f"{count} 个文件变更" if count else "文件变更")
         summary = (
@@ -46,10 +50,13 @@ class TurnChangesRow(_CollapsibleBlock):
         self.setVisible(bool(count))
 
     def changes(self) -> ElaChatTurnChanges:
-        """获取当前汇总快照。"""
+        """获取当前汇总快照（未展开时可能是轻量汇总）。"""
         return self._changes
 
     def _build_body(self) -> None:
+        if self._changes_loader is not None:
+            self._changes = self._changes_loader() or self._changes
+            self._changes_loader = None
         self._body_built = True
         self._files = ElaChatFileChanges(self)
         self._files.setFiles(list(self._changes.files))

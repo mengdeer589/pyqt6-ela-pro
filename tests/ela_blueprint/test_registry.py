@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import pytest
+from PyQt6.QtGui import QColor
+from PyQt6ElaWidgetTools import ElaThemeType, eTheme
 
 from pyqt6_ela_pro.blueprint import (
     PIN_COLORS,
@@ -143,17 +145,20 @@ class TestCreate:
 
 class TestPinColors:
     def test_pin_color_known_and_fallback(self):
-        # exec 为固定 hex；未知类型回退 any（令牌键，主题解析为 hex 字符串）
+        # 未知类型回退 any（令牌键，主题解析为 hex 字符串）
         assert pin_color("exec").startswith("#")
         assert pin_color("不存在的类型").startswith("#")
 
     def test_register_pin_type(self):
-        register_pin_type("audio", "#E0A030")
-        # 登记表里存原样（宿主读自己的值），但 **pin_color 一律归一成小写
-        # hex** —— 与令牌路径（``T()`` -> ``QColor.name()``）的输出统一，
-        # 上游按字符串比色时才不会被大小写咬到。
-        assert PIN_COLORS["audio"] == "#E0A030"
-        assert pin_color("audio") == "#e0a030"
+        try:
+            register_pin_type("audio", "#E0A030")
+            # 登记表里存原样（宿主读自己的值），但 **pin_color 一律归一成小写
+            # hex** —— 与令牌路径（``T()`` -> ``QColor.name()``）的输出统一，
+            # 上游按字符串比色时才不会被大小写咬到。
+            assert PIN_COLORS["audio"] == "#E0A030"
+            assert pin_color("audio") == "#e0a030"
+        finally:
+            PIN_COLORS.pop("audio", None)
 
     def test_register_pin_type_rejects_bad_color(self):
         with pytest.raises(ValueError):
@@ -163,6 +168,50 @@ class TestPinColors:
     def test_pin_color_token_key_resolves(self):
         register_pin_type("mask", "danger")
         assert pin_color("mask").startswith("#")
+
+
+class TestPinColorContrast:
+    """引脚圆点必须能在节点体 / 画布底色上看清（非文本 UI ≥3:1）。"""
+
+    #: 内置类型（宿主 ``register_pin_type`` 注册的自定义色不在本测试范围内）
+    BUILTIN = ("any", "int", "float", "str", "image", "tensor", "exec")
+
+    @pytest.mark.parametrize(
+        "mode",
+        [ElaThemeType.ThemeMode.Light, ElaThemeType.ThemeMode.Dark],
+        ids=["light", "dark"],
+    )
+    def test_builtin_pins_clear_ui_contrast(self, qapp, mode):
+        from pyqt6_ela_pro._colors import _contrast_ratio
+        from pyqt6_ela_pro._theme import surface, surfacePopup
+
+        previous = eTheme.getThemeMode()
+        eTheme.setThemeMode(mode)
+        try:
+            backgrounds = {"node": surfacePopup(mode), "canvas": surface(mode)}
+            for name in self.BUILTIN:
+                color = QColor(pin_color(name))
+                for surface_name, bg in backgrounds.items():
+                    ratio = _contrast_ratio(color, bg)
+                    assert ratio >= 3.0, (
+                        f"{mode.name}/{name} on {surface_name}: "
+                        f"{color.name()} 只有 {ratio:.2f}:1"
+                    )
+        finally:
+            eTheme.setThemeMode(previous)
+
+    def test_image_and_tensor_follow_theme(self, qapp):
+        """这两个类型 Ela 主题没有现成槽位，必须按 Light/Dark 各给一档。"""
+        previous = eTheme.getThemeMode()
+        try:
+            eTheme.setThemeMode(ElaThemeType.ThemeMode.Light)
+            light = {name: pin_color(name) for name in ("image", "tensor")}
+            eTheme.setThemeMode(ElaThemeType.ThemeMode.Dark)
+            dark = {name: pin_color(name) for name in ("image", "tensor")}
+        finally:
+            eTheme.setThemeMode(previous)
+        for name in light:
+            assert light[name] != dark[name], name
 
 
 class TestRegisterNodeType:

@@ -19,7 +19,7 @@ from PyQt6ElaWidgetTools import (
 from .._ownership import ContentSlot, ElaWidgetOwnershipType
 from .._styles import BareButton, ColorText
 from ..ela_button import ElaButton
-from ..tooltips import ElaToolTipPositionType, set_tooltip
+from ..tooltips import ElaToolTipPositionType, remove_tooltip, set_tooltip
 from ._theme import muted_color, text_color
 from .message import _as_int
 
@@ -53,6 +53,7 @@ class ElaChatQueueDock(_ThemeAwareMixin, ElaScrollPageArea):
         self._expanded = False
         self._working = False
         self._undo_available = False
+        self._steer_enabled = True
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(10, 6, 10, 8)
@@ -104,6 +105,8 @@ class ElaChatQueueDock(_ThemeAwareMixin, ElaScrollPageArea):
         self._rows_layout = QVBoxLayout(self._rows)
         self._rows_layout.setContentsMargins(22, 0, 0, 0)
         self._rows_layout.setSpacing(4)
+        self._rows_by_id: dict = {}
+        self._row_order: list = []
         self._rows.hide()
         layout.addWidget(self._rows)
 
@@ -122,7 +125,7 @@ class ElaChatQueueDock(_ThemeAwareMixin, ElaScrollPageArea):
             for item in (messages or [])
             if isinstance(item, dict)
         ]
-        self._rebuild_rows()
+        self._sync_rows()
         self._sync_header()
         self.setVisible(bool(self._messages))
 
@@ -149,11 +152,23 @@ class ElaChatQueueDock(_ThemeAwareMixin, ElaScrollPageArea):
         if on == self._working:
             return
         self._working = on
-        self._rebuild_rows()
+        self._sync_row_actions()
 
     def working(self) -> bool:
         """是否正在生成。"""
         return self._working
+
+    def setSteerEnabled(self, on: bool) -> None:
+        """设置「插话」动作是否可用（关闭时消息留在队列）。"""
+        on = bool(on)
+        if on == self._steer_enabled:
+            return
+        self._steer_enabled = on
+        self._sync_row_actions()
+
+    def steerEnabled(self) -> bool:
+        """「插话」动作是否可用。"""
+        return self._steer_enabled
 
     def setUndoAvailable(self, on: bool) -> None:
         """设置撤销按钮是否可用。"""
@@ -191,20 +206,90 @@ class ElaChatQueueDock(_ThemeAwareMixin, ElaScrollPageArea):
             preview = preview[:39] + "…"
         self._preview.setText(preview)
 
-    def _rebuild_rows(self) -> None:
-        while self._rows_layout.count():
-            item = self._rows_layout.takeAt(0)
-            widget = item.widget()
-            if widget is not None:
-                widget.setParent(None)
-                widget.deleteLater()
+    def _row_action(self) -> tuple[str, bool, str]:
+        if not self._working:
+            return "立即发送", True, "立即发送这一条"
+        if self._steer_enabled:
+            return "插话", True, "送进当前回合，不打断生成"
+        return "插话", False, "当前模式不支持插话，消息保留在队列中"
+
+    def _sync_row_actions(self) -> None:
+        """只改已有行的按钮状态，不重建整张队列（队列可能有几十上百条）。"""
+        label, enabled, tooltip = self._row_action()
+        for index in range(self._rows_layout.count()):
+            item = self._rows_layout.itemAt(index)
+            row = item.widget() if item is not None else None
+            if row is None:
+                continue
+            send = getattr(row, "_send_button", None)
+            if send is None:
+                continue
+            if send.text() != label:
+                send.setText(label)
+            if send.isEnabled() != enabled:
+                send.setEnabled(enabled)
+            if getattr(row, "_send_tooltip", "") != tooltip:
+                set_tooltip(send, tooltip, ElaToolTipPositionType.Top)
+                row._send_tooltip = tooltip
+
+    def _sync_rows(self) -> None:
+        """按消息 id 增量复用行，只重建新增条目（队列可能有几十上百条）。"""
+        existing = dict(self._rows_by_id)
+        old_order = list(self._row_order)
+        ordered: list = []
+        changed: list = []
         for message in self._messages:
-            self._rows_layout.addWidget(self._build_row(message))
-        # 行文本样式统一交给 _apply_theme：新行必须重新应用 12px 字号
-        self._apply_theme()
+            row = existing.get(message["id"])
+            if row is None:
+                row = self._build_row(message)
+                changed.append(row)
+            elif getattr(row, "_queue_message", None) != message:
+                self._update_row(row, message)
+                changed.append(row)
+            ordered.append(row)
+
+        new_ids = {message["id"] for message in self._messages}
+        for queue_id, row in existing.items():
+            if queue_id not in new_ids:
+                row.setParent(None)
+                row.deleteLater()
+
+        # 纯追加 / 原地改文案时只动变化的行；插入 / 删除 / 排序才整体重排
+        if ordered[: len(old_order)] == old_order and len(ordered) >= len(old_order):
+            for row in ordered[len(old_order) :]:
+                self._rows_layout.addWidget(row)
+        else:
+            while self._rows_layout.count():
+                self._rows_layout.takeAt(0)
+            for row in ordered:
+                self._rows_layout.addWidget(row)
+        self._rows_by_id = {
+            message["id"]: row for message, row in zip(self._messages, ordered)
+        }
+        self._row_order = ordered
+        for row in changed:
+            self._apply_row_theme(row)
+
+    def _update_row(self, row: QWidget, message: dict) -> None:
+        row._queue_message = message
+        label = getattr(row, "_queue_label", None)
+        if label is None:
+            return
+        label.setText(self._row_text(message))
+        if message["text"]:
+            set_tooltip(
+                label,
+                message["text"],
+                ElaToolTipPositionType.Top,
+                maxWidth=520,
+                wordWrap=True,
+            )
+        else:
+            remove_tooltip(label)
 
     def _build_row(self, message: dict) -> QWidget:
         row = QWidget(self._rows)
+        row._queue_message = message
         layout = QHBoxLayout(row)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(6)
@@ -219,17 +304,11 @@ class ElaChatQueueDock(_ThemeAwareMixin, ElaScrollPageArea):
             )
         row._queue_label = label
         layout.addWidget(label, 1)
-        send = ElaButton(
-            "插话" if self._working else "立即发送",
-            variant="text",
-            size="small",
-            parent=row,
-        )
-        set_tooltip(
-            send,
-            "送进当前回合，不打断生成" if self._working else "立即发送这一条",
-            ElaToolTipPositionType.Top,
-        )
+        send_label, enabled, tooltip = self._row_action()
+        send = ElaButton(send_label, variant="text", size="small", parent=row)
+        send.setEnabled(enabled)
+        set_tooltip(send, tooltip, ElaToolTipPositionType.Top)
+        row._send_tooltip = tooltip
         safe_connect(
             send,
             "clicked",
@@ -259,10 +338,10 @@ class ElaChatQueueDock(_ThemeAwareMixin, ElaScrollPageArea):
         return row
 
     def _activate_row(self, queueId: str) -> None:
-        if self._working:
-            self.steerRequested.emit(queueId)
-        else:
+        if not self._working:
             self.sendRequested.emit(queueId)
+        elif self._steer_enabled:
+            self.steerRequested.emit(queueId)
 
     @staticmethod
     def _row_text(message: dict) -> str:
@@ -274,6 +353,13 @@ class ElaChatQueueDock(_ThemeAwareMixin, ElaScrollPageArea):
             text += f"  （{attachments} 个附件）"
         return text or "[附件]"
 
+    def _apply_row_theme(self, row: QWidget) -> None:
+        label = getattr(row, "_queue_label", None)
+        if label is None:
+            return
+        label.setTextColor(muted_color(self._theme_mode, 0.8))
+        label.setTextPixelSize(12)
+
     def _apply_theme(self) -> None:
         self._title.setTextColor(text_color(self._theme_mode))
         self._title.setTextPixelSize(12)
@@ -282,15 +368,8 @@ class ElaChatQueueDock(_ThemeAwareMixin, ElaScrollPageArea):
         self._preview.setTextPixelSize(12)
         self._undo_button.setLightIconColor(muted_color(self._theme_mode, 0.6))
         self._undo_button.setDarkIconColor(muted_color(self._theme_mode, 0.6))
-        for index in range(self._rows_layout.count()):
-            item = self._rows_layout.itemAt(index)
-            row = item.widget() if item is not None else None
-            if row is None:
-                continue
-            label = getattr(row, "_queue_label", None)
-            if label is not None:
-                label.setTextColor(muted_color(self._theme_mode, 0.8))
-                label.setTextPixelSize(12)
+        for row in self._row_order:
+            self._apply_row_theme(row)
 
     def _onThemeChanged(self, mode) -> None:
         self._theme_mode = mode

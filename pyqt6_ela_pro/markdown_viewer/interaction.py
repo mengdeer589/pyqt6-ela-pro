@@ -177,7 +177,18 @@ class _MarkdownInteractionMixin:
             self._text_browser.setExtraSelections(self._search_selections)
             self._text_browser.setTextCursor(self._search_selections[0].cursor)
             self._last_search = text
+            self._last_search_case_sensitive = bool(caseSensitive)
         return len(self._search_selections)
+
+    def _refresh_search_after_render(self) -> None:
+        """整篇重渲染后重建搜索高亮（旧 QTextCursor 已指向被替换的文档）。"""
+        text = self._last_search
+        if not text:
+            return
+        bar = self._text_browser.verticalScrollBar()
+        value = bar.value()
+        self.searchText(text, self._last_search_case_sensitive)
+        bar.setValue(min(value, bar.maximum()))
 
     def findNext(self, backward: bool = False) -> bool:
         """在 :meth:`searchText` 的匹配间循环跳转，返回是否成功跳转。"""
@@ -308,7 +319,9 @@ class _MarkdownInteractionMixin:
         self.formulaCopied.emit(latex)
 
     def _copy_all(self) -> None:
-        self._copy_text(self.document().toPlainText())
+        with self._expanded_for_export():
+            text = self.document().toPlainText()
+        self._copy_text(text)
 
     def _copy_selection_markdown(self) -> None:
         """复制选中内容为 Markdown 源（并发出 ``selectionQuoted``）。"""
@@ -378,7 +391,9 @@ class _MarkdownInteractionMixin:
         button = self._ensure_code_button(index)
         if button is None:
             return
-        button.setIcon(self._code_check_icon())
+        button.setAwesome(ElaIconType.IconName.Check)
+        button.setLightIconColor(self._link_color)
+        button.setDarkIconColor(self._link_color)
         single_shot_on(self, 1000, lambda: self._restore_code_button_icon(button))
 
     def resizeEvent(self, event) -> None:  # noqa: N802 (Qt 命名)

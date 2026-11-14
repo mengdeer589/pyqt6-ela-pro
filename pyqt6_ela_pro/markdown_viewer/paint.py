@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import bisect
 
-from PyQt6ElaWidgetTools import ElaIcon, ElaIconType
-from PyQt6.QtCore import QPoint, QPointF, QRect, QRectF, QSize, Qt
+from PyQt6ElaWidgetTools import ElaIconButton, ElaIconType
+from PyQt6.QtCore import QPoint, QPointF, QRect, QRectF, Qt
 from PyQt6.QtGui import (
     QColor,
     QCursor,
@@ -17,10 +17,9 @@ from PyQt6.QtGui import (
     QTextFormat,
     QTextTable,
 )
-from PyQt6.QtWidgets import QAbstractScrollArea, QApplication, QToolButton
+from PyQt6.QtWidgets import QAbstractScrollArea, QApplication
 
 from .._internal import is_deleted
-from .._styles import FlatIconButton
 from ..tooltips import ElaToolTipPositionType, set_tooltip
 from .syntax import _clamp_pos
 from .themes import _QUOTE_LEFT_MARGIN
@@ -120,15 +119,19 @@ class _MarkdownPaintMixin:
             self._code_buttons[index] = button
         return button
 
-    def _create_code_button(self, index: int) -> QToolButton:
+    def _create_code_button(self, index: int) -> ElaIconButton:
         """创建单个复制按钮（``index`` 为代码表序号）。"""
         viewport = self._text_browser.viewport()
-        button = FlatIconButton(viewport)
+        button = ElaIconButton(
+            ElaIconType.IconName.Copy,
+            14,
+            _CODE_BUTTON_SIZE,
+            _CODE_BUTTON_SIZE,
+            viewport,
+        )
         button.setObjectName("ElaMarkdownCopyButton")
         button.setFixedSize(_CODE_BUTTON_SIZE, _CODE_BUTTON_SIZE)
-        button.setIconSize(QSize(14, 14))
         button.setCursor(Qt.CursorShape.PointingHandCursor)
-        button.setAutoRaise(True)
         button.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         lang = (
             self._code_buttons_tables[index].format().property(_CODE_LANG_PROPERTY)
@@ -154,22 +157,16 @@ class _MarkdownPaintMixin:
         button.deleteLater()
         self._code_button_widgets.discard(button)
 
-    def _apply_code_button_style(self, button: QToolButton) -> None:
-        """按钮图标与悬浮 / 按下底色（随主题刷新；自绘，不用 QSS）。"""
-        button.setIcon(self._code_copy_icon())
-        button.setHoverColor(self._code_button_hover_bg)
-        button.setPressColor(self._code_button_press_bg)
-        button.setCornerRadius(6)
-
-    def _code_copy_icon(self):
-        return ElaIcon.getInstance().getElaIcon(
-            ElaIconType.IconName.Copy, self._muted_color
-        )
-
-    def _code_check_icon(self):
-        return ElaIcon.getInstance().getElaIcon(
-            ElaIconType.IconName.Check, self._link_color
-        )
+    def _apply_code_button_style(self, button: ElaIconButton) -> None:
+        """按钮图标与悬浮底色（随主题刷新，交给 ElaIconButton 自绘）。"""
+        button.setAwesome(ElaIconType.IconName.Copy)
+        button.setLightIconColor(self._muted_color)
+        button.setDarkIconColor(self._muted_color)
+        button.setLightHoverIconColor(self._text_color)
+        button.setDarkHoverIconColor(self._text_color)
+        button.setLightHoverColor(self._code_button_hover_bg)
+        button.setDarkHoverColor(self._code_button_hover_bg)
+        button.setBorderRadius(6)
 
     def _code_table_in_view(
         self, table, layout, offset: int, top: int, bottom: int
@@ -220,6 +217,41 @@ class _MarkdownPaintMixin:
             widget = widget.parentWidget()
         return None
 
+    def _visible_block_numbers(self, browser, top: float, bottom: float) -> tuple:
+        """视口纵向区间 ``[top, bottom]`` 覆盖的首 / 末块号。
+
+        不能用 ``cursorForPosition(QPoint(0, y))``：x=0 落在表格左侧边距时
+        会命中表格前面的块，表格 / 代码卡块被漏掉。这里按
+        ``blockBoundingRect`` 二分，不依赖横坐标。
+        """
+        document = self.document()
+        layout = document.documentLayout()
+        offset = browser.verticalScrollBar().value()
+        top_y = top + offset
+        bottom_y = bottom + offset
+        count = max(1, document.blockCount())
+
+        def rect_at(number: int):
+            return layout.blockBoundingRect(document.findBlockByNumber(number))
+
+        lo, hi = 0, count - 1
+        while lo < hi:
+            mid = (lo + hi) // 2
+            if rect_at(mid).bottom() < top_y:
+                lo = mid + 1
+            else:
+                hi = mid
+        first = lo
+
+        lo, hi = 0, count - 1
+        while lo < hi:
+            mid = (lo + hi + 1) // 2
+            if rect_at(mid).top() > bottom_y:
+                hi = mid - 1
+            else:
+                lo = mid
+        return first, lo
+
     def _code_table_index_range(self, top: float, bottom: float) -> tuple:
         """可见带对应的代码表下标区间（按文档位置二分，O(log 表数)）。
         逐表 ``frameBoundingRect`` 在几百个代码块的文档里要 50ms+（1200 表
@@ -238,12 +270,9 @@ class _MarkdownPaintMixin:
         limit = max(0, browser.viewport().height() - 1)
         top = min(max(0, int(top)), limit)
         bottom = min(max(0, int(bottom)), limit)
-        top_block = document.findBlock(
-            browser.cursorForPosition(QPoint(0, top)).position()
-        )
-        bottom_block = document.findBlock(
-            browser.cursorForPosition(QPoint(0, bottom)).position()
-        )
+        top_number, bottom_number = self._visible_block_numbers(browser, top, bottom)
+        top_block = document.findBlockByNumber(top_number)
+        bottom_block = document.findBlockByNumber(bottom_number)
         top_position = top_block.position()
         bottom_position = bottom_block.position() + bottom_block.length()
         first = max(0, bisect.bisect_left(positions, top_position) - 1)
@@ -379,10 +408,9 @@ class _MarkdownPaintMixin:
         )
         if key == self._visible_blocks_key:
             return self._visible_blocks_value
-        first = document.findBlock(browser.cursorForPosition(QPoint(0, top)).position())
-        last = document.findBlock(
-            browser.cursorForPosition(QPoint(0, bottom)).position()
-        )
+        first_number, last_number = self._visible_block_numbers(browser, top, bottom)
+        first = document.findBlockByNumber(first_number)
+        last = document.findBlockByNumber(last_number)
         if not first.isValid():
             first = document.begin()
         if not last.isValid():
@@ -391,23 +419,30 @@ class _MarkdownPaintMixin:
         self._visible_blocks_value = (first, last)
         return first, last
 
-    def _ensure_paint_index(self) -> None:
-        """按文档 revision 懒建绘制索引（装饰块 / 行内代码 marks）。
-        ``QTextDocument.revision()`` 在内容与字符格式变更时都会递增，所以它同时
-        不再逐块读 ``blockFormat``、逐片段读 ``charFormat``（Win7 上这些跨绑定
+    def _ensure_paint_index(self, first=None, last=None) -> None:
+        """按文档 revision + 可见块范围懒建绘制索引（装饰块 / 行内代码 marks）。
+
+        两个消费方只遍历 ``_visible_blocks`` 范围；全量扫描会让大文档的每次
+        流式 flush 都重扫全文，这里只扫当前可见区。无参数调用保留全量兜底。
         """
         try:
             document = self.document()
         except RuntimeError:
             return
         revision = document.revision()
-        if revision == self._paint_index_revision:
+        first_number = (
+            first.blockNumber() if first is not None and first.isValid() else -1
+        )
+        last_number = last.blockNumber() if last is not None and last.isValid() else -1
+        key = (revision, first_number, last_number)
+        if key == self._paint_index_key:
             return
         decorations: set = set()
         inline: dict = {}
         heading_levels = self._md_layout["heading_rule"]["levels"]
-        block = document.begin()
-        while block.isValid():
+        block = first if first_number >= 0 else document.begin()
+        end_number = last_number if last_number >= 0 else document.blockCount() - 1
+        while block.isValid() and block.blockNumber() <= end_number:
             number = block.blockNumber()
             block_format = block.blockFormat()
             if (
@@ -430,6 +465,7 @@ class _MarkdownPaintMixin:
                 inline[number] = marks
             block = block.next()
         self._paint_index_revision = revision
+        self._paint_index_key = key
         self._paint_index_decorations = decorations
         self._paint_index_inline = inline
 
@@ -447,7 +483,8 @@ class _MarkdownPaintMixin:
         layout = document.documentLayout()
         offset = browser.verticalScrollBar().value()
         top, bottom = self._paint_band(browser, exposed)
-        self._ensure_paint_index()
+        first, last = self._visible_blocks(browser, exposed)
+        self._ensure_paint_index(first, last)
         if not self._paint_index_inline:
             return
         painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
@@ -459,7 +496,6 @@ class _MarkdownPaintMixin:
         else:
             painter.setPen(Qt.PenStyle.NoPen)
         painter.setBrush(self._inline_code_bg)
-        first, last = self._visible_blocks(browser, exposed)
         last_number = last.blockNumber()
         block = first
         while block.isValid():
@@ -591,14 +627,14 @@ class _MarkdownPaintMixin:
         layout = document.documentLayout()
         offset = browser.verticalScrollBar().value()
         top, bottom = self._paint_band(browser, exposed)
-        self._ensure_paint_index()
+        first, last = self._visible_blocks(browser, exposed)
+        self._ensure_paint_index(first, last)
         if not self._paint_index_decorations and not self._code_buttons_tables:
             return
         painter.setRenderHint(QPainter.RenderHint.Antialiasing, False)
         md_layout = self._md_layout
         heading_rule = md_layout["heading_rule"]
         quote_layout = md_layout["quote"]
-        first, last = self._visible_blocks(browser, exposed)
         last_number = last.blockNumber()
         block = first
         while block.isValid():
@@ -849,9 +885,11 @@ class _MarkdownPaintMixin:
         pos = self._text_browser.viewport().mapFromGlobal(QCursor.pos())
         self._update_code_button_hover(pos)
 
-    def _restore_code_button_icon(self, button: QToolButton) -> None:
+    def _restore_code_button_icon(self, button: ElaIconButton) -> None:
         try:
-            button.setIcon(self._code_copy_icon())
+            button.setAwesome(ElaIconType.IconName.Copy)
+            button.setLightIconColor(self._muted_color)
+            button.setDarkIconColor(self._muted_color)
         except RuntimeError:
             # 控件已随文档重渲染销毁
             pass

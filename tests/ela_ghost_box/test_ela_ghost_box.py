@@ -12,6 +12,7 @@ from PyQt6ElaWidgetTools import ElaIconType
 from _qthelpers import wait_until
 
 from pyqt6_ela_pro._ownership import ElaWidgetOwnershipType
+from pyqt6_ela_pro.ela_button import ElaButton
 from pyqt6_ela_pro.ela_ghost_box import ElaGhostBox
 
 
@@ -273,6 +274,7 @@ class TestElaGhostBoxFooter:
 
     def test_add_button_creates_footer(self, box):
         button = box.addPopupFooterButton("管理模型", key="manage")
+        assert isinstance(button, ElaButton)
         assert button.footerKey() == "manage"
         footer = box.popupFooter()
         assert footer.hasContent() is True

@@ -104,6 +104,7 @@ class ElaBlueprintCanvas(QWidget):
     node_moved = pyqtSignal(str, QPointF)
     node_rename_requested = pyqtSignal(str)
     node_properties_requested = pyqtSignal(str)
+    node_activated = pyqtSignal(str)
     edge_created = pyqtSignal(object)
     edge_removed = pyqtSignal(str)
     selection_changed = pyqtSignal(list)
@@ -122,6 +123,7 @@ class ElaBlueprintCanvas(QWidget):
         self.graph = graph
         self._owner = owner
         self._use_gl = use_gl
+        self._readonly = False
         self._zoom = 1.0
         self._offset = QPointF(0.0, 0.0)
         # 拖动吸附：基础间距 24（场景单位），屏幕间距随缩放按 2 的幂自适应
@@ -217,7 +219,10 @@ class ElaBlueprintCanvas(QWidget):
         :param title: 可选标题覆盖（在节点体构建前写入，避免二次重排）
 
         非法类型抛 ``KeyError``，节点 id 冲突抛 ``ValueError``。
+        只读画布上返回 ``None``。
         """
+        if self._readonly:
+            return None
         node = ElaNodeRegistry.instance().create(type_name, owner=self._owner)
         node.pos = _as_point(pos)
         if title is not None:
@@ -228,7 +233,9 @@ class ElaBlueprintCanvas(QWidget):
         return node
 
     def add_node(self, node: ElaBlueprintNode, pos=None) -> ElaBlueprintNode:
-        """把既有 ``ElaBlueprintNode`` 放入图（可选指定场景坐标）。"""
+        """把既有 ``ElaBlueprintNode`` 放入图（可选指定场景坐标）。只读时原样返回。"""
+        if self._readonly:
+            return node
         if pos is not None:
             node.pos = _as_point(pos)
         self.graph.add_node(node)
@@ -264,6 +271,23 @@ class ElaBlueprintCanvas(QWidget):
         """当前缩放系数。"""
         return self._zoom
 
+    def setReadOnly(self, on: bool = True) -> None:
+        """只读模式：禁创建 / 删除 / 拖动 / 连线 / 右键菜单。
+
+        平移、缩放、选中、hover 与 ``execution()`` 运行指示仍然可用；
+        节点体控件不再接收鼠标事件，点击冒泡给节点做选中 / 双击激活。
+        """
+        self._readonly = bool(on)
+        for widget in self._node_widgets.values():
+            widget.setReadOnly(self._readonly)
+        if self._readonly:
+            self._interaction.cancel()
+        self.update()
+
+    def isReadOnly(self) -> bool:
+        """是否处于只读模式。"""
+        return self._readonly
+
     def is_using_gl(self) -> bool:
         """当前绘制视口是否使用 GL（否则为软件 raster 视口）。"""
         return bool(getattr(self._viewport, "is_gl_viewport", False))
@@ -297,8 +321,10 @@ class ElaBlueprintCanvas(QWidget):
     def duplicate_selection(self) -> list:
         """复制选中节点（Ctrl+D），副本错开 24px 并成为新的选择。
         返回副本 id 列表；连同节点属性（含按钮体读的 ``properties``）一起
-        复制，但**不**复制节点之间的连线。
+        复制，但**不**复制节点之间的连线。只读时返回空列表。
         """
+        if self._readonly:
+            return []
         copies = []
         for nid in list(self._selected_nodes):
             node = self.graph.node(nid)
@@ -314,10 +340,10 @@ class ElaBlueprintCanvas(QWidget):
     def nudge_selection(self, dx: float, dy: float) -> bool:
         """按场景单位平移选中节点（方向键微调），返回是否真的移动。
         与拖动走同一套脏区：旧 / 新节点矩形（含选中发光带）+ 相连边的新旧
-        包围盒，否则微调一样会留下光晕残影。
+        包围盒，否则微调一样会留下光晕残影。只读时返回 ``False``。
         """
         dx, dy = _finite(dx), _finite(dy)
-        if (dx == 0.0 and dy == 0.0) or not self._selected_nodes:
+        if self._readonly or (dx == 0.0 and dy == 0.0) or not self._selected_nodes:
             return False
         moved = [
             node
@@ -531,6 +557,7 @@ class ElaBlueprintCanvas(QWidget):
             Qt.WidgetAttribute.WA_TransparentForMouseEvents, True
         )
         widget.apply_view(self.scene_to_view(node.pos), self._zoom)
+        widget.setReadOnly(self._readonly)
         widget.show()
         self._node_widgets[node.id] = widget
         self.update()
@@ -745,7 +772,9 @@ class ElaBlueprintCanvas(QWidget):
         super().hideEvent(event)
 
     def delete_selection(self) -> None:
-        """删除选中的边与节点（节点连带其全部边），发相应信号。"""
+        """删除选中的边与节点（节点连带其全部边），发相应信号。只读时无操作。"""
+        if self._readonly:
+            return
         for eid in list(self._selected_edges):
             self.graph.remove_edge(eid)
         for nid in list(self._selected_nodes):
@@ -783,6 +812,8 @@ class ElaBlueprintCanvas(QWidget):
             self._update_scene_rects(rects)
 
     def _open_node_menu(self, widget: ElaNodeWidget, global_pos: QPoint) -> None:
+        if self._readonly:
+            return
         nid = widget.node.id
         menu = ElaNodeContextMenu(nid, self)
         menu.duplicate_requested.connect(self._duplicate_node)
@@ -800,6 +831,8 @@ class ElaBlueprintCanvas(QWidget):
 
     def _open_edge_menu(self, edge_id: str, global_pos: QPoint) -> None:
         """连线右键菜单：删除（右键连线时由交互层调用）。"""
+        if self._readonly:
+            return
         if self.graph.edge(edge_id) is None:
             return
         menu = ElaEdgeContextMenu(edge_id, self)

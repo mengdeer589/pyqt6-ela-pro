@@ -6,7 +6,7 @@ from unittest.mock import MagicMock
 
 from PyQt6.QtCore import Qt, QPoint, QRect
 from PyQt6.QtWidgets import QApplication, QWidget
-from PyQt6ElaWidgetTools import ElaComboBox
+from PyQt6ElaWidgetTools import ElaComboBox, ElaLineEdit
 
 import pytest
 from _qthelpers import wait_until as _wait_until
@@ -343,7 +343,7 @@ class TestElaSearchBox:
         box = ElaSearchBox()
         box.addItems(["北京", "上海"])
         box.showPopup()
-        assert box._searchEdit is not None
+        assert isinstance(box._searchEdit, ElaLineEdit)
         box._searchEdit.setText("bj")
         view = box.view()
         assert view.isRowHidden(0) is False
@@ -535,9 +535,7 @@ class TestComboboxPopupBothSidesTight:
         # QRect(0,0,800,430).bottom() == 429：上方空间 37（≤50，压不了）、
         # 下方 = 429-70-3 = 356（< final 358）→ 压到 356
         screen.availableGeometry.return_value = QRect(0, 0, 800, 430)
-        monkeypatch.setattr(
-            QApplication, "screenAt", staticmethod(lambda pos: screen)
-        )
+        monkeypatch.setattr(QApplication, "screenAt", staticmethod(lambda pos: screen))
 
         _internal._adjust_combobox_popup(combo)
 

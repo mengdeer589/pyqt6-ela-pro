@@ -99,17 +99,17 @@ class TestTerminalLazyRebuild:
         assert calls["n"] == 1
         assert view._needs_rebuild is False
 
-    def test_hidden_palette_change_defers(self, qapp, make):
+    def test_hidden_theme_switch_defers(self, qapp, make):
         _, view = _page(make, qapp)
         calls = _spy_rebuild(view)
 
-        target = next(name for name in terminalThemes() if name != view.paletteName())
-        view.setPaletteName(target)
+        target = next(name for name in terminalThemes() if name != view.terminalTheme())
+        view.setTerminalTheme(target)
         qapp.processEvents()
 
         assert calls["n"] == 0
         assert view._needs_rebuild is True
-        assert view.paletteName() == target
+        assert view.terminalTheme() == target
 
     def test_filter_change_rebuilds_even_when_hidden(self, qapp, make, monkeypatch):
         """过滤改内容 → 必须立即重建（懒化不许扩到过滤路径）。

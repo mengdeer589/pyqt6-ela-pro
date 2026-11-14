@@ -16,6 +16,7 @@ from PyQt6.QtWidgets import QLabel, QWidget
 from PyQt6ElaWidgetTools import (
     ElaColorDialog,
     ElaContentDialog,
+    ElaIconType,
     ElaPromotionCard,
     ElaPromotionView,
     ElaRibbonBar,
@@ -26,6 +27,7 @@ from PyQt6ElaWidgetTools import (
 
 from pyqt6_ela_pro import (
     ElaAvatar,
+    ElaAvatarShapeType,
     ElaField,
     ElaSelectorBar,
     ElaShimmer,
@@ -43,7 +45,12 @@ class TestFluentPage:
 
     def test_page_contains_all_new_components(self, qapp, make):
         page = make(FluentPage)
-        assert len(page.findChildren(ElaAvatar)) == 4
+        avatars = page.findChildren(ElaAvatar)
+        assert len(avatars) == 5
+        compact = [avatar for avatar in avatars if avatar.extent() == 30]
+        assert len(compact) == 1
+        assert compact[0].shape() == ElaAvatarShapeType.Rounded
+        assert compact[0].iconName() == ElaIconType.IconName.Robot
         assert len(page.findChildren(ElaField)) == 3
         assert len(page.findChildren(ElaSelectorBar)) == 1
         assert len(page.findChildren(ElaShimmer)) == 3

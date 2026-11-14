@@ -13,6 +13,7 @@ from pyqt6_ela_pro._styles import (
     setPlainFrame,
     setSolidBackground,
     setTextBaseColor,
+    setTextSelectionColors,
 )
 
 from _pixels import opaque_colors, skip_if_no_pixels
@@ -170,8 +171,47 @@ class TestTextBaseViewportPropagation:
         browser = make(QTextBrowser)
         setTextBaseColor(browser, "#ff0000")
         setTextBaseColor(browser, None)
+        assert browser.viewport().palette().color(QPalette.ColorRole.Base).alpha() == 0
+
+
+class TestTextSelectionColors:
+    """``setTextSelectionColors`` 必须写满三组颜色，并同步到 viewport。
+
+    只写 Active 组时窗口失焦会回落到系统 ``Inactive`` 色（Win7 上表现为浅底
+    黑字）；只写控件时视口用的是首次解析的旧 palette（``WA_SetPalette``）。
+    """
+
+    _GROUPS = (
+        QPalette.ColorGroup.Active,
+        QPalette.ColorGroup.Inactive,
+        QPalette.ColorGroup.Disabled,
+    )
+
+    def test_writes_all_groups_on_widget_and_viewport(self, qapp, make):
+        browser = make(QTextBrowser)
+        setTextSelectionColors(browser, "#123456", "#abcdef")
+        for palette in (browser.palette(), browser.viewport().palette()):
+            for group in self._GROUPS:
+                assert (
+                    palette.color(group, QPalette.ColorRole.Highlight).name()
+                    == "#123456"
+                )
+                assert (
+                    palette.color(group, QPalette.ColorRole.HighlightedText).name()
+                    == "#abcdef"
+                )
+
+    def test_replaces_previous_colors(self, qapp, make):
+        browser = make(QTextBrowser)
+        setTextSelectionColors(browser, "#123456", "#abcdef")
+        setTextSelectionColors(browser, "#ff0000", "#00ff00")
+        assert browser.palette().color(QPalette.ColorRole.Highlight).name() == "#ff0000"
         assert (
-            browser.viewport().palette().color(QPalette.ColorRole.Base).alpha() == 0
+            browser.viewport()
+            .palette()
+            .color(QPalette.ColorRole.HighlightedText)
+            .name()
+            == "#00ff00"
         )
 
 

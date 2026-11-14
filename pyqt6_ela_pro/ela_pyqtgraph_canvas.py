@@ -7,6 +7,7 @@ from PyQt6.QtWidgets import QWidget, QSizePolicy
 from PyQt6ElaWidgetTools import eTheme, ElaThemeType
 
 from ._internal import connect_theme_signal, disconnect_theme
+from ._theme import blend, border, surface, text, textMuted
 
 # ── Optional pyqtgraph import ──────────────────────────
 
@@ -16,21 +17,17 @@ except ImportError:
     pg = None
 
 
-_LIGHT_THEME: dict[str, str] = {
-    "background": "#FFFFFF",
-    "foreground": "#333333",
-    "axis": "#D9D9D9",
-    "grid": "#F0F0F0",
-    "label": "#333333",
-}
-
-_DARK_THEME: dict[str, str] = {
-    "background": "#1E1E2E",
-    "foreground": "#E0E0E0",
-    "axis": "#424242",
-    "grid": "#333333",
-    "label": "#E0E0E0",
-}
+def _theme_for_mode(mode) -> dict[str, str]:
+    """按 Ela 主题生成 pyqtgraph 的 UI chrome 颜色。"""
+    base = surface(mode)
+    line = border(mode)
+    return {
+        "background": base.name(),
+        "foreground": text(mode).name(),
+        "axis": line.name(),
+        "grid": blend(base, line, 0.5).name(),
+        "label": textMuted(mode).name(),
+    }
 
 
 if pg is not None:
@@ -77,8 +74,7 @@ if pg is not None:
         # ── Internal ──────────────────────────────────────
 
         def _apply_theme(self) -> None:
-            is_dark = self._theme_mode == ElaThemeType.ThemeMode.Dark
-            theme = _DARK_THEME if is_dark else _LIGHT_THEME
+            theme = _theme_for_mode(self._theme_mode)
             self.setBackground(theme["background"])
             try:
                 items = list(self.ci.items)
@@ -90,8 +86,7 @@ if pg is not None:
 
         def _style_plot(self, item) -> None:
             """轴/标签颜色跟随主题；背景由 ``setBackground`` 统一处理。"""
-            is_dark = self._theme_mode == ElaThemeType.ThemeMode.Dark
-            theme = _DARK_THEME if is_dark else _LIGHT_THEME
+            theme = _theme_for_mode(self._theme_mode)
             for name in ("left", "bottom", "right", "top"):
                 try:
                     axis = item.getAxis(name)

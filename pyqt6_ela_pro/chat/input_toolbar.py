@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from .input_parts import _ContextUsageRing
 from .message import _as_float, _as_int
+from .selector import ElaChatSelector
 from .toolbar import ElaChatToolBar, ElaChatToolButton
 
 
@@ -17,7 +18,7 @@ class _InputToolbarMixin:
         if on:
             self._add_file_visible_before_shell = self.addFileVisible()
             self._add_file_button.setVisible(False)
-            for selector in self._selectors.values():
+            for selector in self._toolbar.findChildren(ElaChatSelector):
                 selector.setVisible(False)
             self._attachments.setVisible(False)
             self._edit.setFont(self._shell_font)
@@ -27,7 +28,7 @@ class _InputToolbarMixin:
             self._edit.setFont(self._normal_font)
             self._edit.setPlaceholderText(self._default_placeholder)
             self._add_file_button.setVisible(self._add_file_visible_before_shell)
-            for selector in self._selectors.values():
+            for selector in self._toolbar.findChildren(ElaChatSelector):
                 selector.setVisible(True)
             self._attachments.setVisible(bool(self.attachments()))
         self._sync_height()

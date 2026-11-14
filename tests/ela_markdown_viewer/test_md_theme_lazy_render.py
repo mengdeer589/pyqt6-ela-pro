@@ -149,7 +149,7 @@ class TestOffscreenThemeLazyRender:
 
 class TestHighlightCacheAcrossThemes:
     def test_switch_back_hits_cache(self, qapp, make, monkeypatch):
-        """dark → light → dark：回到已渲染过的主题不再重新 lex（缓存 key 含主题）。"""
+        """dark → light → dark：词法 token 与主题无关，切换主题不再重新 lex。"""
         pytest.importorskip("pygments")
         host, viewer = _page(make)
         viewer.setHighlightCacheSize(256)
@@ -189,11 +189,8 @@ class TestHighlightCacheAcrossThemes:
         current = viewer._theme_mode
         before = lexers["n"]
 
-        _switch(qapp, _other_mode(current))  # 另一主题：块未缓存，必须 lex
-        after_other = lexers["n"]
-        assert after_other > before, "切换到未渲染过的主题应重新 lex"
+        _switch(qapp, _other_mode(current))  # 另一主题复用同一份词法 token
+        assert lexers["n"] == before, "切换主题不该重新 lex（token 缓存跨主题保留）"
 
-        _switch(qapp, current)  # 回到已缓存的主题：命中缓存、不再 lex
-        assert lexers["n"] == after_other, (
-            "切回已渲染过的主题不该重新 lex（缓存跨主题保留）"
-        )
+        _switch(qapp, current)  # 切回原主题：仍复用 token
+        assert lexers["n"] == before, "切回原主题不该重新 lex"

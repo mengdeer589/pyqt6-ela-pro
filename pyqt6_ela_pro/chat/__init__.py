@@ -100,7 +100,7 @@ _LAZY_MODULES = {
     "selector": ("ElaChatSelector", "ElaChatSelectorItem"),
     "suggestions": ("ElaChatSuggestion", "SuggestionPopup"),
     "status": ("ElaChatStatusBar",),
-    "trace": ("ElaChatTracePanel",),
+    "trace": ("ElaChatTraceOptions", "ElaChatTracePanel"),
     "toolbar": ("ElaChatToolBar", "ElaChatToolButton"),
     "renderers_builtin": (
         "cleanAnsi",
@@ -160,6 +160,7 @@ __all__ = [
     "ElaChatStats",
     "ElaChatTurnChanges",
     "ElaChatTracePanel",
+    "ElaChatTraceOptions",
     "ElaChatTraceResult",
     "ElaChatTraceRow",
     "buildTraceRows",

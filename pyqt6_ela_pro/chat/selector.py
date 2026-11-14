@@ -132,6 +132,13 @@ class ElaChatSelector(ElaDropDownButton):
     def _sync_label(self) -> None:
         item = self.currentItem()
         self.setText(item.label if item is not None else self._title)
+        icon = (
+            item.icon
+            if item is not None and item.icon is not None
+            else ElaIconType.IconName.None_
+        )
+        if self.elaIcon() != icon:
+            self.setElaIcon(icon)
         text = (
             f"{self._title}: {item.label}"
             if item is not None and self._title

@@ -179,6 +179,31 @@ def setTextBaseColor(widget: QWidget, color=None) -> None:  # noqa: N802 (Qt 命
     widget.update()
 
 
+def setTextSelectionColors(  # noqa: N802 (Qt 命名)
+    widget: QWidget, highlight, text
+) -> None:
+    """固定文本选择的高亮底色 / 文字色（``Highlight`` / ``HighlightedText``）。
+
+    不设时取系统 palette：Win11 用个性色、Win7 与失焦窗口是另一套（浅底黑字）。
+    ``setColor(role, color)`` 一次覆盖 Active / Inactive / Disabled 三组；只在
+    Active 组设置的话，窗口失焦又回到系统色。``Highlight`` 必须同时写 viewport
+    （它带显式 palette，不跟随控件，同 :func:`setTextBaseColor`）。
+    """
+    background = parse_color(highlight)
+    foreground = parse_color(text)
+    palette = widget.palette()
+    palette.setColor(QPalette.ColorRole.Highlight, background)
+    palette.setColor(QPalette.ColorRole.HighlightedText, foreground)
+    widget.setPalette(palette)
+    viewport = widget.viewport() if hasattr(widget, "viewport") else None
+    if viewport is not None:
+        viewport_palette = viewport.palette()
+        viewport_palette.setColor(QPalette.ColorRole.Highlight, background)
+        viewport_palette.setColor(QPalette.ColorRole.HighlightedText, foreground)
+        viewport.setPalette(viewport_palette)
+    widget.update()
+
+
 def elaIconPixmap(icon, color, size, ratio: float = 1.0) -> QPixmap:  # noqa: N802
     """按**物理**像素尺寸取一个上好色的 ElaAwesome 字形位图。
     上游 ``eTheme`` 只暴露 ``drawEffectShadow``，没有 ``drawElaIcon``，所以走

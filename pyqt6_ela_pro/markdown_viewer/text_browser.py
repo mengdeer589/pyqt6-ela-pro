@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Optional
 
 from PyQt6.QtCore import Qt, pyqtSignal
-from PyQt6.QtGui import QPainter, QTextDocument
+from PyQt6.QtGui import QImage, QPainter, QTextDocument
 from PyQt6.QtWidgets import QTextBrowser, QWidget
 
 
@@ -69,7 +69,23 @@ class _ElaTextBrowser(QTextBrowser):
             and url.scheme() in ("http", "https")
         ):
             return None
-        return super().loadResource(resource_type, url)
+        image = super().loadResource(resource_type, url)
+        if (
+            resource_type == QTextDocument.ResourceType.ImageResource
+            and url.scheme() in ("http", "https")
+            and isinstance(image, QImage)
+            and not image.isNull()
+        ):
+            # 远程图片没有 _apply_images 的同步缩放路径：在这里按阅读列宽缩放
+            viewer = self.parent()
+            get_width = getattr(viewer, "_content_text_width", None)
+            width = get_width() if callable(get_width) else 0
+            max_width = max(width - 24, 120)
+            if image.width() > max_width:
+                image = image.scaledToWidth(
+                    max_width, Qt.TransformationMode.SmoothTransformation
+                )
+        return image
 
     def mousePressEvent(self, event) -> None:  # noqa: N802 (Qt 命名)
         if event.button() == Qt.MouseButton.LeftButton:

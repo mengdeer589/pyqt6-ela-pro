@@ -93,6 +93,9 @@ class TestAnnotationEditing:
         qapp.processEvents()
         editor = chart._annotation_editor
         assert editor is not None and editor.isVisible()
+        assert editor.height() <= 26, (
+            "行内编辑器必须压回标签高度（ElaLineEdit 默认最小 35）"
+        )
         assert editor.text() == "peak"
         editor.setText("new peak")
         editor.editingFinished.emit()

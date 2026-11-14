@@ -18,9 +18,9 @@ import pyqt6_ela_pro.mermaid_support as support
 from pyqt6_ela_pro.ela_markdown_viewer import ElaMarkdownViewer
 from pyqt6_ela_pro.tooltip_targets import DOCUMENT_TOOLTIP_PROPERTY
 from pyqt6_ela_pro.mermaid_support import (
-    MERMAID_THEME_VARIABLES,
     ElaMermaidRenderer,
     _build_config,
+    mermaidThemeVariables,
 )
 
 MERMAID_MARKDOWN = "```mermaid\nflowchart LR\n    A --> B\n```"
@@ -93,12 +93,12 @@ class TestMermaidLazyImport:
 
 
 class TestMermaidTheme:
-    def test_build_config_base_theme_and_variables(self):
+    def test_build_config_base_theme_and_variables(self, qapp):
         config = _build_config("light")
         assert config["theme"] == "base"
         assert (
             config["themeVariables"]["primaryColor"]
-            == MERMAID_THEME_VARIABLES["light"]["primaryColor"]
+            == mermaidThemeVariables("light")["primaryColor"]
         )
         assert config["flowchart"]["curve"] == "basis"
         assert config["sequence"]["mirrorActors"] is False
@@ -107,10 +107,27 @@ class TestMermaidTheme:
         assert overridden["themeVariables"]["primaryColor"] == "#123456"
         assert (
             overridden["themeVariables"]["primaryTextColor"]
-            == MERMAID_THEME_VARIABLES["dark"]["primaryTextColor"]
+            == mermaidThemeVariables("dark")["primaryTextColor"]
         )
 
-    def test_set_theme_variables_override_and_reset(self):
+    def test_palette_follows_ela_tokens(self, qapp):
+        from PyQt6ElaWidgetTools import ElaThemeType
+
+        from pyqt6_ela_pro._theme import border, surfaceRaised, text
+
+        light = mermaidThemeVariables("light")
+        dark = mermaidThemeVariables("dark")
+        assert light["primaryTextColor"] == text(ElaThemeType.ThemeMode.Light).name()
+        assert dark["primaryTextColor"] == text(ElaThemeType.ThemeMode.Dark).name()
+        assert (
+            light["primaryBorderColor"] == border(ElaThemeType.ThemeMode.Light).name()
+        )
+        assert (
+            light["tertiaryColor"] == surfaceRaised(ElaThemeType.ThemeMode.Light).name()
+        )
+        assert light["primaryColor"] != dark["primaryColor"]
+
+    def test_set_theme_variables_override_and_reset(self, qapp):
         renderer = ElaMermaidRenderer()
         renderer.setThemeVariables("light", {"primaryColor": "#123456"})
         assert renderer.themeVariables("light")["primaryColor"] == "#123456"
@@ -118,7 +135,7 @@ class TestMermaidTheme:
         renderer.setThemeVariables("light", None)
         assert (
             renderer.themeVariables("light")["primaryColor"]
-            == MERMAID_THEME_VARIABLES["light"]["primaryColor"]
+            == mermaidThemeVariables("light")["primaryColor"]
         )
         renderer.deleteLater()
 

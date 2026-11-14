@@ -6,13 +6,11 @@ from __future__ import annotations
 from typing import Optional
 
 from ..._internal import system_cjk_font_family
-from PyQt6.QtCore import QPointF, QRectF, QSize, Qt, QTimer
+from PyQt6.QtCore import QRectF, Qt, QTimer
 from PyQt6.QtGui import (
     QColor,
     QFont,
     QPainter,
-    QPainterPath,
-    QPen,
     QPixmap,
 )
 from PyQt6.QtWidgets import (
@@ -31,6 +29,7 @@ from ..._internal import safe_connect
 from ..._motion import idle_loop_running, start_idle_loop
 from ..._styles import ColorText
 from ..._theme import ElaStatusRoleType, statusColor
+from ...ela_avatar import ElaAvatar, ElaAvatarShapeType
 from ...widget_base import ElaThemeWidget
 from .._theme import (
     accent_color,
@@ -46,74 +45,56 @@ from ..message import (
 )
 from ._helpers import (
     AVATAR_DEFAULT_SHAPE,
-    AVATAR_RADIUS,
     AVATAR_SIZE,
     ElaChatAvatarSource,
     ROLE_ICONS,
     _load_avatar_pixmap,
-    avatarPixmap,
     formatDuration,
     normalizeAvatarShape,
 )
 
 
-class _AvatarBadge(QWidget):
-    """头像徽标：主题色底 + ElaIcon 字形，可换自定义图片 / SVG（按形状裁切）。"""
+class _AvatarBadge(ElaAvatar):
+    """聊天头像：复用 ``ElaAvatar`` 的形状 / 图标 / 图片能力，只补角色配色。"""
 
     def __init__(self, role: str, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
         self._role = role
-        self._icon_name = ROLE_ICONS.get(role, ElaIconType.IconName.Comment)
-        self._bg = QColor()
-        self._border = QColor()
-        self._icon: Optional[QPixmap] = None
-        self._custom: Optional[QPixmap] = None
-        #: 自定义头像按 (宽, 高, DPR) 缩放后的缓存：固定尺寸下缩放结果是不变量，
-        #: 避免 paintEvent 每帧重做 SmoothTransformation。
-        self._scaled_custom: Optional[QPixmap] = None
-        self._scaled_custom_key: Optional[tuple] = None
-        self._shape = AVATAR_DEFAULT_SHAPE
+        self._shape_name = AVATAR_DEFAULT_SHAPE
         self._theme_mode = eTheme.getThemeMode()
-        self.setFixedSize(AVATAR_SIZE, AVATAR_SIZE)
+        self.setAvatarExtent(AVATAR_SIZE)
+        self.setIconName(ROLE_ICONS.get(role, ElaIconType.IconName.Comment))
         self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
         self._apply_theme()
-
-    def setIconName(self, iconName: ElaIconType.IconName) -> None:
-        """设置头像图标（``ElaIconType`` 成员）。"""
-        self._icon_name = iconName
-        self._apply_theme()
-        self.update()
-
-    def iconName(self):
-        """获取当前头像图标。"""
-        return self._icon_name
 
     def setShape(self, shape: str) -> None:
         """设置头像形状（``"circle"`` / ``"rounded"`` / ``"square"``；非法值回落默认）。"""
         shape = normalizeAvatarShape(shape)
-        if shape == self._shape:
+        if shape == self._shape_name:
             return
-        self._shape = shape
-        self.update()
+        self._shape_name = shape
+        super().setShape(
+            ElaAvatarShapeType.Rounded
+            if shape == "rounded"
+            else (
+                ElaAvatarShapeType.Square
+                if shape == "square"
+                else ElaAvatarShapeType.Circular
+            )
+        )
 
     def shape(self) -> str:
-        """获取当前头像形状。"""
-        return self._shape
+        """获取当前头像形状（聊天 API 的字符串形式）。"""
+        return self._shape_name
 
     def setImage(self, source: ElaChatAvatarSource) -> None:
         """设置自定义头像图（``None`` 清除并回退内置图标）。"""
-        self._custom = _load_avatar_pixmap(source, AVATAR_SIZE * 2)
-        self._scaled_custom = None
-        self._scaled_custom_key = None
-        self.update()
-
-    def image(self) -> Optional[QPixmap]:
-        """获取自定义头像图（未设置返回 ``None``）。"""
-        return None if self._custom is None else QPixmap(self._custom)
+        super().setImage(_load_avatar_pixmap(source, AVATAR_SIZE * 2))
 
     def hasCustomImage(self) -> bool:
         """是否已设置自定义头像图。"""
-        return self._custom is not None and not self._custom.isNull()
+        image = self.image()
+        return image is not None and not image.isNull()
 
     def setThemeMode(self, mode) -> None:
         """更新主题模式并重绘。"""
@@ -126,99 +107,15 @@ class _AvatarBadge(QWidget):
         text = text_color(mode)
         accent = accent_color(mode)
         if self._role == ElaChatRoleType.User:
-            self._bg = blend(base, accent, 0.22)
-            self._border = blend(base, accent, 0.38)
+            self.setBackgroundColor(blend(base, accent, 0.22))
         else:
-            self._bg = blend(base, text, 0.06)
-            self._border = blend(base, text, 0.14)
-        self._icon = avatarPixmap(
-            self._icon_name, int(AVATAR_SIZE * 0.62), text_color(mode)
-        )
-        self.update()
+            self.setBackgroundColor(blend(base, text, 0.06))
+        self.setForegroundColor(text)
 
-    def _shape_path(self) -> QPainterPath:
-        """头像外形路径（按当前形状生成圆 / 圆角方形 / 直角方形）。"""
-        rect = QRectF(self.rect())
-        path = QPainterPath()
-        if self._shape == "square":
-            path.addRect(rect)
-        elif self._shape == "rounded":
-            path.addRoundedRect(rect, AVATAR_RADIUS, AVATAR_RADIUS)
-        else:
-            path.addEllipse(rect)
-        return path
-
-    def _stroke_shape(self, painter: QPainter) -> None:
-        """按当前形状描边（1px，内缩半像素避免发虚）。"""
-        pen = QPen(self._border)
-        pen.setWidthF(1.0)
-        painter.setPen(pen)
-        painter.setBrush(Qt.BrushStyle.NoBrush)
-        rect = QRectF(self.rect()).adjusted(0.5, 0.5, -0.5, -0.5)
-        if self._shape == "square":
-            painter.drawRect(rect)
-        elif self._shape == "rounded":
-            painter.drawRoundedRect(rect, AVATAR_RADIUS, AVATAR_RADIUS)
-        else:
-            painter.drawEllipse(rect)
-
-    def paintEvent(self, _event) -> None:  # noqa: N802 (Qt 命名)
-        painter = QPainter(self)
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-        painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
-
-        clip = self._shape_path()
-        custom = self._custom
-        if custom is not None and not custom.isNull():
-            painter.setClipPath(clip)
-            dpr = self.devicePixelRatioF() or 1.0
-            key = (self.width(), self.height(), dpr)
-            if self._scaled_custom_key != key or self._scaled_custom is None:
-                target = QSize(
-                    max(1, int(self.width() * dpr)),
-                    max(1, int(self.height() * dpr)),
-                )
-                scaled = custom.scaled(
-                    target,
-                    Qt.AspectRatioMode.KeepAspectRatioByExpanding,
-                    Qt.TransformationMode.SmoothTransformation,
-                )
-                scaled.setDevicePixelRatio(dpr)
-                self._scaled_custom = scaled
-                self._scaled_custom_key = key
-            scaled = self._scaled_custom
-            offset = self._device_aligned_offset(
-                scaled.width() / dpr, scaled.height() / dpr, dpr
-            )
-            painter.drawPixmap(offset, scaled)
-            painter.setClipping(False)
-            self._stroke_shape(painter)
-            painter.end()
-            return
-
-        painter.setPen(Qt.PenStyle.NoPen)
-        painter.setBrush(self._bg)
-        painter.drawPath(clip)
-        self._stroke_shape(painter)
-        if self._icon is not None and not self._icon.isNull():
-            # 位图本身已按 DPR 渲染，但居中必须按逻辑尺寸算、落点对齐设备像素网格：
-            # 用物理尺寸居中会让图标落在半像素上，SmoothPixmapTransform 重采样后发虚。
-            dpr = self._icon.devicePixelRatio() or 1.0
-            painter.drawPixmap(
-                self._device_aligned_offset(
-                    self._icon.width() / dpr, self._icon.height() / dpr, dpr
-                ),
-                self._icon,
-            )
-        painter.end()
-
-    def _device_aligned_offset(
-        self, width: float, height: float, dpr: float
-    ) -> QPointF:
-        """把位图居中、并把左上角落到**设备像素整数网格**上（高 DPI 防发虚）。"""
-        x = (self.width() - width) / 2.0
-        y = (self.height() - height) / 2.0
-        return QPointF(round(x * dpr) / dpr, round(y * dpr) / dpr)
+    def _onThemeChanged(self, mode) -> None:  # noqa: N802 (Qt 命名)
+        super()._onThemeChanged(mode)
+        self._theme_mode = mode
+        self._apply_theme()
 
 
 STATUS_DOT_BREATH_MS = 600
@@ -447,8 +344,9 @@ class MessageHeader(ElaThemeWidget):
         self._avatar.setImage(source)
 
     def avatarImage(self) -> Optional[QPixmap]:
-        """获取自定义头像图（未设置返回 ``None``）。"""
-        return self._avatar.image()
+        """获取自定义头像图（未设置返回 ``None``；返回副本，调用方可安全修改）。"""
+        image = self._avatar.image()
+        return None if image is None else QPixmap(image)
 
     def setAvatarShape(self, shape: str) -> None:
         """设置头像形状（``"circle"`` / ``"rounded"`` / ``"square"``）。"""
