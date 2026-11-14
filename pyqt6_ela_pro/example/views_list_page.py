@@ -20,6 +20,7 @@ from PyQt6ElaWidgetTools import (
     ElaTreeView,
 )
 from .base_page import ExamplePage
+from pyqt6_ela_pro import ElaDiffView
 
 
 class ViewsListPage(ExamplePage):
@@ -34,6 +35,7 @@ class ViewsListPage(ExamplePage):
         self._demoTreeView(main_layout)
         self._demoTableView(main_layout)
         self._demoListView(main_layout)
+        self._demoDiffView(main_layout)
         self._demoSuggestBox(main_layout)
         self._demoKeyBinder(main_layout)
         self._demoScrollBar(main_layout)
@@ -312,4 +314,31 @@ class ViewsListPage(ExamplePage):
             nav.addWidget(btn)
         nav.addStretch()
         parent_layout.addLayout(nav)
+        parent_layout.addSpacing(20)
+
+    def _demoDiffView(self, parent_layout):
+        parent_layout.addLayout(
+            self._createHeaderRow(
+                "06. pyqt6_ela_pro - ElaDiffView 差异视图",
+                self._demoDiffView,
+            )
+        )
+        self._addInfoText(
+            "支持统一 diff 文本或 before/after 文件内容，带行号、折叠与横向滚动",
+            parent_layout,
+        )
+        diff = ElaDiffView(self)
+        diff.setFixedHeight(220)
+        diff.setDiff(
+            "--- a/demo.py\n"
+            "+++ b/demo.py\n"
+            "@@ -1,4 +1,4 @@\n"
+            " def greet(name):\n"
+            "-    print('hello ' + name)\n"
+            "+    print(f'hello {name}')\n"
+            " \n"
+            " greet('ela')\n",
+            "demo.py",
+        )
+        parent_layout.addWidget(diff)
         parent_layout.addSpacing(20)

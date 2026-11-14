@@ -9,6 +9,7 @@ from PyQt6ElaWidgetTools import (
     ElaPushButton,
     ElaScrollArea,
     ElaScrollPage,
+    ElaScrollPageArea,
     ElaText,
     ElaToggleSwitch,
 )
@@ -45,6 +46,7 @@ class ContainerLayoutPage(ExamplePage):
         self._demoDivider(main_layout)
         self._demoGroupBox(main_layout)
         self._demoFlowLayout(main_layout)
+        self._demoScrollPageArea(main_layout)
         self._demoDrawer(main_layout)
 
     def _demoDrawerArea(self, parent_layout):
@@ -382,6 +384,28 @@ class ContainerLayoutPage(ExamplePage):
             flow.addWidget(btn)
         container.setLayout(flow)
         parent_layout.addWidget(container)
+        parent_layout.addSpacing(20)
+
+    def _demoScrollPageArea(self, parent_layout):
+        parent_layout.addLayout(
+            self._createHeaderRow(
+                "08. PyQt6ElaWidgetTools - ElaScrollPageArea 卡片容器",
+                self._demoScrollPageArea,
+            )
+        )
+        self._addInfoText(
+            "带圆角边框与主题底色的内容容器，可通过 setBorderRadius 调整圆角",
+            parent_layout,
+        )
+        area = ElaScrollPageArea(self)
+        area.setFixedHeight(120)
+        area.setBorderRadius(8)
+        area_layout = QVBoxLayout(area)
+        area_layout.setContentsMargins(16, 16, 16, 16)
+        area_layout.addWidget(
+            ElaText("内容放在 ElaScrollPageArea 里，自动获得主题底色与圆角边框。", self)
+        )
+        parent_layout.addWidget(area)
         parent_layout.addSpacing(20)
 
     def _demoSiSideDrawer(self, parent_layout):

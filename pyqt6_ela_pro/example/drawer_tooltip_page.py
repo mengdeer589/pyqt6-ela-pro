@@ -7,7 +7,10 @@ from PyQt6ElaWidgetTools import (
     ElaColorDialog,
     ElaContentDialog,
     ElaDialog,
+    ElaIconType,
+    ElaLineEdit,
     ElaPushButton,
+    ElaTeachingTip,
     ElaText,
 )
 from pyqt6_ela_pro import (
@@ -59,6 +62,7 @@ class DrawerTooltipPage(ExamplePage):
         self._demoElaDialog(main_layout)
         self._demoContentDialog(main_layout)
         self._demoColorDialog(main_layout)
+        self._demoTeachingTip(main_layout)
 
     def _demoTooltip(self, parent_layout):
         parent_layout.addWidget(self._createSectionHeader("=== ela_ext - 提示组件 ==="))
@@ -541,3 +545,75 @@ class DrawerTooltipPage(ExamplePage):
         dlg = ElaColorDialog(self)
         names = [c.name() for c in dlg.getCustomColorList()]
         print("最近使用色：", names or "（空——得先自己选过色才有）")
+
+    def _demoTeachingTip(self, main_layout):
+        main_layout.addLayout(
+            self._createHeaderRow(
+                "12. PyQt6ElaWidgetTools - ElaTeachingTip 新手引导",
+                self._demoTeachingTip,
+            )
+        )
+        self._addInfoText(
+            "指向目标控件的引导浮层：标题 / 副标题 / 图标 + 动作与关闭按钮，"
+            "支持自定义内容与点击外部关闭",
+            main_layout,
+        )
+        btn_layout = QHBoxLayout()
+        btn_layout.setSpacing(15)
+        guide_btn = ElaPushButton("标准引导", self)
+        guide_btn.setFixedWidth(120)
+        custom_btn = ElaPushButton("自定义内容", self)
+        custom_btn.setFixedWidth(120)
+        light_btn = ElaPushButton("点击外部关闭", self)
+        light_btn.setFixedWidth(140)
+        btn_layout.addWidget(guide_btn)
+        btn_layout.addWidget(custom_btn)
+        btn_layout.addWidget(light_btn)
+        btn_layout.addStretch()
+        main_layout.addLayout(btn_layout)
+        main_layout.addSpacing(20)
+
+        guide_tip = ElaTeachingTip(self)
+        guide_tip.setTargetWidget(guide_btn)
+        guide_tip.setTitle("试试新的工作方式")
+        guide_tip.setSubTitle("提示会指向相关控件，帮助你了解功能和操作方式。")
+        guide_tip.setElaIcon(ElaIconType.IconName.Lightbulb)
+        guide_tip.setActionButtonText("了解更多")
+        guide_tip.setCloseButtonText("知道了")
+
+        custom_tip = ElaTeachingTip(self)
+        custom_tip.setTargetWidget(custom_btn)
+        custom_tip.setTitle("调整提示内容")
+        custom_tip.setSubTitle("提示中可以直接放置输入控件。")
+        custom_tip.setTipWidth(320)
+        # C++ setCustomWidget 接管所有权，但 sip 未标注 /Transfer/：给个父对象防 GC
+        content = QWidget(self)
+        content_layout = QVBoxLayout(content)
+        content_layout.setContentsMargins(0, 0, 0, 0)
+        content_layout.setSpacing(8)
+        name_edit = ElaLineEdit(content)
+        name_edit.setPlaceholderText("输入显示名称")
+        name_edit.setText("我的工作区")
+        content_layout.addWidget(name_edit)
+        custom_tip.setCustomWidget(content)
+        custom_tip.setActionButtonText("应用")
+        custom_tip.setCloseButtonText("取消")
+
+        light_tip = ElaTeachingTip(self)
+        light_tip.setTargetWidget(light_btn)
+        light_tip.setTitle("点击其他位置即可关闭")
+        light_tip.setSubTitle("点击或滚动提示外部区域，浮层会自动收起。")
+        light_tip.setIsLightDismissEnabled(True)
+
+        tips = (guide_tip, custom_tip, light_tip)
+
+        def _toggle(current):
+            was_open = current.getIsOpen()
+            for tip in tips:
+                tip.setIsOpen(False)
+            if not was_open:
+                current.setIsOpen(True)
+
+        guide_btn.clicked.connect(lambda: _toggle(guide_tip))
+        custom_btn.clicked.connect(lambda: _toggle(custom_tip))
+        light_btn.clicked.connect(lambda: _toggle(light_tip))

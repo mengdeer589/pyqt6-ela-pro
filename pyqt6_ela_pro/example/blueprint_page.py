@@ -6,7 +6,7 @@ import tempfile
 import traceback
 
 from PyQt6.QtCore import Qt, QTimer
-from PyQt6.QtGui import QFont
+from PyQt6.QtGui import QCursor, QFont
 from PyQt6.QtWidgets import QHBoxLayout
 from PyQt6ElaWidgetTools import (
     ElaComboBox,
@@ -24,6 +24,9 @@ from pyqt6_ela_pro import (
     ElaBlueprintCanvas,
     ElaBlueprintGraph,
     ElaButton,
+    ElaEdgeContextMenu,
+    ElaNodeContextMenu,
+    ElaNodeCreationMenu,
     register_node_type,
 )
 from pyqt6_ela_pro._styles import ColorText
@@ -1286,3 +1289,47 @@ class BlueprintPage(ExamplePage):
         self._demoDistributed(main_layout)
         self._demoNodeBody(main_layout)
         self._demoPersistence(main_layout)
+        self._demoContextMenus(main_layout)
+
+    def _demoContextMenus(self, main_layout):
+        main_layout.addLayout(
+            self._createHeaderRow(
+                "右键菜单组件", self._demoContextMenus
+            )
+        )
+        self._addInfoText(
+            "画布内置的三种菜单也可单独弹出：创建节点（可搜索）、节点菜单、连线菜单。",
+            main_layout,
+        )
+        row = QHBoxLayout()
+        row.setSpacing(12)
+
+        create_btn = ElaPushButton("创建节点菜单", self)
+        create_btn.setFixedWidth(140)
+        create_btn.clicked.connect(self._showCreationMenu)
+        row.addWidget(create_btn)
+
+        node_btn = ElaPushButton("节点右键菜单", self)
+        node_btn.setFixedWidth(140)
+        node_btn.clicked.connect(self._showNodeMenu)
+        row.addWidget(node_btn)
+
+        edge_btn = ElaPushButton("连线右键菜单", self)
+        edge_btn.setFixedWidth(140)
+        edge_btn.clicked.connect(self._showEdgeMenu)
+        row.addWidget(edge_btn)
+        row.addStretch()
+        main_layout.addLayout(row)
+        main_layout.addSpacing(20)
+
+    def _showCreationMenu(self):
+        menu = ElaNodeCreationMenu(self, owner=DEMO_OWNER)
+        menu.popup_at(QCursor.pos())
+
+    def _showNodeMenu(self):
+        menu = ElaNodeContextMenu("ctx-demo-node", self)
+        menu.exec(QCursor.pos())
+
+    def _showEdgeMenu(self):
+        menu = ElaEdgeContextMenu("ctx-demo-edge", self)
+        menu.exec(QCursor.pos())

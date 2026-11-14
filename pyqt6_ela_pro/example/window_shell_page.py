@@ -6,6 +6,7 @@ from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QColor, QLinearGradient, QPainter, QPixmap
 from PyQt6.QtWidgets import QHBoxLayout, QVBoxLayout, QWidget
 from PyQt6ElaWidgetTools import (
+    ElaAppBar,
     ElaAppBarType,
     ElaCheckBox,
     ElaDockWidget,
@@ -57,6 +58,7 @@ class WindowShellPage(ExamplePage):
         self._demoDockWidgets(main_layout)
         self._demoOpenInNewWindow(main_layout)
         self._demoCloseChain(main_layout)
+        self._demoAppBar(main_layout)
 
     def _host_window(self) -> ElaWindow | None:
         """宿主 ElaWindow；没有（守卫测试 / 单页预览）时返回 ``None``。"""
@@ -545,4 +547,26 @@ class WindowShellPage(ExamplePage):
                 )
             )
         )
+        parent_layout.addSpacing(20)
+
+    def _demoAppBar(self, parent_layout):
+        parent_layout.addLayout(
+            self._createHeaderRow(
+                "09. PyQt6ElaWidgetTools - ElaAppBar 独立标题栏",
+                self._demoAppBar,
+            )
+        )
+        self._addInfoText(
+            "ElaWindow 使用的无边框标题栏也可单独嵌进任意容器：图标、标题与系统按钮均可配置",
+            parent_layout,
+        )
+        bar = ElaAppBar(self)
+        bar.setFixedHeight(48)
+        for flag in (
+            ElaAppBarType.ButtonType.MinimizeButtonHint,
+            ElaAppBarType.ButtonType.MaximizeButtonHint,
+            ElaAppBarType.ButtonType.CloseButtonHint,
+        ):
+            bar.setWindowButtonFlag(flag, True)
+        parent_layout.addWidget(bar)
         parent_layout.addSpacing(20)

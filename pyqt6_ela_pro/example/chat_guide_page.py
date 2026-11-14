@@ -3,6 +3,17 @@
 from __future__ import annotations
 
 from pyqt6_ela_pro import ElaMarkdownViewer
+from PyQt6ElaWidgetTools import ElaIconType, ElaPushButton, ElaText
+from pyqt6_ela_pro import (
+    ElaChatInputDock,
+    ElaChatSearchBar,
+    ElaChatSuggestion,
+    ElaChatToolBar,
+    ElaMenuItem,
+    ElaSelectionPopup,
+    SuggestionPopup,
+)
+from PyQt6.QtGui import QCursor
 
 from .base_page import ExamplePage
 
@@ -436,6 +447,7 @@ class ChatGuidePage(ExamplePage):
             ("3. 关键 API 速查", self._demoApi),
             ("4. 真实后端（llm_test/agent_demo.py 全文）", self._demoAgentSource),
             ("5. 运行与依赖", self._demoRun),
+            ("6. 可独立复用的聊天 / 浮层组件", self._demoWidgets),
         )
         for title, demo in sections:
             main_layout.addSpacing(12)
@@ -859,3 +871,57 @@ python llm_test\agent_demo.py                 # 等价入口（直接起 AgentWo
 只装在本仓库 venv，不属于库的运行时依赖。
 """
         self._addMarkdown(main_layout, markdown)
+
+    def _demoWidgets(self, main_layout):
+        main_layout.addWidget(
+            ElaText("聊天与浮层组件可脱离 ElaChatWidget 单独嵌入。", self)
+        )
+        main_layout.addSpacing(8)
+
+        toolbar = ElaChatToolBar(self)
+        toolbar.addButton(icon=ElaIconType.IconName.Plus, text="新建", tooltip="新建会话")
+        toolbar.addButton(icon=ElaIconType.IconName.Comments, text="会话")
+        toolbar.addSeparator()
+        toolbar.addButton(icon=ElaIconType.IconName.Gear, text="设置", tooltip="打开设置")
+        toolbar.addStretch()
+        main_layout.addWidget(toolbar)
+        main_layout.addSpacing(12)
+
+        search_bar = ElaChatSearchBar(self)
+        search_bar.setQuery("diff")
+        search_bar.setState(6, 2)
+        main_layout.addWidget(search_bar)
+        main_layout.addSpacing(12)
+
+        dock = ElaChatInputDock(self)
+        dock.setTitle("附件")
+        dock.setWidget(ElaText("ElaChatInputDock 承载输入区上方可替换的附件面板。", self))
+        main_layout.addWidget(dock)
+        main_layout.addSpacing(12)
+
+        suggestions = [
+            ElaChatSuggestion("summarize", "总结对话", "提炼要点", "总结一下"),
+            ElaChatSuggestion("explain", "解释代码", "逐行说明", "解释这段代码"),
+            ElaChatSuggestion("translate", "翻译", "中英互译", "翻译成英文"),
+        ]
+        suggestion_popup = SuggestionPopup(self)
+        suggestion_popup.setItems(suggestions)
+        suggest_btn = ElaPushButton("显示候选建议（SuggestionPopup）", self)
+        suggest_btn.setFixedWidth(280)
+        suggest_btn.clicked.connect(lambda: suggestion_popup.open(suggestions))
+        main_layout.addWidget(suggest_btn)
+        main_layout.addSpacing(12)
+
+        selection_popup = ElaSelectionPopup(self)
+        selection_popup.setActions(
+            [
+                ElaMenuItem("copy", "复制"),
+                ElaMenuItem("explain", "解释"),
+                ElaMenuItem("translate", "翻译"),
+            ]
+        )
+        selection_btn = ElaPushButton("显示划词操作栏（ElaSelectionPopup）", self)
+        selection_btn.setFixedWidth(300)
+        selection_btn.clicked.connect(lambda: selection_popup.popupAt(QCursor.pos()))
+        main_layout.addWidget(selection_btn)
+        main_layout.addSpacing(20)

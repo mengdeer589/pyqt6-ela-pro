@@ -1,16 +1,14 @@
-"""Tests for splitter module: ElaSplitter, ElaSplitterHandle, create_ela_splitter."""
+"""Tests for splitter module: ElaSplitter (upstream binding) and create_ela_splitter."""
 
 from __future__ import annotations
 
 import pytest
 from PyQt6.QtCore import Qt
-from PyQt6.QtWidgets import QBoxLayout, QWidget
+from PyQt6.QtWidgets import QBoxLayout, QSplitter, QWidget
 
-from pyqt6_ela_pro.splitter import (
-    ElaSplitter,
-    ElaSplitterHandle,
-    create_ela_splitter,
-)
+from PyQt6ElaWidgetTools import ElaSplitter as BindingElaSplitter
+
+from pyqt6_ela_pro.splitter import ElaSplitter, create_ela_splitter
 
 
 @pytest.fixture
@@ -18,80 +16,31 @@ def splitter(make):
     return make(ElaSplitter)
 
 
-@pytest.fixture
-def handle(make, splitter):
-    """把手挂在 splitter 上（构造要求 parent）。"""
-    return make(ElaSplitterHandle, Qt.Orientation.Horizontal, splitter)
-
-
 class TestElaSplitter:
-    """Test cases for ElaSplitter class."""
+    """``ElaSplitter`` 直接复用绑定层实现。"""
+
+    def test_is_upstream_class(self):
+        """项目导出与绑定层是同一个类（不再本地重写）。"""
+        assert ElaSplitter is BindingElaSplitter
+        assert issubclass(ElaSplitter, QSplitter)
 
     def test_initialization_with_defaults(self, splitter):
         """Test splitter initializes with horizontal orientation."""
         assert splitter.orientation() == Qt.Orientation.Horizontal
-        assert splitter._handle_width == 6
 
     def test_initialization_with_custom_orientation(self, make):
         """Test splitter accepts custom orientation."""
-        splitter = make(ElaSplitter, orientation=Qt.Orientation.Vertical)
+        splitter = make(ElaSplitter, Qt.Orientation.Vertical)
         assert splitter.orientation() == Qt.Orientation.Vertical
 
-    def test_children_not_collapsible_by_default(self, splitter):
-        """Test splitter children are not collapsible by default."""
-        assert splitter.childrenCollapsible() is False
-
-    def test_set_handle_width(self, splitter):
-        """Test setHandleWidth updates handle width."""
-        splitter.setHandleWidth(10)
-        assert splitter._handle_width == 10
-        assert splitter.handleWidth() == 10
-
-    def test_set_grip_length(self, splitter):
-        """Test set_grip_length updates grip length."""
-        splitter.set_grip_length(50)
-        assert splitter._grip_length == 50
-        assert splitter.grip_length() == 50
-
-    def test_create_handle_returns_ela_splitter_handle(self, splitter):
-        """Test createHandle returns an ElaSplitterHandle."""
-        assert isinstance(splitter.createHandle(), ElaSplitterHandle)
-
-    def test_handle_inherits_grip_length(self, splitter):
-        """Test createHandle sets grip length on handle."""
-        splitter.set_grip_length(50)
-        assert splitter.createHandle().get_grip_length() == 50
-
-
-class TestElaSplitterHandle:
-    """Test cases for ElaSplitterHandle class."""
-
-    def test_initialization(self, handle, splitter):
-        """Test handle initializes with orientation and parent."""
-        assert handle.orientation() == Qt.Orientation.Horizontal
-        assert handle.parent() is splitter
-
-    def test_grip_length_roundtrip(self, handle):
-        """Test set/get_grip_length round-trips."""
-        handle.set_grip_length(24)
-        assert handle._grip_length == 24
-        assert handle.get_grip_length() == 24
-
-    @pytest.mark.parametrize(
-        ("attr", "expected"),
-        [("_is_hover", False), ("_is_pressed", False)],
-    )
-    def test_initial_state(self, handle, attr, expected):
-        assert getattr(handle, attr) == expected
-
-    def test_has_theme_connection(self, handle):
-        """Test handle connects to theme change signal."""
-        assert hasattr(handle, "_onThemeChanged")
-
-    def test_delete_later_disconnects_theme(self, handle, splitter):
-        """Test deleteLater disconnects theme signal without error."""
-        handle.deleteLater()
-        splitter.deleteLater()
+    def test_add_widgets_and_sizes(self, make, splitter):
+        """分割器可正常添加子控件并设置比例。"""
+        first, second = make(QWidget), make(QWidget)
+        splitter.addWidget(first)
+        splitter.addWidget(second)
+        splitter.setSizes([100, 200])
+        assert splitter.count() == 2
+        assert len(splitter.sizes()) == 2
 
 
 class TestCreateElaSplitter:
