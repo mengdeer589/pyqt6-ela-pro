@@ -63,17 +63,9 @@ class ElaDialogBase(ElaContentDialog):
         self.setRightButtonText("确定")
 
         if middleText is None:
-            try:
-                btn = self.findChild(QPushButton, "middleButton")
-            except Exception:
-                btn = None
-            if btn is not None:
-                btn.setVisible(False)
-            else:
-                for btn in self.findChildren(QPushButton):
-                    if btn.text() == "minimum":
-                        btn.setVisible(False)
-                        break
+            middle = self._find_action_button(1)
+            if middle is not None:
+                middle.setVisible(False)
         else:
             self.setMiddleButtonText(middleText)
             # 存成实例属性：disconnect 要拿到**同一个可调用对象**（lambda / partial
@@ -82,6 +74,19 @@ class ElaDialogBase(ElaContentDialog):
             self.middleButtonClicked.connect(self._middleBtnSlot)
 
         self._initParamArea(title)
+
+    def _find_action_button(self, index: int) -> Optional[QPushButton]:
+        """按构造顺序取底部动作按钮（0=左 1=中 2=右）。
+
+        上游没有暴露按钮对象；V3.0 的中键默认文案是「最小化」（旧版 "minimum"），
+        按文本匹配会漏掉。这里按 objectName + 构造顺序取，避开关闭图标按钮。
+        """
+        buttons = [
+            btn
+            for btn in self.findChildren(QPushButton)
+            if btn.objectName() == "ElaPushButton"
+        ]
+        return buttons[index] if 0 <= index < len(buttons) else None
 
     def _initParamArea(self, title: str = "标题") -> None:
         """初始化主体内容区域。"""

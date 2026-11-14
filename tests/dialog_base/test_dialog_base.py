@@ -69,6 +69,41 @@ class TestElaDialogBase:
         dlg.deleteLater()
         parent.deleteLater()
 
+    def test_middle_button_hidden_by_default(self, qapp):
+        """默认只显示左/右两个按钮。
+
+        V3.0 把中键默认文案从 "minimum" 改成「最小化」，按文本找按钮会漏；
+        这里钉住「构造顺序取按钮」的行为，避免示例代码弹窗多出「最小化」。
+        """
+        parent = QWidget()
+        dlg = ElaDialogBase(parent=parent)
+        dlg.show()
+        qapp.processEvents()
+        visible = [
+            btn.text()
+            for btn in dlg.findChildren(QPushButton)
+            if btn.isVisible() and btn.objectName() == "ElaPushButton"
+        ]
+        assert visible == ["取消", "确定"]
+        dlg.close()
+        dlg.deleteLater()
+        parent.deleteLater()
+
+    def test_middle_button_visible_when_text_given(self, qapp):
+        parent = QWidget()
+        dlg = ElaDialogBase(parent=parent, middleText="稍后提醒")
+        dlg.show()
+        qapp.processEvents()
+        visible = [
+            btn.text()
+            for btn in dlg.findChildren(QPushButton)
+            if btn.isVisible() and btn.objectName() == "ElaPushButton"
+        ]
+        assert visible == ["取消", "稍后提醒", "确定"]
+        dlg.close()
+        dlg.deleteLater()
+        parent.deleteLater()
+
     def test_create_with_middle_text(self, qapp):
         parent = QWidget()
         dlg = ElaDialogBase(parent=parent, middleText="稍后提醒")
