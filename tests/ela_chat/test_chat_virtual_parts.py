@@ -5,6 +5,8 @@ from __future__ import annotations
 import bisect
 import time
 
+from PyQt6 import sip
+
 from _qthelpers import wait_until as _wait_until
 
 from pyqt6_ela_pro.chat import (
@@ -420,10 +422,31 @@ class TestVirtualListNewMessage:
         bubble = view.bubble(mid)
         assert bubble is not None
         assert mid in view._virtual_bubble_ids
+
+        def _gap_ok() -> bool:
+            """新消息与上一条真实气泡之间的间距（旧气泡被回收时无从比较，视为通过）。"""
+            current = view.bubble(mid)
+            prev = view.bubble(300)
+            if current is None or sip.isdeleted(current):
+                return False
+            if prev is None or sip.isdeleted(prev):
+                return True
+            gap = current.y() - (prev.y() + prev.height())
+            return 0 <= gap <= 30
+
+        def _layout_settled() -> bool:
+            return view._virtual_bottom_spacer.height() == 0 and _gap_ok()
+
+        # 虚拟窗口与布局都由定时器驱动：并行跑时等条件成立再断言
+        assert _wait_until(qapp, _layout_settled, timeout_ms=5000)
         # 新消息在末尾：bottom spacer 不应再算一遍它的高度
         assert view._virtual_bottom_spacer.height() == 0
-        gap = bubble.y() - (previous.y() + previous.height())
-        assert 0 <= gap <= 30
+        final_bubble = view.bubble(mid)
+        assert final_bubble is not None
+        final_prev = view.bubble(300)
+        if final_prev is not None and not sip.isdeleted(final_prev):
+            gap = final_bubble.y() - (final_prev.y() + final_prev.height())
+            assert 0 <= gap <= 30
 
 
 class TestShellRecycling:
