@@ -54,7 +54,7 @@ _FAKE_REPLIES = {
 class SelectionAssistantPage(ExamplePage):
     """划词助手：全局划词监听、动作条与事件演示。"""
 
-    PAGE_TITLE = "[ela_ext] 划词助手"
+    PAGE_TITLE = "划词助手"
 
     assistantStateChanged = pyqtSignal(bool)
 
@@ -92,7 +92,9 @@ class SelectionAssistantPage(ExamplePage):
             "在任意应用拖选文本（或双击选词），动作条会出现在光标附近；"
             "取词通过模拟 Ctrl+C 完成，默认会恢复原剪贴板。"
             "文字+图片混选只取文字，纯图片选区不弹窗；"
-            "助手不拦截键盘，用户自己的 Ctrl+C / Ctrl+V 不受影响。",
+            "助手不拦截键盘，用户自己的 Ctrl+C / Ctrl+V 不受影响。"
+            "若大段拖选不弹：看日志里的 captureBlocked（内置过滤器默认 600px）"
+            "与 captureFailed（取词超时 / 修饰键闸门）。",
             self,
         )
         info.setTextPixelSize(14)
@@ -142,6 +144,7 @@ class SelectionAssistantPage(ExamplePage):
         layout.addWidget(scope_label)
         self._scope_combo = ElaComboBox(row)
         self._scope_combo.addItem("内置过滤器（推荐）", "builtin")
+        self._scope_combo.addItem("Office 长选（2000px）", "office")
         self._scope_combo.addItem("仅双击选词", "off")
         self._scope_combo.addItem("不限制（会向任意应用注入）", "all")
         self._scope_combo.currentIndexChanged.connect(self._on_scope_changed)
@@ -214,6 +217,11 @@ class SelectionAssistantPage(ExamplePage):
         elif scope == "off":
             assistant.setCaptureFilter(None)
             assistant.setRequireFilterForDrag(True)
+        elif scope == "office":
+            assistant.setCaptureFilter(
+                ElaSelectionAssistant.builtinDragFilter(maxDragPx=2000)
+            )
+            assistant.setRequireFilterForDrag(True)
         else:
             assistant.setCaptureFilter(ElaSelectionAssistant.builtinDragFilter())
             assistant.setRequireFilterForDrag(True)
@@ -223,7 +231,8 @@ class SelectionAssistantPage(ExamplePage):
         if self._assistant is not None:
             self._apply_scope(self._assistant)
         hint = {
-            "builtin": "拖选仅在同窗口、非边框、短距离时取词",
+            "builtin": "同窗口、非边框；普通进程 600px，Office 进程自动放宽到 4000px",
+            "office": "同窗口、非边框、2000px 内取词（强制，不区分进程）",
             "off": "仅双击选词（不注入拖选那条 Ctrl+C）",
             "all": "不限制：任意拖选都会向前台注入 Ctrl+C",
         }[scope]
@@ -297,7 +306,8 @@ class SelectionAssistantPage(ExamplePage):
     def _demoEvents(self, main_layout):
         info = ElaText(
             "selectionCaptured / actionTriggered / popupShown / popupHidden / "
-            "errorOccurred 信号都会记录在下方；宿主实现示例：copy 动作写剪贴板。",
+            "captureBlocked / captureFailed / restoreSkipped / errorOccurred "
+            "都会记录在下方；宿主实现示例：copy 动作写剪贴板。",
             self,
         )
         info.setTextPixelSize(14)
@@ -329,9 +339,9 @@ class SelectionAssistantPage(ExamplePage):
             assistant.popupShown.connect(self._on_popup_shown)
             assistant.popupHidden.connect(lambda: self._log_line("popupHidden"))
             assistant.errorOccurred.connect(self._on_error)
-            assistant.captureBlocked.connect(
-                lambda reason: self._log_line(f"captureBlocked：{reason}")
-            )
+            assistant.captureBlocked.connect(self._on_capture_blocked)
+            assistant.capture().failed.connect(self._on_capture_failed)
+            assistant.capture().restoreSkipped.connect(self._on_restore_skipped)
             assistant.popup().setCompactMode(self._compact_switch.getIsToggled())
             assistant.capture().setRestoreClipboard(self._restore_switch.getIsToggled())
             assistant.setMinSelectionLength(int(self._length_combo.currentData() or 1))
@@ -339,6 +349,15 @@ class SelectionAssistantPage(ExamplePage):
             self._assistant = assistant
             self._apply_scope(assistant)
             self._apply_actions()
+            self._log_line(
+                "助手配置：拖选={}；双击={}ms；取词超时={}ms；最小长度={}；恢复剪贴板={}".format(
+                    self._scope_combo.currentText(),
+                    assistant.doubleClickMs(),
+                    assistant.capture().timeoutMs(),
+                    assistant.minSelectionLength(),
+                    assistant.capture().restoreClipboard(),
+                )
+            )
         return self._assistant
 
     def _on_assistant_state_changed(self, enabled: bool) -> None:
@@ -346,7 +365,29 @@ class SelectionAssistantPage(ExamplePage):
 
     def _on_selection_captured(self, text: str, pos) -> None:
         preview = text.strip().replace("\n", " ")[:40]
-        self._log_line(f"selectionCaptured：{preview!r} @ ({pos.x()}, {pos.y()})")
+        self._log_line(
+            f"selectionCaptured：{len(text)} 字，预览 {preview!r} @ ({pos.x()}, {pos.y()})"
+        )
+
+    def _on_capture_blocked(self, reason: str) -> None:
+        detail = {
+            "drag-without-filter": "未设过滤器，拖选被默认闸门拦截",
+            "filter-denied": "过滤器拒绝：超长拖拽 / 窗口边框 / 跨窗口",
+            "filter-error": "过滤器异常，按拦截处理",
+        }.get(reason, "未知原因")
+        self._log_line(f"captureBlocked：{reason}（{detail}）")
+
+    def _on_capture_failed(self) -> None:
+        self._log_line(
+            "captureFailed：未取到文本（修饰键按住 / 200ms 内连续注入 / "
+            "前台窗口未收到 Ctrl+C / 超时）"
+        )
+
+    def _on_restore_skipped(self) -> None:
+        reason = ""
+        if self._assistant is not None:
+            reason = self._assistant.capture().lastRestoreSkipReason()
+        self._log_line(f"restoreSkipped：{reason or '未知'}")
 
     def _on_popup_shown(self, text: str, pos) -> None:
         self._log_line(f"popupShown：{len(text)} 字 @ ({pos.x()}, {pos.y()})")
@@ -496,6 +537,11 @@ class SelectionAssistantPage(ExamplePage):
         return None
 
     def _log_line(self, message: str) -> None:
+        # 同时打到控制台：Office 测试时窗口可能被挡住，终端里也能看到事件
+        try:
+            print(f"[selection] {message}", flush=True)
+        except Exception:  # noqa: BLE001 - pythonw / 无控制台
+            pass
         if self._log is None:
             return
         stamp = datetime.now().strftime("%H:%M:%S")
@@ -512,9 +558,15 @@ class SelectionAssistantPage(ExamplePage):
             cursor.removeSelectedText()
         self._log.verticalScrollBar().setValue(self._log.verticalScrollBar().maximum())
 
-    def closeEvent(self, event) -> None:  # noqa: N802 (Qt 命名)
+    def shutdown(self) -> None:
+        """主窗口退出前停掉全局监视 / 在途取词（定时器不能再碰剪贴板）。"""
         if self._assistant is not None:
             self._assistant.setEnabled(False)
+            self._assistant.capture().cancel()
+            self._assistant.hide()
+
+    def closeEvent(self, event) -> None:  # noqa: N802 (Qt 命名)
+        self.shutdown()
         # 结果对话框是无父顶层窗：必须显式 close + deleteLater，光靠父窗口
         # 析构带不走它，会留在屏幕上（测试 tests/selection_assistant 守着同一条）。
         if self._result_dialog is not None:

@@ -1,4 +1,4 @@
-"""[pyqt6_ela_pro] 下拉框组件页面。"""
+"""下拉框家族示例页。"""
 
 from PyQt6.QtWidgets import QHBoxLayout
 
@@ -43,9 +43,9 @@ COMBO_BOX_ITEMS = [
 
 
 class ComboBoxPage(ExamplePage):
-    """下拉框组件页面。"""
+    """下拉框家族示例页。"""
 
-    PAGE_TITLE = "下拉框组件"
+    PAGE_TITLE = "下拉框家族"
 
     def __init__(self, parent=None):
         super().__init__(parent)

@@ -1,12 +1,9 @@
 """示例页的节标题不许重复（同一分组内编号也不许撞号）。
 
-用户报的现象：``容器与布局`` 页的「01. ela_ext - ElaDrawer 四方向抽屉」连着出现
-两次 —— ``_addDemoContent`` 同时调了 ``_demoDrawer``（内部又调 ``_demoSiSideDrawer``）
-和 ``_demoSiSideDrawer``，同一段内容渲染两遍。
-
-同一处还叠着第二层问题：那个页面的编号是 ``01 02 02a 02 03 04 13 01 00``
-（两个 ``02``、一个 ``13``），因为 ``_demoScrollPage`` / ``_demoElaDrawerArea``
-在 ``_addDemoContent`` 里的调用位置与编号意图对不上。两类都值得机器守住。
+用户报的现象：``容器与布局`` 页的同一节标题连着出现两次 ——
+``_addDemoContent`` 同时调了外层分组方法和它内部调到的 demo，同一段内容渲染两遍。
+同一处还叠着第二层问题：页面编号有多处重复 / 跳号，因为 ``_addDemoContent``
+里的调用位置与编号意图对不上。两类都值得机器守住。
 
 分组识别按**渲染顺序**（沿 ``_addDemoContent`` 的调用链展开）而不是源码行号 ——
 ``_createSectionHeader("=== xxx ===")`` 常常写在包裹它的 demo 方法里，源码位置

@@ -256,7 +256,9 @@ chart.setChartTheme("brand")
 - 优先级：`option` 显式颜色（`color` / `series.color` / `itemStyle.color` /
   `backgroundColor` / 组件 `textStyle`）> 图表主题 > eTheme。
 - 色带作用于 `visualMap` / 直角与日历 `heatmap` / `image` / `map` 的默认
-  配色；显式 `visualMap.inRange.colors` / `series.cmap` 仍优先。
+  配色；显式 `visualMap.inRange.colors` / `series.cmap` 仍优先。未写
+  `color.ramp` 时按 `color.primary.subtle`（不透明画布底 + 12% 主色）→
+  `color.primary` 生成 —— 暗色档的低端是深色底，不是白色。
 - `registerChartTheme` 严格校验：主题名、色板非空、颜色可解析、槽位键合法、
   `color.ramp` ≥ 2 色；同名注册会合并未给的段（只改 dark 不会丢 light）。
 - `unregisterChartTheme` 可移除自定义 / 非 `ela` 内置主题；移除当前默认

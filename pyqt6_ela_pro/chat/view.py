@@ -157,6 +157,7 @@ class ElaChatView(
         self._content_max_width = _CONTENT_MAX_WIDTH
         self._reasoning_style = ElaChatReasoningStyleType.Collapse
         self._tool_grouping = True
+        self._permission_always_allow_hold = True
         self._tool_default_open = toolDefaultOpen
         self._stats_mode = "footer"
         self._disclaimer_text = DISCLAIMER_TEXT

@@ -108,11 +108,12 @@ uv pip install -e .
 # 或 pip
 pip install -e .
 
-# 全部可选能力（pywin32 / comtypes / pygments / tsdownsample / mermaidx / orjson / polars）
+# 全部可选能力（pywin32 / comtypes / pygments / tsdownsample / mermaidx / orjson / polars / matplotlib / pyqtgraph）
 uv pip install -e ".[all]"
 
 # 按需安装
 uv pip install -e ".[parquet]"   # ElaParquetTable（polars）
+uv pip install -e ".[canvases]"  # ElaPlotWidget / ElaFigureCanvas（pyqtgraph / matplotlib）
 uv pip install -e ".[dev]"       # 开发依赖（pytest 等）
 ```
 
@@ -209,8 +210,6 @@ sys.exit(app.exec())
 | **ElaUploadArea** | 文件上传区域（拖拽+点击，后缀/大小/数量校验） |
 | **ElaField** | 表单字段外壳：标题 + 必填 `*` + 编辑器槽（走 `ElaWidgetOwnershipType` 三态）+ 辅助文字 + 三态校验行（Error / Warning / Success） |
 | **ElaFieldStatusType** | 校验状态：`None_` / `Error` / `Warning` / `Success` |
-| **ElaSelectorBar** | 分段控件：三关键帧「压扁-移动-绽开」的动画指示器、溢出时两端箭头滚动或「更多」按钮、键盘可达、RTL 全量镜像 |
-| **SelectorBarItem / ElaSelectorBarOverflowType / ElaHitType** | 一个分段的模型 / 溢出交互方式 / 命中区域（内部） |
 | **ElaGhostBox** | 幽灵下拉框（透明无边框触发器 / 分组标题行 / 弹层底部固定按钮区；继承搜索与拼音过滤，`setSearchVisible(False)` 可关搜索） |
 
 > 所有下拉框组件都提供 `items` 属性获取选项列表。
@@ -238,6 +237,7 @@ sys.exit(app.exec())
 | **ElaToolTip** | 自定义工具提示 |
 | **ElaStateToolTip** | 加载 / 完成状态提示（宽度随内容自适应，完成自动淡出） |
 | **ElaToolTipPositionType** | 提示位置枚举 |
+| **ElaSpotlight** | 引导遮罩（单目标/多步骤，淡入淡出） |
 
 #### 导航与布局
 
@@ -247,7 +247,8 @@ sys.exit(app.exec())
 | **ElaDrawerPositionType** | 抽屉方向枚举 |
 | **ElaSteps** | 步骤条（多步引导，前进/后退；水平/垂直） |
 | **ElaPagination** | 分页（页码按钮、省略号、跳转输入框） |
-| **ElaSpotlight** | 引导遮罩（单目标/多步骤，淡入淡出） |
+| **ElaSelectorBar** | 分段控件：三关键帧「压扁-移动-绽开」的动画指示器、溢出时两端箭头滚动或「更多」按钮、键盘可达、RTL 全量镜像 |
+| **SelectorBarItem / ElaSelectorBarOverflowType / ElaHitType** | 一个分段的模型 / 溢出交互方式 / 命中区域（内部） |
 | **ElaDivider** | 分割线（水平/垂直/文字/虚线） |
 | **ElaSplitter** | 主题感知分割器（定制 Handle，悬停变色） |
 | **ElaSplitterHandle** | 分割器手柄（由 `ElaSplitter` 内部创建，宿主一般不直接用） |
@@ -396,14 +397,12 @@ python -m pyqt6_ela_pro.example
 
 | 分组 | 页面 |
 |---|---|
-| 基础组件 | 输入与选择 / 下拉框组件 / 容器与布局 / 视图与列表 / 按钮与菜单 / 进度与反馈 / Fluent 与补充组件 |
-| 数据与图表 | 表格（ElaDataTable / ElaParquetTable）/ 图表（第三方库：pyqtgraph / matplotlib / 仪表盘）/ ElaChartWidget 图表工作台 |
-| 内容渲染 | Markdown（文本 / 代码 / 公式 / Mermaid / 流式） |
-| AI 对话 | AI 聊天实验台：多话题聊天 + 输入区 + 右侧 `ElaSplitter` 特性面板（`ElaPivot` 分基础 / 工具 / Agent / 时间线 / 会话 / 输入） |
-| 窗口与应用外壳 | ElaWindow 应用外壳（本页操作主窗口：导航栏模式、窗口按钮、背景绘制、内容堆栈、dock、新窗口打开、关闭链路）/ 弹窗与提示 / 启动与托盘 |
-| 系统交互与嵌入 | 外部内容嵌入（窗口 / 浏览器）/ 终端输出 / 划词助手 |
+| 基础组件 | 输入与表单 / 下拉框家族 / 按钮、菜单与命令栏 / 容器与布局 / 视图与列表 / 导航与工具 / 反馈与状态 / 卡片与展示 / 弹窗与浮层 |
+| 数据与图表 | 表格（ElaDataTable / ElaParquetTable）/ ElaChartWidget 图表工作台 / 第三方图表与图形（pyqtgraph / matplotlib / 仪表盘 / 图形视图） |
+| 内容渲染 | Markdown（文本 / 代码 / 公式 / Mermaid / 流式）/ 终端与差异（`ElaTerminalView` + `ElaDiffView`） |
+| AI 对话 | AI 聊天实验台（多话题聊天 + 输入区 + 右侧 `ElaSplitter` 特性面板）/ 聊天组件 API 指南（用 `ElaMarkdownViewer` 渲染 `llm_test` 源码快照） |
 | 动效与图形 | 动画与图标 / 节点图编辑器 |
-| 参考文档 | 聊天组件 API 指南（用 `ElaMarkdownViewer` 渲染 `llm_test` 源码快照） |
+| 窗口与系统 | ElaWindow 应用外壳（本页操作主窗口：导航栏模式、窗口按钮、背景绘制、内容堆栈、dock、新窗口打开、关闭链路）/ 启动、托盘与任务栏 / 外部内容嵌入（窗口 / 浏览器）/ 划词助手 |
 
 > 窗口 / 浏览器嵌入等页面依赖可选依赖（`pywin32` / `comtypes`）；
 > 缺失时对应页面会降级为说明文字，不影响其它页面。
@@ -433,8 +432,8 @@ python -m pyqt6_ela_pro.example
 | mermaidx | `[all]` | Markdown Mermaid 图渲染（缺失回退代码卡片） |
 | orjson | `[all]` | 聊天 JSON 编解码加速（缺失回退标准库 json） |
 | polars | `[all]` / `[parquet]` | `ElaParquetTable` Parquet 查看 |
-| pyqtgraph | 手动安装 | `ElaPlotWidget` |
-| matplotlib | 手动安装 | `ElaFigureCanvas` |
+| pyqtgraph | `[all]` / `[canvases]` | `ElaPlotWidget` |
+| matplotlib | `[all]` / `[canvases]` | `ElaFigureCanvas` |
 
 ## 设计原则
 

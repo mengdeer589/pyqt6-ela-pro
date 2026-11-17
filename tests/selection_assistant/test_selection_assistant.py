@@ -237,10 +237,19 @@ class TestGestures:
 
     def test_two_slow_clicks_ignored(self, qapp):
         assistant, monitor, capture = self._enabled(qapp)
+        assistant.setDoubleClickMs(200)
         monitor.leftReleased.emit((100, 100), (100, 100))
-        time.sleep(0.45)
+        time.sleep(0.25)
         monitor.leftReleased.emit((100, 100), (100, 100))
         assert capture.count == 0
+        _dispose(qapp, assistant)
+
+    def test_default_double_click_follows_system(self, qapp, monkeypatch):
+        monkeypatch.setattr(assistant_module, "double_click_time", lambda: 650)
+        assistant, _monitor, _capture = _make(qapp)
+        assert assistant.doubleClickMs() == 650
+        assistant.setDoubleClickMs(300)
+        assert assistant.doubleClickMs() == 300
         _dispose(qapp, assistant)
 
     def test_drag_threshold_configurable(self, qapp):

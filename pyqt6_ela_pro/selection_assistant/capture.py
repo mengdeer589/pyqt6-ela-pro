@@ -24,8 +24,9 @@ from ._native import (
 _DEFAULT_CAPTURE_DELAY_MS = 80
 #: 默认剪贴板轮询间隔（毫秒）
 _DEFAULT_POLL_MS = 10
-#: 默认取词超时（毫秒）
-_DEFAULT_TIMEOUT_MS = 250
+#: 默认取词超时（毫秒）。Office 大段选区实测 5 万字 ~330ms / 10 万字 ~420ms；
+#: 250ms 会稳定漏掉大选区，留到 1s 覆盖常见长文档。
+_DEFAULT_TIMEOUT_MS = 1000
 #: 默认取词成功后恢复剪贴板的延迟（毫秒）
 _DEFAULT_RESTORE_DELAY_MS = 120
 #: 检测到图片但还没有文本时额外等待的毫秒数（大图首次写入可能超过基础超时）

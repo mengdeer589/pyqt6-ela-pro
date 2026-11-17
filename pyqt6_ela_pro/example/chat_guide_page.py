@@ -438,7 +438,7 @@ if __name__ == "__main__":
 class ChatGuidePage(ExamplePage):
     """聊天组件使用指南（Markdown 渲染，代码为 llm_test 源码快照）。"""
 
-    PAGE_TITLE = "[ela_ext] 聊天组件指南"
+    PAGE_TITLE = "聊天组件 API 指南"
 
     def _addDemoContent(self, main_layout):
         sections = (
@@ -591,7 +591,7 @@ binder 和窗口（本页示例里 `worker` 就是这个角色）。
 | 层 | 宿主 API（可以依赖） | 内部协议 / 性能开关（别依赖） |
 |---|---|---|
 | `ElaChatWidget` | 回合（`beginAssistantMessage` / `endAssistantMessage` / `stopGeneration` / `setMessageError`）、提交与排队、dock、`setCurrentSessionId`（纯标记） | —— （内容方法已全部移除，见上面的提示） |
-| `ElaChatView` | 建 / 改 / 读消息：`addMessage` / `addMessageFromDict` / `restoreMessages` / `removeMessage` / `appendText` / `addToolCall` / `setStepStats` / `setMessageTitle` / `setMessageError` / `messageError` / `clearMessageError` …；agent 能力：`beginPermission` / `resolvePermission` / `pendingPermissions` / `beginCompaction` / `appendCompactionSummary` / `endCompaction` / `addSteerNotice`；外观：`setReasoningStyle` / `setStatsMode` / `setToolGrouping` / `setToolDefaultOpen` / `setAvatar*` / `setCopyNotificationEnabled` / `setWaitingPlaceholderEnabled` / `setContentMaxWidth`；持久化：`exportSession` / `importSession`；虚拟化：`materializeMessage` / `scrollToMessage` / `setVirtualPartsEnabled` / `setShellVirtualizationEnabled` / `setVirtualListEnabled` | **性能开关**：`beginBatch` / `endBatch`（历史骨架 + 渐进渲染）、`setViewportSuspension`（视口外挂起）、`setResizeReflowDeferred`（交互 resize 延迟重排）；**渲染内部**：`bubble` / `contentWidget` / `holdFollow` / `jumpThreshold` / `isBatchActive` / `guardNestedScroll`。单条消息的延迟渲染（`setRenderDeferred` / `flushRender` / `hasPendingRender`）**只在 `bubble` 上**，view 仅在批量路径内部调用 |
+| `ElaChatView` | 建 / 改 / 读消息：`addMessage` / `addMessageFromDict` / `restoreMessages` / `removeMessage` / `appendText` / `addToolCall` / `setStepStats` / `setMessageTitle` / `setMessageError` / `messageError` / `clearMessageError` …；agent 能力：`beginPermission` / `resolvePermission` / `pendingPermissions` / `beginCompaction` / `appendCompactionSummary` / `endCompaction` / `addSteerNotice`；外观：`setReasoningStyle` / `setStatsMode` / `setToolGrouping` / `setToolDefaultOpen` / `setAvatar*` / `setCopyNotificationEnabled` / `setWaitingPlaceholderEnabled` / `setPermissionAlwaysAllowHoldEnabled` / `setContentMaxWidth`；持久化：`exportSession` / `importSession`；虚拟化：`materializeMessage` / `scrollToMessage` / `setVirtualPartsEnabled` / `setShellVirtualizationEnabled` / `setVirtualListEnabled` | **性能开关**：`beginBatch` / `endBatch`（历史骨架 + 渐进渲染）、`setViewportSuspension`（视口外挂起）、`setResizeReflowDeferred`（交互 resize 延迟重排）；**渲染内部**：`bubble` / `contentWidget` / `holdFollow` / `jumpThreshold` / `isBatchActive` / `guardNestedScroll`。单条消息的延迟渲染（`setRenderDeferred` / `flushRender` / `hasPendingRender`）**只在 `bubble` 上**，view 仅在批量路径内部调用 |
 | `ElaChatBubble` | 取子控件与形态：`actions()` / `footer()` / `meta()` / `header()` / `text()` / `parts()` / `markdownViewer()` / `inlineReasoningViewer()` / `statsBadge()` / `toolPanels()` / `setAvatarShape()` / `setActionsHoverReveal()` | 其余 `beginText` / `appendText` / `addToolCall` / `setParts` / `setPartsDeferred` / `materializeParts` / `partsDeferred` / `partsWindowed` / `expandParts` / `setStatus` / `setStepStats` / `setRenderDeferred` … 是 **view ↔ bubble 内部协议**：宿主改消息请走 view 层，否则会绕过 `_sync_parts` 派生结算与 `_dirty_syncs` 防抖 |
 
 ## Input（输入区，经 `chatInput()` 调用）
@@ -652,6 +652,7 @@ binder 和窗口（本页示例里 `worker` 就是这个角色）。
 | `pendingPermissions(messageId)` / `permissionCard(messageId, requestId)` / `interactivePermissionCard(messageId, requestId)` / `permissionAnswers(messageId, requestId)` | 读审批状态。`permissionCard` 只返回时间线上的**记录卡**（等待期间是 `None`），还在 dock 里等回复的交互卡用 `interactivePermissionCard`。`permissionAnswers` 给**未塌缩**的 `{key: [label, ...]}`，用于「答到一半还没提交」时看进度 |
 | `beginCompaction(messageId, reason)` / `appendCompactionSummary(...)` / `endCompaction(...)` | 上下文压缩在时间线上的表达。**库不实现压缩算法**，只负责「能表达 + 能持久化」 |
 | `addSteerNotice(messageId, text)` | 插话回执行（`↳ <text>`）。刻意不插用户气泡 —— 助手消息正在流式输出，中途插一条用户消息视觉上很怪 |
+| `setPermissionAlwaysAllowHoldEnabled(on)` | 「始终允许」是否必须长按（默认开）；`False` = 普通点击，立即作用于已有待答卡与之后新建的卡 |
 | `setContentMaxWidth(px)` | 气泡宽度约束。限的是**整列**（正文 + 附件条 + 底部行），宽窗口下右边缘对齐；不限宽时行为完全不变 |
 | `setScrollBarPolicy(policy)` / `scrollBar()` | 垂直滚动条策略（默认 `ScrollBarAsNeeded`，仅溢出时显示）与滚动条句柄；手动拖动把手会自动退出贴底跟随 |
 | `setStrictIds(on)` | 严格模式：对**不存在的消息**抛 `KeyError`（默认关闭，迟到事件静默忽略） |
@@ -879,10 +880,14 @@ python llm_test\agent_demo.py                 # 等价入口（直接起 AgentWo
         main_layout.addSpacing(8)
 
         toolbar = ElaChatToolBar(self)
-        toolbar.addButton(icon=ElaIconType.IconName.Plus, text="新建", tooltip="新建会话")
+        toolbar.addButton(
+            icon=ElaIconType.IconName.Plus, text="新建", tooltip="新建会话"
+        )
         toolbar.addButton(icon=ElaIconType.IconName.Comments, text="会话")
         toolbar.addSeparator()
-        toolbar.addButton(icon=ElaIconType.IconName.Gear, text="设置", tooltip="打开设置")
+        toolbar.addButton(
+            icon=ElaIconType.IconName.Gear, text="设置", tooltip="打开设置"
+        )
         toolbar.addStretch()
         main_layout.addWidget(toolbar)
         main_layout.addSpacing(12)
@@ -895,7 +900,9 @@ python llm_test\agent_demo.py                 # 等价入口（直接起 AgentWo
 
         dock = ElaChatInputDock(self)
         dock.setTitle("附件")
-        dock.setWidget(ElaText("ElaChatInputDock 承载输入区上方可替换的附件面板。", 13, self))
+        dock.setWidget(
+            ElaText("ElaChatInputDock 承载输入区上方可替换的附件面板。", 13, self)
+        )
         main_layout.addWidget(dock)
         main_layout.addSpacing(12)
 

@@ -515,7 +515,7 @@ class AnimationIconPage(ExamplePage):
     def _demoSvgFunctions(self, parent_layout):
         parent_layout.addLayout(
             self._createHeaderRow(
-                "04. ela_ext - svg_to_icon / svg_to_pixmap / svg_icon_loader",
+                "02. ela_ext - svg_to_icon / svg_to_pixmap / svg_icon_loader",
                 self._demoSvgFunctions,
             )
         )

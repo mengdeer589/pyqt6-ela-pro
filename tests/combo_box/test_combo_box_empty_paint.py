@@ -3,7 +3,7 @@
 上游 ``ElaMultiSelectComboBox::paintEvent`` 曾把 ``painter.save()`` 写在函数级、
 ``painter.restore()`` 塞进 ``if (count() > 0)`` —— **空框**绘制时漏 restore，
 ``QPainter`` 析构即打印 ``QPainter::end: Painter ended with 1 saved states``
-（示例「下拉框组件」页滚到底部那几行）。
+（示例「下拉框家族」页滚到底部那几行）。
 
 修复落在 **C++ 侧**（``ElaMultiSelectComboBox.cpp``：``restore()`` 移出 ``if``，
 子模块提交 ``c0386b7``）→ 重编 ``pyqt6-elawidgettools`` 轮子。所以本文件同时守住：

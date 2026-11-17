@@ -298,7 +298,8 @@ class HeatmapSeriesRenderer(SeriesRenderer):
             if hovered is not None and blur is not None and self.blursOtherItems():
                 color.setAlphaF(color.alphaF() * blur)
         alpha = self.itemOpacity(index)
-        color.setAlpha(int(255 * max(0.15, anim_t) * alpha))
+        # 空日格底色带 alpha（bg.muted 是叠色）：相乘，覆盖成 255 会画成实色白块
+        color.setAlpha(int(color.alpha() * max(0.15, anim_t) * alpha))
         return color
 
     def hitTest(self, pos: QPointF):

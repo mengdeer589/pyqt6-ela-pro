@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import ctypes
 import sys
 
 import pytest
 
+from pyqt6_ela_pro.selection_assistant import _native
 from pyqt6_ela_pro.selection_assistant._native import (
     _VK_LBUTTON,
     _VK_MBUTTON,
@@ -115,6 +117,35 @@ class TestPolling:
         monitor._poll()
         assert events == [("down", (10, 20))]
         monitor.deleteLater()
+
+
+class TestWindowRect:
+    def test_uses_top_level_rect_for_border_check(self, monkeypatch):
+        """``WindowFromPoint`` 返回的是子窗口；边框判断必须换成顶层窗口矩形。"""
+        if sys.platform != "win32":  # pragma: no cover - 平台分支
+            pytest.skip("仅 Windows")
+
+        calls = []
+
+        class _FakeUser32:
+            def WindowFromPoint(self, point):  # noqa: N802
+                calls.append(("WindowFromPoint", point.x, point.y))
+                return 111
+
+            def GetAncestor(self, hwnd, flags):  # noqa: N802
+                calls.append(("GetAncestor", hwnd, flags))
+                return 222
+
+            def GetWindowRect(self, hwnd, ptr):  # noqa: N802
+                calls.append(("GetWindowRect", hwnd))
+                rect = ctypes.cast(ptr, ctypes.POINTER(_native._RECT)).contents
+                rect.left, rect.top, rect.right, rect.bottom = 10, 20, 30, 40
+                return 1
+
+        monkeypatch.setattr(_native, "_user32", _FakeUser32())
+        assert _native.window_rect_at(5, 6) == (10, 20, 30, 40)
+        assert ("GetAncestor", 111, _native._GA_ROOT) in calls
+        assert ("GetWindowRect", 222) in calls
 
 
 class TestLifecycle:

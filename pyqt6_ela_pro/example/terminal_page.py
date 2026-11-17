@@ -1,4 +1,4 @@
-"""[pyqt6_ela_pro] 终端输出展示示例页。"""
+"""终端与差异视图示例页。"""
 
 import random
 
@@ -8,6 +8,7 @@ from PyQt6ElaWidgetTools import ElaComboBox, ElaIconType, ElaText
 
 from pyqt6_ela_pro import (
     ElaButton,
+    ElaDiffView,
     ElaTerminalView,
     terminalThemes,
 )
@@ -62,9 +63,9 @@ _COLORS = {
 
 
 class TerminalPage(ExamplePage):
-    """终端输出展示组件示例页。"""
+    """终端输出与差异视图示例页。"""
 
-    PAGE_TITLE = "[ela_ext] 终端输出"
+    PAGE_TITLE = "终端与差异"
 
     def __init__(self, parent=None):
         self._timers = []
@@ -72,12 +73,13 @@ class TerminalPage(ExamplePage):
 
     def _addDemoContent(self, main_layout):
         self._demoTerminal(main_layout)
+        self._demoDiffView(main_layout)
 
     def _demoTerminal(self, main_layout):
         """终端输出：一个 ``ElaTerminalView`` + 底部场景触发按钮。"""
         main_layout.addLayout(
             self._createHeaderRow(
-                "ElaTerminalView - 终端输出（单输出框 + 场景按钮）",
+                "01. ElaTerminalView - 终端输出（单输出框 + 场景按钮）",
                 self._demoTerminal,
             )
         )
@@ -210,6 +212,33 @@ class TerminalPage(ExamplePage):
         progress_btn.clicked.connect(start_progress)
         stream_btn.clicked.connect(start_stream)
         stop_btn.clicked.connect(stop_timers)
+
+    def _demoDiffView(self, parent_layout):
+        parent_layout.addLayout(
+            self._createHeaderRow(
+                "02. pyqt6_ela_pro - ElaDiffView 差异视图",
+                self._demoDiffView,
+            )
+        )
+        self._addInfoText(
+            "支持统一 diff 文本或 before/after 文件内容，带行号、折叠与横向滚动",
+            parent_layout,
+        )
+        diff = ElaDiffView(self)
+        diff.setFixedHeight(220)
+        diff.setDiff(
+            "--- a/demo.py\n"
+            "+++ b/demo.py\n"
+            "@@ -1,4 +1,4 @@\n"
+            " def greet(name):\n"
+            "-    print('hello ' + name)\n"
+            "+    print(f'hello {name}')\n"
+            " \n"
+            " greet('ela')\n",
+            "demo.py",
+        )
+        parent_layout.addWidget(diff)
+        parent_layout.addSpacing(20)
 
     def closeEvent(self, event):  # noqa: N802 (Qt 命名)
         for timer in self._timers:

@@ -23,7 +23,7 @@ from PyQt6ElaWidgetTools import (
     eTheme,
 )
 
-from ..._internal import _ThemeAwareMixin, safe_connect
+from ..._internal import _ThemeAwareMixin, is_deleted, safe_connect
 from ..._styles import ColorText
 from ...ela_button import ElaButton
 from ...ela_long_press_button import ElaLongPressButton
@@ -76,6 +76,8 @@ class PermissionCard(_ThemeAwareMixin, ElaScrollPageArea):
         self.setBorderRadius(0)
         self._permission: Optional[ElaChatPermission] = None
         self._responding = False
+        #: ``False`` = 「始终允许」普通点击即生效（宿主偏好，默认长按防误触）
+        self._always_hold_enabled = True
 
         # 逐题向导的状态（key 全部来自 ElaChatQuestion.key）
         self._tab = 0
@@ -217,12 +219,15 @@ class PermissionCard(_ThemeAwareMixin, ElaScrollPageArea):
             lambda *_: self._emit_reply(ElaChatPermissionStatusType.Always, "", ""),
             "permission.always",
         )
-        set_tooltip(
+        # 关掉长按后走 clicked；开着时长按触发，clicked 到了也不重复发
+        safe_connect(
             self._always_button,
-            f"长按 {self.ALWAYS_HOLD_MS / 1000:g} 秒始终允许",
-            ElaToolTipPositionType.Top,
+            "clicked",
+            lambda *_: self._on_always_clicked(),
+            "permission.always_click",
         )
         actions_layout.addWidget(self._always_button)
+        self.setAlwaysAllowHoldEnabled(self._always_hold_enabled)
         self._reject_button = ElaButton(
             "拒绝…", variant="text", danger=True, size="small", parent=self._actions
         )
@@ -297,6 +302,32 @@ class PermissionCard(_ThemeAwareMixin, ElaScrollPageArea):
 
         self.hide()
         self._apply_theme()
+
+    def setAlwaysAllowHoldEnabled(self, on: bool) -> None:  # noqa: N802
+        """「始终允许」是否必须长按（``False`` = 普通点击即生效）。"""
+        self._always_hold_enabled = bool(on)
+        button = getattr(self, "_always_button", None)
+        if button is None or is_deleted(button):
+            return
+        button.setLongPressEnabled(self._always_hold_enabled)
+        set_tooltip(
+            button,
+            (
+                f"长按 {self.ALWAYS_HOLD_MS / 1000:g} 秒始终允许"
+                if self._always_hold_enabled
+                else "点击始终允许"
+            ),
+            ElaToolTipPositionType.Top,
+        )
+
+    def alwaysAllowHoldEnabled(self) -> bool:  # noqa: N802
+        """「始终允许」当前是否必须长按。"""
+        return self._always_hold_enabled
+
+    def _on_always_clicked(self) -> None:
+        # 长按模式下 clicked 只是松手，不构成授权；只有关掉长按才走这条
+        if not self._always_hold_enabled:
+            self._emit_reply(ElaChatPermissionStatusType.Always, "", "")
 
     def sizeHint(self) -> QSize:  # noqa: N802 (Qt 命名)
         """按内容布局报高度；宽度交给父布局（0 = 别替我决定）。

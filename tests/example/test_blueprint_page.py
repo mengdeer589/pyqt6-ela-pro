@@ -223,6 +223,14 @@ class TestEditingDemo:
         qapp.processEvents()
         assert page._body_canvas.grid_snap()
 
+    def test_grid_switch_drives_canvas(self, qapp, make):
+        page = make(BlueprintPage)
+        assert page._grid_switch.getIsToggled() is True
+        assert page._body_canvas.grid_visible() is True
+        page._grid_switch.setIsToggled(False)
+        qapp.processEvents()
+        assert page._body_canvas.grid_visible() is False
+
     def test_duplicate_and_select_all(self, qapp, make):
         page = make(BlueprintPage)
         canvas = page._body_canvas

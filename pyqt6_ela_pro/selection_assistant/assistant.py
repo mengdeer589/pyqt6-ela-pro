@@ -15,6 +15,8 @@ from ..menu_item import ElaMenuItem
 from ._native import (
     ElaMouseMonitor,
     _warn_once,
+    double_click_time,
+    process_name_at,
     safe_connect,
     to_logical_pos,
     window_pid_at,
@@ -25,10 +27,13 @@ from .popup import ElaSelectionPopup
 
 #: 触发拖选所需的最小位移（像素）
 _DEFAULT_DRAG_THRESHOLD = 4
-#: 双击选词判定的最大间隔（毫秒）
-_DEFAULT_DOUBLE_CLICK_MS = 400
 #: 双击选词判定的最大位移（像素）
 _DOUBLE_CLICK_SLOP = 6
+#: 内置拖选过滤器对 Office 进程放宽距离（长选区常跨半页以上），其余进程仍用 600px
+_OFFICE_PROCESSES = frozenset(
+    {"winword.exe", "excel.exe", "powerpnt.exe", "outlook.exe", "onenote.exe"}
+)
+_OFFICE_MAX_DRAG_PX = 4000
 
 
 def _is_deleted(obj) -> bool:  # noqa: ANN001
@@ -112,7 +117,8 @@ class ElaSelectionAssistant(QObject):
         self._require_filter_for_drag = True
         self._min_length = 1
         self._drag_threshold = _DEFAULT_DRAG_THRESHOLD
-        self._double_click_ms = _DEFAULT_DOUBLE_CLICK_MS
+        # 跟系统双击速度（Windows 默认 500ms）；固定 400 会漏掉 400~500ms 的合法双击
+        self._double_click_ms = double_click_time()
 
         self._text = ""
         self._pos = QPoint()
@@ -185,7 +191,7 @@ class ElaSelectionAssistant(QObject):
         return self._drag_threshold
 
     def setDoubleClickMs(self, ms: int) -> None:
-        """设置双击选词判定的最大间隔毫秒数（默认 400）。"""
+        """设置双击选词判定的最大间隔毫秒数（默认跟随系统双击速度）。"""
         self._double_click_ms = max(1, int(ms))
 
     def doubleClickMs(self) -> int:
@@ -221,12 +227,17 @@ class ElaSelectionAssistant(QObject):
         return self._require_filter_for_drag
 
     @staticmethod
-    def builtinDragFilter(maxDragPx: int = 600, borderPx: int = 6):
+    def builtinDragFilter(
+        maxDragPx: int = 600,
+        borderPx: int = 6,
+        officeMaxDragPx: int = _OFFICE_MAX_DRAG_PX,
+    ):
         """内置的启发式拖选过滤器（``predicate(down, up) -> bool``）。
 
-        刻意只做**不依赖具体应用**的保守判断，宁可放过（少弹一次动作条）
-        也不误伤正常操作：同一窗口内（``window_pid_at`` 相同且非 0）、位移
-        不超过 ``maxDragPx`` 像素、按下点不在目标窗口边框 ``borderPx`` 内。
+        同一窗口内（``window_pid_at`` 相同且非 0）、位移不超过上限、按下点
+        不在目标窗口边框 ``borderPx`` 内。普通进程上限 ``maxDragPx``(600)；
+        Word / Excel / PowerPoint / Outlook / OneNote 等 Office 进程放宽到
+        ``officeMaxDragPx``(4000)，否则「跨两栏 / 半页」的正常选区会被误杀。
 
         仍会漏掉滚动区横向拖动等场景，建议再叠加宿主自己的规则（例如限定
         前台进程）。
@@ -234,12 +245,15 @@ class ElaSelectionAssistant(QObject):
 
         def _filter(down, up) -> bool:
             try:
-                dx = int(up[0]) - int(down[0])
-                dy = int(up[1]) - int(down[1])
-                if dx * dx + dy * dy > int(maxDragPx) ** 2:
-                    return False
                 down_pid = window_pid_at(int(down[0]), int(down[1]))
                 if down_pid == 0 or down_pid != window_pid_at(int(up[0]), int(up[1])):
+                    return False
+                limit = max(int(maxDragPx), 1)
+                if process_name_at(down_pid) in _OFFICE_PROCESSES:
+                    limit = max(limit, int(officeMaxDragPx))
+                dx = int(up[0]) - int(down[0])
+                dy = int(up[1]) - int(down[1])
+                if dx * dx + dy * dy > limit * limit:
                     return False
                 if borderPx > 0:
                     rect = window_rect_at(int(down[0]), int(down[1]))

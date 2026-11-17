@@ -158,6 +158,50 @@ class TestLongPressInteraction:
             "提前松开后进度必须回流清零"
         )
 
+    def test_click_mode_falls_back_to_clicked(self, make, qapp):
+        """关掉长按后退化为普通按钮：走 ``clicked``，不再发 ``longPressed``。"""
+        btn = make(ElaLongPressBtn, duration=5000)
+        btn.resize(120, 30)
+        btn.show()
+        qapp.processEvents()
+        btn.setLongPressEnabled(False)
+        assert btn.longPressEnabled() is False
+        clicked = []
+        long_pressed = []
+        btn.clicked.connect(lambda: clicked.append(1))
+        btn.longPressed.connect(lambda: long_pressed.append(1))
+
+        _press(qapp, btn)
+        assert btn.isHolding() is False
+        assert btn.progress() == 0.0
+        _release(qapp, btn)
+        assert clicked == [1]
+        assert long_pressed == []
+
+    def test_click_mode_keyboard_does_not_emit_long_pressed(self, make, qapp):
+        btn = make(ElaLongPressBtn, duration=5000)
+        btn.resize(120, 30)
+        btn.show()
+        qapp.processEvents()
+        btn.setLongPressEnabled(False)
+        clicked = []
+        long_pressed = []
+        btn.clicked.connect(lambda: clicked.append(1))
+        btn.longPressed.connect(lambda: long_pressed.append(1))
+
+        for event_type in (QEvent.Type.KeyPress, QEvent.Type.KeyRelease):
+            qapp.sendEvent(
+                btn,
+                QKeyEvent(
+                    event_type,
+                    Qt.Key.Key_Space,
+                    Qt.KeyboardModifier.NoModifier,
+                ),
+            )
+        assert clicked == [1]
+        assert long_pressed == []
+        assert btn.isHolding() is False
+
     def test_disable_mid_hold_cancels(self, make, qapp):
         """置灰后不许补发 —— 审批卡在 responding 期间就是整排置灰。"""
         btn = make(ElaLongPressBtn, duration=200)

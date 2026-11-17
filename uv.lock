@@ -299,32 +299,29 @@ requires-dist = [
 name = "pyqt6-ela-pro"
 source = { editable = "." }
 dependencies = [
-    { name = "comtypes" },
-    { name = "matplotlib" },
-    { name = "mermaidx" },
-    { name = "orjson" },
-    { name = "polars" },
-    { name = "pygments" },
     { name = "pypinyin" },
     { name = "pyqt6" },
     { name = "pyqt6-elawidgettools" },
     { name = "pyqt6-qt6" },
     { name = "pyqt6-sip", version = "13.13.0", source = { registry = "https://mirrors.aliyun.com/pypi/simple/" }, marker = "python_full_version >= '3.12'" },
     { name = "pyqt6-sip", version = "13.13.0", source = { path = "PyElaWidgetTools/wheels/pyqt6-win7/pyqt6_sip-13.13.0-cp311-cp311-win_amd64.whl" }, marker = "python_full_version < '3.12'" },
-    { name = "pyqtgraph" },
-    { name = "pywin32" },
-    { name = "tsdownsample" },
 ]
 
 [package.optional-dependencies]
 all = [
     { name = "comtypes" },
+    { name = "matplotlib" },
     { name = "mermaidx" },
     { name = "orjson" },
     { name = "polars" },
     { name = "pygments" },
+    { name = "pyqtgraph" },
     { name = "pywin32" },
     { name = "tsdownsample" },
+]
+canvases = [
+    { name = "matplotlib" },
+    { name = "pyqtgraph" },
 ]
 dev = [
     { name = "pytest" },
@@ -336,27 +333,29 @@ parquet = [
 
 [package.dev-dependencies]
 dev = [
+    { name = "comtypes" },
+    { name = "matplotlib" },
+    { name = "mermaidx" },
     { name = "orjson" },
+    { name = "polars" },
     { name = "pygments" },
+    { name = "pyqtgraph" },
     { name = "pytest" },
     { name = "pytest-mock" },
     { name = "pytest-xdist" },
+    { name = "pywin32" },
     { name = "tsdownsample" },
 ]
 
 [package.metadata]
 requires-dist = [
-    { name = "comtypes", specifier = ">=1.4.16" },
     { name = "comtypes", marker = "extra == 'all'", specifier = ">=1.4.0" },
-    { name = "matplotlib", specifier = ">=3.11.2" },
-    { name = "mermaidx", specifier = ">=0.9.5" },
+    { name = "matplotlib", marker = "extra == 'all'", specifier = ">=3.11.2" },
+    { name = "matplotlib", marker = "extra == 'canvases'", specifier = ">=3.11.2" },
     { name = "mermaidx", marker = "extra == 'all'", specifier = ">=0.9" },
-    { name = "orjson", specifier = ">=3.12.0" },
     { name = "orjson", marker = "extra == 'all'", specifier = ">=3.9" },
-    { name = "polars", specifier = ">=1.44.2" },
     { name = "polars", marker = "extra == 'all'", specifier = ">=1.0" },
     { name = "polars", marker = "extra == 'parquet'", specifier = ">=1.0" },
-    { name = "pygments", specifier = ">=2.20.0" },
     { name = "pygments", marker = "extra == 'all'", specifier = ">=2.15" },
     { name = "pypinyin", specifier = ">=0.50.0" },
     { name = "pyqt6", path = "PyElaWidgetTools/wheels/pyqt6-win7/PyQt6-6.8.1-cp39-abi3-win_amd64.whl" },
@@ -364,23 +363,28 @@ requires-dist = [
     { name = "pyqt6-qt6", path = "PyElaWidgetTools/wheels/pyqt6-win7/PyQt6_Qt6-6.8.2-py3-none-win_amd64.whl" },
     { name = "pyqt6-sip", marker = "python_full_version < '3.12'", path = "PyElaWidgetTools/wheels/pyqt6-win7/pyqt6_sip-13.13.0-cp311-cp311-win_amd64.whl" },
     { name = "pyqt6-sip", marker = "python_full_version >= '3.12'", specifier = "==13.13.0" },
-    { name = "pyqtgraph", specifier = ">=0.14.0" },
+    { name = "pyqtgraph", marker = "extra == 'all'", specifier = ">=0.14.0" },
+    { name = "pyqtgraph", marker = "extra == 'canvases'", specifier = ">=0.14.0" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=7.0.0" },
     { name = "pytest-xdist", marker = "extra == 'dev'", specifier = ">=3.6.1" },
-    { name = "pywin32", specifier = ">=312" },
     { name = "pywin32", marker = "extra == 'all'", specifier = ">=306" },
-    { name = "tsdownsample", specifier = ">=0.1.5.1" },
     { name = "tsdownsample", marker = "extra == 'all'", specifier = ">=0.1.5.1" },
 ]
-provides-extras = ["all", "parquet", "dev"]
+provides-extras = ["all", "parquet", "canvases", "dev"]
 
 [package.metadata.requires-dev]
 dev = [
+    { name = "comtypes", specifier = ">=1.4.16" },
+    { name = "matplotlib", specifier = ">=3.11.2" },
+    { name = "mermaidx", specifier = ">=0.9" },
     { name = "orjson", specifier = ">=3.9" },
+    { name = "polars", specifier = ">=1.0" },
     { name = "pygments", specifier = ">=2.15" },
+    { name = "pyqtgraph", specifier = ">=0.14.0" },
     { name = "pytest", specifier = ">=8.3.5" },
     { name = "pytest-mock", specifier = ">=3.14.1" },
     { name = "pytest-xdist", specifier = ">=3.6.1" },
+    { name = "pywin32", specifier = ">=312" },
     { name = "tsdownsample", specifier = ">=0.1.5.1" },
 ]
 

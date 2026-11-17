@@ -11,7 +11,7 @@
 from __future__ import annotations
 
 from PyQt6.QtCore import QEvent, QPoint, QPointF, QSizeF, Qt
-from PyQt6.QtGui import QKeyEvent, QMouseEvent, QPixmap
+from PyQt6.QtGui import QKeyEvent, QMouseEvent, QPainter, QPixmap
 from PyQt6.QtWidgets import QApplication
 
 from pyqt6_ela_pro.blueprint import (
@@ -177,6 +177,32 @@ class TestGridSnap:
         assert canvas.grid_step() == 24
         canvas._zoom = 0.5
         assert canvas.grid_step() == 48
+
+    def test_grid_visibility_toggle(self, make):
+        """``set_grid_visible(False)`` 只跳过绘制（吸附间距不受影响）。"""
+        canvas = _make_canvas(make)
+        assert canvas.grid_visible() is True
+        calls = []
+        original = canvas._grid_tile
+        canvas._grid_tile = lambda step: (calls.append(step), original(step))[1]
+        pixmap = QPixmap(200, 150)
+        pixmap.fill(Qt.GlobalColor.transparent)
+
+        def draw():
+            painter = QPainter(pixmap)
+            try:
+                canvas._draw_grid(painter)
+            finally:
+                painter.end()
+
+        draw()
+        assert calls, "默认应绘制点阵"
+        calls.clear()
+        canvas.set_grid_visible(False)
+        assert canvas.grid_visible() is False
+        draw()
+        assert calls == [], "关闭后不应再取网格纹理"
+        assert canvas.grid_step() == 24
 
 
 class TestKeyboardEditing:

@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from typing import Optional
 
-from PyQt6.QtCore import Qt, pyqtSignal
+from PyQt6.QtCore import Qt, QTimer, pyqtSignal
 from PyQt6.QtGui import QImage, QKeySequence, QShortcut
 from PyQt6.QtWidgets import QHBoxLayout, QVBoxLayout, QWidget
 
@@ -147,6 +147,14 @@ class ElaChatWidget(
         )
         self._composer_rows = tuple(
             self._add_composer_row(layout, widget) for widget in self._composer_widgets
+        )
+        self._composer_reflow_timer = QTimer(self)
+        self._composer_reflow_timer.setSingleShot(True)
+        safe_connect(
+            self._composer_reflow_timer,
+            "timeout",
+            self._reflow_composer_rows,
+            "widget.composer_reflow",
         )
         self._sync_composer_width()
         #: 当前占据审批 dock 的 partId（空 = dock 上没有审批卡）
@@ -290,11 +298,16 @@ class ElaChatWidget(
         return row
 
     def _sync_composer_width(self) -> None:
-        """输入区 / dock 与阅读列同宽并居中（只钉上限，不钉下限）。"""
+        """输入区 / dock 与阅读列同宽并居中（只钉上限，不钉下限）。
+
+        布局级联内 ``updateGeometry()`` 可能被吞掉，宽度滞后时在下一轮事件循环
+        重新激活各 composer 行布局。
+        """
         width = max(0, self.width() - 20)
         max_width = self._view.contentMaxWidth() if hasattr(self, "_view") else 0
         if max_width > 0:
             width = min(max_width, width)
+        stale = False
         for widget in getattr(self, "_composer_widgets", ()):
             if widget.minimumWidth() != 0:
                 widget.setMinimumWidth(0)
@@ -303,6 +316,18 @@ class ElaChatWidget(
             # max 已正确但实际宽滞后时也要唤醒行布局，否则只能等下一次无关重排
             if widget.width() != width:
                 widget.updateGeometry()
+                stale = True
+        timer = getattr(self, "_composer_reflow_timer", None)
+        if stale and timer is not None and not timer.isActive():
+            timer.start(0)
+
+    def _reflow_composer_rows(self) -> None:
+        """级联外重新激活 composer 行布局（同步 ``updateGeometry`` 可能被吞）。"""
+        for row in getattr(self, "_composer_rows", ()):
+            layout = row.layout()
+            if layout is not None:
+                layout.invalidate()
+                layout.activate()
 
     def chatView(self) -> ElaChatView:
         """获取消息列表视图。"""

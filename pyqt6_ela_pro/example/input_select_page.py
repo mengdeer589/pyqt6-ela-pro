@@ -1,4 +1,4 @@
-"""输入与选择。"""
+"""输入与表单。"""
 
 from PyQt6.QtWidgets import QHBoxLayout
 from PyQt6ElaWidgetTools import (
@@ -19,38 +19,48 @@ from PyQt6ElaWidgetTools import (
 )
 from .base_page import ExamplePage
 from pyqt6_ela_pro import (
+    ElaField,
+    ElaFieldStatusType,
     ElaPasswordEdit,
-    ElaSpotlight,
+    ElaRatingControl,
     ElaTagLineEdit,
     ElaUploadArea,
 )
 
 
 class InputSelectPage(ExamplePage):
-    """输入与选择示例页。"""
+    """输入与表单示例页。"""
 
-    PAGE_TITLE = "输入与选择"
+    PAGE_TITLE = "输入与表单"
 
     def __init__(self, parent=None):
         super().__init__(parent)
 
     def _addDemoContent(self, main_layout):
+        main_layout.addWidget(self._createSectionHeader("=== 文本与数值 ==="))
         self._demoLineEdit(main_layout)
         self._demoPlainTextEdit(main_layout)
         self._demoSpinBox(main_layout)
         self._demoDoubleSpinBox(main_layout)
         self._demoSlider(main_layout)
+
+        main_layout.addWidget(self._createSectionHeader("=== 日期与时间 ==="))
         self._demoCalendar(main_layout)
         self._demoCalendarPicker(main_layout)
+
+        main_layout.addWidget(self._createSectionHeader("=== 选择 ==="))
         self._demoCheckBox(main_layout)
         self._demoRadioButton(main_layout)
         self._demoToggleSwitch(main_layout)
         self._demoRoller(main_layout)
         self._demoRollerPicker(main_layout)
+
+        main_layout.addWidget(self._createSectionHeader("=== 扩展输入 ==="))
         self._demoPasswordEdit(main_layout)
         self._demoTagLineEdit(main_layout)
+        self._demoField(main_layout)
         self._demoUploadArea(main_layout)
-        self._demoSpotlight(main_layout)
+        self._demoRatingControl(main_layout)
 
     def _demoLineEdit(self, parent_layout):
         parent_layout.addLayout(
@@ -151,7 +161,7 @@ class InputSelectPage(ExamplePage):
     def _demoCalendar(self, parent_layout):
         parent_layout.addLayout(
             self._createHeaderRow(
-                "06. PyQt6ElaWidgetTools - ElaCalendar 日历", self._demoCalendar
+                "01. PyQt6ElaWidgetTools - ElaCalendar 日历", self._demoCalendar
             )
         )
         self._addInfoText("日历组件", parent_layout)
@@ -163,7 +173,7 @@ class InputSelectPage(ExamplePage):
     def _demoCalendarPicker(self, parent_layout):
         parent_layout.addLayout(
             self._createHeaderRow(
-                "07. PyQt6ElaWidgetTools - ElaCalendarPicker 日期选择器",
+                "02. PyQt6ElaWidgetTools - ElaCalendarPicker 日期选择器",
                 self._demoCalendarPicker,
             )
         )
@@ -238,7 +248,7 @@ class InputSelectPage(ExamplePage):
     def _demoRoller(self, parent_layout):
         parent_layout.addLayout(
             self._createHeaderRow(
-                "05. PyQt6ElaWidgetTools - ElaRoller 滚轮选择器", self._demoRoller
+                "04. PyQt6ElaWidgetTools - ElaRoller 滚轮选择器", self._demoRoller
             )
         )
         self._addInfoText(
@@ -265,7 +275,7 @@ class InputSelectPage(ExamplePage):
     def _demoRollerPicker(self, parent_layout):
         parent_layout.addLayout(
             self._createHeaderRow(
-                "06. PyQt6ElaWidgetTools - ElaRollerPicker 滚轮选择按钮",
+                "05. PyQt6ElaWidgetTools - ElaRollerPicker 滚轮选择按钮",
                 self._demoRollerPicker,
             )
         )
@@ -313,7 +323,7 @@ class InputSelectPage(ExamplePage):
     def _demoTagLineEdit(self, parent_layout):
         parent_layout.addLayout(
             self._createHeaderRow(
-                "10. pyqt6_ela_pro - ElaTagLineEdit 标签输入框", self._demoTagLineEdit
+                "02. pyqt6_ela_pro - ElaTagLineEdit 标签输入框", self._demoTagLineEdit
             )
         )
         self._addInfoText(
@@ -362,7 +372,7 @@ class InputSelectPage(ExamplePage):
     def _demoUploadArea(self, parent_layout):
         parent_layout.addLayout(
             self._createHeaderRow(
-                "11. pyqt6_ela_pro - ElaUploadArea 上传区域", self._demoUploadArea
+                "04. pyqt6_ela_pro - ElaUploadArea 上传区域", self._demoUploadArea
             )
         )
         upload = ElaUploadArea(parent=self)
@@ -374,69 +384,49 @@ class InputSelectPage(ExamplePage):
         parent_layout.addWidget(upload)
         parent_layout.addSpacing(20)
 
-    def _demoSpotlight(self, parent_layout):
+    def _demoField(self, parent_layout):
         parent_layout.addLayout(
             self._createHeaderRow(
-                "12. pyqt6_ela_pro - ElaSpotlight 引导遮罩", self._demoSpotlight
+                "03. pyqt6_ela_pro - ElaField 表单字段", self._demoField
             )
         )
-        self._addInfoText("单目标聚光 + 多步骤引导", parent_layout)
-
+        self._addInfoText(
+            "标签 + 必填星号 + 编辑器槽 + 辅助文字 + 三态校验行；编辑器生命周期按 "
+            "ElaWidgetOwnershipType 三态管理。",
+            parent_layout,
+        )
         row = QHBoxLayout()
-        row.setSpacing(15)
-        single_btn = ElaPushButton("单目标聚光", self)
-        single_btn.setFixedWidth(110)
-        single_target = ElaPushButton("高亮目标", self)
-        single_target.setFixedWidth(110)
-        row.addWidget(single_target)
-        row.addWidget(single_btn)
-        row.addStretch()
+        row.setSpacing(16)
+        normal = ElaField(self)
+        normal.setLabel("用户名")
+        normal.setRequired(True)
+        normal.setHelperText("2-16 个字符")
+        normal.setEditor(ElaLineEdit(self))
+        row.addWidget(normal, 1)
+
+        error = ElaField(self)
+        error.setLabel("邮箱")
+        error.setEditor(ElaLineEdit(self))
+        error.setStatus(ElaFieldStatusType.Error)
+        error.setStatusText("邮箱格式不正确")
+        row.addWidget(error, 1)
+
+        success = ElaField(self)
+        success.setLabel("显示名")
+        success.setEditor(ElaLineEdit(self))
+        success.setStatus(ElaFieldStatusType.Success)
+        success.setStatusText("可用")
+        row.addWidget(success, 1)
         parent_layout.addLayout(row)
+        parent_layout.addSpacing(20)
 
-        def _on_single():
-            s = ElaSpotlight(self)
-            s._title = "提示"
-            s._content = "这是一个单目标引导示例"
-            s.showSpotlight(single_target, "知道了")
-
-        single_btn.clicked.connect(_on_single)
-        parent_layout.addSpacing(12)
-
-        self._addInfoText("多步骤引导，依次高亮下方三个按钮", parent_layout)
-        spot_btn1 = ElaPushButton("第一步", self)
-        spot_btn1.setFixedWidth(100)
-        spot_btn2 = ElaPushButton("第二步", self)
-        spot_btn2.setFixedWidth(100)
-        spot_btn3 = ElaPushButton("第三步", self)
-        spot_btn3.setFixedWidth(100)
-        launch_btn = ElaPushButton("开始引导", self)
-        launch_btn.setFixedWidth(100)
-        spot_layout = QHBoxLayout()
-        spot_layout.setSpacing(15)
-        spot_layout.addWidget(spot_btn1)
-        spot_layout.addWidget(spot_btn2)
-        spot_layout.addWidget(spot_btn3)
-        spot_layout.addWidget(launch_btn)
-        spot_layout.addStretch()
-        parent_layout.addLayout(spot_layout)
-
-        def _on_multi():
-            s = ElaSpotlight(self)
-            s.setSteps(
-                [
-                    ElaSpotlight.SpotlightStep(
-                        spot_btn1, "第一步", "点击此按钮开始操作", False
-                    ),
-                    ElaSpotlight.SpotlightStep(
-                        spot_btn2, "第二步", "配置相关参数", False
-                    ),
-                    ElaSpotlight.SpotlightStep(
-                        spot_btn3, "第三步", "确认并完成", False
-                    ),
-                ]
+    def _demoRatingControl(self, parent_layout):
+        parent_layout.addLayout(
+            self._createHeaderRow(
+                "05. pyqt6_ela_pro - ElaRatingControl 评分", self._demoRatingControl
             )
-            s.finished.connect(lambda: print("多步引导结束"))
-            s.start()
-
-        launch_btn.clicked.connect(_on_multi)
+        )
+        rating = ElaRatingControl(parent=self)
+        rating.ratingChanged.connect(lambda v: print(f"评分: {v}"))
+        parent_layout.addWidget(rating)
         parent_layout.addSpacing(20)

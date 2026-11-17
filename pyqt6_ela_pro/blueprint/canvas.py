@@ -129,6 +129,7 @@ class ElaBlueprintCanvas(QWidget):
         # 拖动吸附：基础间距 24（场景单位），屏幕间距随缩放按 2 的幂自适应
         self._grid_snap = False
         self._grid_step = 24.0
+        self._grid_visible = True
         self._node_widgets = {}
         self._edge_widgets = {}
         self._selected_nodes = []
@@ -313,6 +314,15 @@ class ElaBlueprintCanvas(QWidget):
     def grid_step(self) -> float:
         """当前缩放下实际生效的吸附间距（场景单位）。"""
         return self._grid_scene_step()
+
+    def set_grid_visible(self, on: bool = True) -> None:
+        """背景点阵网格是否显示（默认开）；只影响绘制，不影响吸附。"""
+        self._grid_visible = bool(on)
+        self.update()
+
+    def grid_visible(self) -> bool:
+        """背景点阵网格是否显示。"""
+        return self._grid_visible
 
     def select_all(self) -> None:
         """选中全部节点（Ctrl+A）。"""
@@ -1109,6 +1119,8 @@ class ElaBlueprintCanvas(QWidget):
 
     def _draw_grid(self, p: QPainter) -> None:
         """点阵网格：间距随缩放自适应（屏幕间距保持在 18–72px 之间）。"""
+        if not self._grid_visible:
+            return
         step = self._grid_scene_step()
         tile = self._grid_tile(step * self._zoom)
         side = tile.width() / tile.devicePixelRatioF()

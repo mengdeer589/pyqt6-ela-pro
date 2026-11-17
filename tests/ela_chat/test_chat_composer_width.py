@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from _qthelpers import wait_until
+
 from pyqt6_ela_pro.chat import ElaChatWidget
 
 
@@ -75,3 +77,19 @@ def test_sync_reflows_when_max_already_matches(qapp, make):
     chat._sync_composer_width()
     qapp.processEvents()
     assert inp.width() == 600
+
+
+def test_stale_composer_schedules_deferred_reflow(qapp, make, monkeypatch):
+    chat = _prepared(qapp, make)
+    _sync(chat, qapp, 620)
+    inp = chat.chatInput()
+    assert (inp.width(), inp.maximumWidth()) == (600, 600)
+
+    # 模拟布局级联把 updateGeometry 提示吞掉：同步路径无法当场唤醒行布局。
+    inp.resize(480, inp.height())
+    monkeypatch.setattr(inp, "updateGeometry", lambda: None)
+    chat._sync_composer_width()
+    assert inp.width() == 480
+    assert chat._composer_reflow_timer.isActive()
+
+    assert wait_until(qapp, lambda: inp.width() == 600)

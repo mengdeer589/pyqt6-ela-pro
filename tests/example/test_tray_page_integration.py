@@ -34,7 +34,7 @@ def env(qapp):
     sel.buildDemoContent()
     tray.buildDemoContent()
     window.addPageNode("划词助手", sel, ElaIconType.IconName.Highlighter)
-    window.addPageNode("启动与托盘", tray, ElaIconType.IconName.Plug)
+    window.addPageNode("启动、托盘与任务栏", tray, ElaIconType.IconName.Plug)
     window.show()
     qapp.processEvents()
     yield window, tray, sel
@@ -165,7 +165,7 @@ def _click_button(page, text):
 
 
 class TestRawTrayButtons:
-    """第 03 节裸 ``ElaTrayIcon`` 的按钮要有**可见反应**。
+    """裸 ``ElaTrayIcon`` 那一节的按钮要有**可见反应**。
 
     回归：该演示对象从未 ``show()`` —— 点 正常 / 警告 / 错误 时内部状态确实
     在变（``setState`` 生效），但托盘里没有图标可看，症状就是「点了没反应」。

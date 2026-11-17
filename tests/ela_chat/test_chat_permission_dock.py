@@ -789,6 +789,31 @@ class TestApproveActions:
         always.longPressed.emit()
         assert seen == ["always"]
 
+    def test_view_can_disable_always_hold(self, qapp, make):
+        """宿主偏好：关掉长按后，已有卡与之后新建的卡都变成普通点击。"""
+        chat, mid, card = self._approve_card(make)
+        view = chat.chatView()
+        always = card._action_buttons()[1]
+        assert always.longPressEnabled() is True
+
+        view.setPermissionAlwaysAllowHoldEnabled(False)
+        assert always.longPressEnabled() is False
+
+        second = _ask(chat, mid, ElaChatPermission(request_id="r2", action="bash"))
+        assert second is not None
+        assert second._action_buttons()[1].longPressEnabled() is False
+
+        view.setPermissionAlwaysAllowHoldEnabled(True)
+        assert always.longPressEnabled() is True
+
+    def test_click_mode_always_replies_without_hold(self, qapp, make):
+        chat, _mid, card = self._approve_card(make)
+        chat.chatView().setPermissionAlwaysAllowHoldEnabled(False)
+        seen = []
+        chat.permissionReplied.connect(lambda i, r, rep, a, f: seen.append(rep))
+        card._action_buttons()[1].click()
+        assert seen == ["always"]
+
     def test_actions_hidden_while_responding(self, qapp, make):
         chat, mid, card = self._approve_card(make)
         assert not card._actions.isHidden()

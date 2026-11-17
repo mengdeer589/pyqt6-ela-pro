@@ -62,6 +62,7 @@ class _BubblePermissionMixin:
     def _create_interactive_card(self, partId: str, request: ElaChatPermission):
         """建交互卡并登记（``beginPermission`` 与 ``ensureInteractivePermissionCard`` 共用）。"""
         card = PermissionCard()
+        card.setAlwaysAllowHoldEnabled(self._permission_always_allow_hold)
         safe_connect(
             card,
             "replied",
@@ -137,6 +138,17 @@ class _BubblePermissionMixin:
             if index >= 0:
                 return index
         return layout.count()
+
+    def setPermissionAlwaysAllowHoldEnabled(self, on: bool) -> None:
+        """设置「始终允许」是否必须长按（同步更新 dock 里仍在等待的卡）。"""
+        self._permission_always_allow_hold = bool(on)
+        for card in self._interactive_cards.values():
+            if card is not None and not is_deleted(card):
+                card.setAlwaysAllowHoldEnabled(self._permission_always_allow_hold)
+
+    def permissionAlwaysAllowHoldEnabled(self) -> bool:
+        """「始终允许」当前是否必须长按。"""
+        return self._permission_always_allow_hold
 
     def interactivePermissionCard(self, partId: str) -> Optional[PermissionCard]:
         """取仍在 dock 里等待用户操作的交互卡（非 dock 阶段 / 已销毁返回 ``None``）。"""

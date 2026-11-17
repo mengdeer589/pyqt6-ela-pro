@@ -1,4 +1,4 @@
-"""启动与托盘。"""
+"""启动、托盘与任务栏示例页。"""
 
 from __future__ import annotations
 
@@ -121,9 +121,9 @@ def _tray_icon(name: str, color: str | None = None) -> QIcon:
 
 
 class AppShellPage(ExamplePage):
-    """启动与托盘示例页。"""
+    """启动、托盘与任务栏示例页。"""
 
-    PAGE_TITLE = "启动与托盘"
+    PAGE_TITLE = "启动、托盘与任务栏"
 
     def __init__(self, parent=None):
         self._tray = None
@@ -137,8 +137,11 @@ class AppShellPage(ExamplePage):
         super().__init__(parent)
 
     def _addDemoContent(self, main_layout):
+        main_layout.addWidget(self._createSectionHeader("=== 启动与任务栏 ==="))
         self._demoSplashScreen(main_layout)
         self._demoTaskbarProgress(main_layout)
+
+        main_layout.addWidget(self._createSectionHeader("=== 托盘 ==="))
         self._demoTray(main_layout)
         self._demoHost(main_layout)
         self._demoEvents(main_layout)
@@ -378,11 +381,16 @@ class AppShellPage(ExamplePage):
         self._log_line("托盘图标 -> " + ("显示" if self._tray.isVisible() else "隐藏"))
 
     def _demoTray(self, main_layout):
+        main_layout.addLayout(
+            self._createHeaderRow(
+                "01. ElaTrayIcon - 托盘图标（裸实例）", self._demoTray
+            )
+        )
         info = ElaText(
             "托盘由 Explorer 绘制，QIcon 不吃 eTheme，组件不做主题自动适配——"
             "深浅两版图标需宿主自行准备。图标是 QPainterPath 自绘的"
             "（托盘图标属于宿主资产，示例不自带图标集），关键是"
-            "**多尺寸渲染**：16~64 各来一份，Explorer 按 2x 缩放时才不会发虚。"
+            "多尺寸渲染：16~64 各来一份，Explorer 按 2x 缩放时才不会发虚。"
             "Win7 等环境可能不支持气泡通知，notify() 会降级为发 errorOccurred "
             "而不崩。演示对象默认不占系统托盘（避免与下方宿主演示重复），"
             "点击任一托盘按钮会先把它显示出来。",
@@ -494,6 +502,11 @@ class AppShellPage(ExamplePage):
         self._log_line("宿主请求主窗口" + ("显示" if visible else "隐藏"))
 
     def _demoHost(self, main_layout):
+        main_layout.addLayout(
+            self._createHeaderRow(
+                "02. ElaTrayHost - 托盘宿主（菜单 / 显隐 / 退出）", self._demoHost
+            )
+        )
         info = ElaText(
             "ElaTrayHost 是应用级宿主骨架（放在 example/ 而非组件库）："
             "托盘 + 主窗口显隐 + 退出。菜单项复用 ElaMenuItem；"
@@ -547,6 +560,11 @@ class AppShellPage(ExamplePage):
         self._log_line("托盘宿主已启动：右键托盘看菜单，单击图标切换主窗口显隐")
 
     def _demoEvents(self, main_layout):
+        main_layout.addLayout(
+            self._createHeaderRow(
+                "03. ElaTrayIcon / ElaTrayHost - 信号与日志", self._demoEvents
+            )
+        )
         info = ElaText("托盘与宿主的全部信号出口。", self)
         info.setTextPixelSize(14)
         main_layout.addWidget(info)

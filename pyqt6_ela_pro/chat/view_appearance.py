@@ -35,6 +35,22 @@ class _ViewAppearanceMixin:
         """获取思考展示形态。"""
         return self._reasoning_style
 
+    def setPermissionAlwaysAllowHoldEnabled(self, on: bool = True) -> None:  # noqa: N802
+        """设置「始终允许」是否必须长按（默认开；应用偏好，不进 bundle 视图段）。
+
+        ``False`` 时审批卡上的「始终允许」变成普通点击，其它行为不变；对已有待答
+        审批卡立即生效，也会应用到之后新建的卡。
+        """
+        self._permission_always_allow_hold = bool(on)
+        for bubble in self._bubbles.values():
+            bubble.setPermissionAlwaysAllowHoldEnabled(
+                self._permission_always_allow_hold
+            )
+
+    def permissionAlwaysAllowHoldEnabled(self) -> bool:  # noqa: N802
+        """「始终允许」当前是否必须长按。"""
+        return self._permission_always_allow_hold
+
     def setToolGrouping(self, on: bool) -> None:
         """设置是否把连续上下文工具合并为分组卡。
 

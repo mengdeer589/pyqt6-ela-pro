@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import ctypes
+import os
 import sys
 import time
 import warnings
@@ -44,6 +45,10 @@ _VK_SHIFT = 0x10
 _VK_MENU = 0x12
 #: ``GetSystemMetrics``：系统是否交换了鼠标主 / 次键
 _SM_SWAPBUTTON = 23
+#: ``GetAncestor``：取顶层窗口
+_GA_ROOT = 2
+#: ``OpenProcess``：只查进程信息（不需要读写权限）
+_PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
 
 _INPUT_KEYBOARD = 1
 _KEYEVENTF_KEYUP = 0x0002
@@ -129,10 +134,27 @@ if _IS_WINDOWS:  # pragma: no cover - 平台分支
     _user32.GetForegroundWindow.restype = wintypes.HWND
     _user32.GetSystemMetrics.argtypes = [ctypes.c_int]
     _user32.GetSystemMetrics.restype = ctypes.c_int
+    _user32.GetAncestor.argtypes = [wintypes.HWND, wintypes.UINT]
+    _user32.GetAncestor.restype = wintypes.HWND
     _user32.GetWindowRect.argtypes = [wintypes.HWND, ctypes.POINTER(_RECT)]
     _user32.GetWindowRect.restype = wintypes.BOOL
+    _user32.GetDoubleClickTime.argtypes = []
+    _user32.GetDoubleClickTime.restype = wintypes.UINT
     _user32.GetClipboardSequenceNumber.argtypes = []
     _user32.GetClipboardSequenceNumber.restype = wintypes.DWORD
+
+    _kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    _kernel32.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+    _kernel32.OpenProcess.restype = wintypes.HANDLE
+    _kernel32.QueryFullProcessImageNameW.argtypes = [
+        wintypes.HANDLE,
+        wintypes.DWORD,
+        wintypes.LPWSTR,
+        ctypes.POINTER(wintypes.DWORD),
+    ]
+    _kernel32.QueryFullProcessImageNameW.restype = wintypes.BOOL
+    _kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
+    _kernel32.CloseHandle.restype = wintypes.BOOL
 
 
 def _swap_buttons() -> bool:
@@ -160,6 +182,16 @@ def any_modifier_down() -> bool:
     return any(_async_key_down(vk) for vk in (_VK_SHIFT, _VK_CONTROL, _VK_MENU))
 
 
+def double_click_time() -> int:
+    """系统双击间隔（毫秒）；取不到时回落到 400ms。"""
+    if not _IS_WINDOWS:  # pragma: no cover - 平台分支
+        return 400
+    try:
+        return max(1, int(_user32.GetDoubleClickTime()))
+    except Exception:  # noqa: BLE001 - 旧系统 / 导出缺失
+        return 400
+
+
 def clipboard_sequence_number() -> int:
     """Windows 剪贴板序列号（内容每变化一次递增）；不可用返回 ``0``。
     「文本相同」无法区分「用户又复制了一遍同样的内容」与「没人动过」，
@@ -184,6 +216,9 @@ def window_rect_at(x: int, y: int):
         hwnd = _user32.WindowFromPoint(_POINT(int(x), int(y)))
         if not hwnd:
             return None
+        root = _user32.GetAncestor(hwnd, _GA_ROOT)
+        if root:
+            hwnd = root
         rect = _RECT()
         if not _user32.GetWindowRect(hwnd, ctypes.byref(rect)):
             return None
@@ -221,6 +256,31 @@ def send_copy(force: bool = False) -> bool:
     _send_key(_VK_CONTROL, _KEYEVENTF_KEYUP)
     _last_inject_at = now
     return True
+
+
+def process_name_at(pid: int) -> str:
+    """进程可执行文件名（小写，如 ``winword.exe``）；查不到返回空串。"""
+    if not _IS_WINDOWS or not pid:  # pragma: no cover - 平台分支
+        return ""
+    handle = None
+    try:
+        handle = _kernel32.OpenProcess(
+            _PROCESS_QUERY_LIMITED_INFORMATION, False, int(pid)
+        )
+        if not handle:
+            return ""
+        buffer = ctypes.create_unicode_buffer(32768)
+        size = wintypes.DWORD(len(buffer))
+        if not _kernel32.QueryFullProcessImageNameW(
+            handle, 0, buffer, ctypes.byref(size)
+        ):
+            return ""
+        return os.path.basename(buffer.value).lower()
+    except Exception:  # noqa: BLE001 - 权限 / 进程已退出
+        return ""
+    finally:
+        if handle:
+            _kernel32.CloseHandle(handle)
 
 
 def window_pid_at(x: int, y: int) -> int:
@@ -383,7 +443,9 @@ __all__ = [
     "ElaMouseMonitor",
     "any_modifier_down",
     "clipboard_sequence_number",
+    "double_click_time",
     "foreground_pid",
+    "process_name_at",
     "safe_connect",
     "send_copy",
     "to_logical_pos",

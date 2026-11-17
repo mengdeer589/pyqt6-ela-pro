@@ -36,16 +36,10 @@ dependencies = [
     "pyqt6-sip==13.13.0",
     "pypinyin>=0.50.0",
     "pyqt6-elawidgettools==0.14.0",
-    "pywin32>=312",
-    "comtypes>=1.4.16",
-    "pygments>=2.20.0",
-    "mermaidx>=0.9.5",
-    "tsdownsample>=0.1.5.1",
-    "orjson>=3.12.0",
-    "polars>=1.44.2",
-    "matplotlib>=3.11.2",
-    "pyqtgraph>=0.14.0",
 ]
+# 可选能力（pywin32 / comtypes / pygments / tsdownsample / mermaidx /
+# orjson / polars / matplotlib / pyqtgraph）只走 extras，保持 base 安装最小；
+# 组件在缺失时自动降级或在构造时抛 ImportError。
 
 [project.optional-dependencies]
 all = [
@@ -56,12 +50,18 @@ all = [
     "mermaidx>=0.9",
     "orjson>=3.9",
     "polars>=1.0",
+    "matplotlib>=3.11.2",
+    "pyqtgraph>=0.14.0",
 ]
 # ElaParquetTable 从顶层 __init__ 导出，所以「装了包却拿到一个必然抛
 # ImportError 的公开类」是可达的。charts 系列的 polars / numpy /
 # tsdownsample 走的就是 optional-dependencies 这条路，这里补齐同一套约定。
 parquet = [
     "polars>=1.0",
+]
+canvases = [
+    "matplotlib>=3.11.2",
+    "pyqtgraph>=0.14.0",
 ]
 dev = [
     "pytest>=7.0.0",
@@ -136,6 +136,12 @@ dev = [
     "pytest-mock>=3.14.1",
     "pygments>=2.15",
     "tsdownsample>=0.1.5.1",
+    "mermaidx>=0.9",
     "orjson>=3.9",
+    "polars>=1.0",
+    "matplotlib>=3.11.2",
+    "pyqtgraph>=0.14.0",
+    "pywin32>=312",
+    "comtypes>=1.4.16",
     "pytest-xdist>=3.6.1",
 ]

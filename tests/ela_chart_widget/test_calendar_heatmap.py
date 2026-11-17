@@ -173,6 +173,18 @@ class TestCalendarHeatmapRenderer:
         assert cell["color"] is None
         none.deleteLater()
 
+    def test_empty_days_keep_muted_alpha(self):
+        """空日格底色是叠色（``bg.muted``）：填充时 alpha 必须相乘，不能画成实白。"""
+        chart = _make_chart(_calendar_option(skip_mod=3))
+        renderer = chart._series[0]
+        empty = next(c for c in renderer._cells if c["empty"])
+        filled = next(c for c in renderer._cells if not c["empty"])
+        empty_fill = renderer._cell_fill_color(empty, None, 1.0)
+        filled_fill = renderer._cell_fill_color(filled, None, 1.0)
+        assert 0 < empty_fill.alpha() == empty["color"].alpha() < 255
+        assert filled_fill.alpha() == 255
+        chart.deleteLater()
+
     def test_gap_and_radius_options(self):
         chart = _make_chart(
             _calendar_option(seriesItemStyle={"borderWidth": 2, "borderRadius": 4})

@@ -1,8 +1,8 @@
-"""[pyqt6_ela_pro] 弹窗与提示页面。"""
+"""弹窗与浮层页面。"""
 
 import traceback
-from PyQt6.QtGui import QColor
-from PyQt6.QtWidgets import QHBoxLayout, QVBoxLayout, QWidget
+from PyQt6.QtGui import QColor, QFont
+from PyQt6.QtWidgets import QApplication, QHBoxLayout, QVBoxLayout, QWidget
 from PyQt6ElaWidgetTools import (
     ElaColorDialog,
     ElaContentDialog,
@@ -14,10 +14,15 @@ from PyQt6ElaWidgetTools import (
     ElaText,
 )
 from pyqt6_ela_pro import (
+    ElaButton,
     ElaConfirmDialog,
+    ElaDrawer,
+    ElaDrawerPositionType,
     ElaMessageDialog,
     ElaSeverity,
+    ElaSpotlight,
     ElaStateToolTip,
+    ElaThemeWidget,
     ElaToast,
     ElaToolTip,
     ElaToolTipPositionType,
@@ -37,9 +42,9 @@ _NOTIFY_DEMOS = {
 
 
 class DrawerTooltipPage(ExamplePage):
-    """抽屉与提示组件页面。"""
+    """弹窗与浮层示例页。"""
 
-    PAGE_TITLE = "弹窗与提示"
+    PAGE_TITLE = "弹窗与浮层"
 
     def __init__(self, parent=None):
         self._drawers = {}
@@ -52,26 +57,29 @@ class DrawerTooltipPage(ExamplePage):
         super().__init__(parent)
 
     def _addDemoContent(self, main_layout):
-        self._demoTooltip(main_layout)
+        main_layout.addWidget(self._createSectionHeader("=== 提示 ==="))
+        self._demoToolTip(main_layout)
         self._demoTooltipDirect(main_layout)
         self._demoStateTooltip(main_layout)
         self._demoToast(main_layout)
         self._demoNotifyPopup(main_layout)
+        self._demoTeachingTip(main_layout)
+
+        main_layout.addWidget(self._createSectionHeader("=== 对话框 ==="))
         self._demoMessageDialog(main_layout)
         self._demoConfirmDialog(main_layout)
         self._demoElaDialog(main_layout)
         self._demoContentDialog(main_layout)
         self._demoColorDialog(main_layout)
-        self._demoTeachingTip(main_layout)
 
-    def _demoTooltip(self, parent_layout):
-        parent_layout.addWidget(self._createSectionHeader("=== ela_ext - 提示组件 ==="))
-        self._demoToolTip(parent_layout)
+        main_layout.addWidget(self._createSectionHeader("=== 抽屉与引导 ==="))
+        self._demoSiSideDrawer(main_layout)
+        self._demoSpotlight(main_layout)
 
     def _demoToolTip(self, parent_layout):
         parent_layout.addLayout(
             self._createHeaderRow(
-                "02. ela_ext - ElaToolTip 工具提示", self._demoToolTip
+                "01. ela_ext - ElaToolTip 工具提示", self._demoToolTip
             )
         )
         self._addInfoText("鼠标悬停在按钮上查看提示", parent_layout)
@@ -100,7 +108,7 @@ class DrawerTooltipPage(ExamplePage):
     def _demoTooltipDirect(self, parent_layout):
         parent_layout.addLayout(
             self._createHeaderRow(
-                "03. ela_ext - remove_tooltip 与 ElaToolTip 直接使用",
+                "02. ela_ext - remove_tooltip 与 ElaToolTip 直接使用",
                 self._demoTooltipDirect,
             )
         )
@@ -195,7 +203,7 @@ class DrawerTooltipPage(ExamplePage):
     def _demoStateTooltip(self, parent_layout):
         parent_layout.addLayout(
             self._createHeaderRow(
-                "04. ela_ext - ElaStateToolTip 状态提示", self._demoStateTooltip
+                "03. ela_ext - ElaStateToolTip 状态提示", self._demoStateTooltip
             )
         )
         self._addInfoText(
@@ -259,7 +267,7 @@ class DrawerTooltipPage(ExamplePage):
 
     def _demoToast(self, parent_layout):
         parent_layout.addLayout(
-            self._createHeaderRow("05. ela_ext - ElaToast 通知提示", self._demoToast)
+            self._createHeaderRow("04. ela_ext - ElaToast 通知提示", self._demoToast)
         )
         self._addInfoText(
             "非模态通知，支持成功/信息/警告/错误四种类型，自动淡入→停留→淡出",
@@ -284,7 +292,7 @@ class DrawerTooltipPage(ExamplePage):
     def _demoNotifyPopup(self, parent_layout):
         parent_layout.addLayout(
             self._createHeaderRow(
-                "06. ela_ext - ElaNotifyPopup 通知弹窗", self._demoNotifyPopup
+                "05. ela_ext - ElaNotifyPopup 通知弹窗", self._demoNotifyPopup
             )
         )
         self._addInfoText(
@@ -333,7 +341,7 @@ class DrawerTooltipPage(ExamplePage):
     def _demoMessageDialog(self, parent_layout):
         parent_layout.addLayout(
             self._createHeaderRow(
-                "07. ela_ext - ElaMessageDialog 消息对话框", self._demoMessageDialog
+                "01. ela_ext - ElaMessageDialog 消息对话框", self._demoMessageDialog
             )
         )
         self._addInfoText(
@@ -366,7 +374,7 @@ class DrawerTooltipPage(ExamplePage):
     def _demoConfirmDialog(self, parent_layout):
         parent_layout.addLayout(
             self._createHeaderRow(
-                "08. ela_ext - ElaConfirmDialog 确认对话框", self._demoConfirmDialog
+                "02. ela_ext - ElaConfirmDialog 确认对话框", self._demoConfirmDialog
             )
         )
         self._addInfoText(
@@ -404,7 +412,7 @@ class DrawerTooltipPage(ExamplePage):
     def _demoElaDialog(self, parent_layout):
         parent_layout.addLayout(
             self._createHeaderRow(
-                "09. PyQt6ElaWidgetTools - ElaDialog 对话框", self._demoElaDialog
+                "03. PyQt6ElaWidgetTools - ElaDialog 对话框", self._demoElaDialog
             )
         )
         self._addInfoText(
@@ -435,7 +443,7 @@ class DrawerTooltipPage(ExamplePage):
     def _demoContentDialog(self, main_layout):
         main_layout.addLayout(
             self._createHeaderRow(
-                "10. PyQt6ElaWidgetTools - ElaContentDialog 内容对话框",
+                "04. PyQt6ElaWidgetTools - ElaContentDialog 内容对话框",
                 self._demoContentDialog,
             )
         )
@@ -491,7 +499,7 @@ class DrawerTooltipPage(ExamplePage):
     def _demoColorDialog(self, main_layout):
         main_layout.addLayout(
             self._createHeaderRow(
-                "11. PyQt6ElaWidgetTools - ElaColorDialog 颜色对话框",
+                "05. PyQt6ElaWidgetTools - ElaColorDialog 颜色对话框",
                 self._demoColorDialog,
             )
         )
@@ -549,7 +557,7 @@ class DrawerTooltipPage(ExamplePage):
     def _demoTeachingTip(self, main_layout):
         main_layout.addLayout(
             self._createHeaderRow(
-                "12. PyQt6ElaWidgetTools - ElaTeachingTip 新手引导",
+                "06. PyQt6ElaWidgetTools - ElaTeachingTip 新手引导",
                 self._demoTeachingTip,
             )
         )
@@ -617,3 +625,123 @@ class DrawerTooltipPage(ExamplePage):
         guide_btn.clicked.connect(lambda: _toggle(guide_tip))
         custom_btn.clicked.connect(lambda: _toggle(custom_tip))
         light_btn.clicked.connect(lambda: _toggle(light_tip))
+
+    def _demoSiSideDrawer(self, parent_layout):
+        parent_layout.addLayout(
+            self._createHeaderRow(
+                "01. ela_ext - ElaDrawer 四方向抽屉", self._demoSiSideDrawer
+            )
+        )
+        self._addInfoText("SiliconUI 风格抽屉，支持上下左右四个方向滑入", parent_layout)
+        # 不要 QFont().defaultFamily()（首次 ~190ms）；用 QApplication.font().family()（0.01ms）。
+        default_font_family = QApplication.font().family()
+        for name, pos, size, masked in [
+            ("左侧抽屉", ElaDrawerPositionType.Left, 300, True),
+            ("右侧抽屉", ElaDrawerPositionType.Right, 380, True),
+            ("顶部抽屉", ElaDrawerPositionType.Top, 200, True),
+            ("底部抽屉", ElaDrawerPositionType.Bottom, 200, True),
+            ("右侧无遮罩", ElaDrawerPositionType.Right, 380, False),
+        ]:
+            drawer = ElaDrawer(position=pos, drawer_size=size, parent=self)
+            drawer.setMaskEnabled(masked)
+            content = ElaThemeWidget()
+            content_layout = QVBoxLayout(content)
+            content_layout.setContentsMargins(16, 16, 16, 16)
+            content_layout.setSpacing(12)
+            title = ElaText(name, content)
+            title.setTextPixelSize(18)
+            title.setFont(QFont(default_font_family, 18, QFont.Weight.Bold))
+            content_layout.addWidget(title)
+            desc = ElaText(
+                f"这是一个{name}，可以放置设置项、表单等内容。"
+                + (" 无遮罩模式下抽屉外仍可操作。" if not masked else ""),
+                content,
+            )
+            desc.setTextPixelSize(14)
+            content_layout.addWidget(desc)
+            content_layout.addStretch()
+            close_btn = ElaButton(
+                "关闭抽屉", variant="solid", color="primary", parent=content
+            )
+            close_btn.setFixedWidth(120)
+            close_btn.clicked.connect(drawer.closeDrawer)
+            content_layout.addWidget(close_btn)
+            drawer.setContentWidget(content)
+            self._drawers[name] = drawer
+        btn_layout = QHBoxLayout()
+        btn_layout.setSpacing(15)
+        for name, drawer in self._drawers.items():
+            btn = ElaPushButton(name, self)
+            btn.setFixedWidth(100)
+            btn.clicked.connect(drawer.showDrawer)
+            btn_layout.addWidget(btn)
+        btn_layout.addStretch()
+        parent_layout.addLayout(btn_layout)
+        parent_layout.addSpacing(20)
+
+    def _demoSpotlight(self, parent_layout):
+        parent_layout.addLayout(
+            self._createHeaderRow(
+                "02. pyqt6_ela_pro - ElaSpotlight 引导遮罩", self._demoSpotlight
+            )
+        )
+        self._addInfoText("单目标聚光 + 多步骤引导", parent_layout)
+
+        row = QHBoxLayout()
+        row.setSpacing(15)
+        single_btn = ElaPushButton("单目标聚光", self)
+        single_btn.setFixedWidth(110)
+        single_target = ElaPushButton("高亮目标", self)
+        single_target.setFixedWidth(110)
+        row.addWidget(single_target)
+        row.addWidget(single_btn)
+        row.addStretch()
+        parent_layout.addLayout(row)
+
+        def _on_single():
+            s = ElaSpotlight(self)
+            s._title = "提示"
+            s._content = "这是一个单目标引导示例"
+            s.showSpotlight(single_target, "知道了")
+
+        single_btn.clicked.connect(_on_single)
+        parent_layout.addSpacing(12)
+
+        self._addInfoText("多步骤引导，依次高亮下方三个按钮", parent_layout)
+        spot_btn1 = ElaPushButton("第一步", self)
+        spot_btn1.setFixedWidth(100)
+        spot_btn2 = ElaPushButton("第二步", self)
+        spot_btn2.setFixedWidth(100)
+        spot_btn3 = ElaPushButton("第三步", self)
+        spot_btn3.setFixedWidth(100)
+        launch_btn = ElaPushButton("开始引导", self)
+        launch_btn.setFixedWidth(100)
+        spot_layout = QHBoxLayout()
+        spot_layout.setSpacing(15)
+        spot_layout.addWidget(spot_btn1)
+        spot_layout.addWidget(spot_btn2)
+        spot_layout.addWidget(spot_btn3)
+        spot_layout.addWidget(launch_btn)
+        spot_layout.addStretch()
+        parent_layout.addLayout(spot_layout)
+
+        def _on_multi():
+            s = ElaSpotlight(self)
+            s.setSteps(
+                [
+                    ElaSpotlight.SpotlightStep(
+                        spot_btn1, "第一步", "点击此按钮开始操作", False
+                    ),
+                    ElaSpotlight.SpotlightStep(
+                        spot_btn2, "第二步", "配置相关参数", False
+                    ),
+                    ElaSpotlight.SpotlightStep(
+                        spot_btn3, "第三步", "确认并完成", False
+                    ),
+                ]
+            )
+            s.finished.connect(lambda: print("多步引导结束"))
+            s.start()
+
+        launch_btn.clicked.connect(_on_multi)
+        parent_layout.addSpacing(20)

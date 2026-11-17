@@ -216,6 +216,35 @@ class TestCapture:
         assert clipboard.text() == before
         capture.deleteLater()
 
+    def test_default_timeout_covers_office_large_selection(self, qapp):
+        capture = ElaClipboardCapture()
+        assert capture.timeoutMs() == 1000
+        capture.deleteLater()
+
+    def test_slow_copy_after_350ms_is_still_captured(
+        self, qapp, fake_clipboard, monkeypatch
+    ):
+        """Office 大段选区实测 >250ms；慢于旧超时也必须能取到词。"""
+        clipboard, _state = fake_clipboard
+        clipboard.setText("旧内容")
+        capture = ElaClipboardCapture()
+        capture.setCaptureDelayMs(1)
+        capture.setPollMs(5)
+        capture.setRestoreDelayMs(1)
+        results: list[str] = []
+        capture.captured.connect(results.append)
+        timer = QTimer(capture)
+        timer.setSingleShot(True)
+        timer.timeout.connect(lambda: clipboard.setText("大段选区"))
+        monkeypatch.setattr(
+            capture_module, "send_copy", _fake_send_copy(lambda: timer.start(350))
+        )
+
+        capture.capture()
+        assert _wait_until(qapp, lambda: bool(results), timeout_ms=1500)
+        assert results == ["大段选区"]
+        capture.deleteLater()
+
     def test_config_roundtrip(self, qapp):
         capture = ElaClipboardCapture()
         capture.setCaptureDelayMs(50)

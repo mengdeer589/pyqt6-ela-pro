@@ -46,7 +46,7 @@ def _res(filename):
 class ExamplePage(ElaThemeWidget):
     """示例页面基类，提供通用布局结构。"""
 
-    PAGE_TITLE = "[ela_ext] 示例页面"
+    PAGE_TITLE = "示例页面"
 
     #: 内容会往窗口挂**原生子窗口**（如 `_GLViewport = QOpenGLWidget`）的页面置 True：
     #: 这类页必须在 `window.show()` 之前构建（见 `__main__`）—— 给已显示的顶层窗口挂

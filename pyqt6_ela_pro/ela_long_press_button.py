@@ -71,6 +71,7 @@ class ElaLongPressButton(ElaButton):
         self._progress = 0.0
         self._triggered = False
         self._backward_step = 0.0
+        self._long_press_enabled = True
 
         self._mouse_pressed_timer = self._make_timer(self._onMousePressedTick)
         self._go_backwards_timer = self._make_timer(self._onGoBackwardsTick)
@@ -90,6 +91,19 @@ class ElaLongPressButton(ElaButton):
 
     def duration(self) -> int:
         return self._duration
+
+    def setLongPressEnabled(self, on: bool) -> None:  # noqa: N802
+        """开关长按；``False`` 时退化为普通点击（走 ``clicked``，不再发 ``longPressed``）。"""
+        on = bool(on)
+        if on == self._long_press_enabled:
+            return
+        self._long_press_enabled = on
+        if not on:
+            self._cancel_hold()
+
+    def longPressEnabled(self) -> bool:  # noqa: N802
+        """当前是否启用长按（``False`` = 普通点击即触发）。"""
+        return self._long_press_enabled
 
     def setProgressColor(self, color) -> None:
         """自定义进度填充色（支持 ``QColor`` 与 ``#rrggbb`` / ``rgba(...)``）。"""
@@ -121,7 +135,7 @@ class ElaLongPressButton(ElaButton):
         return 1.0 / steps if steps >= 1 else 1.0
 
     def _start_hold(self) -> None:
-        if not self.isEnabled() or self.isLoading():
+        if not self._long_press_enabled or not self.isEnabled() or self.isLoading():
             return
         self._go_backwards_timer.stop()
         self._triggered = False
@@ -177,7 +191,7 @@ class ElaLongPressButton(ElaButton):
         if not self.isEnabled():
             return
         super().mousePressEvent(event)
-        if event.button() == Qt.MouseButton.LeftButton:
+        if event.button() == Qt.MouseButton.LeftButton and self._long_press_enabled:
             self._start_hold()
 
     def mouseReleaseEvent(self, event: QMouseEvent) -> None:
@@ -185,7 +199,11 @@ class ElaLongPressButton(ElaButton):
         self._end_hold()
 
     def keyPressEvent(self, event: QKeyEvent) -> None:
-        if event.key() in self._HOLD_KEYS and not event.isAutoRepeat():
+        if (
+            self._long_press_enabled
+            and event.key() in self._HOLD_KEYS
+            and not event.isAutoRepeat()
+        ):
             self._start_hold()
         super().keyPressEvent(event)
 

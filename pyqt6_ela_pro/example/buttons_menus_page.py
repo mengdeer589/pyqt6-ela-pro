@@ -13,9 +13,11 @@ from PyQt6ElaWidgetTools import (
     ElaMessageBar,
     ElaMessageBarType,
     ElaPushButton,
+    ElaRibbonBar,
     ElaText,
     ElaThemeType,
     ElaToggleButton,
+    ElaToolBar,
     ElaToolButton,
     eTheme,
 )
@@ -61,37 +63,45 @@ _ACCENT_PRESETS = [
 
 
 class ButtonsMenusPage(ExamplePage):
-    """按钮与菜单示例页。"""
+    """按钮、菜单与命令栏示例页。"""
 
-    PAGE_TITLE = "按钮与菜单"
+    PAGE_TITLE = "按钮、菜单与命令栏"
 
     def __init__(self, parent=None):
         self._nameEdit = None
         self._passwordEdit = None
         self._longPressBtn = None
+        self._progressBtn = None
         self._accentInfo = None
         super().__init__(parent)
 
     def _addDemoContent(self, main_layout):
+        main_layout.addWidget(self._createSectionHeader("=== 按钮 ==="))
         self._demoPushButton(main_layout)
         self._demoToolButton(main_layout)
         self._demoIconButton(main_layout)
         self._demoToggleButton(main_layout)
+        self._demoElaButton(main_layout)
         self._demoPrimaryButton(main_layout)
         self._demoLongPressButton(main_layout)
         self._demoProgressButton(main_layout)
         self._demoSvgIcon(main_layout)
-        self._demoElaButton(main_layout)
         self._demoDropDownButton(main_layout)
         self._demoSplitButton(main_layout)
+
+        main_layout.addWidget(self._createSectionHeader("=== 菜单与命令栏 ==="))
         self._demoElaMenu(main_layout)
         self._demoMenuBar(main_layout)
+        self._demoToolBar(main_layout)
+        self._demoRibbonBar(main_layout)
+
+        main_layout.addWidget(self._createSectionHeader("=== 主题强调色 ==="))
         self._demoAccentColor(main_layout)
 
     def _demoAccentColor(self, parent_layout):
         parent_layout.addLayout(
             self._createHeaderRow(
-                "99. pyqt6_ela_pro - setAccentColor 强调色换色",
+                "01. pyqt6_ela_pro - setAccentColor 强调色换色",
                 self._demoAccentColor,
             )
         )
@@ -155,7 +165,7 @@ class ButtonsMenusPage(ExamplePage):
     def _demoPushButton(self, parent_layout):
         parent_layout.addLayout(
             self._createHeaderRow(
-                "05. PyQt6ElaWidgetTools - ElaPushButton 按钮", self._demoPushButton
+                "01. PyQt6ElaWidgetTools - ElaPushButton 按钮", self._demoPushButton
             )
         )
         self._addInfoText("按钮组件", parent_layout)
@@ -175,7 +185,7 @@ class ButtonsMenusPage(ExamplePage):
     def _demoToolButton(self, parent_layout):
         parent_layout.addLayout(
             self._createHeaderRow(
-                "06. PyQt6ElaWidgetTools - ElaToolButton 工具按钮", self._demoToolButton
+                "02. PyQt6ElaWidgetTools - ElaToolButton 工具按钮", self._demoToolButton
             )
         )
         self._addInfoText("工具按钮组件，用于展示图标", parent_layout)
@@ -195,7 +205,7 @@ class ButtonsMenusPage(ExamplePage):
     def _demoIconButton(self, parent_layout):
         parent_layout.addLayout(
             self._createHeaderRow(
-                "07. PyQt6ElaWidgetTools - ElaIconButton 图标按钮", self._demoIconButton
+                "03. PyQt6ElaWidgetTools - ElaIconButton 图标按钮", self._demoIconButton
             )
         )
         self._addInfoText("图标按钮组件", parent_layout)
@@ -215,7 +225,7 @@ class ButtonsMenusPage(ExamplePage):
     def _demoToggleButton(self, parent_layout):
         parent_layout.addLayout(
             self._createHeaderRow(
-                "07a. PyQt6ElaWidgetTools - ElaToggleButton 切换按钮",
+                "04. PyQt6ElaWidgetTools - ElaToggleButton 切换按钮",
                 self._demoToggleButton,
             )
         )
@@ -252,7 +262,7 @@ class ButtonsMenusPage(ExamplePage):
     def _demoPrimaryButton(self, parent_layout):
         parent_layout.addLayout(
             self._createHeaderRow(
-                "02. PyQt6ElaWidgetTools - ElaPushButton 按钮", self._demoPrimaryButton
+                "06. ela_ext - ElaPushButton 按钮", self._demoPrimaryButton
             )
         )
         self._addInfoText("按钮组件", parent_layout)
@@ -281,7 +291,7 @@ class ButtonsMenusPage(ExamplePage):
     def _demoLongPressButton(self, parent_layout):
         parent_layout.addLayout(
             self._createHeaderRow(
-                "04. ela_ext - ElaLongPressButton 长按按钮", self._demoLongPressButton
+                "07. ela_ext - ElaLongPressButton 长按按钮", self._demoLongPressButton
             )
         )
         self._addInfoText(
@@ -338,7 +348,7 @@ class ButtonsMenusPage(ExamplePage):
     def _demoProgressButton(self, parent_layout):
         parent_layout.addLayout(
             self._createHeaderRow(
-                "05. pyqt6_ela_pro - ElaProgressButton 进度按钮",
+                "08. pyqt6_ela_pro - ElaProgressButton 进度按钮",
                 self._demoProgressButton,
             )
         )
@@ -377,7 +387,7 @@ class ButtonsMenusPage(ExamplePage):
     def _demoSvgIcon(self, parent_layout):
         parent_layout.addLayout(
             self._createHeaderRow(
-                "07. ela_ext - ElaButton.setSvgIcon 第三方 SVG 图标", self._demoSvgIcon
+                "09. ela_ext - ElaButton.setSvgIcon 第三方 SVG 图标", self._demoSvgIcon
             )
         )
         self._addInfoText(
@@ -444,7 +454,7 @@ class ButtonsMenusPage(ExamplePage):
     def _demoElaButton(self, parent_layout):
         parent_layout.addLayout(
             self._createHeaderRow(
-                "09. ela_ext - ElaButton 统一按钮", self._demoElaButton
+                "05. ela_ext - ElaButton 统一按钮", self._demoElaButton
             )
         )
         self._addInfoText(
@@ -569,7 +579,7 @@ class ButtonsMenusPage(ExamplePage):
     def _demoDropDownButton(self, parent_layout):
         parent_layout.addLayout(
             self._createHeaderRow(
-                "09a. pyqt6_ela_pro - ElaDropDownButton 下拉按钮",
+                "10. pyqt6_ela_pro - ElaDropDownButton 下拉按钮",
                 self._demoDropDownButton,
             )
         )
@@ -609,7 +619,7 @@ class ButtonsMenusPage(ExamplePage):
     def _demoSplitButton(self, parent_layout):
         parent_layout.addLayout(
             self._createHeaderRow(
-                "10. pyqt6_ela_pro - ElaSplitButton 拆分按钮", self._demoSplitButton
+                "11. pyqt6_ela_pro - ElaSplitButton 拆分按钮", self._demoSplitButton
             )
         )
         self._addInfoText(
@@ -714,4 +724,55 @@ class ButtonsMenusPage(ExamplePage):
         about_action = help_menu.addAction("关于")
         about_action.triggered.connect(lambda: self._showMenuFeedback("帮助-关于"))
         parent_layout.addWidget(menu_bar)
+        parent_layout.addSpacing(20)
+
+    def _demoToolBar(self, parent_layout):
+        parent_layout.addLayout(
+            self._createHeaderRow(
+                "03. PyQt6ElaWidgetTools - ElaToolBar 工具栏", self._demoToolBar
+            )
+        )
+        self._addInfoText("工具栏组件，可在工具栏中添加各种组件", parent_layout)
+        parent_layout.addSpacing(10)
+        toolbar = ElaToolBar(self)
+        for i in range(5):
+            tool_btn = ElaToolButton(self)
+            tool_btn.setText(f"工具{i + 1}")
+            tool_btn.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
+            toolbar.addWidget(tool_btn)
+        toolbar.addSeparator()
+        for i in range(3):
+            tool_btn = ElaToolButton(self)
+            tool_btn.setText(f"操作{i + 1}")
+            tool_btn.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
+            toolbar.addWidget(tool_btn)
+        parent_layout.addWidget(toolbar)
+        parent_layout.addSpacing(20)
+
+    def _demoRibbonBar(self, parent_layout):
+        parent_layout.addLayout(
+            self._createHeaderRow(
+                "04. PyQt6ElaWidgetTools - ElaRibbonBar 功能区",
+                self._demoRibbonBar,
+            )
+        )
+        self._addInfoText(
+            "按页 / 组组织 QAction，switchRibbonPage 切页；可绑定 QTabBar 或 ElaPivot。",
+            parent_layout,
+        )
+        ribbon = ElaRibbonBar(self)
+        ribbon.addRibbonAction(
+            "通用操作", "文件管理", "新建", ElaIconType.IconName.FilePlus
+        )
+        ribbon.addRibbonAction(
+            "通用操作", "文件管理", "打开", ElaIconType.IconName.FolderOpen
+        )
+        ribbon.addRibbonAction(
+            "记录与回放", "回放控制", "播放", ElaIconType.IconName.CirclePlay
+        )
+        ribbon.addRibbonAction(
+            "系统与设置", "系统设置", "设置", ElaIconType.IconName.GearComplex
+        )
+        ribbon.switchRibbonPage("通用操作")
+        parent_layout.addWidget(ribbon)
         parent_layout.addSpacing(20)

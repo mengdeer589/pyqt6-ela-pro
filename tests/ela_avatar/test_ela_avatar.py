@@ -394,16 +394,49 @@ class TestCoverPixmap:
         """cover 的裁剪源必须按比例放大到「至少盖满一边」。"""
         source = QPixmap(64, 32)
         source.fill(QColor("#ff0000"))
+        painter = QPainter(source)
+        try:
+            painter.fillRect(24, 0, 16, 32, QColor("#00ff00"))
+        finally:
+            painter.end()
+
         target = QPixmap(32, 32)
-        target.fill()
+        target.fill(QColor("#000000"))
         painter = QPainter(target)
         try:
             drawCoverPixmap(painter, QRectF(0, 0, 32, 32), source)
         finally:
             painter.end()
         image = target.toImage()
-        # 上下边应被内容覆盖（源图按 32x32 缩放后正好盖满），左右边不应被留白
-        assert image.pixelColor(0, 0).name() != QColor(0, 0, 0).name() or True
+        # 64x32 -> 32x32 应裁中间 32x32（源 x=16..48）：红 / 绿 / 绿 / 红。
+        assert image.pixelColor(2, 16).name() == "#ff0000"
+        assert image.pixelColor(10, 16).name() == "#00ff00"
+        assert image.pixelColor(22, 16).name() == "#00ff00"
+        assert image.pixelColor(30, 16).name() == "#ff0000"
+
+    def test_cover_accounts_for_device_pixel_ratio(self, motion_full):
+        """源矩形是物理像素；DPR=2 的小图也必须按逻辑尺寸算裁剪区。"""
+        source = QPixmap(64, 32)
+        source.setDevicePixelRatio(2.0)
+        source.fill(QColor("#ff0000"))
+        painter = QPainter(source)
+        try:
+            # QPainter 在 DPR=2 的 pixmap 上用逻辑坐标：物理 x=16..48 的绿块。
+            painter.fillRect(8, 0, 16, 16, QColor("#00ff00"))
+        finally:
+            painter.end()
+
+        target = QPixmap(32, 32)
+        target.fill(QColor("#000000"))
+        painter = QPainter(target)
+        try:
+            drawCoverPixmap(painter, QRectF(0, 0, 32, 32), source)
+        finally:
+            painter.end()
+        image = target.toImage()
+        assert image.pixelColor(2, 2).name() == "#00ff00"
+        assert image.pixelColor(16, 16).name() == "#00ff00"
+        assert image.pixelColor(29, 29).name() == "#00ff00"
 
     def test_tolerates_null_pixmap(self):
         canvas = QPixmap(8, 8)

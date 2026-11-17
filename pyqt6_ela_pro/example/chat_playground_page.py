@@ -580,6 +580,12 @@ class ChatPlaygroundPage(ExamplePage):
                         self._demo_approval,
                         False,
                     ),
+                    (
+                        "始终允许长按",
+                        "切换 700ms 长按 / 普通点击",
+                        self._demo_always_allow_hold,
+                        False,
+                    ),
                     ("问答型审批", "逐题向导 + 自定义答案", self._demo_question, False),
                     (
                         "steer 插话",
@@ -2126,6 +2132,15 @@ class ChatPlaygroundPage(ExamplePage):
         self._status.setStatus(
             f"审批卡已挂到 {type(chat.permissionDock()).__name__}，"
             f"待答 {len(chat.pendingPermissionCards())} 张"
+        )
+
+    def _demo_always_allow_hold(self, chat: ElaChatWidget) -> None:
+        view = chat.chatView()
+        on = not view.permissionAlwaysAllowHoldEnabled()
+        view.setPermissionAlwaysAllowHoldEnabled(on)
+        self._scenario_approval(chat)
+        self._status.setStatus(
+            f"始终允许：{'长按 700ms' if on else '普通点击'}（审批卡已更新）"
         )
 
     def _demo_question(self, chat: ElaChatWidget) -> None:

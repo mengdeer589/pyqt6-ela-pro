@@ -1,4 +1,4 @@
-"""图表（第三方库）。"""
+"""第三方图表与图形示例页。"""
 
 import random
 import math
@@ -30,21 +30,16 @@ except ImportError:
 
 
 class ChartLibPage(ExamplePage):
-    """图表（第三方库）示例页。"""
+    """第三方图表与图形示例页。"""
 
-    PAGE_TITLE = "图表（第三方库）"
-
-    def __init__(self, parent=None):
-        self._basicTable = None
-        self._asyncTable = None
-        self._styleTable = None
-        self._sortTable = None
-        self._sortingEnabled = False
-        super().__init__(parent)
+    PAGE_TITLE = "第三方图表与图形"
 
     def _addDemoContent(self, main_layout):
+        main_layout.addWidget(self._createSectionHeader("=== 实时图表 ==="))
         self._demoPyqtgraphChart(main_layout)
         self._demoFigureCanvas(main_layout)
+
+        main_layout.addWidget(self._createSectionHeader("=== 仪表与图形视图 ==="))
         self._demoDashboardGauge(main_layout)
         self._demoGraphicsView(main_layout)
 
@@ -109,7 +104,7 @@ class ChartLibPage(ExamplePage):
     def _demoPyqtgraphChart(self, parent_layout):
         parent_layout.addLayout(
             self._createHeaderRow(
-                "03. ela_ext - ElaPlotWidget 实时波形图 (pyqtgraph)",
+                "01. ela_ext - ElaPlotWidget 实时波形图 (pyqtgraph)",
                 self._demoPyqtgraphChart,
             )
         )
@@ -243,7 +238,7 @@ class ChartLibPage(ExamplePage):
     def _demoFigureCanvas(self, parent_layout):
         parent_layout.addLayout(
             self._createHeaderRow(
-                "04. ela_ext - ElaFigureCanvas 图表 (matplotlib)",
+                "02. ela_ext - ElaFigureCanvas 图表 (matplotlib)",
                 self._demoFigureCanvas,
             )
         )
@@ -355,7 +350,7 @@ class ChartLibPage(ExamplePage):
     def _demoDashboardGauge(self, parent_layout):
         parent_layout.addLayout(
             self._createHeaderRow(
-                "05. ela_ext - ElaDashboardGauge 仪表盘", self._demoDashboardGauge
+                "01. ela_ext - ElaDashboardGauge 仪表盘", self._demoDashboardGauge
             )
         )
         self._addInfoText(
@@ -436,7 +431,7 @@ class ChartLibPage(ExamplePage):
 
         parent_layout.addLayout(
             self._createHeaderRow(
-                "06. PyQt6ElaWidgetTools - ElaGraphicsScene / ElaGraphicsView 图形视图",
+                "02. PyQt6ElaWidgetTools - ElaGraphicsScene / ElaGraphicsView 图形视图",
                 self._demoGraphicsView,
             )
         )

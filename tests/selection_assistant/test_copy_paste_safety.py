@@ -243,6 +243,23 @@ class TestBuiltinDragFilter:
         assert f((100, 100), (400, 130)) is False
         assert f((100, 100), (250, 130)) is True
 
+    def test_office_long_drag_uses_relaxed_limit(self, monkeypatch):
+        """Office 长选区（跨两栏 / 半页）不应被普通进程的 600px 上限误杀。"""
+        monkeypatch.setattr(assistant_module, "window_pid_at", lambda x, y: 4242)
+        monkeypatch.setattr(
+            assistant_module, "window_rect_at", lambda x, y: (0, 0, 5000, 2000)
+        )
+        monkeypatch.setattr(
+            assistant_module, "process_name_at", lambda pid: "winword.exe"
+        )
+        f = ElaSelectionAssistant.builtinDragFilter()
+        assert f((100, 100), (900, 700)) is True
+
+        monkeypatch.setattr(
+            assistant_module, "process_name_at", lambda pid: "explorer.exe"
+        )
+        assert f((100, 100), (900, 700)) is False
+
     def test_filter_failure_denies(self, monkeypatch):
         def boom(x, y):
             raise OSError("Win32 查询失败")

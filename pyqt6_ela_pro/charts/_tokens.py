@@ -92,10 +92,11 @@ def _mix(a: QColor, b: QColor, t: float) -> QColor:
 
 
 def _subtle_primary(mode, chart=None) -> QColor:
-    """color.primary.subtle：主色与画布底的 12% 混合浅色（主题感知）。"""
+    """color.primary.subtle：主色与不透明画布底的 12% 混合色（主题感知）。"""
     bg = theme_override(chart, mode, "color.bg.base")
     if bg is None:
-        bg = _ela_color(mode, "BasicBase")
+        # BasicBase 是白色 alpha 叠色：直混得到近白，暗色热力图 / graphic 会过曝
+        bg = surfaceRaised(mode)
     primary = theme_override(chart, mode, "color.primary")
     if primary is None:
         primary = _ela_color(mode, "PrimaryNormal")

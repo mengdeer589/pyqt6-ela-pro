@@ -543,6 +543,9 @@ class _ViewMessagesMixin:
         bubble.setTimestamp(datetime.now().strftime("%H:%M:%S"))
         bubble.setReasoningStyle(self._reasoning_style)
         bubble.setToolGrouping(self._tool_grouping)
+        bubble.setPermissionAlwaysAllowHoldEnabled(
+            self._permission_always_allow_hold
+        )
         bubble.setStatsMode(self._stats_mode)
         bubble.setToolDefaultOpen(self._tool_default_open)
         bubble._disclosure = self._disclosure

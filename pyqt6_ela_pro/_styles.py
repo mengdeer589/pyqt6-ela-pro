@@ -344,10 +344,10 @@ def drawCoverPixmap(painter: QPainter, target, pixmap: QPixmap) -> None:  # noqa
         return
     if box.width() <= 0 or box.height() <= 0:
         return
-    # 覆盖逻辑尺寸所需的缩放比：宽高取 max 即「至少盖满一边」，另一边居中裁掉。
+    # 绘制缩放比：宽高取 max 即「至少盖满一边」，另一边居中裁掉；源裁剪区 = 目标 / 该比例。
     scale = max(box.width() / logicalWidth, box.height() / logicalHeight)
-    srcWidth = logicalWidth * scale
-    srcHeight = logicalHeight * scale
+    srcWidth = box.width() / scale
+    srcHeight = box.height() / scale
     src = QRectF(
         (logicalWidth - srcWidth) / 2.0 * ratio,
         (logicalHeight - srcHeight) / 2.0 * ratio,

@@ -22,14 +22,17 @@ import math
 import pytest
 from PyQt6.QtCore import QPoint, QPointF, Qt
 from PyQt6.QtGui import (
+    QColor,
     QFocusEvent,
     QKeyEvent,
     QMouseEvent,
     QPainter,
     QPixmap,
 )
+from PyQt6ElaWidgetTools import ElaThemeType, eTheme
 
 from pyqt6_ela_pro.blueprint import registry as reg
+from pyqt6_ela_pro.blueprint._tokens import T
 from pyqt6_ela_pro.blueprint.canvas import ElaBlueprintCanvas
 from pyqt6_ela_pro.blueprint.model import ElaBlueprintNode
 
@@ -459,3 +462,21 @@ def _hide_event():
 from PyQt6.QtCore import QEvent as _QEvent  # noqa: E402
 
 QEvent_Type_MouseButtonPress = _QEvent.Type.MouseButtonPress
+
+
+class TestThemeTokenHex:
+    def test_alpha_overlays_are_flattened_to_hex(self):
+        """``T()`` 的 hex 不带 alpha：叠色必须先合成，否则暗色网格点是纯白、浅色是纯黑。"""
+        previous = eTheme.getThemeMode()
+        try:
+            eTheme.setThemeMode(ElaThemeType.ThemeMode.Dark)
+            dark = QColor(T("color.border"))
+            dark_text = QColor(T("color.text.tertiary"))
+            eTheme.setThemeMode(ElaThemeType.ThemeMode.Light)
+            light = QColor(T("color.border"))
+        finally:
+            eTheme.setThemeMode(previous)
+        assert dark.isValid() and light.isValid()
+        assert dark.lightness() < 128
+        assert light.lightness() > 128
+        assert dark_text.name() != "#ffffff"

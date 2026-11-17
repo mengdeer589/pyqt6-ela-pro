@@ -6,6 +6,7 @@ from PyQt6.QtGui import QColor
 from PyQt6ElaWidgetTools import eTheme, ElaThemeType
 
 from .._internal import connect_theme_signal
+from .._theme import _composite, surfaceRaised
 from ..charts._tokens import chart_token
 
 __all__ = ["T", "theme_changed_slot", "shadow_md"]
@@ -25,7 +26,7 @@ _PIN_COLOR_PAIRS = {
 
 
 def T(key):
-    """读取令牌：颜色返回 hex 字符串，数值返回 int（对齐源库调用面）。
+    """读取令牌：颜色返回不透明 hex 字符串（alpha 叠色先合成到卡片表面），数值返回 int。
     **未知键抛 ``KeyError``** —— 这是有意的：静默回退会把「拼错一个令牌名」
     合法性必须在更早的注册期就校验掉（见 ``registry.register_pin_type``），
     """
@@ -39,12 +40,16 @@ def T(key):
         if name in SPACE:
             return SPACE[name]
         raise KeyError(f"未知间距令牌: {key!r}")
+    mode = eTheme.getThemeMode()
     pair = _PIN_COLOR_PAIRS.get(key)
     if pair is not None:
-        dark = eTheme.getThemeMode() == ElaThemeType.ThemeMode.Dark
+        dark = mode == ElaThemeType.ThemeMode.Dark
         return QColor(pair[1] if dark else pair[0]).name()
-    v = chart_token(eTheme.getThemeMode(), key)
+    v = chart_token(mode, key)
     if isinstance(v, QColor):
+        if v.alpha() < 255:
+            # hex 不带 alpha：V3.0 的 border / 弱文本是叠色，直转会得到纯白 / 纯黑
+            v = _composite(surfaceRaised(mode), v)
         return v.name()
     return v
 

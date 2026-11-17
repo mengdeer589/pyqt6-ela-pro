@@ -71,7 +71,7 @@ class BlueprintPage(ExamplePage):
     #: Windows/Qt 重建顶层 HWND（主窗口「闪一次」）。
     PRE_SHOW_BUILD = True
 
-    PAGE_TITLE = "ElaBlueprintCanvas 节点图编辑器"
+    PAGE_TITLE = "节点图编辑器"
 
     METRIC_TITLES = {
         "epoch": "Epoch",
@@ -95,6 +95,7 @@ class BlueprintPage(ExamplePage):
         self._dist_note = None
         self._body_edges = []
         self._snap_switch = None
+        self._grid_switch = None
         self._persist_data = None
         self._persist_note = None
         self._build_training_steps = None
@@ -874,6 +875,14 @@ class BlueprintPage(ExamplePage):
         snap_label.setTextPixelSize(14)
         edit_row.addWidget(snap_switch)
         edit_row.addWidget(snap_label)
+        grid_switch = ElaToggleSwitch(self)
+        grid_switch.setIsToggled(True)
+        grid_switch.toggled.connect(self._body_canvas.set_grid_visible)
+        self._grid_switch = grid_switch
+        grid_label = ElaText("点阵网格", self)
+        grid_label.setTextPixelSize(14)
+        edit_row.addWidget(grid_switch)
+        edit_row.addWidget(grid_label)
         duplicate_btn = ElaPushButton("复制选中", self)
         duplicate_btn.clicked.connect(self._body_canvas.duplicate_selection)
         select_btn = ElaPushButton("全选", self)
@@ -1293,9 +1302,7 @@ class BlueprintPage(ExamplePage):
 
     def _demoContextMenus(self, main_layout):
         main_layout.addLayout(
-            self._createHeaderRow(
-                "右键菜单组件", self._demoContextMenus
-            )
+            self._createHeaderRow("右键菜单组件", self._demoContextMenus)
         )
         self._addInfoText(
             "画布内置的三种菜单也可单独弹出：创建节点（可搜索）、节点菜单、连线菜单。",

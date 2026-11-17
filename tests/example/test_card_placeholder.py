@@ -1,4 +1,4 @@
-"""卡片封面缺图降级（「进度与反馈」页）。
+"""卡片封面缺图降级（「卡片与展示」页）。
 
 `ElaPromotionCard` 四个文字色写死 `Qt::white`（上游设计：图片上的白字），
 封面图一旦缺失，浅色主题下白字落在近白页面上完全不可读（实机截图暴露过）。
@@ -14,8 +14,8 @@ import os
 from PyQt6ElaWidgetTools import ElaPromotionCard, ElaText
 
 from pyqt6_ela_pro.example.base_page import _res
-from pyqt6_ela_pro.example.progress_feedback_page import (
-    ProgressFeedbackPage,
+from pyqt6_ela_pro.example.cards_page import (
+    CardsPage,
     _card_pixmap,
     _placeholder_card_pixmap,
 )
@@ -54,9 +54,9 @@ def test_placeholder_keeps_white_text_readable(qapp):
 
 
 def test_demo_card_always_gets_a_cover(make):
-    page = make(ProgressFeedbackPage)
+    page = make(CardsPage)
     cards = page.findChildren(ElaPromotionCard)
-    assert cards, "06 节应演示 ElaPromotionCard"
+    assert cards, "卡片节应演示 ElaPromotionCard"
     assert not cards[0].getCardPixmap().isNull()
     if not os.path.exists(_res("miku.png")):
         texts = [child.text() for child in page.findChildren(ElaText)]

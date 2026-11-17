@@ -1,4 +1,4 @@
-"""四个「补漏」小节的回归守卫。
+"""补漏小节与组件归位的回归守卫。
 
 补的是什么：一次全量组件对账（AST 命中 ∪ 运行时控件树）发现 example 从没
 实例化过 ``ElaTagLineEdit`` / ``ElaToggleButton`` / ``ElaScrollPage`` /
@@ -34,39 +34,43 @@ from pyqt6_ela_pro import (
     ElaTagLineEdit,
 )
 from pyqt6_ela_pro.example.buttons_menus_page import ButtonsMenusPage
+from pyqt6_ela_pro.example.cards_page import CardsPage
 from pyqt6_ela_pro.example.container_layout_page import ContainerLayoutPage
 from pyqt6_ela_pro.example.drawer_tooltip_page import DrawerTooltipPage
-from pyqt6_ela_pro.example.fluent_page import FluentPage
 from pyqt6_ela_pro.example.input_select_page import InputSelectPage
+from pyqt6_ela_pro.example.navigation_page import NavigationToolsPage
 
 
-class TestFluentPage:
-    """补齐此前 example 从未实例化的 Fluent / 补充组件。"""
+class TestMovedComponents:
+    """Fluent 页解散后，各组件落到对应角色页。"""
 
-    def test_page_contains_all_new_components(self, qapp, make):
-        page = make(FluentPage)
+    def test_cards_page_has_avatar_shimmer_and_promotion(self, qapp, make):
+        page = make(CardsPage)
         avatars = page.findChildren(ElaAvatar)
         assert len(avatars) == 5
         compact = [avatar for avatar in avatars if avatar.extent() == 30]
         assert len(compact) == 1
         assert compact[0].shape() == ElaAvatarShapeType.Rounded
         assert compact[0].iconName() == ElaIconType.IconName.Robot
-        assert len(page.findChildren(ElaField)) == 3
-        assert len(page.findChildren(ElaSelectorBar)) == 1
         assert len(page.findChildren(ElaShimmer)) == 3
-        assert len(page.findChildren(ElaPromotionView)) == 1
-        assert len(page.findChildren(ElaRibbonBar)) == 1
-
-    def test_selector_and_ribbon_have_content(self, qapp, make):
-        page = make(FluentPage)
-        bar = page.findChildren(ElaSelectorBar)[0]
-        assert bar.itemCount() == 3
-        assert bar.selectedIndex() == 1
-        ribbon = page.findChildren(ElaRibbonBar)[0]
-        assert ribbon.getCurrentRibbonPage() == "通用操作"
         view = page.findChildren(ElaPromotionView)[0]
         assert view.getIsAutoScroll() is True
         assert len(view.findChildren(ElaPromotionCard)) == 3
+
+    def test_field_is_on_input_page(self, qapp, make):
+        page = make(InputSelectPage)
+        assert len(page.findChildren(ElaField)) == 3
+
+    def test_selector_bar_is_on_navigation_page(self, qapp, make):
+        page = make(NavigationToolsPage)
+        bar = page.findChildren(ElaSelectorBar)[0]
+        assert bar.itemCount() == 3
+        assert bar.selectedIndex() == 1
+
+    def test_ribbon_is_on_buttons_page(self, qapp, make):
+        page = make(ButtonsMenusPage)
+        ribbon = page.findChildren(ElaRibbonBar)[0]
+        assert ribbon.getCurrentRibbonPage() == "通用操作"
 
 
 # ================================================================ ElaTagLineEdit

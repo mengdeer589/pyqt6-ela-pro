@@ -1,8 +1,7 @@
 """容器与布局。"""
 
 from PyQt6.QtCore import Qt
-from PyQt6.QtWidgets import QApplication, QHBoxLayout, QVBoxLayout, QWidget
-from PyQt6.QtGui import QFont
+from PyQt6.QtWidgets import QHBoxLayout, QVBoxLayout, QWidget
 from PyQt6ElaWidgetTools import (
     ElaCheckBox,
     ElaFlowLayout,
@@ -14,11 +13,8 @@ from PyQt6ElaWidgetTools import (
     ElaToggleSwitch,
 )
 from pyqt6_ela_pro import (
-    ElaButton,
     ElaDivider,
-    ElaDrawer,
     ElaDrawerArea,
-    ElaDrawerPositionType,
     ElaGroupBox,
     ElaThemeWidget,
     create_ela_splitter,
@@ -31,12 +27,6 @@ class ContainerLayoutPage(ExamplePage):
 
     PAGE_TITLE = "容器与布局"
 
-    def __init__(self, parent=None):
-        self._drawers = {}
-        self._stateTooltip = None
-        self._tooltip_demo_btn = None
-        super().__init__(parent)
-
     def _addDemoContent(self, main_layout):
         # 调用顺序即页面顺序，且必须与各节标题的编号一致
         self._demoDrawerArea(main_layout)
@@ -47,7 +37,6 @@ class ContainerLayoutPage(ExamplePage):
         self._demoGroupBox(main_layout)
         self._demoFlowLayout(main_layout)
         self._demoScrollPageArea(main_layout)
-        self._demoDrawer(main_layout)
 
     def _demoDrawerArea(self, parent_layout):
         parent_layout.addLayout(
@@ -403,64 +392,9 @@ class ContainerLayoutPage(ExamplePage):
         area_layout = QVBoxLayout(area)
         area_layout.setContentsMargins(16, 16, 16, 16)
         area_layout.addWidget(
-            ElaText("内容放在 ElaScrollPageArea 里，自动获得主题底色与圆角边框。", 13, self)
+            ElaText(
+                "内容放在 ElaScrollPageArea 里，自动获得主题底色与圆角边框。", 13, self
+            )
         )
         parent_layout.addWidget(area)
         parent_layout.addSpacing(20)
-
-    def _demoSiSideDrawer(self, parent_layout):
-        parent_layout.addLayout(
-            self._createHeaderRow(
-                "01. ela_ext - ElaDrawer 四方向抽屉", self._demoSiSideDrawer
-            )
-        )
-        self._addInfoText("SiliconUI 风格抽屉，支持上下左右四个方向滑入", parent_layout)
-        # 不要 QFont().defaultFamily()（首次 ~190ms）；用 QApplication.font().family()（0.01ms）。
-        default_font_family = QApplication.font().family()
-        for name, pos, size, masked in [
-            ("左侧抽屉", ElaDrawerPositionType.Left, 300, True),
-            ("右侧抽屉", ElaDrawerPositionType.Right, 380, True),
-            ("顶部抽屉", ElaDrawerPositionType.Top, 200, True),
-            ("底部抽屉", ElaDrawerPositionType.Bottom, 200, True),
-            ("右侧无遮罩", ElaDrawerPositionType.Right, 380, False),
-        ]:
-            drawer = ElaDrawer(position=pos, drawer_size=size, parent=self)
-            drawer.setMaskEnabled(masked)
-            content = ElaThemeWidget()
-            content_layout = QVBoxLayout(content)
-            content_layout.setContentsMargins(16, 16, 16, 16)
-            content_layout.setSpacing(12)
-            title = ElaText(name, content)
-            title.setTextPixelSize(18)
-            title.setFont(QFont(default_font_family, 18, QFont.Weight.Bold))
-            content_layout.addWidget(title)
-            desc = ElaText(
-                f"这是一个{name}，可以放置设置项、表单等内容。"
-                + (" 无遮罩模式下抽屉外仍可操作。" if not masked else ""),
-                content,
-            )
-            desc.setTextPixelSize(14)
-            content_layout.addWidget(desc)
-            content_layout.addStretch()
-            close_btn = ElaButton(
-                "关闭抽屉", variant="solid", color="primary", parent=content
-            )
-            close_btn.setFixedWidth(120)
-            close_btn.clicked.connect(drawer.closeDrawer)
-            content_layout.addWidget(close_btn)
-            drawer.setContentWidget(content)
-            self._drawers[name] = drawer
-        btn_layout = QHBoxLayout()
-        btn_layout.setSpacing(15)
-        for name, drawer in self._drawers.items():
-            btn = ElaPushButton(name, self)
-            btn.setFixedWidth(100)
-            btn.clicked.connect(drawer.showDrawer)
-            btn_layout.addWidget(btn)
-        btn_layout.addStretch()
-        parent_layout.addLayout(btn_layout)
-        parent_layout.addSpacing(20)
-
-    def _demoDrawer(self, parent_layout):
-        parent_layout.addWidget(self._createSectionHeader("=== ela_ext - 抽屉组件 ==="))
-        self._demoSiSideDrawer(parent_layout)

@@ -355,6 +355,8 @@ class ElaChatBubble(
         self._permission_cards: dict = {}
         #: 仍在 dock 里等待用户操作的交互卡（partId -> 卡片）；落定后清空
         self._interactive_cards: dict = {}
+        #: 「始终允许」是否必须长按（view 级偏好，传给新建 / 已有交互卡）
+        self._permission_always_allow_hold = True
         self._header = MessageHeader(self._role, self)
         self._meta = MessageMeta(self)
         self._actions = MessageActions(self)

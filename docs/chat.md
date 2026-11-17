@@ -153,6 +153,8 @@
   形状 `setAvatarShape`（默认圆形 / `rounded` 8px 圆角 / `square` 4px 圆角）；
   免责提示文案 / 显隐 `setDisclaimer(text)` / `setDisclaimerVisible(on)`
   （默认 `DISCLAIMER_TEXT`，只作用于助手消息，空文案自动隐藏）；
+  「始终允许」默认长按 700ms，宿主可用
+  `setPermissionAlwaysAllowHoldEnabled(False)` 改成普通点击（已有卡 + 新卡）；
   阅读列默认 768px 居中（`setContentMaxWidth()`，`0` 恢复全宽），
   用户气泡 / 助手正文 / 工具卡共用同一条列；输入区与 dock 同宽居中
   （只钉最大宽，不向宿主贡献固定下限）

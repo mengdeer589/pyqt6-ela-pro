@@ -57,6 +57,7 @@ from pyqt6_ela_pro.example import (
     AppShellPage,
     BlueprintPage,
     ButtonsMenusPage,
+    CardsPage,
     ChartLibPage,
     ChartsPage,
     ChatGuidePage,
@@ -66,10 +67,10 @@ from pyqt6_ela_pro.example import (
     DataTablePage,
     DrawerTooltipPage,
     EmbedPage,
-    FluentPage,
+    FeedbackStatusPage,
     InputSelectPage,
     MarkdownPage,
-    ProgressFeedbackPage,
+    NavigationToolsPage,
     SelectionAssistantPage,
     TerminalPage,
     ViewsListPage,
@@ -91,6 +92,81 @@ _DEFAULT_THEME_MODE = ElaThemeType.ThemeMode.Dark
 _DEFAULT_BACKGROUND_ENABLED = True
 #: ``ElaDialogBase`` 中间按钮的 ``done`` 码（`middleButtonClicked` → `done(2)`）
 _DIALOG_MIDDLE_BUTTON = 2
+
+#: 侧边栏唯一清单：[(分组, 分组图标, [(页面标题, 页面类, 页面图标), ...])]
+#: 一级分组只按「是否独立子系统」切；基础组件内部按界面角色分页。
+_PAGE_GROUPS = (
+    (
+        "基础组件",
+        ElaIconType.IconName.List,
+        (
+            ("输入与表单", InputSelectPage, ElaIconType.IconName.Pen),
+            ("下拉框家族", ComboBoxPage, ElaIconType.IconName.ListUl),
+            (
+                "按钮、菜单与命令栏",
+                ButtonsMenusPage,
+                ElaIconType.IconName.CircleNotch,
+            ),
+            ("容器与布局", ContainerLayoutPage, ElaIconType.IconName.Square),
+            ("视图与列表", ViewsListPage, ElaIconType.IconName.TableList),
+            ("导航与工具", NavigationToolsPage, ElaIconType.IconName.Compass),
+            ("反馈与状态", FeedbackStatusPage, ElaIconType.IconName.Gauge),
+            ("卡片与展示", CardsPage, ElaIconType.IconName.Cards),
+            ("弹窗与浮层", DrawerTooltipPage, ElaIconType.IconName.Bell),
+        ),
+    ),
+    (
+        "数据与图表",
+        ElaIconType.IconName.ChartLine,
+        (
+            ("表格", DataTablePage, ElaIconType.IconName.Table),
+            (
+                "ElaChartWidget 图表工作台",
+                ChartsPage,
+                ElaIconType.IconName.ChartLine,
+            ),
+            ("第三方图表与图形", ChartLibPage, ElaIconType.IconName.ChartPie),
+        ),
+    ),
+    (
+        "内容渲染",
+        ElaIconType.IconName.FileCode,
+        (
+            ("Markdown 渲染", MarkdownPage, ElaIconType.IconName.FileCode),
+            ("终端与差异", TerminalPage, ElaIconType.IconName.Terminal),
+        ),
+    ),
+    (
+        "AI 对话",
+        ElaIconType.IconName.Comments,
+        (
+            ("AI 组件", ChatPlaygroundPage, ElaIconType.IconName.Comments),
+            ("聊天组件 API 指南", ChatGuidePage, ElaIconType.IconName.BookOpen),
+        ),
+    ),
+    (
+        "动效与图形",
+        ElaIconType.IconName.Play,
+        (
+            ("动画与图标", AnimationIconPage, ElaIconType.IconName.Play),
+            ("节点图编辑器", BlueprintPage, ElaIconType.IconName.Circle),
+        ),
+    ),
+    (
+        "窗口与系统",
+        ElaIconType.IconName.WindowRestore,
+        (
+            (
+                "ElaWindow 应用外壳",
+                WindowShellPage,
+                ElaIconType.IconName.WindowRestore,
+            ),
+            ("启动、托盘与任务栏", AppShellPage, ElaIconType.IconName.Plug),
+            ("外部内容嵌入", EmbedPage, ElaIconType.IconName.Globe),
+            ("划词助手", SelectionAssistantPage, ElaIconType.IconName.Highlighter),
+        ),
+    ),
+)
 
 
 class ExampleWindow(ElaWindow):
@@ -137,110 +213,12 @@ class ExampleWindow(ElaWindow):
     def _buildSidebar(self) -> None:
         icon = ElaIconType.IconName
 
-        _, basic = self.addExpanderNode("基础组件", icon.List)
-        self._addPage("基础组件", "输入与选择", InputSelectPage(self), basic, icon.Pen)
-        self._addPage("基础组件", "下拉框组件", ComboBoxPage(self), basic, icon.ListUl)
-        self._addPage(
-            "基础组件", "容器与布局", ContainerLayoutPage(self), basic, icon.Square
-        )
-        self._addPage(
-            "基础组件", "视图与列表", ViewsListPage(self), basic, icon.TableList
-        )
-        self._addPage(
-            "基础组件", "按钮与菜单", ButtonsMenusPage(self), basic, icon.CircleNotch
-        )
-        self._addPage(
-            "基础组件", "进度与反馈", ProgressFeedbackPage(self), basic, icon.Gauge
-        )
-        self._addPage(
-            "基础组件", "Fluent 与补充组件", FluentPage(self), basic, icon.Circle
-        )
-        self.expandNavigationNode(basic)
-
-        _, data = self.addExpanderNode("数据与图表", icon.ChartLine)
-        self._addPage("数据与图表", "表格", DataTablePage(self), data, icon.Table)
-        self._addPage(
-            "数据与图表", "图表（第三方库）", ChartLibPage(self), data, icon.ChartPie
-        )
-        self._addPage(
-            "数据与图表",
-            "ElaChartWidget 图表工作台",
-            ChartsPage(self),
-            data,
-            icon.ChartLine,
-        )
-        self.expandNavigationNode(data)
-
-        _, render = self.addExpanderNode("内容渲染", icon.FileCode)
-        self._addPage(
-            "内容渲染", "Markdown 渲染", MarkdownPage(self), render, icon.FileCode
-        )
-        self.expandNavigationNode(render)
-
-        _, chat = self.addExpanderNode("AI 对话", icon.Comments)
-        self._addPage(
-            "AI 对话",
-            "AI 组件",
-            ChatPlaygroundPage(self),
-            chat,
-            icon.Comments,
-        )
-        self.expandNavigationNode(chat)
-
-        _, shell = self.addExpanderNode("窗口与应用外壳", icon.WindowRestore)
-        self._addPage(
-            "窗口与应用外壳",
-            "ElaWindow 应用外壳",
-            WindowShellPage(self),
-            shell,
-            icon.WindowRestore,
-        )
-        self._addPage(
-            "窗口与应用外壳", "弹窗与提示", DrawerTooltipPage(self), shell, icon.Bell
-        )
-        self._addPage(
-            "窗口与应用外壳", "启动与托盘", AppShellPage(self), shell, icon.Plug
-        )
-        self.expandNavigationNode(shell)
-
-        _, system = self.addExpanderNode("系统交互与嵌入", icon.Terminal)
-        self._addPage(
-            "系统交互与嵌入", "外部内容嵌入", EmbedPage(self), system, icon.Globe
-        )
-        self._addPage(
-            "系统交互与嵌入", "终端输出", TerminalPage(self), system, icon.Terminal
-        )
-        self._addPage(
-            "系统交互与嵌入",
-            "划词助手",
-            SelectionAssistantPage(self),
-            system,
-            icon.Highlighter,
-        )
-        self.expandNavigationNode(system)
-
-        _, motion_expander = self.addExpanderNode("动效与图形", icon.Play)
-        self._addPage(
-            "动效与图形",
-            "动画与图标",
-            AnimationIconPage(self),
-            motion_expander,
-            icon.Play,
-        )
-        self._addPage(
-            "动效与图形",
-            "节点图编辑器",
-            BlueprintPage(self),
-            motion_expander,
-            icon.Circle,
-        )
-        self.expandNavigationNode(motion_expander)
-
-        _, docs = self.addExpanderNode("参考文档", icon.BookOpen)
-        self._addPage(
-            "参考文档", "聊天组件 API 指南", ChatGuidePage(self), docs, icon.BookOpen
-        )
-        self.expandNavigationNode(docs)
+        for group, group_icon, pages in _PAGE_GROUPS:
+            result, expander_key = self.addExpanderNode(group, group_icon)
+            self._check_node(result, f"分组「{group}」")
+            for title, page_cls, page_icon in pages:
+                self._addPage(group, title, page_cls(self), expander_key, page_icon)
+            self.expandNavigationNode(expander_key)
 
         # ``addFooterNode`` 与 ``addExpanderNode`` 同款：key 由**返回值**给出
         result, self._about_key = self.addFooterNode("关于", 0, icon.CircleInfo)
@@ -763,6 +741,13 @@ if __name__ == "__main__":
     _warm_timer.timeout.connect(_warm_next)
     _warm_timer.start(250)
 
+    def _shutdown_selection_pages() -> None:
+        # 主窗口关闭时子页面不会收到 closeEvent；退出前统一停掉划词监视，
+        # 避免定时器在 Qt 剪贴板析构阶段继续取词（qt.qpa.mime 重试噪音）。
+        for page in window.findChildren(SelectionAssistantPage):
+            page.shutdown()
+
+    app.aboutToQuit.connect(_shutdown_selection_pages)
     rc = app.exec()
     # 退出前显式销毁并冲刷删除队列：让各组件的清理钩子（断开全局主题信号等）
     # 在解释器退出前完成，避免进程退出时的 Qt 清理竞态崩溃
