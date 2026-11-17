@@ -107,11 +107,17 @@ class TestAccentDerivation:
         # 派生保持色相：红强调色的 hover 仍是红系，不是蓝
         assert abs(hover.getHslF()[0] - QColor("#c0392b").getHslF()[0]) < 0.02
 
-    def test_set_accent_moves_switch_center(self):
-        """开关未激活圆点也是跟随强调色的角色，不同步就会出现「强调色换了、圆点还是灰的」。"""
+    @pytest.mark.parametrize(
+        ("mode", "factory"),
+        [(_L, 0x06000000), (_D, 0x19000000)],
+        ids=["light", "dark"],
+    )
+    def test_set_accent_keeps_basic_alt_base(self, mode, factory):
+        """``BasicAltBase`` 是交替行底色与未选中指示器的共享 alpha 叠色，换色不得覆写。"""
         T.setAccentColor(QColor("#c0392b"))
-        center = QColor(eTheme.getThemeColor(_L, _TC.BasicAltBase))
-        assert center != QColor("#6a6a6a")
+        assert eTheme.getThemeColor(mode, _TC.BasicAltBase).rgba() == factory
+        T.resetAccentColor()
+        assert eTheme.getThemeColor(mode, _TC.BasicAltBase).rgba() == factory
 
     def test_reset_round_trip_is_visually_identical(self):
         """换色再换回来必须**逐值**一致（不是「差不多」）。"""
@@ -167,6 +173,21 @@ class TestStatusColor:
     def test_error_uses_upstream_native_token(self):
         native = QColor(eTheme.getThemeColor(_L, _TC.StatusDanger)).name()
         assert T.statusColor(_L, T.ElaStatusRoleType.Error).name() == native
+
+    @pytest.mark.parametrize(
+        ("role", "token"),
+        [
+            (T.ElaStatusRoleType.Warning, _TC.StatusWarning),
+            (T.ElaStatusRoleType.Success, _TC.StatusSuccess),
+        ],
+        ids=["warning", "success"],
+    )
+    def test_warning_success_use_upstream_tokens(self, role, token):
+        for mode in (_L, _D):
+            assert (
+                T.statusColor(mode, role).rgba()
+                == eTheme.getThemeColor(mode, token).rgba()
+            )
 
     def test_neutral_falls_back_to_muted_text(self):
         assert (

@@ -201,7 +201,8 @@ def _glyphRawFont(family: str) -> Optional[QRawFont]:
         return _glyph_raw_fonts[family]
     raw: Optional[QRawFont] = None
     try:
-        if family and family in _fontFamilySet():
+        # GDI zh_CN 只登记本地化族名（微软雅黑），直接查 families 会把英文名判死
+        if family and fontFamilyAvailable(family):
             candidate = QRawFont.fromFont(QFont(family))
             if candidate is not None and candidate.isValid():
                 raw = candidate

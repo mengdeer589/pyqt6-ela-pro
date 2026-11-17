@@ -6,7 +6,7 @@ V3.0 把 ``BasicPress`` 等令牌改成了 alpha 叠色，不能再凭它的亮�
 
 from __future__ import annotations
 
-from PyQt6ElaWidgetTools import ElaThemeType
+from PyQt6ElaWidgetTools import ElaThemeType, eTheme
 
 from pyqt6_ela_pro import ElaMarkdownViewer
 from pyqt6_ela_pro.markdown_viewer.themes import _md_theme_spec
@@ -44,3 +44,10 @@ class TestThemeModeSelection:
         assert viewer._code_bg.name() != dark_bg
         viewer._onThemeChanged(ElaThemeType.ThemeMode.Dark)
         assert viewer._code_bg.name() == dark_bg
+
+    def test_search_highlight_uses_warning_background(self, make):
+        viewer = make(ElaMarkdownViewer)
+        token = ElaThemeType.ThemeColor.StatusWarningBackground
+        for mode in (ElaThemeType.ThemeMode.Light, ElaThemeType.ThemeMode.Dark):
+            viewer._onThemeChanged(mode)
+            assert viewer._search_bg.rgba() == eTheme.getThemeColor(mode, token).rgba()

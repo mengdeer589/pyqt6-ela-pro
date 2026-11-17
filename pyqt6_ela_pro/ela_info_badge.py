@@ -132,7 +132,7 @@ class ElaInfoBadge(ElaThemeWidget):
             return eTheme.getThemeColor(mode, ElaThemeType.ThemeColor.PrimaryNormal)
         if self._severity == self.ElaSeverityType.Success:
             # 走语义令牌（分深浅两档）；别再写死浅色档 hex —— 会与
-            # `_theme._STATUS_COLORS` 各自漂移、暗色下拿不到暗色档
+            # 上游 Status* 令牌各自漂移、暗色下拿不到暗色档
             return statusColor(mode, ElaStatusRoleType.Success)
         if self._severity == self.ElaSeverityType.Caution:
             return statusColor(mode, ElaStatusRoleType.Warning)

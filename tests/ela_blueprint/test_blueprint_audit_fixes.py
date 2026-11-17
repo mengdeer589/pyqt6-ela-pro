@@ -374,13 +374,13 @@ class TestTitleTextContrast:
         finally:
             eTheme.setThemeMode(previous)
 
-    def test_light_warning_picks_dark_text(self, qapp):
-        """浅色琥珀（#c08a3e）白字只有 ~2.4:1，必须选深字（~7:1）。"""
+    def test_light_warning_picks_white_text(self, qapp):
+        """上游浅色 Warning 是深琥珀（#9D5D00），白字对比度更高。"""
         previous = eTheme.getThemeMode()
         eTheme.setThemeMode(ElaThemeType.ThemeMode.Light)
         try:
             fg = _nw._text_on(QColor(str(_nw.T("color.warning"))))
-            assert fg.name() != "#ffffff"
+            assert fg.name() == "#ffffff"
         finally:
             eTheme.setThemeMode(previous)
 

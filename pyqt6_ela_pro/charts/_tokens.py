@@ -59,16 +59,20 @@ _ELA_COLOR_KEYS = {
     "color.primary": "PrimaryNormal",  # 主题主色
     "color.primary.hover": "PrimaryHover",
     "color.primary.pressed": "PrimaryPress",
+    "color.success": "StatusSuccess",  # 成功状态
+    "color.warning": "StatusWarning",  # 警告状态
     "color.danger": "StatusDanger",  # 危险色
 }
 
-#: Ela 主题色中没有的语义色：key -> (light_hex, dark_hex)
+#: 上游没有对应槽位的语义色：key -> (light_hex, dark_hex)
 _STATIC_COLORS = {
-    "color.success": ("#3E7E5F", "#6BA98A"),
-    "color.success.hover": ("#34684F", "#55D0A0"),
-    "color.warning": ("#C08A3E", "#D2A668"),
-    "color.warning.hover": ("#A97A35", "#C08A3E"),
     "color.on.primary": ("#FFFFFF", "#15181E"),
+}
+
+#: 上游没有 success / warning hover 槽位：从基础状态色派生
+_STATUS_HOVER_KEYS = {
+    "color.success.hover": "color.success",
+    "color.warning.hover": "color.warning",
 }
 
 
@@ -109,6 +113,18 @@ def _derived_accent(mode, key: str, chart=None) -> Optional[QColor]:
     return _mix(primary, target, 0.12)
 
 
+def _derived_status_hover(mode, key: str, chart=None) -> Optional[QColor]:
+    """上游没有 success / warning hover 槽位：按基础色 12% 压暗 / 提亮派生。"""
+    base_key = _STATUS_HOVER_KEYS.get(key)
+    if base_key is None:
+        return None
+    base = chart_token(mode, base_key, chart)
+    target = (
+        QColor("#000000") if mode == ElaThemeType.ThemeMode.Light else QColor("#ffffff")
+    )
+    return _mix(base, target, 0.12)
+
+
 def chart_token(mode, key, chart=None):
     """读取单个令牌值：颜色返回 ``QColor``（实时主题），数值返回 int/float。
 
@@ -126,6 +142,9 @@ def chart_token(mode, key, chart=None):
     derived = _derived_accent(mode, key, chart)
     if derived is not None:
         return derived
+    status_hover = _derived_status_hover(mode, key, chart)
+    if status_hover is not None:
+        return status_hover
     if key == "color.primary.subtle":
         return _subtle_primary(mode, chart)
     if key == "color.bg.base":

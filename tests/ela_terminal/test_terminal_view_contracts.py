@@ -15,11 +15,11 @@ import pytest
 from PyQt6.QtGui import QColor
 
 from pyqt6_ela_pro.terminal_view import (
-    _HIGHLIGHT,
     _HIGHLIGHT_RATIO,
     ElaTerminalView,
     _blend,
 )
+from pyqt6_ela_pro._theme import ElaStatusRoleType, statusColor
 
 
 def _drain(qapp) -> None:
@@ -324,7 +324,11 @@ class TestEmbeddedAndFollow:
 class TestHighlightColor:
     def test_none_restores_derived_default(self, make):
         view = make(ElaTerminalView)
-        derived = _blend(view._palette["background"], _HIGHLIGHT, _HIGHLIGHT_RATIO)
+        derived = _blend(
+            view._palette["background"],
+            statusColor(view._theme_mode, ElaStatusRoleType.Warning),
+            _HIGHLIGHT_RATIO,
+        )
         view.setHighlightColor(QColor("#ff0000"))
         assert view._highlight == QColor("#ff0000")
         view.setHighlightColor(None)

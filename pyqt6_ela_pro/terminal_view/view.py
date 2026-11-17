@@ -51,7 +51,7 @@ from .._internal import (
     system_cjk_font_family,
 )
 from .._styles import editBorderlessStyle, paintRoundedCard
-from .._theme import surfaceRaised
+from .._theme import ElaStatusRoleType, statusColor, surfaceRaised
 from ..ela_button import ElaButton
 from ..tooltips import ElaToolTipPositionType, set_tooltip
 from ..widget_base import ElaThemeWidget
@@ -133,8 +133,7 @@ _CARD_RADIUS = 8
 _GUTTER_PAD = 10
 _GUTTER_MIN_WIDTH = 46
 
-#: 搜索命中高亮色（向背景混合）
-_HIGHLIGHT = QColor("#ffcf4d")
+#: 搜索命中高亮与终端背景的混合比
 _HIGHLIGHT_RATIO = 0.45
 #: 格式缓存上限：truecolor 输出可产生近乎无限的唯一样式
 _FORMAT_CACHE_LIMIT = 512
@@ -270,7 +269,7 @@ class ElaTerminalView(ElaThemeWidget):
         self._palette: dict = {}
         self._format_cache: dict = {}
         self._highlight = QColor()
-        # 宿主持久覆盖的高亮色（None = 用背景派生的默认黄）。与 ``_highlight``
+        # 宿主持久覆盖的高亮色（None = 用背景派生的默认 Ela Warning 色）。与 ``_highlight``
         # 分开，``_refresh_palette`` 换肤时不会冲掉用户覆盖。
         self._highlight_override: Optional[QColor] = None
         self._gutter_font = QFont(_DEFAULT_FONT_FAMILY)
@@ -881,9 +880,9 @@ class ElaTerminalView(ElaThemeWidget):
         """设置搜索命中高亮色（``QColor`` 或色串），并就地重渲染。
 
         覆盖值会**跨换肤保留**（``setTerminalTheme`` / 主题切换只重算背景派生的
-        默认黄，不动用户设过的色）；传 ``None`` 清除覆盖、回到派生默认黄。
+        默认 Ela Warning 色，不动用户设过的色）；传 ``None`` 清除覆盖、回到派生默认色。
 
-        :param color: 高亮色；传 ``None`` 恢复按背景派生的默认黄色
+        :param color: 高亮色；传 ``None`` 恢复按背景派生的默认 Ela Warning 色
         """
         if color is None:
             self._highlight_override = None
@@ -903,7 +902,11 @@ class ElaTerminalView(ElaThemeWidget):
         if self._highlight_override is not None:
             new = QColor(self._highlight_override)
         else:
-            new = _blend(self._palette["background"], _HIGHLIGHT, _HIGHLIGHT_RATIO)
+            new = _blend(
+                self._palette["background"],
+                statusColor(self._theme_mode, ElaStatusRoleType.Warning),
+                _HIGHLIGHT_RATIO,
+            )
         if self._highlight == new:
             return False
         self._highlight = new

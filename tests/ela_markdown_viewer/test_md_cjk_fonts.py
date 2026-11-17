@@ -10,6 +10,7 @@ from __future__ import annotations
 import pytest
 from PyQt6.QtGui import QFont, QFontDatabase, QRawFont
 
+from pyqt6_ela_pro import _internal
 from pyqt6_ela_pro._internal import missingGlyphFont
 from pyqt6_ela_pro.ela_markdown_viewer import ElaMarkdownViewer
 from pyqt6_ela_pro.markdown_viewer import appearance
@@ -212,6 +213,23 @@ class TestMissingGlyphFallback:
         viewer.setMarkdown("\u4e2d\u6587\n")
 
         assert self._families_for(viewer, "\u4e2d") == []
+
+    def test_localized_family_registry_keeps_covered_text(
+        self, qapp, make, monkeypatch
+    ):
+        """GDI 只登记「微软雅黑」时，英文主字体不得把整段文本判成缺字。"""
+        monkeypatch.setattr(
+            _internal, "_font_family_set", {"\u5fae\u8f6f\u96c5\u9ed1", "\u5b8b\u4f53"}
+        )
+        monkeypatch.setattr(_internal, "_glyph_raw_fonts", {})
+        monkeypatch.setattr(_internal, "_glyph_coverage", {})
+        monkeypatch.setattr(_internal, "_glyph_fallback", {})
+        viewer = make(ElaMarkdownViewer)
+        viewer.document().setDefaultFont(QFont(_CJK))
+        viewer.setMarkdown("a \u2194 b\n")
+
+        assert self._families_for(viewer, "\u2194") == [missingGlyphFont("\u2194")]
+        assert self._families_for(viewer, "a \u2194 b") == []
 
 
 class TestCodeFormatFamilies:

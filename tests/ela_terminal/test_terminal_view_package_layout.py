@@ -22,7 +22,7 @@ PUBLIC = (
     "terminalThemes",
     "unregisterTerminalTheme",
 )
-PRIVATE = ("_HIGHLIGHT", "_HIGHLIGHT_RATIO", "_blend")
+PRIVATE = ("_HIGHLIGHT_RATIO", "_blend")
 
 
 def test_package_directory_replaces_module():

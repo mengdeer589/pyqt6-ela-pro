@@ -9,9 +9,8 @@ from __future__ import annotations
 from typing import Optional
 
 from PyQt6.QtCore import Qt
-from PyQt6.QtGui import QColor
 from PyQt6.QtWidgets import QPushButton, QWidget, QVBoxLayout
-from PyQt6ElaWidgetTools import ElaContentDialog, ElaText, eTheme, ElaThemeType
+from PyQt6ElaWidgetTools import ElaContentDialog, ElaText
 
 #: 内容自适应时的窗口宽度上限（超出部分换行、高度随内容增长）
 _AUTO_FIT_MAX_WIDTH = 620
@@ -44,14 +43,6 @@ class ElaDialogBase(ElaContentDialog):
                 "parent=None 会导致进程崩溃。请传入宿主窗口，例如 "
                 "ElaDialogBase(parent=self.window())。"
             )
-        # 浅色主题下 DialogBase 槽位偏灰，调到本组件要的浅灰白。
-        # **只能在构造期写、不能放模块级**：那等于 import 本库就改宿主全局主题，
-        # 且没有 NOTIFY、宿主还原不回去；构造期的作用域是「用了本组件的对话框」。
-        eTheme.setThemeColor(
-            ElaThemeType.ThemeMode.Light,
-            ElaThemeType.ThemeColor.PopupBase,
-            QColor("#fafafa"),
-        )
         super().__init__(parent)
         self._titleWidget: Optional[ElaText] = None
         self._paramWidget: Optional[QWidget] = None

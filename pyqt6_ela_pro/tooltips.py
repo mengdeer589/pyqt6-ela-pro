@@ -59,8 +59,6 @@ TOOLTIP_SHADOW_BORDER_WIDTH: int = 3
 #: 提示框显示期间的光标看门狗间隔（ms）。滚动 / 重排 / 禁用 / 窗口失活不会
 #: 补发 ``Leave``（Qt 只在鼠标真正换 widget 或目标被 hide 时派发）。
 TOOLTIP_WATCH_INTERVAL: int = 120
-TOOLTIP_LIGHT_BG_COLOR: str = "#ffffff"
-TOOLTIP_DARK_BG_COLOR: str = "#202020"
 #: ``Full`` 模式下的淡出时长。实际时长受全局动效策略约束
 #: （``Reduced`` 压到 ≤50ms、``Disabled`` 同步落终值，见 :mod:`._motion`）。
 TOOLTIP_FADE_DURATION: int = Duration.Fast

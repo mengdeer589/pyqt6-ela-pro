@@ -96,7 +96,7 @@ class ButtonsMenusPage(ExamplePage):
             )
         )
         self._addInfoText(
-            "换强调色时 hover / press / 开关圆点会一并派生写入 —— 只改基础色的话，\n"
+            "换强调色时 hover / press 会一并派生写入 —— 只改基础色的话，\n"
             "按钮本体是新色、悬停又跳回出厂蓝。派生规则是从出厂值反解的，所以\n"
             "「换色再换回来」是逐值一致的。注意 eTheme 没有换色通知，需要自行重绘。",
             parent_layout,

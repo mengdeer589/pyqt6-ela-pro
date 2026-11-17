@@ -11,7 +11,6 @@ from PyQt6.QtWidgets import QApplication, QPlainTextEdit
 from PyQt6ElaWidgetTools import ElaThemeType, eTheme
 
 from pyqt6_ela_pro.terminal_view import (
-    _HIGHLIGHT,
     _HIGHLIGHT_RATIO,
     ElaTerminalView,
     TerminalStyle,
@@ -22,6 +21,7 @@ from pyqt6_ela_pro.terminal_view import (
     terminalThemes,
     unregisterTerminalTheme,
 )
+from pyqt6_ela_pro._theme import ElaStatusRoleType, statusColor
 
 ESC = "\x1b"
 CSI = ESC + "["
@@ -566,7 +566,11 @@ class TestAppearance:
         # ``!= #ff0000``，而非法 QColor（``QColor()``）天然不等于它 ——
         # 于是「None 置成非法色、QPainter 直接不画、搜索高亮整块消失」
         # 这个 bug 被一条恒真断言完全盖住。
-        derived = _blend(view._palette["background"], _HIGHLIGHT, _HIGHLIGHT_RATIO)
+        derived = _blend(
+            view._palette["background"],
+            statusColor(view._theme_mode, ElaStatusRoleType.Warning),
+            _HIGHLIGHT_RATIO,
+        )
         view.setHighlightColor(QColor("#ff0000"))
         assert view._highlight == QColor("#ff0000")
         view.setHighlightColor(None)
@@ -582,7 +586,9 @@ class TestAppearance:
         assert view._highlight == QColor("#ff0000")
         view.setHighlightColor(None)
         assert view._highlight == _blend(
-            view._palette["background"], _HIGHLIGHT, _HIGHLIGHT_RATIO
+            view._palette["background"],
+            statusColor(view._theme_mode, ElaStatusRoleType.Warning),
+            _HIGHLIGHT_RATIO,
         )
 
     def test_highlight_rejects_invalid_color(self, view):

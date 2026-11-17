@@ -97,6 +97,7 @@ def _composite(base: QColor, overlay: QColor) -> QColor:
         255,
     )
 
+
 def _color(mode, token) -> QColor:
     """读一个上游槽位并**拷贝**成新的 QColor。``mode=None`` = 当前模式。"""
     if mode is None:
@@ -189,20 +190,6 @@ class ElaSeverity(IntEnum):
     Error = 3
 
 
-#: ``Warning`` / ``Success`` 的定值，**刻意不从强调色派生**：状态语义来自色相
-#: （琥珀 / 绿），换强调色不该把它染成同色；色值取 Fluent 对比度调校过的一组。
-_STATUS_COLORS = {
-    _TM.Light: {
-        ElaStatusRoleType.Warning: QColor("#9D5D00"),
-        ElaStatusRoleType.Success: QColor("#0F7B0F"),
-    },
-    _TM.Dark: {
-        ElaStatusRoleType.Warning: QColor("#FCE100"),
-        ElaStatusRoleType.Success: QColor("#6CCB5F"),
-    },
-}
-
-
 def _shift(base: QColor, d_s: float, d_l: float) -> QColor:
     """保持色相与 alpha，按 HSL 偏移饱和度 / 亮度。
     ``QColor.getHslF()`` 返回 **4 元组**（含 alpha），写成 3 元组会
@@ -222,10 +209,10 @@ def _shift(base: QColor, d_s: float, d_l: float) -> QColor:
 def statusColor(mode, role: ElaStatusRoleType) -> QColor:
     """校验 / 提示状态的文字与图标色。
 
-    ``Error`` 用上游 ``StatusDanger``；``Warning`` / ``Success`` 取
-    :data:`_STATUS_COLORS` 定值；``Neutral`` 回落次要文字色。
+    ``Error`` / ``Warning`` / ``Success`` 分别取上游 ``StatusDanger`` /
+    ``StatusWarning`` / ``StatusSuccess``；``Neutral`` 回落次要文字色。
 
-    :param mode: ``None`` = 当前模式；定值色表也按它取，否则暗色下会拿到浅色主题的色。
+    :param mode: ``None`` = 当前模式。
     :param role: 也接受裸 int；非法值按 ``Neutral`` 处理。
     """
     if mode is None:
@@ -238,8 +225,9 @@ def statusColor(mode, role: ElaStatusRoleType) -> QColor:
         return textMuted(mode)
     if role == ElaStatusRoleType.Error:
         return _color(mode, _TC.StatusDanger)
-    table = _STATUS_COLORS.get(mode) or _STATUS_COLORS[_TM.Light]
-    return QColor(table.get(role, table[ElaStatusRoleType.Warning]))
+    if role == ElaStatusRoleType.Warning:
+        return _color(mode, _TC.StatusWarning)
+    return _color(mode, _TC.StatusSuccess)
 
 
 #: 消息等级 → 状态角色。``Info`` 没有对应状态色，单独走强调色。
@@ -290,25 +278,15 @@ _ACCENT_STEPS = {
     _TM.Dark: {"hover": (-0.1376, -0.0353), "press": (-0.2999, -0.0883)},
 }
 
-#: ``BasicAltBase``（开关未激活的圆点）跟随强调色。它在上游是中性灰，
-#: 不跟着走就会出现「强调色换了、开关圆点还是灰的」。
-_SWITCH_CENTER_DS = -0.55
-
 #: 上游出厂强调色，供 :func:`resetAccentColor` 还原。
 _DEFAULT_ACCENT = {
     _TM.Light: QColor("#0067c0"),
     _TM.Dark: QColor("#4abcf7"),
 }
 
-#: 上游出厂的开关圆点色（还原用）。
-_DEFAULT_SWITCH_CENTER = {
-    _TM.Light: QColor("#6a6a6a"),
-    _TM.Dark: QColor("#d0d0d0"),
-}
-
 
 def setAccentColor(color, modes=None) -> None:
-    """换强调色，**并一并派生写入 hover / press / 开关圆点**（换色后不自动重绘，见模块 docstring）。
+    """换强调色，**并一并派生写入 hover / press**（换色后不自动重绘，见模块 docstring）。
 
     ``color`` 收 ``QColor`` / hex / ``rgb()`` / ``rgba()``；非法值忽略。
     """
@@ -325,22 +303,16 @@ def setAccentColor(color, modes=None) -> None:
         ):
             d_s, d_l = steps[key]
             eTheme.setThemeColor(mode, slot, _shift(value, d_s, d_l))
-        eTheme.setThemeColor(
-            mode, _TC.BasicAltBase, _shift(value, _SWITCH_CENTER_DS, 0.0)
-        )
 
 
 def resetAccentColor(modes=None) -> None:
-    """还原成上游出厂强调色（并按出厂值写回开关圆点，不重新派生）。"""
+    """还原成上游出厂强调色（hover / press 一并回出厂值，不重新派生）。"""
     targets = list(modes) if modes else [_TM.Light, _TM.Dark]
     for mode in targets:
         base = _DEFAULT_ACCENT.get(mode)
         if base is None:
             continue
         eTheme.setThemeColor(mode, _TC.PrimaryNormal, QColor(base))
-        eTheme.setThemeColor(
-            mode, _TC.BasicAltBase, QColor(_DEFAULT_SWITCH_CENTER[mode])
-        )
         # hover / press 一并回到出厂值，换回后视觉与「从未换过色」完全相同
         steps = _ACCENT_STEPS.get(mode, _ACCENT_STEPS[_TM.Light])
         for slot, key in ((_TC.PrimaryHover, "hover"), (_TC.PrimaryPress, "press")):

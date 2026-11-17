@@ -26,6 +26,7 @@ from pyqt6_ela_pro.charts import (
     setDefaultChartTheme,
     unregisterChartTheme,
 )
+from pyqt6_ela_pro.charts._tokens import theme_ramp
 from pyqt6_ela_pro.charts._utils import parse_color
 from pyqt6_ela_pro.charts.interact.visualmap import VisualMapComponent
 
@@ -343,6 +344,22 @@ class TestRamp:
         top = max(cells, key=lambda cell: cell["value"])["color"].name()
         assert top == expected[-1]
 
+    def test_ela_derived_ramp_follows_mode(self, make):
+        """``ela`` 的派生色带：暗色档低端必须是深色底（``BasicBase`` 直混得到近白）。"""
+        previous = eTheme.getThemeMode()
+        chart = _chart(make)
+        try:
+            eTheme.setThemeMode(ElaThemeType.ThemeMode.Dark)
+            dark = [parse_color(c) for c in theme_ramp(chart)]
+            primary = chartToken("color.primary", chart)
+            eTheme.setThemeMode(ElaThemeType.ThemeMode.Light)
+            light = [parse_color(c) for c in theme_ramp(chart)]
+        finally:
+            eTheme.setThemeMode(previous)
+        assert dark[0].lightness() < 128
+        assert light[0].lightness() > 128
+        assert dark[-1].name() == primary.name()
+
 
 class TestImageTheme:
     @staticmethod
@@ -385,3 +402,32 @@ class TestImageTheme:
         expected = chartThemeSpec("matlab")[_variant()]["color.ramp"]
         assert [parse_color(c).name() for c in renderer._colors()] == expected
 
+
+class TestStatusTokens:
+    def test_success_warning_follow_ela_tokens(self):
+        mode = eTheme.getThemeMode()
+        colors = ElaThemeType.ThemeColor
+        assert (
+            chartToken("color.success").rgba()
+            == eTheme.getThemeColor(mode, colors.StatusSuccess).rgba()
+        )
+        assert (
+            chartToken("color.warning").rgba()
+            == eTheme.getThemeColor(mode, colors.StatusWarning).rgba()
+        )
+
+    def test_success_warning_hover_is_derived(self):
+        for key, base_key in (
+            ("color.success.hover", "color.success"),
+            ("color.warning.hover", "color.warning"),
+        ):
+            hover = chartToken(key)
+            base = chartToken(base_key)
+            assert hover.isValid()
+            assert hover != base
+
+    def test_hover_follows_chart_theme_override(self, make):
+        chart = _chart(make, "plotly")
+        base = chartToken("color.success", chart)
+        assert base.name() == "#00cc96"
+        assert chartToken("color.success.hover", chart) != base

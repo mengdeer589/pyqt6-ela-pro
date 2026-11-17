@@ -163,7 +163,7 @@ sys.exit(app.exec())
 | `start_idle_loop(timer, ms, on_stop=)` | 启动持续动效循环；`Reduced` 下停掉，`on_stop` 落到静态基态 |
 | `surface(mode)` / `text(mode)` / `accent(mode)` | 语义令牌（`surface`/`surfaceRaised`/`surfacePopup`/`surfaceDialog`/`border`/`text`/`textMuted`/`accent`…） |
 | `statusColor(mode, ElaStatusRoleType.X)` | 校验/提示状态色（`Neutral`/`Error`/`Warning`/`Success`） |
-| `setAccentColor(color)` | 换强调色（`QColor` / hex / `rgb()` / `rgba()`），**并一并派生写入 hover/press/开关圆点**（换色后需自行触发重绘） |
+| `setAccentColor(color)` | 换强调色（`QColor` / hex / `rgb()` / `rgba()`），**并一并派生写入 hover/press**（换色后需自行触发重绘） |
 | `motion.setMode(ElaMotionModeType.Reduced)` | 全局动效：状态过渡压到 ≤50ms、持续动效停止 |
 | `set_tooltip(widget, text, position, theme)` | 设置自定义工具提示 |
 | `remove_tooltip(widget)` | 移除自定义工具提示 |

@@ -42,25 +42,25 @@ class TestElaDialogBase:
                                             ElaThemeType.ThemeColor.PopupBase))
         assert after.name() == before.name()
 
-    def test_instance_sets_light_dialog_base(self, qapp):
-        """构造本组件的对话框时，浅色 DialogBase 应被调到本组件要的浅灰白。"""
+    def test_instance_does_not_mutate_global_theme(self, qapp):
+        """构造本组件的对话框不得覆写宿主全局主题。"""
         from PyQt6ElaWidgetTools import ElaThemeType, eTheme
 
+        mode = ElaThemeType.ThemeMode.Light
+        token = ElaThemeType.ThemeColor.PopupBase
+        original = QColor(eTheme.getThemeColor(mode, token))
         parent = QWidget()
-        # 先写一个哨兵色：PyQt6 的 setThemeColor 返回 None（void），
-        # 构造对话框后再用 getThemeColor 读回，验证确实被组件改成浅灰白。
-        eTheme.setThemeColor(
-            ElaThemeType.ThemeMode.Light,
-            ElaThemeType.ThemeColor.PopupBase,
-            QColor("#123456"),
-        )
-        dlg = ElaDialogBase(parent=parent)
-        color = eTheme.getThemeColor(
-            ElaThemeType.ThemeMode.Light, ElaThemeType.ThemeColor.PopupBase
-        )
-        assert QColor(color).name() == "#fafafa"
-        dlg.deleteLater()
-        parent.deleteLater()
+        dlg = None
+        try:
+            eTheme.setThemeColor(mode, token, QColor("#123456"))
+            dlg = ElaDialogBase(parent=parent)
+            color = eTheme.getThemeColor(mode, token)
+            assert QColor(color).name() == "#123456"
+        finally:
+            eTheme.setThemeColor(mode, token, original)
+            if dlg is not None:
+                dlg.deleteLater()
+            parent.deleteLater()
 
     def test_create_with_default_buttons(self, qapp):
         parent = QWidget()

@@ -3,7 +3,7 @@
 ``QColor`` 自己解析不了 CSS 函数式颜色（``QColor("rgba(1,2,3,0.5)")`` 是**无效色**），
 以前这些入口会静默回退默认色。现在统一走 ``_colors.parse_color``：
 
-- ``_theme.setAccentColor``（强调色 → hover / press / 开关圆点）
+- ``_theme.setAccentColor``（强调色 → hover / press）
 - ``_styles`` 原语（文本色 / 纯色底 / 1px 边框 / ``ColorText`` / ``FlatIconButton``）
 - ``ElaAvatar`` 背景 / 前景、``ElaProgressButton`` / ``ElaLongPressButton`` 进度色、
   ``ElaSideDrawer`` 底色、``ElaToolTip`` 文字色、``ElaTerminalView`` 高亮色

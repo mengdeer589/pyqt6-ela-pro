@@ -611,8 +611,8 @@ class _MarkdownAppearanceMixin:
         callouts = calloutColors(mode, self._callout_bg)
         self._callout_warning_color = QColor(callouts["warning"])
         self._callout_caution_color = QColor(callouts["caution"])
-        self._search_bg = self._blend(
-            background, QColor("#ff922b"), 0.4 if self._is_dark_theme else 0.5
+        self._search_bg = QColor(
+            eTheme.getThemeColor(mode, ElaThemeType.ThemeColor.StatusWarningBackground)
         )
         self._selection_bg = self._blend(
             background,
