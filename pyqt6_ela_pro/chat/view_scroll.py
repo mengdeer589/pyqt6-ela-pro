@@ -162,8 +162,12 @@ class _ViewScrollMixin:
     def _on_view_resized(self, width: int) -> None:
         """视图尺寸变化：拖动期间冻结内容宽度，停手后统一重排。"""
         if not self._resize_reflow_deferred:
+            # 关闭延迟重排时也必须按新宽度重算估算高度，否则 spacer 会持续漂移。
+            self._refresh_height_estimates()
             return
         if width <= 0 or not self._should_defer_resize():
+            if width > 0:
+                self._refresh_height_estimates()
             return
         if width == self._resize_width and not self._resize_reflow_timer.isActive():
             return  # 仅高度变化，无需 reflow
@@ -176,9 +180,21 @@ class _ViewScrollMixin:
         self._resize_width = width
         self._resize_reflow_timer.start(self._resize_reflow_delay)
 
+    def _refresh_height_estimates(self) -> None:
+        """按当前内容宽度重算壳占位 / spacer 高度估算。"""
+        self._refresh_shell_heights()
+        if not self._virtual_list_mode:
+            return
+        for messageId, message in self._message_index.items():
+            if messageId not in self._bubbles:
+                self._virtual_heights[messageId] = self._estimate_shell_height(message)
+        self._virtual_prefix_dirty = True
+        self._virtual_window_timer.start(0)
+
     def _release_resize_reflow(self) -> None:
         """解除宽度冻结并按新宽度一次性重排。"""
         if self._resize_frozen_width <= 0:
+            self._refresh_height_estimates()
             return
         viewport = self._scroll.viewport()
         viewport.setUpdatesEnabled(False)
@@ -190,18 +206,12 @@ class _ViewScrollMixin:
             if not self._stick:
                 bar = self._scroll.verticalScrollBar()
                 self._pending_anchor = (bar.value(), bar.maximum())
-            self._refresh_shell_heights()
+            self._refresh_height_estimates()
             self._content_layout.activate()
             # 冻结期间内容宽可能与视口脱节（ElaScrollBar 占 10px），必须显式拉回，
             # 否则内容溢出视口被右侧裁掉。
             self._sync_content_width()
             if self._virtual_list_mode:
-                for messageId, message in self._message_index.items():
-                    if messageId not in self._bubbles:
-                        self._virtual_heights[messageId] = self._estimate_shell_height(
-                            message
-                        )
-                self._virtual_prefix_dirty = True
                 self._refresh_virtual_window()
             if self._stick:
                 self._scroll_to_bottom()
@@ -257,6 +267,7 @@ class _ViewScrollMixin:
         """
         if self._follow_hold:
             self._hold_timer.start(_FOLLOW_HOLD_MS)
+            self._update_jump_button()
             return
         pending = self._pending_anchor
         if pending is not None and not self._stick:
@@ -267,11 +278,13 @@ class _ViewScrollMixin:
                 # 物化可能让内容变高（懒加载插入）也可能变矮（超长消息窗口化），
                 # 两个方向都要按锚点补偿，否则滚动位置会跳。
                 self._scroll.verticalScrollBar().setValue(max(0, top + delta))
+            self._update_jump_button()
             self._schedule_suspension_update()
             return
         self._pending_anchor = None
         if self._stick:
             self._scroll_to_bottom()
+        self._update_jump_button()
         self._schedule_suspension_update()
 
     def holdFollow(self, hold: bool = True) -> None:

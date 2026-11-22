@@ -5,7 +5,7 @@ from __future__ import annotations
 import pytest
 from PyQt6ElaWidgetTools import ElaThemeType
 
-from pyqt6_ela_pro._colors import _contrast_ratio
+from pyqt6_ela_pro._colors import contrastRatio
 from pyqt6_ela_pro._content_colors import calloutColors, diffColors
 from pyqt6_ela_pro._theme import (
     ElaStatusRoleType,
@@ -27,7 +27,7 @@ def test_diff_colors_follow_status_roles(qapp, mode):
 
     background = surfaceRaised(mode)
     for key in ("add", "delete"):
-        ratio = _contrast_ratio(colors[key], background)
+        ratio = contrastRatio(colors[key], background)
         assert ratio >= 4.5, f"{mode.name}/{key}: {ratio:.2f}:1"
 
 
@@ -39,5 +39,5 @@ def test_callout_colors_follow_status_roles(qapp, mode):
 
     background = surfaceRaised(mode)
     for key, color in colors.items():
-        ratio = _contrast_ratio(color, background)
+        ratio = contrastRatio(color, background)
         assert ratio >= 4.5, f"{mode.name}/{key}: {ratio:.2f}:1"

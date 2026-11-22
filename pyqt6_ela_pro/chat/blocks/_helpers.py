@@ -67,7 +67,6 @@ TOOL_ICONS = {
     "agent": ElaIconType.IconName.UserRobot,
     "fetch": ElaIconType.IconName.Globe,
 }
-CONTEXT_TOOLS = ("read", "glob", "grep", "list")
 #: 子代理类工具（建 ``SubagentCard`` 而不是普通工具卡）
 SUBAGENT_TOOLS = frozenset({"task", "subagent", "agent", "delegate_task"})
 #: 工具类别 → 默认图标
@@ -152,10 +151,13 @@ LAYOUT_SPACING = 6
 
 def _clip_detail(detail: str) -> str:
     """截断超长单行（展开态也照截，否则点开就炸）。"""
+    text = detail if isinstance(detail, str) else str(detail or "")
     out = []
-    for line in detail.split("\n"):
+    suffix = " …（本行已截断）"
+    limit = max(1, DETAIL_MAX_LINE_CHARS - len(suffix))
+    for line in text.split("\n"):
         if len(line) > DETAIL_MAX_LINE_CHARS:
-            line = line[:DETAIL_MAX_LINE_CHARS] + " …（本行已截断）"
+            line = line[:limit] + suffix
         out.append(line)
     return "\n".join(out)
 
@@ -176,7 +178,16 @@ def _collapsed_detail(detail: str, expanded: bool) -> tuple:
     return "\n".join(kept), overflow, len(lines)
 
 
-SHELL_TOOLS = ("bash", "shell", "run", "exec", "terminal")
+SHELL_TOOLS = (
+    "bash",
+    "shell",
+    "run",
+    "exec",
+    "execute",
+    "terminal",
+    "cmd",
+    "powershell",
+)
 _WRITE_TOOLS = ("edit", "write", "patch", "apply_patch")
 
 
@@ -528,7 +539,7 @@ _HEADING_LINE_LIMIT = 256
 def _clean_heading(raw: str) -> str:
     """清洗标题原文（去行内标记与前导列表符号）。"""
     heading = re.sub(r"[*_`~]+", "", raw).strip()
-    return re.sub(r"^[\-\*\d\.、\s]+", "", heading).strip()
+    return re.sub(r"^(?:\d+[.)、]\s*|[-*+]\s+)", "", heading).strip()
 
 
 def _iter_heading_matches(pattern, text):

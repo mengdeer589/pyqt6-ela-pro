@@ -341,8 +341,8 @@ class ElaGhostBox(ElaSearchBox):
         # setItemDelegate 不转移所有权：必须保 Python 引用，否则 GC 后崩溃
         self._delegate = _GhostHeaderDelegate(self)
         self.setItemDelegate(self._delegate)
-        # 与上游 ElaComboBox V3.0（35→30）的触发框同高，整套组合框族统一 30
-        self.setFixedHeight(30)
+        # 与上游 ElaComboBox 的触发框同高（控件统一 32），整套组合框族保持一致
+        self.setFixedHeight(32)
 
         # 第三参（parent）**不传 self**：那会让目标销毁连带删掉仍在运行的动画，
         # 槽随后跑在已释放对象上 = 0xC0000005。守卫见

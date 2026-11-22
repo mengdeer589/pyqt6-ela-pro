@@ -63,14 +63,20 @@ tests/                     回归测试（按组件 / 家族目录组织；`-m "
   时间轴 / 回放 / 流程图 / RSS），
   `tools/perf/bench_markdown_paint.py`（原生浏览器 vs 查看器的滚动绘制分项，Win7 排查字体慢路径）。
   详见 [docs/chat.md](docs/chat.md) 与 [docs/performance.md](docs/performance.md)。
-- **图表引擎**：`ElaChartWidget` 对齐 ECharts 的 `setOption`（22 种系列、tooltip / dataZoom /
-  日历热力 / 下钻），**多轴**（双 Y / 顶部 X / 双 X）、**多网格**（`gridIndex`）、**多标题 / 多图例**、**log 轴**、**时间轴**
+- **图表引擎**：`ElaChartWidget` 对齐 ECharts 的 `setOption`（23 种系列、tooltip / dataZoom /
+  日历热力 / 下钻），**甘特图**（`type: "gantt"`：进度 / 里程碑 / 依赖箭头 /
+  基线 / 截止日期 / 关键路径 / 状态色映射主题令牌 / `editable` 拖动改期 + 进度拖动 +
+  `ganttTaskChanged` / `ganttProgressChanged` 等信号；
+  `ElaGanttView` 固定 x 轴 + 纵向滚动条 + 可选日/周/月/今天工具条，
+  `preferredHeight()` 按行数算高度），
+  **多轴**（双 Y / 顶部 X / 双 X）、**多网格**（`gridIndex`）、**多标题 / 多图例**、**log 轴**、**时间轴**
   （`xAxis.type: "time"`：日期字符串 / 毫秒时间戳、自动时间刻度）、**数据点标签 /
   `markPoint` / `markLine` 标签双击编辑**、**Plotly 风格可拖动标注**（`annotations`：
   拖动文本框只改箭头尾部像素偏移 `ax` / `ay`，箭头终点始终锚定数据点；双击可改文案，
-  `annotationDragged` 可持久化）；**配色主题**（`ela` / `echarts` /
-  `matlab` / `plotly` / `ggplot2` / `seaborn` / `tableau`，实例级
-  `setChartTheme` + 自定义 `registerChartTheme`，option 显式颜色优先）；
+  `annotationDragged` 可持久化）；**配色主题**（`ela` 浅 / 深两套 Fluent 色板 +
+  `echarts` / `matlab` / `plotly` / `ggplot2` / `seaborn` / `tableau`，几何统一
+  Ela 风格，实例级 `setChartTheme` + 自定义 `registerChartTheme`，option 显式
+  颜色 / 宽度优先）；
   **文字外观**（字号 / 字重 / 单族字体 /
   斜体，组件级优先、顶层 `textStyle` 兜底；轴标签另有
   `setAxisLabelStyle` 便捷接口，含加粗 / 颜色 / 居中 / 间距）；**矩阵图像**
@@ -268,7 +274,7 @@ sys.exit(app.exec())
 | **ElaRowColorDelegate** | 表格行底色 delegate（跨行分组着色用） |
 | **ElaParquetTable** | Parquet 文件分页查看 |
 | **ElaInfoBarWidget** | Parquet 查看器的错误 / 统计信息条 |
-| **ElaChartWidget** | 类 ECharts 引擎：22 系列 + 交互组件（含日历热力 / 可拖动标注）+ 7 套配色主题（Ela / ECharts / MATLAB / Plotly / ggplot2 / seaborn / Tableau） |
+| **ElaChartWidget** | 类 ECharts 引擎：23 系列 + 交互组件（含日历热力 / 可拖动标注 / 甘特拖动改期）+ 7 套配色主题（Ela / ECharts / MATLAB / Plotly / ggplot2 / seaborn / Tableau）；`ElaGanttView` 提供纵向滚动甘特容器 |
 | **ElaNumericBuffer** | charts 的大数组**按引用**包装（百万点不深拷贝）；**传入后不得原地修改** |
 | **ElaDashboardGauge** | 仪表盘（全自绘，指针动画，颜色分段） |
 | **ElaPlotWidget** | pyqtgraph 绘图控件（主题自适应，可选依赖） |

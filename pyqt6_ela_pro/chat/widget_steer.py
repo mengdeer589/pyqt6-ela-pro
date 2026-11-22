@@ -29,7 +29,7 @@ class _WidgetSteerMixin:
             return None
         if messageId is not None:
             for item in self._steer:
-                if item.get("messageId") == messageId:
+                if item.get("key") == messageId:
                     return item["id"]
         mentions = list(mentions or [])
         pendingId = self._view.addPendingUserMessage(
@@ -44,7 +44,7 @@ class _WidgetSteerMixin:
                 "id": steerId,
                 "text": text,
                 "attachments": list(attachments or []),
-                "messageId": messageId,
+                "key": messageId,
                 "pendingMessageId": pendingId,
                 "mentions": mentions,
             }
@@ -143,10 +143,10 @@ class _WidgetSteerMixin:
         if pendingId is not None:
             self._view.resolvePendingUserMessage(int(pendingId), sent=True)
         self.steerChanged.emit(self.steerMessages())
-        messageId = self.streamingMessageId() or self._streaming_id
+        messageId = self.streamingMessageId()
         if messageId is not None:
             self._view.addSteerNotice(messageId, item["text"])
         payload = dict(item)
-        payload["messageId"] = messageId
+        payload["assistantMessageId"] = messageId
         self.steerReady.emit(payload)
         return payload

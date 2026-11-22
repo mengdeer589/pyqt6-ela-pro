@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from PyQt6.QtGui import QTextFormat
+from PyQt6.QtGui import QTextCharFormat, QTextFormat
 
 
 _CODE_TOKEN_PREFIX = "\ue000elacode"
@@ -77,3 +77,14 @@ _CODE_MARKER_VALUE = "elacode"
 _CODE_BUTTON_SIZE = 24
 
 _CODE_VIEW_CULL_MARGIN = 64.0
+
+
+def merge_anchor_format(target: QTextCharFormat, source: QTextCharFormat) -> None:
+    """把源格式上的链接属性合并进目标格式（占位符替换时保留外链）。"""
+    if not source.isAnchor():
+        return
+    target.setAnchor(True)
+    target.setAnchorHref(source.anchorHref())
+    names = source.anchorNames()
+    if names:
+        target.setAnchorNames(names)

@@ -161,6 +161,33 @@ def render_formula(
 
 _MATH_SPECIAL_RE = re.compile(r"[`$\\]")
 
+_LIST_MARKER_RE = re.compile(r"^(?:[-+*]|\d+[.)])(?:[ \t]|$)")
+
+
+def _is_indented_code_line(line: str) -> bool:
+    """行首 4 空格 / tab（剥掉 ``>`` 引用前缀后）视为缩进代码。"""
+    stripped = re.sub(r"^(?:[ \t]*>[ \t]?)+", "", line)
+    if stripped.startswith("\t"):
+        return True
+    indent = len(stripped) - len(stripped.lstrip(" "))
+    if indent < 4:
+        return False
+    return _LIST_MARKER_RE.match(stripped.lstrip(" ")) is None
+
+
+def _looks_like_math(content: str) -> bool:
+    """纯反斜杠 / 空白不算公式，避免把 ``\\[\\\\\\]`` 这类转义当显示公式。"""
+    return any(char.isalnum() or char in "{}^_=+-*/<>|" for char in content)
+
+
+def _is_escaped(text: str, index: int) -> bool:
+    count = 0
+    cursor = index - 1
+    while cursor >= 0 and text[cursor] == "\\":
+        count += 1
+        cursor -= 1
+    return count % 2 == 1
+
 
 def _scan_inline_math(line: str, maths: list, mark: str) -> str:
     """扫描一行内的行内公式（``$...$`` / ``\\(...\\)`` / 同行 ``$$...$$``）。
@@ -205,8 +232,9 @@ def _scan_inline_math(line: str, maths: list, mark: str) -> str:
         if c == "\\" and i + 1 < n and line[i + 1] in "([":
             close = "\\)" if line[i + 1] == "(" else "\\]"
             end = line.find(close, i + 2)
-            if end != -1:
-                maths.append((line[i + 2 : end], close == "\\]"))
+            content = line[i + 2 : end] if end != -1 else ""
+            if end != -1 and _looks_like_math(content):
+                maths.append((content, close == "\\]", line[i : end + 2]))
                 result.append(mark.format(len(maths) - 1))
                 i = end + 2
                 continue
@@ -215,8 +243,9 @@ def _scan_inline_math(line: str, maths: list, mark: str) -> str:
             continue
         if line.startswith("$$", i):
             end = line.find("$$", i + 2)
-            if end != -1:
-                maths.append((line[i + 2 : end], True))
+            content = line[i + 2 : end] if end != -1 else ""
+            if end != -1 and _looks_like_math(content):
+                maths.append((content, True, line[i : end + 2]))
                 result.append(mark.format(len(maths) - 1))
                 i = end + 2
                 continue
@@ -230,14 +259,22 @@ def _scan_inline_math(line: str, maths: list, mark: str) -> str:
                 end = line.find("$", j)
                 if end == -1:
                     break
-                if line[end - 1].isspace() or (end + 1 < n and line[end + 1].isdigit()):
+                if (
+                    _is_escaped(line, end)
+                    or line[end - 1].isspace()
+                    or (end + 1 < n and line[end + 1].isdigit())
+                ):
                     j = end + 1
                     continue
-                maths.append((line[i + 1 : end], False))
-                result.append(mark.format(len(maths) - 1))
-                i = end + 1
-                matched = True
-                break
+                content = line[i + 1 : end]
+                if _looks_like_math(content):
+                    maths.append((content, False, line[i : end + 1]))
+                    result.append(mark.format(len(maths) - 1))
+                    i = end + 1
+                    matched = True
+                    break
+                j = end + 1
+                continue
             if matched:
                 continue
             result.append("$")
@@ -268,16 +305,25 @@ def extract_math(text: str, mark: str, macros: Optional[dict] = None):
     while i < len(lines):
         line = lines[i]
         stripped = line.strip()
+        fence_probe = re.sub(r"^(?:[ \t]*>[ \t]?)+", "", stripped)
+        if not fence_probe.startswith(("```", "~~~")):
+            fence_probe = re.sub(r"^[ \t]*(?:[-+*]|\d+[.)])[ \t]+", "", fence_probe)
         if in_fence:
             out.append(line)
-            if stripped.startswith(fence_mark) and not stripped.strip(fence_mark[0]):
+            if fence_probe.startswith(fence_mark) and not fence_probe.strip(
+                fence_mark[0]
+            ):
                 in_fence = False
             i += 1
             continue
-        fence_open = re.match(r"^(`{3,}|~{3,})", stripped)
+        fence_open = re.match(r"^(`{3,}|~{3,})", fence_probe)
         if fence_open:
             in_fence = True
             fence_mark = fence_open.group(1)
+            out.append(line)
+            i += 1
+            continue
+        if _is_indented_code_line(line):
             out.append(line)
             i += 1
             continue
@@ -288,6 +334,7 @@ def extract_math(text: str, mark: str, macros: Optional[dict] = None):
         elif env_m and env_m.group(1).rstrip("*") in _MATH_ENVS:
             closer = "\\end{" + env_m.group(1) + "}"
         if closer is not None:
+            start = i
             body = []
             i += 1
             while i < len(lines) and lines[i].strip() != closer:
@@ -299,8 +346,9 @@ def extract_math(text: str, mark: str, macros: Optional[dict] = None):
                 if closer.startswith("\\end"):
                     env_name = env_m.group(1)
                     latex = f"\\begin{{{env_name}}}{latex}\\end{{{env_name}}}"
-                if latex:
-                    maths.append((latex, True))
+                if latex and _looks_like_math(latex):
+                    original = "\n".join(lines[start:i])
+                    maths.append((latex, True, original))
                     out.append("")
                     out.append(mark.format(len(maths) - 1))
                     out.append("")
@@ -311,5 +359,8 @@ def extract_math(text: str, mark: str, macros: Optional[dict] = None):
             continue
         out.append(_scan_inline_math(line, maths, mark))
         i += 1
-    maths = [(_expand_macros(latex, macros), display) for latex, display in maths]
+    maths = [
+        (_expand_macros(latex, macros), display, original)
+        for latex, display, original in maths
+    ]
     return "\n".join(out), maths

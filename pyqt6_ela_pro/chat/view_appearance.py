@@ -6,6 +6,7 @@ from __future__ import annotations
 from typing import Optional
 
 
+from ._changes import changesFromPartsOrMessage
 from .blocks import (
     ElaChatAvatarSource,
     normalizeAvatarShape,
@@ -21,6 +22,14 @@ from .message import (
 class _ViewAppearanceMixin:
     """方法组 mixin：状态由 ``ElaChatView.__init__`` 建立。"""
 
+    def _schedule_virtual_height_sync(self) -> None:
+        """已物化气泡改高后，让 spacer / 壳占位高度在下一帧重新结算。"""
+        if self._shell_placeholders:
+            self._virtualizer._refresh_shell_heights()
+        if self._virtual_list_mode:
+            self._virtual_prefix_dirty = True
+            self._virtual_window_timer.start(0)
+
     def setReasoningStyle(self, style: str) -> None:
         """设置思考展示形态（``"collapse"`` / ``"inline"``），对已有消息立即生效。"""
         self._reasoning_style = (
@@ -30,6 +39,7 @@ class _ViewAppearanceMixin:
         )
         for bubble in self._bubbles.values():
             bubble.setReasoningStyle(self._reasoning_style)
+        self._schedule_virtual_height_sync()
 
     def reasoningStyle(self) -> str:
         """获取思考展示形态。"""
@@ -98,8 +108,6 @@ class _ViewAppearanceMixin:
 
     def turnChanges(self, messageId: int):
         """获取指定消息的文件变更汇总（从工具 metadata 派生）。"""
-        from ._changes import changesFromPartsOrMessage
-
         return changesFromPartsOrMessage(self.message(messageId))
 
     def setCopyNotificationEnabled(self, on: bool) -> None:
@@ -143,6 +151,7 @@ class _ViewAppearanceMixin:
         self._stats_mode = mode if mode in ("footer", "steps", "none") else "footer"
         for bubble in self._bubbles.values():
             bubble.setStatsMode(self._stats_mode)
+        self._schedule_virtual_height_sync()
 
     def statsMode(self) -> str:
         """获取用量徽标展示模式。"""
@@ -196,6 +205,7 @@ class _ViewAppearanceMixin:
         for bubble in self._bubbles.values():
             if bubble.role() == ElaChatRoleType.User:
                 bubble.setMaxWidthRatio(self._user_bubble_ratio)
+        self._schedule_virtual_height_sync()
 
     def userBubbleMaxWidth(self) -> float:
         """获取用户气泡最大宽度比例。"""
@@ -211,6 +221,7 @@ class _ViewAppearanceMixin:
         for bubble in self._bubbles.values():
             bubble.setContentMaxWidth(self._content_max_width)
         self._apply_content_margins()
+        self._schedule_virtual_height_sync()
         host = self.parentWidget()
         sync = getattr(host, "_sync_composer_width", None)
         if callable(sync):

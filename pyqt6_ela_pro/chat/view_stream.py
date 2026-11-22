@@ -217,28 +217,25 @@ class _ViewStreamMixin:
         self.messageUpdated.emit(messageId)
         return partId
 
-    def beginCompaction(
-        self, messageId: int, reason: str = "auto", *, queued: bool = False
-    ) -> str:
+    def beginCompaction(self, messageId: int, *, queued: bool = False) -> str:
         """标记一次上下文压缩开始（``queued=True`` 表示已排队、尚未开跑），返回分段 id。
         库只表达「这里发生过压缩」并接住摘要，压缩算法归 provider。
-        ``reason`` 只进 journal 原始事件（诊断用），时间线卡片不展示。
         """
         bubble = self._require_bubble(messageId, "beginCompaction")
         if bubble is None:
             return ""
-        partId = bubble.beginCompaction(reason, queued=queued)
+        partId = bubble.beginCompaction(queued=queued)
         self._sync_parts(messageId)
         self.messageUpdated.emit(messageId)
         return partId
 
     def appendCompactionSummary(self, messageId: int, partId: str, chunk: str) -> None:
         """追加压缩摘要（流式）。"""
-        bubble = self._bubbles.get(messageId)
+        bubble = self._require_bubble(messageId, "appendCompactionSummary")
         if bubble is None or not partId or not chunk:
             return
         bubble.appendCompactionSummary(partId, chunk)
-        self._dirty_syncs.add(messageId)
+        self._sync_parts(messageId)
         self.messageUpdated.emit(messageId)
 
     def endCompaction(
@@ -425,10 +422,15 @@ class _ViewStreamMixin:
         """
         api = "setMessageError"
         self._require_int_id(messageId, api)
-        if self._store.message(messageId) is None:
+        existing = self._store.message(messageId)
+        if existing is None:
             if self._strict_ids:
                 raise KeyError(f"{api}：消息 id {messageId!r} 不存在")
             return
+        if not message:
+            self.clearMessageError(messageId)
+            return
+        was_streaming = existing.status == ElaChatStatusType.Streaming
         bubble = self._bubbles.get(messageId)
         if bubble is not None:
             bubble.setError(message, errorType)
@@ -442,6 +444,8 @@ class _ViewStreamMixin:
                 messageId, lambda m: m.withStatus(ElaChatStatusType.Error)
             )
         self.messageUpdated.emit(messageId)
+        if was_streaming:
+            self.messageStreamFinished.emit(messageId, ElaChatStatusType.Error)
 
     def messageError(self, messageId: int) -> tuple:
         """获取指定消息的 ``(错误文本, 错误类型)``（无错误返回 ``("", "")``）。"""

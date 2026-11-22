@@ -9,7 +9,7 @@ from PyQt6.QtGui import QPainter, QPainterPath, QPen
 from PyQt6.QtWidgets import QApplication, QHBoxLayout, QWidget
 from PyQt6ElaWidgetTools import ElaIconButton, ElaThemeType, eTheme
 
-from .._styles import SHADOW_MARGIN, paintOverlayShadow
+from .._styles import SHADOW_MARGIN, coerceElaIcon, paintOverlayShadow
 from ..ela_button import ElaButton
 from ..tooltips import ElaToolTipPositionType, set_tooltip
 from ..widget_base import ElaThemeWidget
@@ -157,7 +157,7 @@ class ElaSelectionPopup(ElaThemeWidget):
         tooltip = action.tooltip or action.label
         if self._compact and action.icon is not None:
             button: QWidget = ElaIconButton(
-                action.icon,
+                coerceElaIcon(action.icon),
                 _ICON_BUTTON_SIZE - 10,
                 _ICON_BUTTON_SIZE,
                 _ICON_BUTTON_SIZE,

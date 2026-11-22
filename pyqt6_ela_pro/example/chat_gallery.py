@@ -343,7 +343,7 @@ class ChatGalleryDialog(ElaDialogBase):
         layout.addWidget(working)
 
         retry = self._own(ElaChatRetryCard(parent))
-        retry.setRetry(2, "上游限流，稍后自动重试", time.time() + 30)
+        retry.setRetry(2, "上游限流，稍后自动重试", time.time() * 1000.0 + 30_000)
         retry_result = self._result(layout, parent)
         safe_connect(
             retry,
@@ -412,13 +412,6 @@ class ChatGalleryDialog(ElaDialogBase):
             "removeRequested",
             lambda mid: queue_result.setText(f"移除：{mid}"),
             "gallery.queue_remove",
-            receiver=queue,
-        )
-        safe_connect(
-            queue,
-            "reorderRequested",
-            lambda mid, index: queue_result.setText(f"排序：{mid} → {index}"),
-            "gallery.queue_reorder",
             receiver=queue,
         )
         safe_connect(

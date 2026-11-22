@@ -6,7 +6,7 @@ from dataclasses import replace
 
 
 import time
-from collections import Counter
+from collections import Counter, deque
 from datetime import datetime
 from typing import Optional
 
@@ -15,14 +15,18 @@ from .._internal import safe_connect
 from .bubble import ElaChatBubble
 from .message import (
     ElaChatMessage,
-    ElaChatPartKindType,
     ElaChatReasoningStyleType,
     ElaChatRoleType,
     ElaChatStatusType,
     ElaChatToolStatusType,
     _as_int,
 )
-from .session import SESSION_SCHEMA_VERSION, ElaChatSessionInfo
+from .session import (
+    SESSION_SCHEMA_VERSION,
+    ElaChatSessionInfo,
+    migrateSessionBundle,
+)
+from .timeline import estimate_parts_height
 
 
 def _with_created_at(message: ElaChatMessage, createdAt: float) -> ElaChatMessage:
@@ -329,13 +333,16 @@ class _ViewMessagesMixin:
         """
         if not isinstance(bundle, dict):
             raise ValueError("importSession: bundle 必须是 dict")
+        bundle = migrateSessionBundle(bundle)
         rows = bundle.get("messages", [])
         if not isinstance(rows, list):
             raise ValueError("importSession: bundle['messages'] 必须是列表")
         rows = [row for row in rows if isinstance(row, dict)]
         if clear:
-            # 先校验后清空：坏 bundle（批内重复 id）不能把当前会话清掉再抛。
+            # 先校验后清空：坏 bundle（批内重复 id / 更高 schema）不能把当前会话清掉再抛。
             self._validate_preserve_ids(rows, against_existing=False)
+            for row in rows:
+                ElaChatMessage.fromDict(row)
         if clear:
             # 先清空再应用视图选项：``clear()`` 会重置披露状态。
             self.clear()
@@ -543,9 +550,7 @@ class _ViewMessagesMixin:
         bubble.setTimestamp(datetime.now().strftime("%H:%M:%S"))
         bubble.setReasoningStyle(self._reasoning_style)
         bubble.setToolGrouping(self._tool_grouping)
-        bubble.setPermissionAlwaysAllowHoldEnabled(
-            self._permission_always_allow_hold
-        )
+        bubble.setPermissionAlwaysAllowHoldEnabled(self._permission_always_allow_hold)
         bubble.setStatsMode(self._stats_mode)
         bubble.setToolDefaultOpen(self._tool_default_open)
         bubble._disclosure = self._disclosure
@@ -570,6 +575,13 @@ class _ViewMessagesMixin:
             "viewerCreated",
             lambda widget, mid=messageId: self._guard_message_viewer(mid, widget),
             "view.viewer_created",
+            receiver=bubble,
+        )
+        safe_connect(
+            bubble,
+            "partsReset",
+            lambda mid=messageId: self._drop_message_guards(mid),
+            "view.parts_reset",
             receiver=bubble,
         )
         if streaming:
@@ -686,81 +698,23 @@ class _ViewMessagesMixin:
         bubble.show()
         return bubble
 
-    def _height_meta(self, message: ElaChatMessage) -> tuple:
-        """轻量高度统计（缓存）：避免每次估算 / resize 都遍历全部 parts。"""
-        cached = self._height_meta_cache.get(message.id)
-        if cached is not None:
-            return cached
-        steps = 0
-        tool = reasoning = text_parts = text_chars = 0
-        stats = compaction = permission = other = 0
-        for part in message.parts:
-            step = max(1, int(getattr(part, "step", 1) or 1))
-            if step > steps:
-                steps = step
-            kind = getattr(part, "kind", "")
-            if kind == ElaChatPartKindType.Tool:
-                tool += 1
-            elif kind == ElaChatPartKindType.Reasoning:
-                reasoning += 1
-            elif kind == ElaChatPartKindType.Text:
-                text_parts += 1
-                text_chars += len(getattr(part, "text", "") or "")
-            elif kind == ElaChatPartKindType.Stats:
-                stats += 1
-            elif kind == ElaChatPartKindType.Compaction:
-                compaction += 1
-            elif kind == ElaChatPartKindType.Permission:
-                permission += 1
-            else:
-                other += 1
-        if not message.parts and message.text:
-            text_parts = 1
-            text_chars = len(message.text)
-        meta = (
-            steps,
-            tool,
-            reasoning,
-            text_parts,
-            text_chars,
-            stats,
-            compaction,
-            permission,
-            other,
-        )
-        self._height_meta_cache[message.id] = meta
-        return meta
-
     def _estimate_shell_height(self, message: ElaChatMessage) -> int:
-        """未建壳消息的占位高度（分段统计缓存 + O(1) 估算）。"""
+        """未建壳消息的占位高度（与 timeline 的物化估算同一口径）。"""
         width = self._content.width()
         if width <= 0:
             width = max(320, self.width() - 100)
-        (
-            steps,
-            tool,
-            reasoning,
-            text_parts,
-            text_chars,
-            stats,
-            compaction,
-            permission,
-            other,
-        ) = self._height_meta(message)
-        chars_per_line = max(24, width // 8)
-        lines = (text_chars + chars_per_line - 1) // chars_per_line if text_chars else 0
-        stats_height = 24 if self._stats_mode == "steps" else 0
-        total = (
-            steps * 28
-            + tool * 40
-            + reasoning * 36
-            + text_parts * 12
-            + lines * 22
-            + stats * stats_height
-            + compaction * 64
-            + permission * 96
-            + other * 40
-        )
+        if self._content_max_width > 0:
+            width = min(width, self._content_max_width)
+        if message.parts:
+            total = estimate_parts_height(message.parts, width, self._stats_mode)
+        else:
+            chars_per_line = max(24, width // 8)
+            lines = (
+                (len(message.text) + chars_per_line - 1) // chars_per_line
+                if message.text
+                else 0
+            )
+            total = 12 + lines * 22
         return max(40, total + 110)
 
     def removeMessage(self, messageId: int) -> None:
@@ -787,6 +741,7 @@ class _ViewMessagesMixin:
         self._virtual_order_dirty = True
         if not self._messages:
             self._empty.setVisible(True)
+        self._prune_search_hits([messageId])
         self.messageRemoved.emit(messageId)
         self._update_jump_button()
 
@@ -809,12 +764,20 @@ class _ViewMessagesMixin:
             if bubble is not None:
                 bubble.cancelPendingPermissions()
         for mid in removed:
-            self._detach_message(mid)
+            self._detach_message(mid, bulk=True)
+        self._virtual_bubble_ids = [
+            mid for mid in self._virtual_bubble_ids if mid not in removed_set
+        ]
+        self._lazy_ids = [mid for mid in self._lazy_ids if mid not in removed_set]
+        self._render_queue = deque(
+            mid for mid in self._render_queue if mid not in removed_set
+        )
         self._store.remove_ids(removed_set)
         self._virtual_prefix_dirty = True
         self._virtual_order_dirty = True
         if not self._messages:
             self._empty.setVisible(True)
+        self._prune_search_hits(removed)
         self._update_jump_button()
         for mid in removed:
             self.messageRemoved.emit(mid)
@@ -861,6 +824,7 @@ class _ViewMessagesMixin:
         self._virtual_prefix_dirty = True
         self._virtual_order_dirty = True
         self._render_queue.clear()
+        self._render_queue_reversed = False
         self._render_timer.stop()
         # 渐进渲染被打断时必须自己收尾：``beginBatch`` 关掉了视口刷新，而恢复
         # 只在 ``_finish_batch_render`` 里；这里清空队列后再没人走到那里，视口
@@ -875,6 +839,9 @@ class _ViewMessagesMixin:
         self._lazy_timer.stop()
         self._loading_older = False
         self._pending_anchor = None
+        self._stick = True
+        self._virtual_pending_top = 0
+        self._virtual_refreshing = False
         self._batch_eager_rendered = 0
         for guards in self._guards_by_message.values():
             for guard in guards:
@@ -891,10 +858,14 @@ class _ViewMessagesMixin:
             self._activity_row.setText("")
             self._activity_row.hide()
         self._empty.setVisible(True)
+        self._scroll.verticalScrollBar().setValue(0)
         self._update_jump_button()
 
-    def _detach_message(self, messageId: int) -> bool:
-        """摘除单条消息的气泡 / 占位与相关引用；返回消息是否存在。"""
+    def _detach_message(self, messageId: int, *, bulk: bool = False) -> bool:
+        """摘除单条消息的气泡 / 占位与相关引用；返回消息是否存在。
+        ``bulk=True`` 时不在三个线性容器里逐条 remove，由调用方统一重建。
+        """
+        self._virtual_heights.pop(messageId, None)
         placeholder = self._shell_placeholders.pop(messageId, None)
         bubble = self._bubbles.pop(messageId, None)
         virtual_exists = self._virtual_list_mode and messageId in self._message_index
@@ -911,9 +882,8 @@ class _ViewMessagesMixin:
             bubble.setParent(None)
             bubble.deleteLater()
         if self._virtual_list_mode:
-            if messageId in self._virtual_bubble_ids:
+            if not bulk and messageId in self._virtual_bubble_ids:
                 self._virtual_bubble_ids.remove(messageId)
-            self._virtual_heights.pop(messageId, None)
             self._virtual_prefix_dirty = True
             if not self._virtual_window_timer.isActive():
                 self._virtual_window_timer.start(0)
@@ -924,12 +894,13 @@ class _ViewMessagesMixin:
         self._retry.pop(messageId, None)
         self._dirty_syncs.discard(messageId)
         self._suspended_ids.discard(messageId)
-        if messageId in self._lazy_ids:
-            self._lazy_ids.remove(messageId)
-        try:
-            self._render_queue.remove(messageId)
-        except ValueError:
-            pass
+        if not bulk:
+            if messageId in self._lazy_ids:
+                self._lazy_ids.remove(messageId)
+            try:
+                self._render_queue.remove(messageId)
+            except ValueError:
+                pass
         for guard in self._guards_by_message.pop(messageId, ()):
             try:
                 self._scroll_guards.remove(guard)
@@ -942,10 +913,6 @@ class _ViewMessagesMixin:
         self._store.add(message)
         self._virtual_prefix_dirty = True
         self._virtual_order_dirty = True
-
-    def _reindex_messages(self) -> None:
-        """重建 id → 下标 / 快照索引（列表结构变化后调用）。"""
-        self._store.reindex()
 
     def _update_snapshot(self, messageId: int, updater) -> None:
         if not self._store.update(messageId, updater):

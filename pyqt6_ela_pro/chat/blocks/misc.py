@@ -34,6 +34,7 @@ from .._theme import (
 )
 from ..message import (
     ElaChatStatusType,
+    _as_int,
 )
 from ..toolbar import ElaChatToolBar
 from ._helpers import PREVIEW_MAX_CHARS, RETRYABLE_ERROR_TYPES
@@ -216,11 +217,11 @@ class CompactionSeparator(_ThemeAwareMixin, ElaScrollPageArea):
             self._sync_label()
             return
         prompt = (
-            max(0, int(getattr(stats, "prompt_tokens", 0) or 0))
-            + max(0, int(getattr(stats, "cache_read_tokens", 0) or 0))
-            + max(0, int(getattr(stats, "cache_write_tokens", 0) or 0))
+            max(0, _as_int(getattr(stats, "prompt_tokens", 0)))
+            + max(0, _as_int(getattr(stats, "cache_read_tokens", 0)))
+            + max(0, _as_int(getattr(stats, "cache_write_tokens", 0)))
         )
-        output = max(0, int(getattr(stats, "completion_tokens", 0) or 0))
+        output = max(0, _as_int(getattr(stats, "completion_tokens", 0)))
         if prompt + output <= 0:
             self._stats_text = ""
         else:
@@ -228,10 +229,12 @@ class CompactionSeparator(_ThemeAwareMixin, ElaScrollPageArea):
         self._sync_label()
 
     def setOpened(self, opened: bool) -> None:
-        """展开 / 收起摘要。"""
+        """展开 / 收起摘要（状态未变只刷新显示，不重复 emit）。"""
+        opened = bool(opened)
+        changed = opened != self._opened
         if opened:
             self._build_body()
-        self._opened = bool(opened)
+        self._opened = opened
         self._body.setVisible(self._opened)
         self._sync_preview()
         self._chevron.setAwesome(
@@ -242,7 +245,8 @@ class CompactionSeparator(_ThemeAwareMixin, ElaScrollPageArea):
         if self.layout() is not None:
             self.layout().activate()
         self.updateGeometry()
-        self.toggled.emit(bool(opened))
+        if changed:
+            self.toggled.emit(opened)
 
     def opened(self) -> bool:
         """摘要是否展开（读的是显式状态，与是否已 show 无关）。"""

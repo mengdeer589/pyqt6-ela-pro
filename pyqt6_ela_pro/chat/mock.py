@@ -112,6 +112,7 @@ class ElaChatMockBackend(QObject):
         #: 回合 token 自增源（与真实 worker 同构：token 是「这轮生杀」的凭据）
         self._turn_seq = 0
         self._current_turn = 0
+        self._closed = False
         self._timer = QTimer(self)
         self._timer.setInterval(self._tick_ms)
         safe_connect(self._timer, "timeout", self._on_tick, "mock.tick")
@@ -155,6 +156,8 @@ class ElaChatMockBackend(QObject):
         token 是这一轮的落定凭据（``turnFinished`` 原样带回）；未受理时返回
         ``None``。真值即代表已受理，不要当 bool 用。
         """
+        if self._closed:
+            return None
         if self._running:
             self.cancel()
             if self._running:
@@ -168,9 +171,6 @@ class ElaChatMockBackend(QObject):
         self._turn_attachments = list(attachments or ())
         self._events = self._build_events(self._question)
         self._running = True
-        if not self._events:
-            self._finish_turn()
-            return token
         self._timer.start()
         return token
 
@@ -183,7 +183,8 @@ class ElaChatMockBackend(QObject):
         return list(self._turn_attachments)
 
     def reset(self) -> None:
-        """重置模拟后端状态。"""
+        """重置模拟后端状态（在跑的回合按取消收尾）。"""
+        self._finish_turn()
         self._events = []
         self._question = ""
         self._turn_attachments = []
@@ -195,7 +196,8 @@ class ElaChatMockBackend(QObject):
         self._finish_turn()
 
     def shutdown(self) -> None:
-        """关闭后端（模拟后端与取消等价）。"""
+        """关闭后端（模拟后端与取消等价，关闭后不再受理新回合）。"""
+        self._closed = True
         self.cancel()
 
     def _finish_turn(self) -> None:

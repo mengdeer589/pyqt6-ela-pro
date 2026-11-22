@@ -13,16 +13,21 @@
 from __future__ import annotations
 
 import json
+import time
 
 import pytest
 
 from PyQt6.QtCore import QEvent, QPoint, Qt, QPointF
 from PyQt6.QtGui import QMouseEvent
+from PyQt6.QtWidgets import QVBoxLayout, QWidget
 
+from pyqt6_ela_pro._diff import ElaDiffFile
 from pyqt6_ela_pro.chat import (
+    ElaChatAttachment,
     ElaChatStats,
     ElaChatStatusType,
     ElaChatToolStatusType,
+    ElaChatTurnChanges,
     ElaChatWidget,
     ModelPricing,
     cost_from_parts,
@@ -31,8 +36,11 @@ from pyqt6_ela_pro.chat import (
 )
 from pyqt6_ela_pro.chat.blocks import (
     RETRYABLE_ERROR_TYPES,
+    AttachmentStrip,
     CompactionSeparator,
+    ElaChatRetryCard,
     PermissionRecord,
+    TurnChangesRow,
 )
 from pyqt6_ela_pro.chat.view_parts import EmptyState
 from pyqt6_ela_pro.chat.message import (
@@ -459,7 +467,7 @@ class TestFontScale:
         view.addToolCall(mid, "read", {"filePath": "a.py"}, "文件内容")
         view.setStepStats(mid, ElaChatStats(prompt_tokens=10, completion_tokens=20))
         view.addToolCall(mid, "bash", {"cmd": "ls"}, "ok")
-        partId = view.beginCompaction(mid, "auto")
+        partId = view.beginCompaction(mid)
         view.appendCompactionSummary(mid, partId, "摘要一行")
         view.endCompaction(mid, partId, historyCount=12)
         view.addSteerNotice(mid, "插话回执")
@@ -528,7 +536,7 @@ class TestCompactionLabel:
     def _card(chat, summary="保留了：架构约定 / 三个 API 变更", count=0):
         view = chat.chatView()
         mid = _turn(chat)
-        partId = view.beginCompaction(mid, "auto")
+        partId = view.beginCompaction(mid)
         view.appendCompactionSummary(mid, partId, summary)
         view.endCompaction(mid, partId, historyCount=count)
         cards = chat.findChildren(CompactionSeparator)
@@ -592,12 +600,78 @@ class TestCompactionLabel:
         assert card._preview.text() == ""
         assert card._preview.isHidden()
 
+    def test_same_open_state_refreshes_without_emit(self, qapp, make):
+        chat = make(ElaChatWidget)
+        card = self._card(chat, summary="保留了：架构约定")
+        seen = []
+        card.toggled.connect(seen.append)
+        card.setOpened(False)
+        assert seen == []
+        card.setOpened(True)
+        assert seen == [True]
+
+
+class TestAttachmentStripNoop:
+    def test_same_normalized_list_does_not_emit(self, qapp, make):
+        strip = make(AttachmentStrip)
+        seen = []
+        strip.changed.connect(seen.append)
+        strip.setAttachments([ElaChatAttachment(name="a.py", path="a.py")])
+        assert len(seen) == 1
+        strip.setAttachments([{"name": "a.py", "path": "a.py"}])
+        assert len(seen) == 1
+
+
+class TestChangesRowLoader:
+    def test_loader_runs_once_after_body_built(self, qapp, make):
+        row = make(TurnChangesRow)
+        full = ElaChatTurnChanges(
+            files=(ElaDiffFile(path="a.py", additions=1, deletions=1),),
+            additions=1,
+            deletions=1,
+        )
+        calls = []
+
+        def loader():
+            calls.append(1)
+            return full
+
+        small = ElaChatTurnChanges(files=(ElaDiffFile(path="a.py"),))
+        row.setChanges(small, loader=loader)
+        assert calls == []
+        row.setOpened(True)
+        assert calls == [1]
+        row.setChanges(small, loader=loader)
+        assert calls == [1], "body 建好后不应再重跑 loader"
+
+
+class TestRetryCardActiveState:
+    def test_hidden_card_does_not_run_countdown(self, qapp, make):
+        host = make(QWidget)
+        layout = QVBoxLayout(host)
+        card = ElaChatRetryCard(host)
+        layout.addWidget(card)
+        host.hide()
+        card.setRetry(1, "限流", time.time() * 1000.0 + 60_000.0)
+        assert card.isActive() is True
+        assert card._timer.isActive() is False
+
+        host.show()
+        qapp.processEvents()
+        assert card._timer.isActive() is True
+        host.hide()
+        qapp.processEvents()
+        assert card._timer.isActive() is False
+
+        card.clear()
+        assert card.isActive() is False
+
 
 class TestCompaction:
     def test_compaction_part_lifecycle(self, chat):
         mid = _turn(chat)
         view = chat.chatView()
-        partId = view.beginCompaction(mid, "auto")
+        partId = view.beginCompaction(mid)
         assert partId
         view.appendCompactionSummary(mid, partId, "## 目标")
         view.appendCompactionSummary(mid, partId, "\n- 修 bug")

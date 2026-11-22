@@ -44,8 +44,12 @@
   工厂签名 `(ToolRenderContext) -> QWidget`，返回 `None` 落回默认纯文本；
   可选实现 `updateToolResult(result, status)` 接收结果推送。
   `subtitle(arguments) -> (键, 值)` 的键会自动从参数摘要排除（防「3 个文件
-  files=[...]」重复）；给上下文工具（read / glob / grep / list）注册默认退出
-  分组（否则被分组卡绕过）。库内提供**可选**内置渲染器（见下「可选内置工具
+  files=[...]」重复）；`groupable=True` 表示进入上下文分组（分组卡会绕过
+  渲染器），默认 False（渲染器优先）。给内置上下文工具注册渲染器默认退出
+  分组（否则被分组卡绕过）。没有渲染器的宿主工具用
+  `registerContextTool(name, *, label="", enabled=True)` 加入/移出分组，
+  `contextTools()` 查询当前集合；只有连续的可分组调用会合并，遇到其它工具
+  会终结当前分组。库内提供**可选**内置渲染器（见下「可选内置工具
   渲染器」），宿主仍可全部自行实现。**渲染器里的每个 `ColorText` 都要显式
   `setTextPixelSize`** —— 不设就是 `ElaText` 的默认字号（实测 **28px**），比
   chat 的 11-14px 标尺大一大截，整张卡的比例会崩
@@ -280,15 +284,19 @@
   整会话
   `view.exportSession(session, extra)` / `view.importSession(bundle,
   clear=True)`（bundle = session 元数据 + messages + 外观选项，clear 时保留
-  原 id）；`ElaChatSessionInfo` 提供会话元数据快照 + `toDict/fromDict`；
-  回合中途崩溃用 `ElaChatTurnJournal` 追加写事件流恢复（示例见
-  `chat/__init__.py` docstring）；`connectWorker()` 会自动跟随 `llmStarted`
+  原 id；`migrateSessionBundle()` 会把 v0 / 旧 schema 升级到当前版本，高于
+  当前版本直接拒绝）；`ElaChatSessionInfo` 提供会话元数据快照 + `toDict/fromDict`；
+  回合中途崩溃用 `ElaChatTurnJournal` 追加写事件流恢复（`appendTo(path)` /
+  `loadFrom(path)` 直接接文件；示例见 `chat/__init__.py` docstring）；
+  `connectWorker()` 会自动跟随 `llmStarted`
   切步（第 1 轮不切，此时别再手动 `beginStep`），同一步重复上报的用量按
-  最新值覆盖，正文 / 思考 / 步骤时长自动记录
+  最新值覆盖，正文 / 思考 / 步骤时长自动记录；`begin(..., agent=, model=,
+  modelVariant=)` 与 `end(..., errorType=)` 会把身份和错误类型写进日志，
+  恢复后的错误卡仍能判断是否给「重试」
 - **历史会话虚拟化** — 批量恢复时首屏之外的消息只保存 `parts` 数据、
   不建工具卡 / 思考块 / 查看器（`bubble.partsDeferred()` 为 True）；滚动到
-  附近时按页物化，也可显式 `view.materializeMessage(id)` /
-  `view.scrollToMessage(id)`。超过 24 步的超长消息只物化末尾 12 步，其余
+  附近时按页物化，也可显式 `view.materializeMessage(id)`（默认只准备控件，
+  不改变滚动位置；`reveal=True` 才滚进视口）/ `view.scrollToMessage(id)`。超过 24 步的超长消息只物化末尾 12 步，其余
   折叠成「展开全部」按钮（`bubble.partsWindowed()` / `expandParts()`）；
   完整 `parts` / `messages()` / 导出始终是全量数据。批量超过 80 条时连
   **气泡壳**也延迟（只留等高占位，`bubble(id)` 对未物化消息返回 `None`），
@@ -389,8 +397,9 @@ chat.sendNextQueued()                         # 或手动触发
   的手动披露状态，二者随 `exportSession` 的 `view` 段持久化。
 - **会话内搜索（`ElaChatSearchBar` / `ElaChatSearchHit`）** —
   `view.searchText(query, caseSensitive=False)` 搜索助手正文 + 用户文本，
-  `searchNext` / `searchPrev` 循环跳转并高亮；`view.showSearchBar()` /
-  `hideSearchBar()`，`ElaChatWidget` 的 `Ctrl+F` 走同一入口。
+  `searchNext` / `searchPrev` 循环跳转并高亮；搜索条第二行显示当前命中的
+  前后文预览。`view.showSearchBar()` / `hideSearchBar()`，`ElaChatWidget` 的
+  `Ctrl+F` 走同一入口。
 - **Diff / 文件变更** — 顶层 `ElaDiffView`（基于 `ElaPlainTextEdit` +
   `editBorderlessStyle()`，继承 ElaScrollBar / ElaMenu；统一 diff：双行号、
   +/- 底色、Pygments 着色、折叠上下文、大 diff 上限），`ElaChatFileChanges` 是工具 body
@@ -468,7 +477,8 @@ chat.sendNextQueued()                         # 或手动触发
   - `setShellMode(True)`：等宽字体、`Esc` 退出、提交走 `shellSubmitted(text)`；
   - `setHistory(ElaChatPromptHistory)`：↑/↓ 浏览提示历史，保留当前草稿；
   - `draftState()` / `setDraftState()` + 300ms `draftChanged`：宿主按会话保存草稿。
-- **队列增强** — `ElaChatQueueDock` 增加「插话」（生成中）/ 撤销；
+- **队列增强** — `ElaChatQueueDock` 增加「插话」（生成中）/ 撤销，行支持
+  拖动换位与「上移 / 下移」按钮；
   `setSteerEnabled(False)` 时行按钮置灰、`steerQueued(queueId)` 返回 `False`
   （消息留在队列），`Ctrl+Enter` 回退排队（不受 `setQueueEnabled(False)` 限制）；
   `ElaChatWidget.moveQueued(queueId, toIndex)` / `steerQueued(queueId)` /

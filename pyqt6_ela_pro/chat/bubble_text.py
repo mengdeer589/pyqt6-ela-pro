@@ -16,9 +16,6 @@ from PyQt6.QtWidgets import (
 
 from ..ela_markdown_viewer import ElaMarkdownViewer
 from ._theme import base_color
-from .blocks import (
-    ReasoningBlock,
-)
 from .message import (
     ElaChatPart,
     ElaChatPartKindType,
@@ -149,17 +146,18 @@ class _BubbleTextMixin:
 
     def hasExpandedSections(self) -> bool:
         """是否有用户展开中的折叠块 / 思考块 / 工具面板（壳回收应跳过这类消息）。"""
-        for card in self._tool_cards.values():
-            if card is not None and not is_deleted(card) and card.isOpened():
-                return True
         for panel in self._panels:
             if panel is not None and not is_deleted(panel) and panel.isOpened():
                 return True
-        for part in self._parts:
-            if part.kind != ElaChatPartKindType.Reasoning:
+        row = self._changes_row
+        if row is not None and not is_deleted(row) and row.isOpened():
+            return True
+        for widget in self._part_widgets.values():
+            if widget is None or is_deleted(widget):
                 continue
-            widget = self._part_widgets.get(part.id)
-            if isinstance(widget, ReasoningBlock) and widget.isOpened():
+            if hasattr(widget, "isOpened") and widget.isOpened():
+                return True
+            if hasattr(widget, "opened") and widget.opened():
                 return True
         return False
 
@@ -346,17 +344,14 @@ class _BubbleTextMixin:
         self._append_part(part, viewer)
         self._current_text_id = None
 
-    def beginText(self, partId: Optional[str] = None) -> Optional[str]:
-        """开始一个新的正文段，返回分段 id（非助手消息返回 ``None``）。
-
-        ``partId`` 可由调用方指定（存储恢复时保留原分段 id），缺省自动生成。
-        """
+    def beginText(self) -> Optional[str]:
+        """开始一个新的正文段，返回分段 id（非助手消息返回 ``None``）。"""
         if self._role != ElaChatRoleType.Assistant:
             return None
         self._ensure_parts_materialized()
         if self._current_text_id is not None:
             self.endText()
-        partId = partId or uuid4().hex[:12]
+        partId = uuid4().hex[:12]
         status = (
             ElaChatStatusType.Streaming
             if self._status == ElaChatStatusType.Streaming

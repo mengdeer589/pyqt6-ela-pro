@@ -33,11 +33,12 @@ class TurnChangesRow(_CollapsibleBlock):
         self._apply_theme()
 
     def setChanges(self, changes, loader=None) -> None:
-        """替换汇总内容；``loader`` 在首次展开时补齐完整 diff。"""
+        """替换汇总内容；``loader`` 只在正文未建时登记，展开后补一次完整 diff。"""
         self._changes = changes or ElaChatTurnChanges()
-        self._changes_loader = loader
-        if self._body_built and loader is not None:
-            self._changes = loader() or self._changes
+        if not self._body_built:
+            self._changes_loader = loader
+        if self._body_built:
+            self._load_changes()
         count = self._changes.count
         self.setTitle(f"{count} 个文件变更" if count else "文件变更")
         summary = (
@@ -53,10 +54,23 @@ class TurnChangesRow(_CollapsibleBlock):
         """获取当前汇总快照（未展开时可能是轻量汇总）。"""
         return self._changes
 
-    def _build_body(self) -> None:
-        if self._changes_loader is not None:
-            self._changes = self._changes_loader() or self._changes
+    def _load_changes(self) -> None:
+        """跑一次懒加载器；成功即清空，异常落回现有 changes。"""
+        loader = self._changes_loader
+        if loader is None:
+            return
+        try:
+            loaded = loader()
+        except Exception:
+            # 只试一次：失败的 loader 每次展开都重跑等于白费
             self._changes_loader = None
+            return
+        if loaded is not None:
+            self._changes = loaded
+        self._changes_loader = None
+
+    def _build_body(self) -> None:
+        self._load_changes()
         self._body_built = True
         self._files = ElaChatFileChanges(self)
         self._files.setFiles(list(self._changes.files))
@@ -90,7 +104,6 @@ class TurnChangesRow(_CollapsibleBlock):
 
     def _onThemeChanged(self, mode: ElaThemeType.ThemeMode) -> None:
         super()._onThemeChanged(mode)
-        self._apply_theme()
 
 
 __all__ = ["TurnChangesRow"]

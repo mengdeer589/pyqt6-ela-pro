@@ -60,6 +60,7 @@ class _ViewTimelineMixin:
         detail: str = "",
     ) -> str:
         """在指定消息的时间线上追加一条通知，返回分段 id。"""
+        self._require_int_id(messageId, "addNotice")
         partId = uuid4().hex[:12]
         bubble = self._bubbles.get(messageId)
         if bubble is not None:
@@ -68,7 +69,9 @@ class _ViewTimelineMixin:
             return partId
         message = self._store.message(messageId)
         if message is None:
-            raise ValueError(f"addNotice: 消息 {messageId} 不存在")
+            if self._strict_ids:
+                raise KeyError(f"addNotice: 消息 {messageId} 不存在")
+            return ""
         part = ElaChatPart(
             id=partId,
             kind=ElaChatPartKindType.Notice,
@@ -78,7 +81,18 @@ class _ViewTimelineMixin:
             detail=detail or "",
         )
         self._update_snapshot(messageId, lambda m: m.withParts((*m.parts, part)))
+        self._virtual_prefix_dirty = True
+        self.messageUpdated.emit(messageId)
         return partId
+
+    @staticmethod
+    def _is_empty_plan(plan) -> bool:
+        """``[]`` / ``{"items": []}`` 表示清空计划。"""
+        if isinstance(plan, (list, tuple)):
+            return not plan
+        if isinstance(plan, dict):
+            return not (plan.get("items") or plan.get("todos"))
+        return False
 
     def setPlan(
         self,
@@ -91,6 +105,10 @@ class _ViewTimelineMixin:
 
         ``partId`` 为空时复用该消息最后一张计划卡；计划内容随消息持久化。
         """
+        self._require_int_id(messageId, "setPlan")
+        if self._is_empty_plan(plan):
+            self.clearPlan(messageId)
+            return ""
         value = ElaChatPlan.coerce(plan)
         if value is None:
             return ""
@@ -103,7 +121,9 @@ class _ViewTimelineMixin:
             return value_id
         message = self._store.message(messageId)
         if message is None:
-            raise ValueError(f"setPlan: 消息 {messageId} 不存在")
+            if self._strict_ids:
+                raise KeyError(f"setPlan: 消息 {messageId} 不存在")
+            return ""
         if message.role != ElaChatRoleType.Assistant:
             return ""
         target = partId
@@ -114,6 +134,10 @@ class _ViewTimelineMixin:
                     break
         target = target or uuid4().hex[:12]
         existing = next((part for part in message.parts if part.id == target), None)
+        if existing is not None and existing.kind != ElaChatPartKindType.Plan:
+            # 调用方传了正文 / 工具 part 的 id：另起一个 id，别制造重复 part。
+            target = uuid4().hex[:12]
+            existing = None
         if existing is not None and existing.kind == ElaChatPartKindType.Plan:
             updated = existing.withPlan(value)
             self._update_snapshot(
@@ -122,17 +146,21 @@ class _ViewTimelineMixin:
                     tuple(item if p.id == item.id else p for p in m.parts)
                 ),
             )
+            self._virtual_prefix_dirty = True
+            self.messageUpdated.emit(messageId)
             return target
         part = ElaChatPart(
             id=target,
             kind=ElaChatPartKindType.Plan,
             status=ElaChatStatusType.Done,
             plan=value,
-            step=max(1, int(message.stepCount() or 1)),
+            step=max(1, int(message.stepCount or 1)),
         )
         self._update_snapshot(
             messageId, lambda m, item=part: m.withParts((*m.parts, item))
         )
+        self._virtual_prefix_dirty = True
+        self.messageUpdated.emit(messageId)
         return target
 
     def plan(self, messageId: int) -> Optional[ElaChatPlan]:
@@ -157,6 +185,7 @@ class _ViewTimelineMixin:
 
     def clearPlan(self, messageId: int) -> None:
         """移除指定消息的全部计划卡。"""
+        self._require_int_id(messageId, "clearPlan")
         bubble = self._bubbles.get(messageId)
         if bubble is not None:
             bubble.clearPlan()
@@ -178,6 +207,7 @@ class _ViewTimelineMixin:
         nextAt: float = 0.0,
     ) -> None:
         """设置某条消息的自动重试态（``nextAt`` 为 epoch 毫秒，0 = 无倒计时）。"""
+        self._require_int_id(messageId, "setRetry")
         self._retry[messageId] = (
             max(1, int(attempt or 1)),
             str(message or ""),
@@ -200,7 +230,11 @@ class _ViewTimelineMixin:
 
     def setActivity(self, text: str) -> None:
         """设置时间线底部的运行态文案（空串隐藏）。"""
-        self._activity_text = str(text or "")
+        text = str(text or "")
+        row = getattr(self, "_activity_row", None)
+        if text == self._activity_text and row is not None and not is_deleted(row):
+            return
+        self._activity_text = text
         row = self._ensure_activity_row()
         row.setText(self._activity_text)
         self._position_activity_row()
@@ -227,8 +261,10 @@ class _ViewTimelineMixin:
         row = getattr(self, "_activity_row", None)
         if row is None:
             return
-        self._content_layout.removeWidget(row)
-        self._content_layout.insertWidget(self._activity_insert_index(), row)
+        target = self._activity_insert_index()
+        if self._content_layout.indexOf(row) != target:
+            self._content_layout.removeWidget(row)
+            self._content_layout.insertWidget(target, row)
         row.setVisible(bool(self._activity_text))
         if self._activity_text:
             row.show()
@@ -255,6 +291,7 @@ class _ViewTimelineMixin:
 
     def resolvePendingUserMessage(self, messageId: int, sent: bool = True) -> bool:
         """结算待发送消息：``sent=True`` 转为普通消息，``False`` 删除。"""
+        self._require_int_id(messageId, "resolvePendingUserMessage")
         bubble = self._bubbles.get(messageId)
         if bubble is None:
             return False
@@ -273,6 +310,7 @@ class _ViewTimelineMixin:
         modelVariant: str = "",
     ) -> None:
         """设置消息的 agent / 模型 / 变体（空串清除）。"""
+        self._require_int_id(messageId, "setMessageIdentity")
         self._update_snapshot(
             messageId,
             lambda m: m.withIdentity(agent, model, modelVariant),
@@ -283,6 +321,7 @@ class _ViewTimelineMixin:
 
     def setMessageMentions(self, messageId: int, mentions) -> None:
         """设置用户消息文本里的 @ 引用区间。"""
+        self._require_int_id(messageId, "setMessageMentions")
         self._update_snapshot(messageId, lambda m: m.withMentions(mentions))
         bubble = self._bubbles.get(messageId)
         if bubble is not None:

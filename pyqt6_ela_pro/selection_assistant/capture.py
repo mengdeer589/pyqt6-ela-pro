@@ -52,7 +52,7 @@ def _mime_has_non_text(mime) -> bool:
     """mime 里是否有文本之外的内容（图片 / 文件 / HTML / Markdown / OLE 等）。"""
     if mime is None:
         return False
-    for probe in ("hasImage", "hasUrls", "hasHtml", "hasTable"):
+    for probe in ("hasImage", "hasUrls", "hasHtml"):
         try:
             if getattr(mime, probe)():
                 return True
@@ -247,6 +247,8 @@ class ElaClipboardCapture(QObject):
         self._pending_until = 0.0
         self._captured_signature: Optional[tuple] = None
         self._restore_from_failure = False
+        self._injected = False
+        self._user_active = False
         # 取词成功那一刻的剪贴板序列号；恢复时用它判「文本相同但用户又复制过」
         self._capture_seq = 0
         self._skip_reason = ""
@@ -333,6 +335,8 @@ class ElaClipboardCapture(QObject):
         self._pending_until = 0.0
         self._captured_signature = None
         self._restore_from_failure = False
+        self._injected = False
+        self._user_active = False
         self._capture_seq = 0
         self._skip_reason = ""
         self._deadline = time.monotonic() + self._timeout_ms / 1000.0
@@ -346,16 +350,24 @@ class ElaClipboardCapture(QObject):
         self._delay_timer.stop()
         self._poll_timer.stop()
         self._restore_timer.stop()
+        self._user_active = False
+        if self._injected and self._restore:
+            # 已经注入过 Ctrl+C：剪贴板里可能是这次选区，必须先走恢复再清基准
+            self._captured_raw_text = self._current_text()
+            self._captured_signature = _clipboard_signature(QApplication.clipboard())
+            self._arm_restore(from_failure=True)
+        else:
+            self._baseline_mime = None
+        self._injected = False
         self._capture_seq = 0
         self._skip_reason = ""
-        self._baseline_mime = None
         self._saw_change = False
         self._image_grace_until = 0.0
         self._pending_text = None
         self._pending_until = 0.0
-        self._captured_signature = None
+        self._captured_signature = None if not self._need_restore else self._captured_signature
         self._restore_from_failure = False
-        self._captured_raw_text = None
+        self._captured_raw_text = None if not self._need_restore else self._captured_raw_text
 
     def _on_send_copy(self) -> None:
         if not self._active:
@@ -381,12 +393,16 @@ class ElaClipboardCapture(QObject):
             # 剪贴板从头到尾没被碰过，按「无选区」收尾即可
             self._finish("", ok=False)
             return
+        self._injected = True
         self._poll_timer.start()
         self._poll()
 
     def _poll(self) -> None:
         if not self._active:
             return
+        if any_modifier_down():
+            # 用户在取词窗口里自己按了 Ctrl+C / Ctrl+V：这次结果不能回写旧基准
+            self._user_active = True
         try:
             clipboard = QApplication.clipboard()
             seq = clipboard_sequence_number()
@@ -435,13 +451,17 @@ class ElaClipboardCapture(QObject):
 
     def _finish(self, text: str, ok: bool) -> None:
         self._active = False
+        self._injected = False
         self._delay_timer.stop()
         self._poll_timer.stop()
         self._captured_text = text if ok else ""
         self._captured_raw_text = self._current_text()
         self._captured_signature = _clipboard_signature(QApplication.clipboard())
         if self._restore and (ok or self._saw_change):
-            self._arm_restore(from_failure=not ok)
+            if self._user_active:
+                self._skip_restore(SKIP_USER_ACTIVE)
+            else:
+                self._arm_restore(from_failure=not ok)
         if ok:
             self.captured.emit(text)
         else:

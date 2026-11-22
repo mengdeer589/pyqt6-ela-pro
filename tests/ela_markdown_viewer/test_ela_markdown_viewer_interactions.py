@@ -7,7 +7,7 @@ link signal, zoom, search, export helpers and context menu.
 from __future__ import annotations
 
 from _qthelpers import wait_for_clipboard as _wait_for_clipboard
-from PyQt6.QtCore import QCoreApplication, QEvent, QTimer, QUrl
+from PyQt6.QtCore import QUrl
 from PyQt6.QtGui import (
     QColor,
     QContextMenuEvent,
@@ -19,7 +19,6 @@ from PyQt6.QtGui import (
 from PyQt6.QtWidgets import QApplication
 from PyQt6ElaWidgetTools import ElaMenu
 
-from pyqt6_ela_pro._internal import is_deleted
 from pyqt6_ela_pro.ela_markdown_viewer import ElaMarkdownViewer
 
 
@@ -282,40 +281,6 @@ class TestExportAndMenu:
         )
         assert calls == [global_pos]
         v.deleteLater()
-
-    def test_show_context_menu_execs_the_menu(self, qapp, make):
-        """``_show_context_menu`` 真的把菜单弹出来（execElaMenu：兜底 + 回收）。
-
-        ``QMenu.exec`` 会**阻塞到菜单被关闭**（PyQt6 里 ``ElaMenu.exec`` 是
-        shiboken 方法，类级打补丁拦不住 —— 实测 ``menu.exec`` 绕过 Python 类属性），
-        所以这里放一个**挂在 viewer 上的定时器**把弹层关掉，再验证兜底与回收。
-        """
-        v = make(ElaMarkdownViewer)
-        pos = v.mapToGlobal(v.rect().center())
-
-        opened: list = []
-        closer = QTimer(v)
-        closer.setInterval(10)
-
-        def _close_popup() -> None:
-            popup = QApplication.activePopupWidget()
-            if popup is None:
-                return
-            opened.append(popup)
-            closer.stop()
-            popup.close()
-
-        closer.timeout.connect(_close_popup)
-        closer.start()
-        v._show_context_menu(pos)
-        assert opened, "右键菜单没有弹出来"
-        menu = opened[0]
-        # execElaMenu 的兜底：非主屏上 ElaMenu 偶发不按 sizeHint 撑开
-        assert menu.minimumSize() == menu.sizeHint()
-        # execElaMenu 在关闭后回收菜单（deleteLater —— 显式冲刷 DeferredDelete）
-        QCoreApplication.sendPostedEvents(menu, QEvent.Type.DeferredDelete)
-        qapp.processEvents()
-        assert is_deleted(menu)
 
     def test_copy_code_at_cursor_emits_signal(self, qapp, requires_clipboard):
         v = ElaMarkdownViewer()

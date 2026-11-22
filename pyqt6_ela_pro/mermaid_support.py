@@ -237,6 +237,7 @@ def _render_with_mermaidx(
         config=config,
     )
     svg = diagram.svg()
+    zoom = _MAX_ZOOM
     try:
         import resvg_py
 
@@ -258,6 +259,7 @@ def _render_with_mermaidx(
         first_error = f"{type(exc).__name__}: {exc}"
         try:
             data = diagram.png(scale=2.0)
+            zoom = 2.0
         except Exception:
             raise RuntimeError(
                 f"Mermaid 渲染失败（resvg 直调与 mermaidx PNG 均不可用）：{first_error}"
@@ -265,6 +267,7 @@ def _render_with_mermaidx(
     image = QImage.fromData(bytes(data), "PNG")
     if image.isNull():
         raise RuntimeError("Mermaid 渲染输出无法解码为图片")
+    image.setDevicePixelRatio(zoom)
     return image
 
 

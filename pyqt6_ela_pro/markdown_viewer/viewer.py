@@ -179,9 +179,13 @@ class ElaMarkdownViewer(
         #: 推理块标签（``None`` 关闭；默认 `` ... ``）
         self._reasoning_tag: Optional[str] = _DEFAULT_REASONING_TAG
         self._reasoning_label = _DEFAULT_REASONING_LABEL
+        #: 首行 frontmatter：``"fence"`` 保留为 YAML 代码块 / ``"strip"`` 交给 Qt 剥离
+        self._front_matter_mode: str = "fence"
         #: 可折叠块（推理 / ``<details>``）元数据与展开状态
         self._fold_blocks: list[dict] = []
         self._expanded_folds: set[int] = set()
+        #: 用户主动收起的默认展开折叠（主题重渲染不要把它重新展开）
+        self._collapsed_folds: set[int] = set()
         #: 围栏代码块的源行范围（与 ``_fenced_blocks`` 对应）：[(start, end)]
         self._fenced_source_lines: list[tuple[int, int]] = []
         #: 文档块号 → 源行范围（引用回复用；``None`` = 未构建）。
@@ -387,6 +391,7 @@ class ElaMarkdownViewer(
         self._cancel_large_render()
         self._expanded_code_blocks.clear()
         self._expanded_folds.clear()
+        self._collapsed_folds.clear()
         text = text or ""
         # 阅读语义（stick=False）：换内容回顶部；同内容重渲保留位置。
         # 聊天语义（stick=True）走 ``_render`` 的贴底判定，不受这个标志影响。

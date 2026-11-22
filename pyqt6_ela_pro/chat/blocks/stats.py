@@ -47,12 +47,10 @@ class StatsBadge(ElaThemeWidget):
 
     def setStats(self, stats: Optional[ElaChatStats]) -> None:
         """更新用量统计（``None`` 或全零则隐藏徽标）。"""
-        self._setStats(stats, deferShow=False)
+        self._setStats(stats)
 
-    def _setStats(
-        self, stats: Optional[ElaChatStats], *, deferShow: bool = False
-    ) -> None:
-        """``setStats`` 的内部实现；历史批量回放时只填数据、不显示。"""
+    def _setStats(self, stats: Optional[ElaChatStats]) -> None:
+        """``setStats`` 的内部实现。"""
         self._stats = stats
         context_total = stats.contextTokens() if stats is not None else 0
         total = _as_int(stats.total_tokens) if stats is not None else 0
@@ -78,10 +76,6 @@ class StatsBadge(ElaThemeWidget):
         if stats.cache_write_tokens:
             parts.append(f"缓存写 {stats.cache_write_tokens}")
         self._label.setText("  ·  ".join(parts))
-        if deferShow:
-            # 最终显隐由 _apply_stats_mode 决定：footer 模式下大部分徽标永远不显示。
-            self._apply_theme()
-            return
         self._label.show()
         self._apply_tooltip()
         self._apply_theme()

@@ -127,13 +127,23 @@ class ElaSelectionAssistant(QObject):
         self._press_in_popup = False
         self._last_click_at = 0.0
         self._last_click_pos = None
+        self._last_click_pid = 0
 
         if self._monitor is not None:
             self._connect_monitor()
-        self._popup.actionTriggered.connect(self._on_action)
+        safe_connect(
+            self._popup, "actionTriggered", self._on_action, "assistant.popup_action"
+        )
         self._popup.hidden.connect(self.popupHidden)
-        self._capture.captured.connect(self._on_captured)
-        self._capture.failed.connect(self._on_capture_failed)
+        safe_connect(
+            self._capture, "captured", self._on_captured, "assistant.captured"
+        )
+        safe_connect(
+            self._capture,
+            "failed",
+            self._on_capture_failed,
+            "assistant.capture_failed",
+        )
         # 只能用普通 callable 连接 destroyed：绑定方法形式的槽 PyQt6 不会调用
         # （见 _cleanup_on_destroy 的说明）
         self.destroyed.connect(functools.partial(_cleanup_on_destroy, self))
@@ -369,19 +379,23 @@ class ElaSelectionAssistant(QObject):
             # 点马上点一下会被误判成双击，多注入一次 Ctrl+C。
             self._last_click_at = 0.0
             self._last_click_pos = None
+            self._last_click_pid = 0
             if self._allow_capture(down, up, "drag"):
                 self._start_capture(up)
             return
 
         now = time.monotonic()
+        pid = window_pid_at(*up)
         double = (
             self._last_click_pos is not None
             and (now - self._last_click_at) * 1000.0 <= self._double_click_ms
             and abs(int(up[0]) - self._last_click_pos[0]) <= _DOUBLE_CLICK_SLOP
             and abs(int(up[1]) - self._last_click_pos[1]) <= _DOUBLE_CLICK_SLOP
+            and (not pid or not self._last_click_pid or pid == self._last_click_pid)
         )
         self._last_click_at = now
         self._last_click_pos = (int(up[0]), int(up[1]))
+        self._last_click_pid = pid
         if double and self._allow_capture(down, up, "double"):
             self._start_capture(up)
 
@@ -402,7 +416,7 @@ class ElaSelectionAssistant(QObject):
                     "拖选要向前台注入 Ctrl+C，终端里等于 SIGINT。"
                     "需要拖选取词请 setCaptureFilter("
                     "ElaSelectionAssistant.builtinDragFilter())，"
-                    "或 setRequireFilterForDrag(True) 显式打开：",
+                    "或 setRequireFilterForDrag(False) 显式关闭默认闸门：",
                     RuntimeError("blocked"),
                 )
                 self.captureBlocked.emit("drag-without-filter")

@@ -18,7 +18,11 @@ class _InputToolbarMixin:
         if on:
             self._add_file_visible_before_shell = self.addFileVisible()
             self._add_file_button.setVisible(False)
-            for selector in self._toolbar.findChildren(ElaChatSelector):
+            self._shell_selector_visibility = {
+                selector: not selector.isHidden()
+                for selector in self._toolbar.findChildren(ElaChatSelector)
+            }
+            for selector in self._shell_selector_visibility:
                 selector.setVisible(False)
             self._attachments.setVisible(False)
             self._edit.setFont(self._shell_font)
@@ -28,8 +32,10 @@ class _InputToolbarMixin:
             self._edit.setFont(self._normal_font)
             self._edit.setPlaceholderText(self._default_placeholder)
             self._add_file_button.setVisible(self._add_file_visible_before_shell)
+            visible = getattr(self, "_shell_selector_visibility", {})
             for selector in self._toolbar.findChildren(ElaChatSelector):
-                selector.setVisible(True)
+                selector.setVisible(visible.get(selector, False))
+            self._shell_selector_visibility = {}
             self._attachments.setVisible(bool(self.attachments()))
         self._sync_height()
         self._edit.setFocus()
@@ -77,16 +83,13 @@ class _InputToolbarMixin:
         :param window: 模型上下文窗口词元；``0`` / 非法值按 0% 显示
         :param costUsd: 会话累计花费（美元），进 hover 详情；``0`` 不显示该行
         """
-        self._usage_used = max(0, _as_int(used))
-        self._usage_window = max(0, _as_int(window))
-        self._usage_cost = _as_float(costUsd)
         self._usage_ring.setUsage(
-            self._usage_used, self._usage_window, self._usage_cost
+            max(0, _as_int(used)), max(0, _as_int(window)), _as_float(costUsd)
         )
 
     def contextUsage(self) -> tuple:
         """获取 ``(已用, 窗口, 花费美元)``（未设置时窗口为 0）。"""
-        return (self._usage_used, self._usage_window, self._usage_cost)
+        return self._usage_ring.usage()
 
     def contextUsagePercent(self) -> int:
         """上下文占用百分比（窗口未知返回 0）。"""

@@ -227,13 +227,13 @@ def window_rect_at(x: int, y: int):
         return None
 
 
-def _send_key(vk: int, flags: int = 0) -> None:
-    """发一个按键事件（``SendInput``）。单独成函数是为了测试能替换它。"""
+def _send_key(vk: int, flags: int = 0) -> bool:
+    """发一个按键事件（``SendInput``）；返回是否真的插入。"""
     if not _IS_WINDOWS:  # pragma: no cover - 平台分支
         raise RuntimeError("send_copy 仅支持 Windows")
     item = _INPUT(type=_INPUT_KEYBOARD)
     item.ki = _KEYBDINPUT(wVk=vk, wScan=0, dwFlags=flags, time=0, dwExtraInfo=0)
-    _user32.SendInput(1, ctypes.byref(item), ctypes.sizeof(_INPUT))
+    return bool(_user32.SendInput(1, ctypes.byref(item), ctypes.sizeof(_INPUT)))
 
 
 def send_copy(force: bool = False) -> bool:
@@ -250,10 +250,15 @@ def send_copy(force: bool = False) -> bool:
             return False
         if (now - _last_inject_at) * 1000.0 < MIN_INJECT_INTERVAL_MS:
             return False
-    _send_key(_VK_CONTROL)
-    _send_key(_VK_C)
-    _send_key(_VK_C, _KEYEVENTF_KEYUP)
-    _send_key(_VK_CONTROL, _KEYEVENTF_KEYUP)
+    injected = [
+        _send_key(_VK_CONTROL),
+        _send_key(_VK_C),
+        _send_key(_VK_C, _KEYEVENTF_KEYUP),
+        _send_key(_VK_CONTROL, _KEYEVENTF_KEYUP),
+    ]
+    if any(result is False for result in injected):
+        # 不完整注入（UIPI / 安全桌面）：按键状态可能残留，按未注入处理
+        return False
     _last_inject_at = now
     return True
 

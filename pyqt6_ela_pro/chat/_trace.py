@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass, field, replace
 from typing import Iterable, Optional, Tuple
 
@@ -11,6 +12,7 @@ from .message import (
     ElaChatRoleType,
     ElaChatStats,
     ElaChatToolStatusType,
+    _as_float,
 )
 from .renderers import parseToolArguments
 
@@ -56,6 +58,10 @@ def _int(value, default: int = 0) -> int:
         return default
 
 
+def _float(value, default: float = 0.0) -> float:
+    return max(0.0, _as_float(value, default))
+
+
 def _is_error(status) -> bool:
     return str(status or "") in (
         ElaChatToolStatusType.Error,
@@ -67,8 +73,8 @@ def _is_error(status) -> bool:
 def _stats_tokens(stats: Optional[ElaChatStats]) -> int:
     if stats is None:
         return 0
-    total = int(stats.total_tokens or 0)
-    return total if total > 0 else int(stats.contextTokens() or 0)
+    total = _int(stats.total_tokens)
+    return total if total > 0 else _int(stats.contextTokens())
 
 
 def _tool_detail(call) -> str:
@@ -91,7 +97,7 @@ def _tool_row(
     metadata = call.metadata if isinstance(call.metadata, dict) else {}
     tokens = metadata.get("tokens", metadata.get("total_tokens"))
     cost = metadata.get("cost_usd", metadata.get("cost"))
-    duration = max(0.0, float(call.duration_ms or 0.0))
+    duration = _float(call.duration_ms)
     if duration <= 0:
         duration = _DEFAULT_SPAN_MS
         estimated = True
@@ -104,12 +110,12 @@ def _tool_row(
         detail=_tool_detail(call),
         status=call.status,
         duration_ms=duration,
-        started_at=max(0.0, float(call.started_at or 0.0)),
+        started_at=_float(call.started_at),
         tokens=_int(tokens) if isinstance(tokens, (int, float)) else 0,
-        cost_usd=float(cost) if isinstance(cost, (int, float)) else 0.0,
+        cost_usd=_float(cost),
         depth=3,
         step=step,
-        start_ms=max(0.0, float(startMs or 0.0)),
+        start_ms=_float(startMs),
         span_ms=duration,
         estimated=estimated,
     )
@@ -313,7 +319,7 @@ def _step_rows(
     tool_rows = {}
     tool_order = []
     others = []
-    cursor = max(0.0, float(cursorStart or 0.0))
+    cursor = _float(cursorStart)
     for part in parts:
         kind = part.kind
         if kind == ElaChatPartKindType.Tool and part.tool_call is not None:
@@ -329,7 +335,7 @@ def _step_rows(
             tool_order.append(row.part_id)
             cursor = max(cursor, row.start_ms + row.duration_ms)
         else:
-            duration = max(0.0, float(part.duration_ms or 0.0))
+            duration = _float(part.duration_ms)
             estimated = duration <= 0
             if estimated:
                 duration = _DEFAULT_SPAN_MS
@@ -352,12 +358,26 @@ def _step_rows(
 
     # 子代理子调用挂到父行；父缺失时保留为顶层工具行。递归建树，
     # 保证多层嵌套时孙调用也在父行 children 里。
+    parent_of = {
+        call_id: (tool_rows[call_id].parent_id or "") for call_id in tool_order
+    }
+    # 坏数据里的自环 / A↔B 环：整条链按顶层处理，避免工具静默消失或递归爆栈。
+    for call_id in tool_order:
+        seen: set = set()
+        current = call_id
+        while current:
+            if current in seen:
+                for item in seen:
+                    parent_of[item] = ""
+                break
+            seen.add(current)
+            current = parent_of.get(current, "")
     children_map: dict = {}
     top_ids = []
     for call_id in tool_order:
-        row = tool_rows[call_id]
-        if row.parent_id and row.parent_id in tool_rows:
-            children_map.setdefault(row.parent_id, []).append(call_id)
+        parent = parent_of.get(call_id, "")
+        if parent and parent in tool_rows and parent != call_id:
+            children_map.setdefault(parent, []).append(call_id)
         else:
             top_ids.append(call_id)
 
@@ -367,7 +387,7 @@ def _step_rows(
             build(child_id, depth + 1) for child_id in children_map.get(call_id, ())
         )
         if not kids and depth == row.depth:
-            return row
+            return replace(row, error_below=row.isError)
         start = min((child.start_ms for child in kids), default=row.start_ms)
         start = min(start, row.start_ms)
         return replace(
@@ -399,7 +419,7 @@ def _step_rows(
         start = cursor
         duration = 0.0
     if stats is not None and stats.duration_ms > duration:
-        duration = float(stats.duration_ms)
+        duration = _float(stats.duration_ms)
     row = ElaChatTraceRow(
         kind="step",
         message_id=messageId,
@@ -410,11 +430,11 @@ def _step_rows(
         start_ms=start,
         span_ms=duration,
         tokens=_stats_tokens(stats),
-        cost_usd=float(stats.cost_usd or 0.0) if stats is not None else 0.0,
+        cost_usd=_float(stats.cost_usd) if stats is not None else 0.0,
         depth=2,
         step=step,
         children=tuple(children),
-        error_below=any(child.error_below for child in children),
+        error_below=any(child.error_below or child.isError for child in children),
         stats=stats,
         context_tokens=int(stats.contextTokens() or 0) if stats is not None else 0,
     )
@@ -430,7 +450,8 @@ def _clip_threshold(rows) -> float:
     if not durations:
         return _MIN_CLIP_MS
     durations.sort()
-    index = min(len(durations) - 1, int(len(durations) * 0.99))
+    index = max(0, math.ceil(len(durations) * 0.99) - 1)
+    index = min(len(durations) - 1, index)
     return min(_MAX_CLIP_MS, max(_MIN_CLIP_MS, durations[index] * 2.0))
 
 
@@ -497,7 +518,7 @@ def _finalize_turn(turn: ElaChatTraceRow, clip_ms: float) -> ElaChatTraceRow:
                 start, end = display[id(row)]
                 starts.append(start)
                 ends.append(end)
-            elif row.kind in _CONTAINER_KINDS:
+            elif not kids and row.kind in _CONTAINER_KINDS:
                 starts.append(row.start_ms)
                 ends.append(row.start_ms + min(max(0.0, row.span_ms), clip_ms))
             for child in kids:
@@ -548,11 +569,11 @@ def _response_row(
     if not parts:
         return None, cursorStart
     message_id = int(getattr(message, "id", 0) or 0)
-    created = float(getattr(message, "created_at", 0.0) or 0.0)
+    created = _float(getattr(message, "created_at", 0.0))
     if created > 0 and turn_start > 0:
         start = max(0.0, (created - turn_start) * 1000.0)
     else:
-        start = max(0.0, float(cursorStart or 0.0))
+        start = _float(cursorStart)
     groups = {}
     order = []
     for part in parts:
@@ -574,10 +595,11 @@ def _response_row(
         step_rows.append(step_row)
     if not step_rows:
         return None, cursor
-    duration = float(getattr(message, "duration_ms", 0.0) or 0.0)
+    duration = _float(getattr(message, "duration_ms", 0.0))
+    end = max((_raw_end(row) for row in step_rows), default=start)
+    duration = max(duration, end - start)
     if duration <= 0:
-        end = max((_raw_end(row) for row in step_rows), default=start)
-        duration = max(1.0, end - start)
+        duration = 1.0
     status = str(getattr(message, "status", "") or "")
     agent = str(getattr(message, "agent", "") or "")
     model = str(getattr(message, "model", "") or "")
@@ -632,9 +654,9 @@ def buildTraceRows(messages) -> ElaChatTraceResult:
         if not responses_input:
             continue
         first = responses_input[0]
-        turn_start = float(getattr(user, "created_at", 0.0) or 0.0)
+        turn_start = _float(getattr(user, "created_at", 0.0))
         if turn_start <= 0:
-            turn_start = float(getattr(first, "created_at", 0.0) or 0.0)
+            turn_start = _float(getattr(first, "created_at", 0.0))
         cursor = 0.0
         responses = []
         for index, message in enumerate(responses_input, 1):
@@ -660,7 +682,7 @@ def buildTraceRows(messages) -> ElaChatTraceResult:
             cost_usd=sum(row.cost_usd for row in responses),
             depth=0,
             children=tuple(responses),
-            error_below=any(row.error_below for row in responses),
+            error_below=any(row.error_below or row.isError for row in responses),
         )
         turns.append(turn)
         tokens += turn.tokens
@@ -684,7 +706,7 @@ def buildTraceRows(messages) -> ElaChatTraceResult:
         total_duration += max(0.0, turn.duration_ms)
         if row is not turn:
             for item in row.walk():
-                if item.clipped:
+                if item.clipped and item.kind not in ("turn", "response", "step"):
                     clipped_count += 1
     return ElaChatTraceResult(
         rows=tuple(finalized),

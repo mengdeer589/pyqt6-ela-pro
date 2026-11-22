@@ -6,8 +6,10 @@
 
 from __future__ import annotations
 
+import logging
 import time
 from dataclasses import replace
+from pathlib import Path
 from typing import Callable, Optional
 
 from .._internal import guard_callback as _guarded
@@ -25,10 +27,15 @@ from .message import (
     ElaChatStatusType,
     ElaChatToolCall,
     ElaChatToolStatusType,
+    _as_float as _float,
+    _as_int as _int,
+    _as_str as _str,
 )
 
 #: 日志行格式版本（与消息的 ``SCHEMA_VERSION`` 独立演进）
 JOURNAL_VERSION = 2
+
+logger = logging.getLogger(__name__)
 
 
 def _location_list(value) -> list:
@@ -88,6 +95,10 @@ class ElaChatTurnJournal:
         self._role = role if role in ElaChatRoleType.All else ElaChatRoleType.Assistant
         self._title = title or ""
         self._timestamp = timestamp or ""
+        self._agent = ""
+        self._model = ""
+        self._model_variant = ""
+        self._error_type = ""
         self._created_at = _float(createdAt, 0.0)
         self._clock = clock or time.time
         self._events: list = []
@@ -129,7 +140,11 @@ class ElaChatTurnJournal:
         self._parts = []
         self._step = 1
         self._status = ElaChatStatusType.Streaming
+        self._agent = ""
+        self._model = ""
+        self._model_variant = ""
         self._error = ""
+        self._error_type = ""
         self._duration_ms = 0.0
         self._attachments = []
         self._ended = False
@@ -145,15 +160,27 @@ class ElaChatTurnJournal:
         self._tool_started.clear()
         self._flow.reset()
 
-    def begin(self, messageId: Optional[int] = None) -> "ElaChatTurnJournal":
+    def begin(
+        self,
+        messageId: Optional[int] = None,
+        *,
+        agent: str = "",
+        model: str = "",
+        modelVariant: str = "",
+    ) -> "ElaChatTurnJournal":
         """开始记录一个回合（``messageId`` 省略则沿用构造时的值）。
 
         复用同一实例记录第二个回合时先复位累计状态，否则内容会拼进上一回合。
         """
-        if self._events:
+        has_begun = any(item.get("e") == _Ev.Begin for item in self._events)
+        if has_begun or self._parts or self._open or self._ended:
             self._reset_state()
         if messageId is not None:
             self._message_id = _int(messageId, self._message_id)
+        if agent or model or modelVariant:
+            self._agent = str(agent or "")
+            self._model = str(model or "")
+            self._model_variant = str(modelVariant or "")
         self._open = True
         self._flow.begin_turn()
         self._push(
@@ -162,7 +189,25 @@ class ElaChatTurnJournal:
             role=self._role,
             title=self._title,
             timestamp=self._timestamp,
+            agent=self._agent,
+            model=self._model,
+            variant=self._model_variant,
             at=self._created_at,
+        )
+        return self
+
+    def setIdentity(
+        self, agent: str = "", model: str = "", modelVariant: str = ""
+    ) -> "ElaChatTurnJournal":
+        """记录消息身份（agent / 模型 / 变体）。"""
+        self._agent = str(agent or "")
+        self._model = str(model or "")
+        self._model_variant = str(modelVariant or "")
+        self._push(
+            _Ev.Meta,
+            agent=self._agent,
+            model=self._model,
+            variant=self._model_variant,
         )
         return self
 
@@ -270,6 +315,7 @@ class ElaChatTurnJournal:
         title: str = "",
         locations=None,
         parentId: str = "",
+        metadata=None,
     ) -> "ElaChatTurnJournal":
         """记录工具调用开始（``arguments`` 支持 dict / JSON 字符串）。"""
         if not self._open:
@@ -292,6 +338,7 @@ class ElaChatTurnJournal:
             title=str(title or ""),
             loc=_location_list(locations),
             parent=str(parentId or ""),
+            meta=dict(metadata) if isinstance(metadata, dict) else {},
             at=_float(started_at),
         )
         return self
@@ -368,6 +415,8 @@ class ElaChatTurnJournal:
         self,
         status: str = ElaChatStatusType.Done,
         historyCount: int = 0,
+        *,
+        stats: Optional[ElaChatStats] = None,
     ) -> "ElaChatTurnJournal":
         """记录压缩结束并落定摘要。"""
         if not self._open or self._rec_compaction is None:
@@ -377,6 +426,7 @@ class ElaChatTurnJournal:
             id=self._rec_compaction,
             status=status,
             count=_int(historyCount),
+            data=stats.toDict() if stats is not None else None,
         )
         self._rec_compaction = None
         return self
@@ -403,7 +453,10 @@ class ElaChatTurnJournal:
         return self
 
     def end(
-        self, status: str = ElaChatStatusType.Done, error: str = ""
+        self,
+        status: str = ElaChatStatusType.Done,
+        error: str = "",
+        errorType: str = "",
     ) -> "ElaChatTurnJournal":
         """结束记录（``status`` 见 :class:`ElaChatStatusType`）。
         先收口仍打开的正文 / 思考段；没有显式 :meth:`setDuration` 时按
@@ -416,13 +469,22 @@ class ElaChatTurnJournal:
         self.endText()
         if not self._duration_ms and self._flow.open:
             self.setDuration(self._flow.turn_duration_ms())
-        self._push(_Ev.End, status=status, error=error or "")
+        self._error_type = str(errorType or "")
+        self._push(
+            _Ev.End,
+            status=status,
+            error=error or "",
+            error_type=self._error_type,
+        )
         self._open = False
         return self
 
     def _mint(self) -> str:
-        self._seq += 1
-        return "j%d" % self._seq
+        while True:
+            self._seq += 1
+            candidate = "j%d" % self._seq
+            if self._find(candidate) is None:
+                return candidate
 
     def _push(self, event_kind: str, **fields) -> None:
         """记一条事件，**并同步应用到自己的重放状态**。
@@ -452,7 +514,28 @@ class ElaChatTurnJournal:
             _json.dumps(item, allow_nan=False) for item in self._events[self._dumped :]
         ]
         self._dumped = len(self._events)
-        return "\n".join(lines)
+        return ("\n".join(lines) + "\n") if lines else ""
+
+    def appendTo(self, path) -> int:  # noqa: N802 (Qt / Ela 命名)
+        """把新增事件追加到 UTF-8 日志文件，返回写入行数。"""
+        text = self.dumpsNewLines()
+        if not text:
+            return 0
+        path = Path(path)
+        if path.exists() and path.stat().st_size:
+            with path.open("rb") as handle:
+                handle.seek(-1, 2)
+                if handle.read(1) != b"\n":
+                    text = "\n" + text
+        with path.open("a", encoding="utf-8", newline="\n") as handle:
+            handle.write(text)
+        return text.count("\n")
+
+    @classmethod
+    def loadFrom(cls, path, settleOpen: bool = True) -> "ElaChatTurnJournal":  # noqa: N802
+        """从日志文件重放（跳过残行 / 未知事件）。"""
+        with Path(path).open("r", encoding="utf-8") as handle:
+            return cls.fromLines([handle.read()], settleOpen=settleOpen)
 
     def isOpen(self) -> bool:
         """是否仍在记录中（未 ``end()``）。"""
@@ -473,13 +556,19 @@ class ElaChatTurnJournal:
         # 只认「事件名是字符串」的行：``{"e": [1,2]}`` 也是合法 JSON，会让 _apply 抛 unhashable。
         if not isinstance(data, dict) or not isinstance(data.get("e"), str):
             return None
+        if _int(data.get("v"), JOURNAL_VERSION) > JOURNAL_VERSION:
+            logger.warning("跳过更高版本的 journal 事件：v=%s", data.get("v"))
+            return None
         return data
 
     @classmethod
     def fromEvents(cls, events) -> "ElaChatTurnJournal":
         """由事件序列**忠实重放**（不结算未结束的分段）。"""
         journal = cls()
-        journal.replay(events)
+        cleaned = [dict(item) for item in events or () if isinstance(item, dict)]
+        journal.replay(cleaned)
+        journal._events = cleaned
+        journal._dumped = len(cleaned)
         return journal
 
     @classmethod
@@ -505,6 +594,8 @@ class ElaChatTurnJournal:
                     events.append(item)
         journal = cls()
         journal.replay(events)
+        journal._events = [dict(item) for item in events]
+        journal._dumped = len(events)
         if settleOpen and not journal._ended:
             journal._settle(ElaChatStatusType.Stopped)
         return journal
@@ -533,9 +624,13 @@ class ElaChatTurnJournal:
             created_at=self._created_at,
             title=self._title,
             timestamp=self._timestamp,
+            agent=self._agent,
+            model=self._model,
+            model_variant=self._model_variant,
             duration_ms=self._duration_ms,
             attachments=tuple(self._attachments),
             error=self._error,
+            error_type=self._error_type,
         )
         if self._parts:
             return base.withParts(tuple(self._parts))
@@ -571,11 +666,17 @@ class ElaChatTurnJournal:
             self._role = role
         self._title = _str(event.get("title"), self._title)
         self._timestamp = _str(event.get("timestamp"), self._timestamp)
+        self._agent = _str(event.get("agent"), self._agent)
+        self._model = _str(event.get("model"), self._model)
+        self._model_variant = _str(event.get("variant"), self._model_variant)
         self._created_at = _float(event.get("at"), self._created_at)
 
     def _ev_meta(self, event: dict) -> None:
         self._title = _str(event.get("title"), self._title)
         self._timestamp = _str(event.get("timestamp"), self._timestamp)
+        self._agent = _str(event.get("agent"), self._agent)
+        self._model = _str(event.get("model"), self._model)
+        self._model_variant = _str(event.get("variant"), self._model_variant)
         self._created_at = _float(event.get("at"), self._created_at)
 
     def _ev_attach(self, event: dict) -> None:
@@ -677,8 +778,26 @@ class ElaChatTurnJournal:
         raw_locations = event.get("loc")
         if isinstance(raw_locations, list):
             call = call.withLocations(raw_locations)
+        raw_metadata = event.get("meta")
+        if isinstance(raw_metadata, dict):
+            call = call.withMetadata(raw_metadata)
         step = _int(event.get("step"), self._step)
         existing = self._find(callId)
+        if existing is not None and existing.tool_call is not None:
+            old = existing.tool_call
+            merged = old.withArguments(call.arguments)
+            if call.kind or old.kind:
+                merged = merged.withKind(call.kind or old.kind)
+            if call.title or old.title:
+                merged = merged.withTitle(call.title or old.title)
+            if call.locations or old.locations:
+                merged = merged.withLocations(call.locations or old.locations)
+            if call.parent_id or old.parent_id:
+                merged = merged.withParent(call.parent_id or old.parent_id)
+            if call.metadata:
+                merged = merged.withMetadata({**old.metadata, **call.metadata})
+            self._replace(existing, existing.withToolCall(merged))
+            return
         if existing is not None:
             self._replace(existing, existing.withToolCall(call))
             return
@@ -763,7 +882,12 @@ class ElaChatTurnJournal:
         status = _str(event.get("status"), ElaChatStatusType.Done)
         if status not in ElaChatStatusType.All:
             status = ElaChatStatusType.Done
-        self._replace(part, part.withStatus(status))
+        self._replace(
+            part,
+            part.withStatus(status)
+            .withHistoryCount(_int(event.get("count"), part.history_count))
+            .withStats(ElaChatStats.fromDict(event.get("data"))),
+        )
 
     def _ev_plan(self, event: dict) -> None:
         partId = _str(event.get("id"))
@@ -790,6 +914,7 @@ class ElaChatTurnJournal:
         if status not in ElaChatStatusType.All:
             status = ElaChatStatusType.Done
         self._error = _str(event.get("error"))
+        self._error_type = _str(event.get("error_type"))
         self._settle(status)
         self._ended = True
 
@@ -811,7 +936,13 @@ class ElaChatTurnJournal:
         self._flushBuffers()
         settled = []
         for part in self._parts:
-            if part.status != ElaChatStatusType.Streaming:
+            unsettled_tool = (
+                part.kind == ElaChatPartKindType.Tool
+                and part.tool_call is not None
+                and part.tool_call.status
+                in (ElaChatToolStatusType.Pending, ElaChatToolStatusType.Running)
+            )
+            if part.status != ElaChatStatusType.Streaming and not unsettled_tool:
                 settled.append(part)
                 continue
             if part.kind == ElaChatPartKindType.Tool and part.tool_call is not None:
@@ -954,6 +1085,10 @@ class ElaChatTurnJournal:
             toolCall.get("id") or "",
             function.get("name") or "unknown",
             function.get("arguments", ""),
+            kind=toolCall.get("kind") or "",
+            title=toolCall.get("title") or "",
+            locations=toolCall.get("locations"),
+            parentId=toolCall.get("parent_id") or toolCall.get("parentId") or "",
         )
 
     def _on_tool_ended(self, toolCall, result: str) -> None:
@@ -993,33 +1128,6 @@ _HANDLERS = {
     _Ev.Plan: ElaChatTurnJournal._ev_plan,
     _Ev.End: ElaChatTurnJournal._ev_end,
 }
-
-
-def _str(value, default: str = "") -> str:
-    if value is None:
-        return default
-    return value if isinstance(value, str) else str(value)
-
-
-def _int(value, default: int = 0) -> int:
-    # OverflowError 必须一并捕获：int(float('inf')) 抛的是它，且它不是
-    # TypeError / ValueError 的子类
-    if value is None or isinstance(value, bool):
-        return default
-    try:
-        return int(value)
-    except (TypeError, ValueError, OverflowError):
-        return default
-
-
-def _float(value, default: float = 0.0) -> float:
-    if value is None or isinstance(value, bool):
-        return default
-    try:
-        out = float(value)
-    except (TypeError, ValueError, OverflowError):
-        return default
-    return out if out == out and out not in (float("inf"), float("-inf")) else default
 
 
 __all__ = ["ElaChatTurnJournal", "JOURNAL_VERSION"]

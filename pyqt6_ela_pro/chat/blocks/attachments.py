@@ -65,7 +65,7 @@ class _ImageAttachmentCard(QWidget):
 
     def resizeEvent(self, event) -> None:  # noqa: N802 (Qt 命名)
         super().resizeEvent(event)
-        self._close.move(self.width() - self._close.width() + 4, -4)
+        self._close.move(self.width() - self._close.width(), 0)
 
 
 class AttachmentStrip(ElaThemeWidget):
@@ -106,16 +106,28 @@ class AttachmentStrip(ElaThemeWidget):
     def setAttachments(self, attachments) -> None:
         """整体替换附件列表（接受 ``ElaChatAttachment`` 或字典）。"""
         normalized = [self._normalize(item) for item in (attachments or [])]
+        if self._same_attachments(normalized):
+            return
         self._rebuild(normalized)
         self.changed.emit(self.attachments())
+
+    def _same_attachments(self, normalized: list) -> bool:
+        """规范化结果与当前列表是否等价（避免空刷新反复 emit ``changed``）。"""
+        if len(normalized) != len(self._attachments):
+            return False
+        return all(
+            new is old or new == old for new, old in zip(normalized, self._attachments)
+        )
 
     def addAttachment(
         self, name: str, path: str = "", size: int = 0
     ) -> ElaChatAttachment:
         """追加一个附件并返回快照（同路径自动去重）。"""
         attachment = ElaChatAttachment(name=name, path=path, size=_as_int(size))
-        if path and any(item.path == path for item in self._attachments):
-            return attachment
+        if path:
+            for existing in self._attachments:
+                if existing.path == path:
+                    return existing
         self._append(attachment)
         self.changed.emit(self.attachments())
         return attachment
@@ -294,8 +306,12 @@ class AttachmentStrip(ElaThemeWidget):
                 pixmap = QPixmap(attachment.path)
             if pixmap is not None and not pixmap.isNull():
                 card = _ImageAttachmentCard(pixmap, tooltip, self)
-                card.clicked.connect(
-                    lambda a=attachment: self.attachmentClicked.emit(a.path or a.name)
+                safe_connect(
+                    card,
+                    "clicked",
+                    lambda a=attachment: self.attachmentClicked.emit(a.path or a.name),
+                    "attachments.click_image",
+                    receiver=card,
                 )
                 safe_connect(
                     card,
@@ -322,8 +338,12 @@ class AttachmentStrip(ElaThemeWidget):
             "attachments.remove_chip",
             receiver=chip,
         )
-        chip.clicked.connect(
-            lambda a=attachment: self.attachmentClicked.emit(a.path or a.name)
+        safe_connect(
+            chip,
+            "clicked",
+            lambda a=attachment: self.attachmentClicked.emit(a.path or a.name),
+            "attachments.click_chip",
+            receiver=chip,
         )
         return chip
 

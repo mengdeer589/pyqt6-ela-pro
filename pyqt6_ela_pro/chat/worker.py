@@ -11,6 +11,8 @@ from typing import AsyncIterator, Optional
 
 from PyQt6.QtCore import QThread, QTimer, pyqtSignal
 
+from .._internal import is_deleted
+
 #: 取消标记轮询间隔（秒）
 _CANCEL_POLL_INTERVAL = 0.05
 #: shutdown 后看门狗的轮询间隔（毫秒）—— 只读 ``isFinished()``，不阻塞
@@ -70,12 +72,15 @@ class ElaChatAsyncWorker(QThread):
         self._loop: Optional[asyncio.AbstractEventLoop] = None
         self._queue: Optional[asyncio.Queue] = None
         self._cancel = threading.Event()
+        self._cancel_turn: Optional[int] = None
         self._closing = False
         self._token_lock = threading.Lock()
         #: 回合 token 自增源。token 是「这轮生杀」的凭据：``cancel()`` 是异步的
         #: （轮询命中才收尾），旧回合的 ``turnFinished`` 可能晚到几十毫秒，
         #: 宿主凭 token 就能认出迟到信号而不被它收掉新回合。
         self._turn_seq = 0
+        #: 已提交、尚未开跑的回合 token；停止只在有活跃/在队回合时生效
+        self._pending_turns: set = set()
         self._watchdog: Optional[QTimer] = None
         self._watchdog_deadline = 0.0
         self._terminated = False
@@ -150,19 +155,22 @@ class ElaChatAsyncWorker(QThread):
         loop.close()
 
     async def _serve(self) -> None:
+        # 先建队列再 setup：ready 在 setup 里发出，宿主可能在 ready 槽里立刻 ask；
+        # shutdown 落在慢速 setup 期间也不能丢哨兵。
+        self._queue = asyncio.Queue()
         try:
             await self._setup()
         except Exception as exc:
             self.failed.emit(f"后端初始化失败：{exc}")
+            self._drain_dropped()
             return
-        self._queue = asyncio.Queue()
+        if self._closing:
+            self._drain_dropped()
+            return
         while True:
             command = await self._queue.get()
             if command is None:
                 break
-            # 新命令开始：清掉上一轮遗留的取消标记。不能放进 _run_turn ——
-            # regenerate 的 _rollback_turn 可能耗时，期间按下的停止会被清掉。
-            self._cancel.clear()
             kind, payload, turn = command
             if kind == "ask":
                 await self._run_turn(*payload, turn)
@@ -179,11 +187,27 @@ class ElaChatAsyncWorker(QThread):
                     await self._reset_backend()
                 except Exception as exc:
                     self.errorOccurred.emit("worker", f"{type(exc).__name__}: {exc}")
+        self._drain_dropped()
+
+    def _drain_dropped(self) -> None:
+        """关闭时排空未执行的回合命令，避免宿主永远等不到 turnFinished。"""
+        if self._queue is None:
+            return
+        while not self._queue.empty():
+            command = self._queue.get_nowait()
+            if command and command[0] in ("ask", "regenerate") and command[2]:
+                if self._cancel_turn == int(command[2]):
+                    self._cancel.clear()
+                    self._cancel_turn = None
+                self._pending_turns.discard(int(command[2]))
+                self.turnFinished.emit(int(command[2]))
 
     async def _run_turn(self, prompt: str, attachments: list, turn: int) -> None:
-        if self._cancel.is_set():
+        self._pending_turns.discard(turn)
+        if self._cancel.is_set() and self._cancel_turn in (None, turn):
             # 回滚 / 排队期间按下了停止：作废本轮，但仍发 turnFinished 收掉回合
             self._cancel.clear()
+            self._cancel_turn = None
             self.turnFinished.emit(turn)
             return
         try:
@@ -224,13 +248,17 @@ class ElaChatAsyncWorker(QThread):
         finally:
             self._turn_active = False
             watcher.cancel()
+            if self._cancel_turn in (None, turn):
+                self._cancel.clear()
+                self._cancel_turn = None
             self.turnFinished.emit(turn)
 
     async def _watch_cancel(self, task: "asyncio.Future") -> None:
         """轮询取消 / 关闭标记；命中后取消流式 task。"""
         try:
             while not task.done():
-                if self._cancel.is_set() or self._closing:
+                targeted = self._cancel_turn in (None, self._active_turn)
+                if (self._cancel.is_set() and targeted) or self._closing:
                     task.cancel()
                     return
                 await asyncio.sleep(_CANCEL_POLL_INTERVAL)
@@ -250,6 +278,8 @@ class ElaChatAsyncWorker(QThread):
         """
         turn = self._next_turn_token()
         submitted = self._submit(("ask", (text, list(attachments or ())), turn))
+        if submitted:
+            self._pending_turns.add(turn)
         return turn if submitted else None
 
     def regenerate(self, text: str, attachments=None) -> Optional[int]:
@@ -258,15 +288,29 @@ class ElaChatAsyncWorker(QThread):
         必须带上原消息的附件，否则模型看不见用户上传的文件。
         """
         turn = self._next_turn_token()
-        submitted = self._submit(("regenerate", (text, list(attachments or ())), turn))
+        submitted = self._submit(
+            ("regenerate", (text, list(attachments or ())), turn)
+        )
+        if submitted:
+            self._pending_turns.add(turn)
         return turn if submitted else None
 
     def reset(self) -> None:
         """重置后端会话。"""
         self._submit(("reset", None, 0))
 
-    def cancel(self) -> None:
-        """请求中止当前回合（保留已输出内容）。"""
+    def cancel(self, turn: Optional[int] = None) -> None:
+        """请求中止当前回合（``turn`` 为空 = 任意在跑回合；保留已输出内容）。
+
+        没有活跃 / 在队回合时直接忽略：否则取消标记会留到下一回合，把一条
+        刚提交的消息静默吞成「发出去了但一个字没有」。
+        """
+        if turn is None:
+            if not self._turn_active and not self._pending_turns:
+                return
+        elif turn not in self._pending_turns and turn != self._active_turn:
+            return
+        self._cancel_turn = turn
         self._cancel.set()
 
     def _submit(self, command) -> bool:
@@ -279,14 +323,41 @@ class ElaChatAsyncWorker(QThread):
             # 已请求关闭：不再受理命令（只查 loop/queue 会在 shutdown 之后、
             # 线程收尾前的窗口里让 ask() 假成功，命令永不执行）。
             return False
-        put = self._queue.put(command)
+
+        async def enqueue():
+            # 提交与 shutdown 竞态：入队协程里再查一次，关闭后投递的命令要补收尾。
+            if self._closing:
+                return False
+            await self._queue.put(command)
+            return True
+
+        put = enqueue()
         try:
-            asyncio.run_coroutine_threadsafe(put, loop)
+            future = asyncio.run_coroutine_threadsafe(put, loop)
         except RuntimeError:
             # 协程已建出但没被调度 —— 必须显式关掉，否则 RuntimeWarning + 悬空
             put.close()
             return False
+        future.add_done_callback(
+            lambda item, cmd=command: self._submit_finished(item, cmd)
+        )
         return True
+
+    def _submit_finished(self, future, command) -> None:
+        """入队失败（已关闭）时补发 ``turnFinished``，避免宿主回合永久挂起。"""
+        try:
+            queued = bool(future.result())
+        except Exception:
+            queued = False
+        if queued or command[0] not in ("ask", "regenerate") or not command[2]:
+            return
+        self._pending_turns.discard(int(command[2]))
+        if self._cancel_turn == int(command[2]):
+            self._cancel.clear()
+            self._cancel_turn = None
+        if is_deleted(self):
+            return
+        self.turnFinished.emit(int(command[2]))
 
     #: shutdown 等待线程退出的最长时间（毫秒），超时后 terminate 兜底
     shutdownWaitMs = _SHUTDOWN_WAIT_MS

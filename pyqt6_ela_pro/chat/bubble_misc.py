@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 
+from dataclasses import replace
 from typing import Optional
 from uuid import uuid4
 
@@ -36,7 +37,10 @@ class _BubbleMiscMixin:
         partId: Optional[str] = None,
     ) -> str:
         """追加一条时间线通知（模型 / agent / 目录切换、中断等），返回分段 id。"""
+        if self._role != ElaChatRoleType.Assistant:
+            return ""
         self._ensure_parts_materialized()
+        self._mark_generation_started()
         partId = partId or uuid4().hex[:12]
         widget = ElaChatNotice(
             noticeType,
@@ -62,6 +66,8 @@ class _BubbleMiscMixin:
         **刻意不插一条用户消息** —— 助手消息正在流式输出，中途插一条用户
         气泡视觉上很怪。回执行留在同一条助手消息内，语义是「插话已送达」。
         """
+        if self._role != ElaChatRoleType.Assistant:
+            return ""
         self._ensure_parts_materialized()
         self._mark_generation_started()
         partId = partId or uuid4().hex[:12]
@@ -91,6 +97,9 @@ class _BubbleMiscMixin:
             return ""
         self._ensure_parts_materialized()
         self._mark_generation_started()
+        if self._is_empty_plan(plan):
+            self.clearPlan()
+            return ""
         value = ElaChatPlan.coerce(plan)
         if value is None:
             return ""
@@ -101,8 +110,14 @@ class _BubbleMiscMixin:
                     break
         partId = partId or uuid4().hex[:12]
         part = self._find_part(partId)
+        if part is not None and part.kind != ElaChatPartKindType.Plan:
+            partId = uuid4().hex[:12]
+            part = None
         if part is not None and part.kind == ElaChatPartKindType.Plan:
-            self._replace_part(partId, part.withPlan(value))
+            updated = part.withPlan(value)
+            if updated.step != self._step_index:
+                updated = replace(updated, step=self._step_index)
+            self._replace_part(partId, updated)
             widget = self._part_widgets.get(partId)
             if isinstance(widget, PlanPanel):
                 widget.setPlan(value)
@@ -133,6 +148,15 @@ class _BubbleMiscMixin:
     def clearPlan(self) -> None:
         """移除全部计划卡。"""
         self._remove_parts({ElaChatPartKindType.Plan})
+
+    @staticmethod
+    def _is_empty_plan(plan) -> bool:
+        """``[]`` / ``{"items": []}`` 表示清空计划（模型的 todowrite([])）。"""
+        if isinstance(plan, (list, tuple)):
+            return not plan
+        if isinstance(plan, dict):
+            return not (plan.get("items") or plan.get("todos"))
+        return False
 
     def turnChanges(self) -> ElaChatTurnChanges:
         """获取当前回合的文件变更汇总（从工具 metadata 派生）。"""
@@ -199,24 +223,18 @@ class _BubbleMiscMixin:
         if not row.isVisible():
             row.show()
 
-    def beginCompaction(
-        self,
-        reason: str = "auto",
-        partId: Optional[str] = None,
-        *,
-        queued: bool = False,
-    ) -> str:
+    def beginCompaction(self, *, queued: bool = False) -> str:
         """开始一次上下文压缩，返回分段 id。
 
         **库不实现压缩算法** —— 摘要怎么来、压哪段、什么时候压都由宿主决定
         （依赖 provider 侧的能力）。本方法只在时间线上如实表达「这里发生过
         一次压缩」，并把摘要接上。
-
-        ``reason`` **只进 journal 原始事件**（宿主诊断用），时间线卡片不展示它。
         """
+        if self._role != ElaChatRoleType.Assistant:
+            return ""
         self._ensure_parts_materialized()
         self._mark_generation_started()
-        partId = partId or uuid4().hex[:12]
+        partId = uuid4().hex[:12]
         status = ElaChatStatusType.Queued if queued else ElaChatStatusType.Streaming
         widget = CompactionSeparator(self._parts_container or self._content or self)
         widget.setCompactionStatus(status)

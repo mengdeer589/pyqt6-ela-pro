@@ -39,16 +39,18 @@ class _WidgetQueueMixin:
         """撤销上一次队列操作（添加 / 移除 / 编辑 / 排序 / 转为插话）。"""
         if not self._queue_history:
             return False
-        queue, steerId = self._queue_history.pop()
+        queue, steerId = self._queue_history[-1]
+        if steerId is not None and not any(
+            item.get("id") == steerId for item in self._steer
+        ):
+            # 插话已被投递 / 清理：恢复队列会重复发送同一条指令，快照也不能丢
+            return False
+        self._queue_history.pop()
         if steerId is not None:
-            if not any(item.get("id") == steerId for item in self._steer):
-                # 插话已被投递 / 清理：恢复队列会重复发送同一条指令。
-                return False
             self._steer = [item for item in self._steer if item.get("id") != steerId]
             self.steerChanged.emit(self.steerMessages())
         self._queue = queue
         self._sync_queue()
-        self.queueChanged.emit(self.queuedMessages())
         return True
 
     def moveQueued(self, queueId: str, toIndex: int) -> bool:
@@ -81,7 +83,6 @@ class _WidgetQueueMixin:
                     "id": steerId,
                     "text": item["text"],
                     "attachments": list(item.get("attachments") or []),
-                    "messageId": item.get("messageId"),
                     "mentions": list(item.get("mentions") or []),
                 }
             )
@@ -112,7 +113,11 @@ class _WidgetQueueMixin:
         ``messageId`` 为幂等键：同 id 重复入队只保留一条（消除双击 / 竞态）。
         """
         text = (text or "").strip()
-        if not text:
+        if not text and not attachments:
+            return None
+        if messageId is not None and self._view.message(messageId) is not None:
+            # 幂等键指向视图里已有的消息：再入队后发送会被 sendUserMessage 直接
+            # 返回旧 id，队列条目却已消失（静默丢消息）。
             return None
         if messageId is not None:
             for item in self._queue:
@@ -159,13 +164,19 @@ class _WidgetQueueMixin:
             if item["id"] != queueId:
                 continue
             self._queue.pop(index)
-            self._sync_queue()
-            self.sendUserMessage(
+            messageId = self.sendUserMessage(
                 item["text"],
                 item["attachments"],
                 item.get("messageId"),
                 mentions=item.get("mentions"),
             )
+            if messageId is None:
+                self._queue.insert(index, item)
+                self._sync_queue()
+                return False
+            # 已发送的条目不能再被撤销回队列（会二次发送）。
+            self._queue_history.clear()
+            self._sync_queue()
             return True
         return False
 
@@ -178,8 +189,7 @@ class _WidgetQueueMixin:
             self._queue.pop(index)
             self._sync_queue()
             self._input.setText(item["text"])
-            if item["attachments"]:
-                self._input.setAttachments(item["attachments"])
+            self._input.setAttachments(item["attachments"])
             self._input.setMentions(item.get("mentions"))
             self._input.textEdit().setFocus()
             return True
@@ -194,10 +204,10 @@ class _WidgetQueueMixin:
         self._sync_queue()
 
     def _sync_queue(self) -> None:
-        self._queue_dock.setMessages(self._queue)
         self._queue_dock.setWorking(bool(self._generating))
         self._queue_dock.setSteerEnabled(self.steerEnabled())
         self._queue_dock.setUndoAvailable(self.canUndoQueue())
+        self._queue_dock.setMessages(self._queue)
         self.queueChanged.emit(self.queuedMessages())
 
     def sendNextQueued(self) -> bool:
@@ -207,8 +217,7 @@ class _WidgetQueueMixin:
         queued = self.queuedMessages()
         if not queued:
             return False
-        self.sendQueuedNow(queued[0]["id"])
-        return True
+        return self.sendQueuedNow(queued[0]["id"])
 
     def setAutoSendQueue(self, on: bool = True) -> None:
         """设置回合结束后是否自动发送队首排队消息（默认开启）。"""

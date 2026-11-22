@@ -119,8 +119,10 @@ class _MarkdownInteractionMixin:
             return
         if index in self._expanded_folds:
             self._expanded_folds.discard(index)
+            self._collapsed_folds.add(index)
         else:
             self._expanded_folds.add(index)
+            self._collapsed_folds.discard(index)
         self._render()
 
     def _toggle_task_by_ordinal(self, raw: str) -> None:
@@ -347,6 +349,8 @@ class _MarkdownInteractionMixin:
             start = 0 if width != self._image_scan_width else self._image_scan_watermark
             self._apply_images(self.document(), start_block=start)
             self._mark_images_scanned()
+        if self._mermaid_jobs:
+            self._schedule_mermaid_pump()
         if self._large_render_chunks:
             # 分块渲染期间不同步按钮：每次布局刷新都是一趟全表树遍历 + 全量定位，
             # 几千个代码块时是 O(n²)（524KB / 4282 表约 1.9s）；统一在收尾建一次。

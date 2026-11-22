@@ -31,11 +31,11 @@ class TestElaTagLineEdit:
 
         edit.deleteLater()
 
-    def test_fixed_height_is_35(self):
-        """与上游 ElaLineEdit（35）同高。"""
+    def test_fixed_height_is_32(self):
+        """与上游 ElaLineEdit（32）同高。"""
         edit = ElaTagLineEdit()
 
-        assert edit.height() == 35
+        assert edit.height() == 32
 
         edit.deleteLater()
 

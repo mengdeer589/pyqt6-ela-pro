@@ -25,7 +25,7 @@ class _WidgetTurnMixin:
         ``messageSubmitted``。已有流式消息时先按 ``Stopped`` 收尾并发 ``stopRequested``，
         """
         text = (text or "").strip()
-        if not text:
+        if not text and not attachments:
             return None
         if messageId is not None:
             existing = self._view.message(messageId)
@@ -35,8 +35,8 @@ class _WidgetTurnMixin:
             # 先就地收尾旧流再通知宿主：宿主可能在 stopRequested 槽里同步
             # 走完 binder.finish(turn)，其末尾会续发排队消息 —— 不压住就会把
             # 队首消息抢在新消息前面发出（顺序错乱，且队首回合立刻被截断）。
-            self._endActiveStream(ElaChatStatusType.Stopped)
             with self._autoSendPaused():
+                self._endActiveStream(ElaChatStatusType.Stopped)
                 self.stopRequested.emit()
         if messageId is None:
             messageId = self._view.addMessage(ElaChatRoleType.User, text)
@@ -134,6 +134,8 @@ class _WidgetTurnMixin:
             self._streaming_id = None
             self.setGenerating(False)
             self.clearQueue()
+            self._queue_history.clear()
+            self._queue_dock.setUndoAvailable(False)
             # 插话属于**被中止的那一轮**：留着会在新会话的下一个 step 边界
             # 被自动投递（旧指令静默重放给模型），必须一起清
             self.clearSteer()
@@ -158,6 +160,17 @@ class _WidgetTurnMixin:
         if message and target == self._streaming_id:
             self._finishErrorTurn(target, ElaChatStatusType.Error)
 
+    def _on_view_message_removed(self, messageId: int) -> None:
+        """宿主经 ``chatView().removeMessage()`` 删消息时同步回合状态。"""
+        if messageId == self._streaming_id:
+            self._streaming_id = None
+            self.setGenerating(False)
+            if self._steer:
+                self.clearSteer()
+        else:
+            self._dropSteerForPending(messageId)
+        self._finished_generation.discard(messageId)
+
     def removeMessage(self, messageId: int) -> None:
         """移除指定消息；若是当前流式消息则先结束生成状态。"""
         if messageId == self._streaming_id:
@@ -167,12 +180,8 @@ class _WidgetTurnMixin:
                 self.clearSteer()
         else:
             self._dropSteerForPending(messageId)
-        # 删消息前必须先 abort 该消息里的未答复审批，否则 dock 上会留下一张
-        # 指向已不存在消息的死卡（用户点了没有任何回音）。
-        bubble = self._view.bubble(messageId)
-        if bubble is not None:
-            bubble.cancelPendingPermissions()
         self._finished_generation.discard(messageId)
+        # 审批作废由 view.removeMessage 统一处理（两阶段保护），这里不再重复
         self._view.removeMessage(messageId)
 
     def beginAssistantMessage(
@@ -183,7 +192,10 @@ class _WidgetTurnMixin:
         ``Stopped`` 收尾（不发 ``stopRequested``、不触发排队续发）。
         """
         if self._streaming_id is not None:
-            self._endActiveStream(ElaChatStatusType.Stopped)
+            with self._autoSendPaused():
+                self._endActiveStream(ElaChatStatusType.Stopped)
+        if self._steer:
+            self.clearSteer()
         messageId = self._view.beginMessage(
             ElaChatRoleType.Assistant,
             agent=agent,
@@ -238,13 +250,15 @@ class _WidgetTurnMixin:
             return self._finishErrorTurn(target, ElaChatStatusType.Error)
         if message is not None and message.isStreaming:
             self._view.endMessage(target, status)
-        if target == self._streaming_id:
+        current = self._streaming_id
+        if target == current:
             self._streaming_id = None
             if self._steer:
                 self.clearSteer()
-        self.setGenerating(False)
+        if target == current or current is None:
+            self.setGenerating(False)
         self._emit_generation_finished(target, status)
-        if self._auto_send_queue:
+        if self._auto_send_queue and self._streaming_id is None:
             self.sendNextQueued()
         return target
 
@@ -256,17 +270,16 @@ class _WidgetTurnMixin:
         self.generationFinished.emit(target, status)
 
     def _finishErrorTurn(self, target: int, status: str) -> int:
-        """错误回合的收尾：落 generating、发 ``generationFinished``、排空队列。
-        不发收尾信号并排空队列，``autoSendQueue`` 就发不出下一条、状态栏一直停在
-        「生成中」。
-        """
-        if target == self._streaming_id:
+        """错误回合的收尾：落 generating、发 ``generationFinished``、排空队列。"""
+        current = self._streaming_id
+        if target == current:
             self._streaming_id = None
             if self._steer:
                 self.clearSteer()
-        self.setGenerating(False)
+        if target == current or current is None:
+            self.setGenerating(False)
         self._emit_generation_finished(target, status)
-        if self._auto_send_queue:
+        if self._auto_send_queue and self._streaming_id is None:
             self.sendNextQueued()
         return target
 
@@ -291,6 +304,15 @@ class _WidgetTurnMixin:
             self.clearSteer()
         self._emit_generation_finished(target, status)
         return target
+
+    def _stop_stream_for_rewrite(self) -> None:
+        """撤回 / 重生 / 重试前收尾在途流，并通知宿主中止后端。
+
+        只清 ``_streaming_id`` 会让 worker 继续跑、分片落到已删除的消息上。
+        """
+        with self._autoSendPaused():
+            self._endActiveStream(ElaChatStatusType.Stopped)
+            self.stopRequested.emit()
 
     def streamingMessageId(self) -> Optional[int]:
         """当前正在流式生成的消息 id；无则 ``None``。
@@ -350,10 +372,7 @@ class _WidgetTurnMixin:
         if target is None or not target.isUser:
             return None
         if self._streaming_id is not None and self._streaming_id >= messageId:
-            self._streaming_id = None
-            self.setGenerating(False)
-            if self._steer:
-                self.clearSteer()
+            self._stop_stream_for_rewrite()
         self._view.removeMessagesFrom(messageId)
         self._pruneSteer()
         self._finished_generation = {
@@ -394,10 +413,7 @@ class _WidgetTurnMixin:
         if userMessage is None:
             return None
         if self._streaming_id is not None and self._streaming_id >= messageId:
-            self._streaming_id = None
-            self.setGenerating(False)
-            if self._steer:
-                self.clearSteer()
+            self._stop_stream_for_rewrite()
         self._view.removeMessagesFrom(messageId)
         self._pruneSteer()
         self._finished_generation = {
@@ -422,7 +438,6 @@ class _WidgetTurnMixin:
         if userMessage is None:
             return None
         if self._streaming_id == messageId:
-            self._streaming_id = None
-            self.setGenerating(False)
+            self._stop_stream_for_rewrite()
         self._view.clearMessageError(messageId)
         return userMessage

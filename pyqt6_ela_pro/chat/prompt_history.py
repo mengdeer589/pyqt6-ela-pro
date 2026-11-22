@@ -4,7 +4,32 @@ from __future__ import annotations
 
 from typing import Optional
 
+from .message import ElaChatAttachment, ElaChatMention
+
 DEFAULT_HISTORY_LIMIT = 50
+
+
+def _entry(text, attachments=None, mentions=None) -> dict:
+    """把一次提示归一成纯 JSON 条目（附件 / mentions 都落成字典）。"""
+    items = []
+    for item in attachments or ():
+        items.append(ElaChatAttachment.coerce(item).toDict())
+    spans = []
+    for item in mentions or ():
+        value = (
+            item if isinstance(item, ElaChatMention) else ElaChatMention.fromDict(item)
+        )
+        if value is not None and value.isValid:
+            spans.append(value.toDict())
+    return {"text": str(text or ""), "attachments": items, "mentions": spans}
+
+
+def _copy(value: dict) -> dict:
+    return {
+        "text": str(value.get("text") or ""),
+        "attachments": [dict(item) for item in value.get("attachments") or ()],
+        "mentions": [dict(item) for item in value.get("mentions") or ()],
+    }
 
 
 class ElaChatPromptHistory:
@@ -14,7 +39,7 @@ class ElaChatPromptHistory:
         self._limit = max(1, int(limit))
         self._entries = {"normal": [], "shell": []}
         self._index = {"normal": -1, "shell": -1}
-        self._draft = {"normal": "", "shell": ""}
+        self._draft = {"normal": _entry(""), "shell": _entry("")}
 
     def add(
         self,
@@ -24,38 +49,33 @@ class ElaChatPromptHistory:
         mode: str = "normal",
     ) -> None:
         """记录一条提示（空文本且无附件时忽略）。"""
-        text = str(text or "")
-        attachments = list(attachments or ())
-        if not text.strip() and not attachments:
+        entry = _entry(text, attachments, mentions)
+        if not entry["text"].strip() and not entry["attachments"]:
             return
         bucket = self._entries.setdefault(mode, [])
-        bucket.append(
-            {
-                "text": text,
-                "attachments": attachments,
-                "mentions": list(mentions or ()),
-            }
-        )
+        bucket.append(entry)
         if len(bucket) > self._limit:
             del bucket[: len(bucket) - self._limit]
         self.reset(mode)
 
-    def previous(self, mode: str = "normal", draft: str = "") -> Optional[dict]:
+    def previous(self, mode: str = "normal", draft="") -> Optional[dict]:
         """上一条历史（首次调用时记住当前草稿）；没有更早返回 ``None``。"""
         bucket = self._entries.get(mode, [])
         if not bucket:
             return None
         index = self._index.get(mode, -1)
         if index < 0:
-            self._draft[mode] = str(draft or "")
+            self._draft[mode] = (
+                _copy(draft) if isinstance(draft, dict) else _entry(draft)
+            )
             index = len(bucket)
         if index <= 0:
             index = 0
             self._index[mode] = 0
-            return dict(bucket[0])
+            return _copy(bucket[0])
         index -= 1
         self._index[mode] = index
-        return dict(bucket[index])
+        return _copy(bucket[index])
 
     def next(self, mode: str = "normal") -> Optional[dict]:
         """下一条历史；越过最新一条返回当前草稿，再往下返回 ``None``。"""
@@ -66,36 +86,31 @@ class ElaChatPromptHistory:
         index += 1
         if index >= len(bucket):
             self._index[mode] = -1
-            return {
-                "text": self._draft.get(mode, ""),
-                "attachments": [],
-                "mentions": [],
-                "draft": True,
-            }
+            return {**_copy(self._draft.get(mode, _entry(""))), "draft": True}
         self._index[mode] = index
-        return dict(bucket[index])
+        return _copy(bucket[index])
 
     def items(self, mode: str = "normal") -> list:
         """历史快照（旧 -> 新）。"""
-        return [dict(item) for item in self._entries.get(mode, [])]
+        return [_copy(item) for item in self._entries.get(mode, [])]
 
     def reset(self, mode: Optional[str] = None) -> None:
         """复位游标（``None`` 复位两份）。"""
         for key in list(self._index) if mode is None else [mode]:
             self._index[key] = -1
-            self._draft[key] = ""
+            self._draft[key] = _entry("")
 
     def clear(self, mode: Optional[str] = None) -> None:
         """清空历史。"""
         for key in list(self._entries) if mode is None else [mode]:
             self._entries[key] = []
             self._index[key] = -1
-            self._draft[key] = ""
+            self._draft[key] = _entry("")
 
     def toDict(self) -> dict:
         """转为纯 JSON 字典。"""
         return {
-            key: [dict(item) for item in value] for key, value in self._entries.items()
+            key: [_copy(item) for item in value] for key, value in self._entries.items()
         }
 
     @classmethod
@@ -106,19 +121,18 @@ class ElaChatPromptHistory:
         history = cls(limit)
         if not isinstance(data, dict):
             return history
-        for mode in ("normal", "shell"):
-            rows = data.get(mode)
-            if not isinstance(rows, list):
+        for mode, rows in data.items():
+            if not isinstance(mode, str) or not isinstance(rows, list):
                 continue
             for row in rows:
-                if isinstance(row, dict) and str(row.get("text") or "").strip():
-                    history._entries[mode].append(
-                        {
-                            "text": str(row.get("text") or ""),
-                            "attachments": list(row.get("attachments") or ()),
-                            "mentions": list(row.get("mentions") or ()),
-                        }
-                    )
+                if not isinstance(row, dict):
+                    continue
+                history.add(
+                    row.get("text") or "",
+                    row.get("attachments"),
+                    row.get("mentions"),
+                    mode,
+                )
         return history
 
 

@@ -8,6 +8,20 @@ from typing import Optional
 from PyQt6.QtGui import QImage, QPixmap
 
 
+def hasLocalFiles(mime) -> bool:
+    """mime 里是否有本地文件 URL（**不做磁盘 stat**，拖拽移动事件用）。"""
+    if mime is None or not mime.hasUrls():
+        return False
+    return any(
+        url.isLocalFile() and url.toLocalFile() for url in mime.urls()
+    )
+
+
+def hasImage(mime) -> bool:
+    """mime 里是否带图片（**不做 QPixmap 转换**）。"""
+    return mime is not None and mime.hasImage()
+
+
 def localFiles(mime) -> list:
     """mime 里的本地文件路径列表（只保留确实存在的文件）。"""
     if mime is None or not mime.hasUrls():

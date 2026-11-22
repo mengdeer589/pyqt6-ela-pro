@@ -17,6 +17,9 @@ from PyQt6ElaWidgetTools import (
 from ..._internal import safe_connect
 from ..toolbar import ElaChatToolBar
 
+#: 内建动作的保留 key：自定义动作占用同名 key 会截走内建信号
+RESERVED_ACTION_KEYS = frozenset({"copy", "undo", "regenerate"})
+
 
 class MessageActions(ElaChatToolBar):
     """底部层操作栏（复制 / 撤回 / 重新生成 + 自定义动作）。"""
@@ -100,7 +103,12 @@ class MessageActions(ElaChatToolBar):
         tooltip: str = "",
         callback=None,
     ) -> QPushButton:
-        """添加自定义动作按钮（同时发 ``actionTriggered(key)``）。"""
+        """添加自定义动作按钮（同时发 ``actionTriggered(key)``）。
+
+        :raises ValueError: ``key`` 与内建动作（copy / undo / regenerate）重名
+        """
+        if key in RESERVED_ACTION_KEYS:
+            raise ValueError(f"自定义动作 key 与内建动作冲突: {key!r}")
         return self.addButton(icon=icon, tooltip=tooltip, key=key, callback=callback)
 
     def _dispatch(self, key: str) -> None:

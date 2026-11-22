@@ -64,6 +64,8 @@ class _ChatPlainTextEdit(ElaPlainTextEdit):
         self._min_lines = 1
         self._max_lines = 8
         self._key_handler = None
+        # 卡片自己已有内边距；文档再留 10px 会让每行高度对不上（末行被裁）
+        self.document().setDocumentMargin(0)
         # 高度跟着 sizeHint 走（Fixed）；宽度仍由卡片布局拉伸
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
 
@@ -105,8 +107,9 @@ class _ChatPlainTextEdit(ElaPlainTextEdit):
         if width > 0:
             document.setTextWidth(width)
         line = QFontMetrics(self.font()).lineSpacing()
-        min_height = line * self._min_lines
-        max_height = line * self._max_lines
+        chrome = 2 * self.frameWidth()
+        min_height = line * self._min_lines + chrome
+        max_height = line * self._max_lines + chrome
         height = 0.0
         block = document.begin()
         while block.isValid():
@@ -115,7 +118,7 @@ class _ChatPlainTextEdit(ElaPlainTextEdit):
                 # 已超上限：sizeHint 会被布局反复询问，不必再数后面的块
                 break
             block = block.next()
-        return int(min(max(height, min_height), max_height))
+        return int(min(max(height + chrome, min_height), max_height))
 
     def sizeHint(self) -> QSize:  # noqa: N802
         hint = super().sizeHint()
@@ -251,7 +254,7 @@ class _ContextUsageRing(ElaThemeWidget):
         """占用百分比（窗口未知返回 0）。"""
         if self._window <= 0:
             return 0
-        return max(0, min(100, round(self._used * 100 / self._window)))
+        return min(100, (self._used * 100 + self._window // 2) // self._window)
 
     def level(self) -> int:
         """档位：``0`` 正常 / ``1`` 警示 / ``2`` 危险。"""

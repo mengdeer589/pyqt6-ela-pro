@@ -43,6 +43,14 @@ _LARGE_RENDER_CHARS = 65536
 
 _LARGE_RENDER_CHUNK = 16384
 
+#: 超大文档用更小的块，避免单块 80ms+ 的连续卡顿；总耗时约 +5–10%
+_LARGE_RENDER_LARGE_CHARS = 256 * 1024
+
+_LARGE_RENDER_CHUNK_LARGE = 8192
+
+#: 超过此大小的可见文档切主题也走分块，避免整窗冻结数秒
+_THEME_CHUNK_CHARS = 128 * 1024
+
 _LARGE_RENDER_BUDGET_MS = 16
 
 
@@ -53,6 +61,7 @@ class _MarkdownStreamMixin:
         self._cancel_large_render()
         self._expanded_code_blocks.clear()
         self._expanded_folds.clear()
+        self._collapsed_folds.clear()
         self._block_source_map = None
         self._stream_active = True
         self._stream_source = ""
@@ -237,6 +246,11 @@ class _MarkdownStreamMixin:
         （空行后仍是缩进行）不会被拆开。找不到安全空行时整段并入下一块，
         宁可单块大一点，也不能把一个代码块 / 表格切成两半。
         """
+        chunk_limit = (
+            _LARGE_RENDER_CHUNK_LARGE
+            if len(text) > _LARGE_RENDER_LARGE_CHARS
+            else _LARGE_RENDER_CHUNK
+        )
         lines = text.splitlines(keepends=True)
         chunks: list[str] = []
         start = 0
@@ -254,15 +268,15 @@ class _MarkdownStreamMixin:
             line = lines[i]
             stripped = line.strip()
             if fence is not None:
-                if _fence_close(line, fence):
+                if _fence_close(line, fence[0], fence[1]):
                     fence = None
             elif math_closer is not None:
                 if stripped == math_closer:
                     math_closer = None
             else:
-                opened, _lang = _fence_open(line)
+                opened, _lang, prefix = _fence_open(line)
                 if opened:
-                    fence = opened
+                    fence = (opened, prefix)
                 elif stripped in ("$$", "\\["):
                     math_closer = "$$" if stripped == "$$" else "\\]"
                 else:
@@ -288,7 +302,7 @@ class _MarkdownStreamMixin:
             if safe and i + 1 < n and lines[i + 1].startswith(("    ", "\t")):
                 # 空行后的缩进行仍是同一个缩进代码块
                 safe = False
-            if safe and size >= _LARGE_RENDER_CHUNK:
+            if safe and size >= chunk_limit:
                 # 空行本身丢掉：块间由 _render_large_step 的 insertBlock 分隔
                 chunks.append("".join(lines[start:i]))
                 start = i + 1

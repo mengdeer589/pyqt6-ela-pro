@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Optional
 
-from PyQt6.QtCore import Qt, pyqtSignal
+from PyQt6.QtCore import QSize, Qt, pyqtSignal
 from PyQt6.QtGui import QStandardItem, QStandardItemModel
 from PyQt6.QtWidgets import QAbstractItemView, QVBoxLayout, QWidget
 from PyQt6ElaWidgetTools import ElaListView, ElaScrollPageArea
@@ -54,7 +54,8 @@ class SuggestionPopup(ElaScrollPageArea):
         # ElaScrollPageArea 构造时 setFixedHeight(75)，浮层高度按候选项自适应
         self.setMinimumHeight(0)
         self.setBorderRadius(8)
-        self.setMaximumHeight(maxHeight)
+        self._max_height = max(_ITEM_HEIGHT, int(maxHeight))
+        self.setMaximumHeight(self._max_height)
         self._items: list[ElaChatSuggestion] = []
         self._model = QStandardItemModel(self)
         self._view = ElaListView(self)
@@ -147,10 +148,17 @@ class SuggestionPopup(ElaScrollPageArea):
         for item in self._items:
             entry = QStandardItem(item.label)
             entry.setEditable(False)
-            entry.setData(item, Qt.ItemDataRole.UserRole)
             self._model.appendRow(entry)
+        self.updateGeometry()
         if not self._items:
             self.close()
+
+    def sizeHint(self) -> QSize:  # noqa: N802
+        hint = super().sizeHint()
+        if not self._items:
+            return QSize(hint.width(), 0)
+        height = min(self._max_height, 8 + len(self._items) * _ITEM_HEIGHT)
+        return QSize(hint.width(), height)
 
     def activateCurrent(self) -> bool:
         """激活当前高亮项；返回是否已激活。"""

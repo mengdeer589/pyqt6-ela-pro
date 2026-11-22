@@ -23,6 +23,40 @@ from .message import (
 SESSION_SCHEMA_VERSION = 1
 
 
+def _migrate_v0(bundle: dict) -> dict:
+    """v0（没有 schema / view 段）补齐到 v1。"""
+    result = dict(bundle)
+    result.setdefault("session", {})
+    result.setdefault("messages", [])
+    result.setdefault("view", {})
+    return result
+
+
+#: 版本 N -> 升级到 N+1 的函数；库内维护，新增格式时在这里登记。
+_SESSION_MIGRATIONS = {0: _migrate_v0}
+
+
+def migrateSessionBundle(bundle) -> dict:
+    """把会话 bundle 迁移到 :data:`SESSION_SCHEMA_VERSION`（不修改入参）。
+
+    高于当前版本的 bundle 直接抛 ``ValueError``，避免静默解析未知字段。
+    """
+    if not isinstance(bundle, dict):
+        raise ValueError("importSession: bundle 必须是 dict")
+    result = dict(bundle)
+    raw = max(0, _as_int(result.get("schema"), 0))
+    if raw > SESSION_SCHEMA_VERSION:
+        raise ValueError(
+            f"会话 bundle schema {raw} 高于当前支持的 {SESSION_SCHEMA_VERSION}"
+        )
+    for version in range(raw, SESSION_SCHEMA_VERSION):
+        migration = _SESSION_MIGRATIONS.get(version)
+        if migration is not None:
+            result = migration(result)
+    result["schema"] = SESSION_SCHEMA_VERSION
+    return result
+
+
 @dataclass(frozen=True)
 class ElaChatSessionInfo:
     """会话（话题）快照。"""
@@ -74,13 +108,14 @@ class ElaChatSessionInfo:
 
 
 def _last_stats(message):
-    """消息的「最后一步」统计：优先最后一个 ``stats`` 段；没有段则退回消息级。"""
+    """消息最后一个**有词元**的 ``stats``：末步全 0 时继续往前找。"""
     for part in reversed(getattr(message, "parts", ()) or ()):
         if getattr(part, "kind", "") == ElaChatPartKindType.Stats:
             stats = getattr(part, "stats", None)
-            if stats is not None:
+            if stats is not None and _stats_total(stats) > 0:
                 return stats
-    return getattr(message, "stats", None)
+    stats = getattr(message, "stats", None)
+    return stats if stats is not None and _stats_total(stats) > 0 else None
 
 
 def _stats_total(stats) -> int:
@@ -214,11 +249,11 @@ class ElaChatSessionStats:
                     saw_reasoning = True
                     reasoning_ms += _as_float(getattr(part, "duration_ms", 0.0))
                 elif kind == ElaChatPartKindType.Tool:
-                    saw_tool = True
                     call = getattr(part, "tool_call", None)
                     if call is None:
                         # 坏数据（存储里缺 tool_call）：不是一次能数的调用，跳过
                         continue
+                    saw_tool = True
                     count, errors, aborted, unsettled = _add_tool_call(
                         call, tool_counts
                     )
@@ -265,7 +300,7 @@ class ElaChatSessionStats:
         window = max(0, _as_int(contextWindow))
         percent = None
         if window > 0 and total > 0:
-            percent = max(0, min(100, round(total * 100 / window)))
+            percent = min(100, (total * 100 + window // 2) // window)
         return cls(
             message_count=len(items),
             user_messages=user_messages,

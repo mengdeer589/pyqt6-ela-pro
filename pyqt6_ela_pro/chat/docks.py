@@ -6,9 +6,15 @@ from typing import Optional
 from uuid import uuid4
 
 from .._internal import _ThemeAwareMixin, is_deleted, safe_connect
-from PyQt6.QtCore import Qt, pyqtSignal
-from PyQt6.QtGui import QFont
-from PyQt6.QtWidgets import QHBoxLayout, QVBoxLayout, QWidget
+from PyQt6.QtCore import QMimeData, Qt, pyqtSignal
+from PyQt6.QtGui import QDrag, QFont
+from PyQt6.QtWidgets import (
+    QApplication,
+    QHBoxLayout,
+    QSizePolicy,
+    QVBoxLayout,
+    QWidget,
+)
 from PyQt6ElaWidgetTools import (
     ElaIconButton,
     ElaIconType,
@@ -22,6 +28,64 @@ from ..ela_button import ElaButton
 from ..tooltips import ElaToolTipPositionType, remove_tooltip, set_tooltip
 from ._theme import muted_color, text_color
 from .message import _as_int
+
+
+_QUEUE_MIME = "application/x-ela-chat-queue"
+
+
+class _QueueRow(QWidget):
+    """排队行：按钮之外还支持拖动换位。"""
+
+    reorderRequested = pyqtSignal(str, int)
+
+    def __init__(self, dock, queue_id: str, parent=None) -> None:
+        super().__init__(parent)
+        self._dock = dock
+        self._queue_id = queue_id
+        self._drag_start = None
+        self.setAcceptDrops(True)
+
+    def mousePressEvent(self, event) -> None:  # noqa: N802
+        if event.button() == Qt.MouseButton.LeftButton:
+            self._drag_start = event.position().toPoint()
+        super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event) -> None:  # noqa: N802
+        if (
+            self._drag_start is not None
+            and event.buttons() & Qt.MouseButton.LeftButton
+            and (event.position().toPoint() - self._drag_start).manhattanLength()
+            >= QApplication.startDragDistance()
+        ):
+            self._drag_start = None
+            drag = QDrag(self)
+            mime = QMimeData()
+            mime.setData(_QUEUE_MIME, self._queue_id.encode("utf-8"))
+            drag.setMimeData(mime)
+            drag.exec(Qt.DropAction.MoveAction)
+            return
+        super().mouseMoveEvent(event)
+
+    def mouseReleaseEvent(self, event) -> None:  # noqa: N802
+        self._drag_start = None
+        super().mouseReleaseEvent(event)
+
+    def dragEnterEvent(self, event) -> None:  # noqa: N802
+        if event.mimeData().hasFormat(_QUEUE_MIME):
+            event.acceptProposedAction()
+
+    def dragMoveEvent(self, event) -> None:  # noqa: N802
+        if event.mimeData().hasFormat(_QUEUE_MIME):
+            event.acceptProposedAction()
+
+    def dropEvent(self, event) -> None:  # noqa: N802
+        if not event.mimeData().hasFormat(_QUEUE_MIME):
+            return
+        source = bytes(event.mimeData().data(_QUEUE_MIME)).decode("utf-8", "ignore")
+        target = self._dock._index_of_row(self)
+        if source and target >= 0:
+            self.reorderRequested.emit(source, target)
+            event.acceptProposedAction()
 
 
 class ElaChatQueueDock(_ThemeAwareMixin, ElaScrollPageArea):
@@ -127,7 +191,7 @@ class ElaChatQueueDock(_ThemeAwareMixin, ElaScrollPageArea):
         ]
         self._sync_rows()
         self._sync_header()
-        self.setVisible(bool(self._messages))
+        self.setVisible(bool(self._messages) or self._undo_available)
 
     def messages(self) -> list:
         """排队消息快照列表（``attachments`` 也是副本，改它不会影响内部状态）。"""
@@ -232,6 +296,12 @@ class ElaChatQueueDock(_ThemeAwareMixin, ElaScrollPageArea):
                 set_tooltip(send, tooltip, ElaToolTipPositionType.Top)
                 row._send_tooltip = tooltip
 
+    def _index_of_row(self, row: QWidget) -> int:
+        for index, item in enumerate(self._row_order):
+            if item is row:
+                return index
+        return -1
+
     def _sync_rows(self) -> None:
         """按消息 id 增量复用行，只重建新增条目（队列可能有几十上百条）。"""
         existing = dict(self._rows_by_id)
@@ -251,12 +321,18 @@ class ElaChatQueueDock(_ThemeAwareMixin, ElaScrollPageArea):
         new_ids = {message["id"] for message in self._messages}
         for queue_id, row in existing.items():
             if queue_id not in new_ids:
+                self._rows_layout.removeWidget(row)
                 row.setParent(None)
                 row.deleteLater()
 
-        # 纯追加 / 原地改文案时只动变化的行；插入 / 删除 / 排序才整体重排
-        if ordered[: len(old_order)] == old_order and len(ordered) >= len(old_order):
-            for row in ordered[len(old_order) :]:
+        # 纯追加 / 原地改文案 / 删除时只动变化的行；插入 / 排序才整体重排。
+        kept_old = [
+            row
+            for row in old_order
+            if getattr(row, "_queue_message", {}).get("id") in new_ids
+        ]
+        if ordered[: len(kept_old)] == kept_old and len(ordered) >= len(kept_old):
+            for row in ordered[len(kept_old) :]:
                 self._rows_layout.addWidget(row)
         else:
             while self._rows_layout.count():
@@ -288,12 +364,22 @@ class ElaChatQueueDock(_ThemeAwareMixin, ElaScrollPageArea):
             remove_tooltip(label)
 
     def _build_row(self, message: dict) -> QWidget:
-        row = QWidget(self._rows)
+        row = _QueueRow(self, message["id"], self._rows)
         row._queue_message = message
+        safe_connect(
+            row,
+            "reorderRequested",
+            self.reorderRequested,
+            "docks.reorder_drag",
+            receiver=row,
+        )
         layout = QHBoxLayout(row)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(6)
         label = ColorText(self._row_text(message), row)
+        label.setTextFormat(Qt.TextFormat.PlainText)
+        label.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
+        label.setMinimumWidth(0)
         if message["text"]:
             set_tooltip(
                 label,
@@ -316,6 +402,19 @@ class ElaChatQueueDock(_ThemeAwareMixin, ElaScrollPageArea):
             "docks.send",
         )
         row._send_button = send
+        up = ElaIconButton(ElaIconType.IconName.ChevronUp, 12, 18, 18, row)
+        down = ElaIconButton(ElaIconType.IconName.ChevronDown, 12, 18, 18, row)
+        for button, delta, tip in ((up, -1, "上移"), (down, 1, "下移")):
+            button.setBorderRadius(4)
+            set_tooltip(button, tip, ElaToolTipPositionType.Top)
+            safe_connect(
+                button,
+                "clicked",
+                lambda _checked=False, mid=message["id"], step=delta: (
+                    self._emit_reorder(mid, step)
+                ),
+                "docks.reorder",
+            )
         edit = ElaButton("编辑", variant="text", size="small", parent=row)
         safe_connect(
             edit,
@@ -335,7 +434,18 @@ class ElaChatQueueDock(_ThemeAwareMixin, ElaScrollPageArea):
         layout.addWidget(send)
         layout.addWidget(edit)
         layout.addWidget(remove)
+        layout.addWidget(up)
+        layout.addWidget(down)
         return row
+
+    def _emit_reorder(self, queueId: str, delta: int) -> None:
+        for index, message in enumerate(self._messages):
+            if message["id"] != queueId:
+                continue
+            target = max(0, min(index + delta, len(self._messages) - 1))
+            if target != index:
+                self.reorderRequested.emit(queueId, target)
+            return
 
     def _activate_row(self, queueId: str) -> None:
         if not self._working:
@@ -433,9 +543,11 @@ class ElaChatInputDock(_ThemeAwareMixin, ElaScrollPageArea):
         """
         self._updating = True
         try:
+            previous_replace = self._replace
             self._replace = bool(replace)
             if not self._slot.setWidget(widget, ownership=ownership):
-                self._replace = False
+                self._replace = previous_replace
+                self.changed.emit(self.replacesInput())
                 return False
             if widget is None:
                 self.hide()
@@ -529,6 +641,8 @@ class ElaChatPermissionDock(_ThemeAwareMixin, ElaScrollPageArea):
         窗口弹出来。
         """
         self._detach()
+        self._queued = 0
+        self._queued_label.hide()
         if card is None:
             self.hide()
             self.changed.emit(False)

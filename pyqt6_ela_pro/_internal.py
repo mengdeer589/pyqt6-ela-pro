@@ -550,8 +550,9 @@ def to_logical_pos(x: int, y: int) -> QPoint:
 
 def execElaMenu(menu, global_pos) -> None:
     """弹出 ``ElaMenu``（阻塞到关闭）并在关闭后回收。
-    非主屏上偶发不按 ``sizeHint`` 撑开，先 ``setMinimumSize(sizeHint())``；
-    ``popup()`` 是异步的，必须用阻塞的 ``exec()``，返回后再 ``deleteLater()``。
+    非主屏 / Win7 的尺寸兜底已进 ``ElaMenu::showEvent``；这里保留
+    ``setMinimumSize`` 兼容旧 wheel。``popup()`` 是异步的，必须用阻塞的
+    ``exec()``，返回后再 ``deleteLater()``。
     """
     try:
         menu.setMinimumSize(menu.sizeHint())
@@ -701,9 +702,9 @@ def _adjust_combobox_popup(combo_box) -> None:
         return
     screen_geo = screen.availableGeometry()
 
-    item_h = combo_box.view().sizeHintForRow(0) if combo_box.count() else 30
+    item_h = combo_box.view().sizeHintForRow(0) if combo_box.count() else 35
     if item_h <= 0:
-        item_h = 30
+        item_h = 35
     n = combo_box.maxVisibleItems()
     if combo_box.count() < n:
         n = combo_box.count()

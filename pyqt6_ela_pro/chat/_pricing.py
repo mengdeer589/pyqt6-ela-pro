@@ -66,6 +66,11 @@ def _normalize_tiers(tiers) -> tuple:
         if not isinstance(item, (tuple, list)) or len(item) < 2:
             continue
         threshold, price = item[0], item[1]
+        if isinstance(price, dict):
+            try:
+                price = ModelPricing(**price)
+            except TypeError:
+                continue
         if not isinstance(price, ModelPricing):
             continue
         try:
@@ -156,12 +161,14 @@ def formatCost(usd) -> str:
     value = _finite(usd)
     if value <= 0:
         return "$0.00"
+    if value < 0.0001:
+        return "<$0.0001"
     if value < 1:
-        text = f"{value:.4f}"
-        if text == "1.0000":
-            # 0.99999 这类：四位小数进位成 "1.0000"，看起来像整一美元
-            text = f"{value:.5f}"
-        return f"${text}"
+        for precision in range(4, 10):
+            text = f"{value:.{precision}f}"
+            if float(text) < 1.0:
+                return f"${text}"
+        return "<$1.00"
     if value < 1000:
         return f"${value:.2f}"
     return f"${value:.0f}"

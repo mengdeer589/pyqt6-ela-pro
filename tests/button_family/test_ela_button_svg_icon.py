@@ -210,7 +210,7 @@ class TestThemeFollow:
         """3 档尺寸都要成立（旧的平行按钮类用 setFixedSize 冻死了尺寸）。"""
         btn = make(ElaButton, "保存", size=size)
         btn.setSvgIcon(_SVG, 16)
-        assert btn.height() == {"small": 22, "middle": 30, "large": 38}[size]
+        assert btn.height() == {"small": 24, "middle": 32, "large": 40}[size]
 
 
 class TestPaintRobustness:

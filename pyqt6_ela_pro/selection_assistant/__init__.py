@@ -13,6 +13,7 @@ from .assistant import ElaSelectionAssistant
 from .capture import (
     SKIP_CLIPBOARD_CHANGED,
     SKIP_NON_TEXT_BASELINE,
+    SKIP_USER_ACTIVE,
     SKIP_USER_COPIED,
     ElaClipboardCapture,
 )
@@ -22,6 +23,7 @@ from .result_dialog import ElaSelectionResultDialog
 __all__ = [
     "SKIP_CLIPBOARD_CHANGED",
     "SKIP_NON_TEXT_BASELINE",
+    "SKIP_USER_ACTIVE",
     "SKIP_USER_COPIED",
     "ElaClipboardCapture",
     "ElaMenuItem",

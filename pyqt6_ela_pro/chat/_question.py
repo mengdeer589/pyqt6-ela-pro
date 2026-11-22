@@ -27,7 +27,7 @@ from PyQt6ElaWidgetTools import (
 )
 
 from .._internal import _ThemeAwareMixin, is_deleted, safe_connect, single_shot_on
-from .._styles import ColorText, paintRoundedCard
+from .._styles import ColorText, editBorderlessStyle, paintRoundedCard
 from ..tooltips import ElaToolTipPositionType, set_tooltip
 from ._theme import (
     accent_color,
@@ -73,16 +73,11 @@ def question_colors(mode) -> dict:
         "card_hover": card_color(mode),
         "picked": blend(base_color(mode), accent, 0.10),
         "border": border_color(mode, 0.16),
-        "neutral_border": border_color(mode, 0.18),
         "glow": glow,
         "accent": accent,
         "ink": ink,
         "muted": muted_color(mode, 0.7),
         "hint": muted_color(mode, 0.62),
-        "surface": card_color(mode),
-        "overlay": blend(base_color(mode), ink, 0.06),
-        "overlay_press": blend(base_color(mode), ink, 0.12),
-        "focus": blend(accent, ink, 0.35),
     }
 
 
@@ -122,14 +117,29 @@ class _AutoGrowEditor(ElaPlainTextEdit):
     #: 按 Ctrl+Enter：整卡「下一步 / 提交」
     advanceRequested = pyqtSignal()
 
+    def __init__(self, parent=None) -> None:
+        super().__init__(parent)
+        self._preedit = ""
+
+    def inputMethodEvent(self, event) -> None:  # noqa: N802 (Qt 命名)
+        self._preedit = event.preeditString()
+        super().inputMethodEvent(event)
+
     def keyPressEvent(self, event) -> None:  # noqa: N802 (Qt 命名)
+        mods = event.modifiers()
+        if self._preedit and not (
+            mods
+            & (Qt.KeyboardModifier.ControlModifier | Qt.KeyboardModifier.AltModifier)
+        ):
+            # 组合态：回车 / 方向键先交给输入法上屏
+            super().keyPressEvent(event)
+            return
         key = event.key()
         if key == Qt.Key.Key_Escape:
             self.dismissRequested.emit()
             event.accept()
             return
         if key in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
-            mods = event.modifiers()
             if mods & Qt.KeyboardModifier.ShiftModifier:
                 super().keyPressEvent(event)  # 换行
                 return
@@ -157,6 +167,16 @@ class _AutoGrowEditor(ElaPlainTextEdit):
         # 文档宽度必须跟视口同步，否则 blockBoundingRect 按旧宽（或不定宽）
         # 排版，折行高度会被低估（长单段只报一两行）。
         width = self.viewport().width()
+        revision = document.revision()
+        font_key = self.font().key()
+        cache = getattr(self, "_height_cache", None)
+        if (
+            cache is not None
+            and cache[0] == revision
+            and cache[1] == width
+            and cache[2] == font_key
+        ):
+            return cache[3]
         if width > 0 and document.textWidth() != width:
             document.setTextWidth(width)
         layout = document.documentLayout()
@@ -167,7 +187,12 @@ class _AutoGrowEditor(ElaPlainTextEdit):
             block = block.next()
         if total <= 0:
             total = max(1, document.blockCount()) * self.fontMetrics().lineSpacing()
-        return int(total + 0.5) + 2 * self.frameWidth() + 4
+        result = max(
+            24, int(total + 0.5) + 2 * self.frameWidth() + 4
+        )
+        result = min(result, self.fontMetrics().lineSpacing() * 12 + 8)
+        self._height_cache = (revision, width, font_key, result)
+        return result
 
 
 class QuestionSegment(_ThemeAwareMixin, QWidget):
@@ -196,33 +221,39 @@ class QuestionSegment(_ThemeAwareMixin, QWidget):
         self.update()
 
     def mousePressEvent(self, event) -> None:  # noqa: N802
+        if event.button() != Qt.MouseButton.LeftButton:
+            return
         self.jumped.emit(self._index)
         super().mousePressEvent(event)
 
     def paintEvent(self, _event) -> None:  # noqa: N802
         painter = QPainter(self)
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
-        if self._active:
-            color = text_color(self._theme_mode)
-        elif self._answered:
-            color = accent_color(self._theme_mode)
-        else:
-            color = muted_color(self._theme_mode, 0.45)
-        painter.setPen(Qt.PenStyle.NoPen)
-        painter.setBrush(color)
-        # 圆角 = 高度的一半 = 全圆角胶囊（``border-radius: 999px`` 的直译）
-        radius = SEGMENT_BAR[1] / 2.0
-        painter.drawRoundedRect(
-            QRectF(
-                0,
-                (self.height() - SEGMENT_BAR[1]) / 2.0,
-                SEGMENT_BAR[0],
-                SEGMENT_BAR[1],
-            ),
-            radius,
-            radius,
-        )
-        painter.end()
+        try:
+            painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+            if self._active:
+                color = text_color(self._theme_mode)
+            elif self._answered:
+                color = accent_color(self._theme_mode)
+            else:
+                color = muted_color(self._theme_mode, 0.45)
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.setBrush(color)
+            # 圆角 = 高度的一半 = 全圆角胶囊（``border-radius: 999px`` 的直译）
+            radius = SEGMENT_BAR[1] / 2.0
+            painter.drawRoundedRect(
+                QRectF(
+                    0,
+                    (self.height() - SEGMENT_BAR[1]) / 2.0,
+                    SEGMENT_BAR[0],
+                    SEGMENT_BAR[1],
+                ),
+                radius,
+                radius,
+            )
+        except Exception:
+            pass
+        finally:
+            painter.end()
 
     def _onThemeChanged(self, mode: ElaThemeType.ThemeMode) -> None:  # noqa: N802
         self._theme_mode = mode
@@ -245,6 +276,8 @@ class QuestionOptionCard(QAbstractButton):
     markClicked = pyqtSignal(str)
     #: 自定义答案提交（参数：文本）
     editCommitted = pyqtSignal(str)
+    #: 编辑器里的文本被清空（空文本不算答案，卡片据此撤回旧提交值）
+    editCleared = pyqtSignal()
     #: 该行获得键盘焦点（参数：行号）
     rowFocused = pyqtSignal(int)
     #: 请求把焦点移到相邻行（``-1`` 上一行 / ``+1`` 下一行 / ``0`` 首行 / ``2`` 末行）
@@ -252,8 +285,6 @@ class QuestionOptionCard(QAbstractButton):
     #: 卡片级快捷键（``"next"`` / ``"back"`` / ``"dismiss"`` / ``"digit:<n>"``）；
     #: 用信号而非事件过滤器：给行装 Python 过滤器在析构期会踩 0xC0000409
     globalKey = pyqtSignal(str)
-    #: 本行内容高度变了（自定义答案编辑器展开 / 收起），外层据此重算选项区
-    contentChanged = pyqtSignal()
 
     def __init__(
         self,
@@ -367,9 +398,11 @@ class QuestionOptionCard(QAbstractButton):
         if editing and self._editor is None:
             self._editor = _AutoGrowEditor(self)
             self._editor.setFrameShape(QFrame.Shape.NoFrame)
+            self._editor.document().setDocumentMargin(0)
+            self._editor.setStyle(editBorderlessStyle())
             self._editor.setPlaceholderText(CUSTOM_ANSWER_PLACEHOLDER)
             self._editor.setVerticalScrollBarPolicy(
-                Qt.ScrollBarPolicy.ScrollBarAlwaysOff
+                Qt.ScrollBarPolicy.ScrollBarAsNeeded
             )
             self._editor.setHorizontalScrollBarPolicy(
                 Qt.ScrollBarPolicy.ScrollBarAlwaysOff
@@ -377,6 +410,7 @@ class QuestionOptionCard(QAbstractButton):
             self._editor.setSizePolicy(
                 QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Minimum
             )
+            self._editor.setTabChangesFocus(True)
             safe_connect(
                 self._editor,
                 "textChanged",
@@ -424,7 +458,6 @@ class QuestionOptionCard(QAbstractButton):
         self._apply_content()
         self.updateGeometry()
         self._schedule_height_sync()
-        self.contentChanged.emit()
 
     def editorText(self) -> str:  # noqa: N802
         """自定义答案当前文本（编辑器未创建时返回待回填文本）。"""
@@ -433,8 +466,16 @@ class QuestionOptionCard(QAbstractButton):
         return self._pending_editor_text
 
     def setEditorText(self, text: str) -> None:  # noqa: N802
-        """回填自定义答案（切题回来时恢复草稿；编辑器懒创建前先暂存）。"""
+        """回填自定义答案（切题回来时恢复草稿；编辑器懒创建前先暂存）。
+
+        编辑器已有文本且与传入不同时不覆盖：Esc 只是退出编辑态、文本仍是未提交
+        草稿，用已提交值回填会把用户刚敲的字抹掉。只更新回填基准。
+        """
         text = text or ""
+        current = self.editorText()
+        if self._editor is not None and current and current != text:
+            self._pending_editor_text = text
+            return
         self._pending_editor_text = text
         if self._editor is None:
             return
@@ -450,6 +491,7 @@ class QuestionOptionCard(QAbstractButton):
             return
         text = self.editorText().strip()
         if not text:
+            self.editCleared.emit()
             return
         self.editCommitted.emit(text)
 
@@ -475,6 +517,8 @@ class QuestionOptionCard(QAbstractButton):
         编辑态下标记仍可点（多选要能「再点一次 = 取消并收起」）；行内其它位置
         把焦点还给编辑器，走 ``super()`` 会让 ``QAbstractButton`` 抢走焦点。
         """
+        if event.button() != Qt.MouseButton.LeftButton:
+            return
         if self._mark_rect().contains(event.position()):
             self._press_on_mark = True
             self.markClicked.emit(self._value)
@@ -491,6 +535,9 @@ class QuestionOptionCard(QAbstractButton):
     def mouseReleaseEvent(self, event) -> None:  # noqa: N802
         # 不用 super：它只会发 clicked，且要求 press 走过 super（标记区是故意
         # 截断的），否则没 press 过也算一次点击，白白多发一轮 activate。
+        if event.button() != Qt.MouseButton.LeftButton:
+            return
+        self.setDown(False)
         if self._press_on_mark:
             # 标记区按下已发过 markClicked，同一手势的 release 不能再发 activate
             self._press_on_mark = False
@@ -554,7 +601,6 @@ class QuestionOptionCard(QAbstractButton):
         self.updateGeometry()
         # 行高由内容决定，但嵌套布局不会自己重问 sizeHint；延到下一轮事件循环
         self._schedule_height_sync()
-        self.contentChanged.emit()
 
     def _apply_content(self) -> None:
         if self._is_custom:
@@ -631,16 +677,20 @@ class QuestionOptionCard(QAbstractButton):
             background = QColor(background)
             background.setAlphaF(background.alphaF() * 0.5)
         painter = QPainter(self)
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
-        paintRoundedCard(
-            painter,
-            QRectF(self.rect()),
-            background=background,
-            border=border,
-            radius=CARD_RADIUS,
-            glow=glow,
-        )
-        painter.end()
+        try:
+            painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+            paintRoundedCard(
+                painter,
+                QRectF(self.rect()),
+                background=background,
+                border=border,
+                radius=CARD_RADIUS,
+                glow=glow,
+            )
+        except Exception:
+            pass
+        finally:
+            painter.end()
 
     def _comfortable_minimum(self) -> int:
         """单行候选行的舒适高度下限（从字体度量算，不写死像素）。

@@ -60,6 +60,9 @@ class SubagentCard(_CollapsibleBlock):
         self.setCardMargins(0, 0, 0, 0)
         self._call = call
         self._message_id = 0
+        self._nested = False
+        #: 上一次的失败态：状态变化时才重刷标题色
+        self._error_state = None
         self._child_cards: dict = {}
         self._child_order: list = []
         self._pending_children: dict = {}
@@ -136,6 +139,7 @@ class SubagentCard(_CollapsibleBlock):
             call_id = f"child-{len(self._child_order)}"
             call = replace(call, id=call_id)
         if call_id in self._child_cards or call_id in self._pending_children:
+            self._update_child(call_id, call)
             return self._child_cards.get(call_id)
         self._child_order.append(call_id)
         self._pending_children[call_id] = (call, bool(defaultOpen))
@@ -143,6 +147,43 @@ class SubagentCard(_CollapsibleBlock):
             self._materialize_page()
         self._schedule_stats()
         return self._child_cards.get(call_id)
+
+    def _update_child(self, callId: str, call: ElaChatToolCall) -> None:
+        """同 id 重复上报：合并进 pending 快照或已物化卡，别丢掉新状态。"""
+        card = self._child_cards.get(callId)
+        if card is not None:
+            if is_deleted(card):
+                return
+            if call.arguments and call.arguments != card.arguments():
+                card.setArguments(call.arguments)
+            if call.result:
+                card.setResult(
+                    call.result,
+                    ok=call.status != ElaChatToolStatusType.Error,
+                    durationMs=call.duration_ms,
+                )
+            elif call.status and call.status != card.status():
+                card.setStatus(call.status, call.duration_ms)
+            self._schedule_stats()
+            return
+        pending = self._pending_children.get(callId)
+        if pending is None:
+            return
+        existing, default_open = pending
+        merged = existing
+        if call.arguments:
+            merged = merged.withArguments(call.arguments)
+        if call.result:
+            merged = merged.withResult(call.result, call.status)
+        elif call.status:
+            merged = merged.withStatus(call.status)
+        if call.started_at or call.duration_ms:
+            merged = merged.withTiming(
+                call.started_at or merged.started_at,
+                call.duration_ms or merged.duration_ms,
+            )
+        self._pending_children[callId] = (merged, default_open)
+        self._schedule_stats()
 
     def childCard(self, callId: str) -> Optional[_CollapsibleBlock]:
         """按 id 获取子工具卡；未物化的子调用会按需建卡（API 兼容入口）。"""
@@ -227,25 +268,41 @@ class SubagentCard(_CollapsibleBlock):
         result: str,
         ok: bool = True,
         durationMs: float = 0.0,
+        status: str = "",
     ) -> None:
         """结果更新入口（父调用或子调用都走这里；不物化未展开的子卡）。"""
         key = str(callId or "")
         card = self._child_cards.get(key)
         if card is not None and not is_deleted(card):
-            card.updateResult(key, result, ok=ok, durationMs=durationMs)
+            if status:
+                card.setStatus(status, durationMs)
+                card.setResult(result, ok=status != ElaChatToolStatusType.Error)
+            else:
+                card.updateResult(key, result, ok=ok, durationMs=durationMs)
             self._schedule_stats()
             return
         pending = self._pending_children.get(key)
         if pending is not None:
             call, default_open = pending
-            status = ElaChatToolStatusType.Done if ok else ElaChatToolStatusType.Error
+            if status not in ElaChatToolStatusType.All:
+                status = (
+                    ElaChatToolStatusType.Done if ok else ElaChatToolStatusType.Error
+                )
             call = call.withResult(result, status).withTiming(
                 call.started_at, durationMs
             )
             self._pending_children[key] = (call, default_open)
             self._schedule_stats()
             return
-        self.setResult(result, ok=ok, durationMs=durationMs)
+        # 未知子 id 不能落到父卡：那会把子工具的结果写成父结果。
+        if key and key != self._call.id:
+            return
+        if status:
+            self.setResult(result, ok=status != ElaChatToolStatusType.Error, durationMs=durationMs)
+            if status != self._call.status:
+                self.setStatus(status, durationMs)
+        else:
+            self.setResult(result, ok=ok, durationMs=durationMs)
 
     def refreshStats(self) -> None:
         """刷新子工具数量 / 词元 / 成本摘要。"""
@@ -262,6 +319,9 @@ class SubagentCard(_CollapsibleBlock):
             self._materialize_page()
         else:
             self._page_timer.stop()
+        # 嵌套子代理统一只走 childToggled 上抛（父卡不再额外连它的 toggled）。
+        if self._nested:
+            self.childToggled.emit()
 
     def _materialize_page(self) -> None:
         """按页物化未展开的子工具，避免一个事件循环建出几百个卡。"""
@@ -290,12 +350,14 @@ class SubagentCard(_CollapsibleBlock):
             return None
         call, default_open = item
         name = (call.name or "").lower()
-        if name in SUBAGENT_TOOLS and toolRenderer(call.name) is None:
+        nested = name in SUBAGENT_TOOLS and toolRenderer(call.name) is None
+        if nested:
             card = SubagentCard(
                 parent=self._children_container,
                 tool_call=call,
                 defaultOpen=default_open,
             )
+            card._nested = True
             safe_connect(
                 card,
                 "childToggled",
@@ -320,13 +382,14 @@ class SubagentCard(_CollapsibleBlock):
         else:
             self._children_layout.insertWidget(index, card)
         self._child_cards[key] = card
-        safe_connect(
-            card,
-            "toggled",
-            self._on_child_toggled,
-            "subagent.child_toggle",
-            receiver=card,
-        )
+        if not nested:
+            safe_connect(
+                card,
+                "toggled",
+                self._on_child_toggled,
+                "subagent.child_toggle",
+                receiver=card,
+            )
         self._sync_more_button()
         return card
 
@@ -390,11 +453,7 @@ class SubagentCard(_CollapsibleBlock):
             ElaChatToolStatusType.Running,
         )
         self.setTitle(call.title or "子代理")
-        subtitle = ""
-        try:
-            _key, subtitle = toolSubtitleParts(call.arguments)
-        except Exception:
-            subtitle = ""
+        _key, subtitle = toolSubtitleParts(call.arguments)
         subtitle = " ".join(str(subtitle or "").split())
         if len(subtitle) > 80:
             subtitle = subtitle[:79] + "…"
@@ -402,7 +461,12 @@ class SubagentCard(_CollapsibleBlock):
         self._subtitle_label.setVisible(bool(subtitle))
         self._sync_stats()
         self.setBusy(running)
-        self.setExpandable(True)
+        is_error = call.status == ElaChatToolStatusType.Error
+        if is_error and not self.isOpened():
+            self.setOpened(True)
+        if self._error_state != is_error:
+            self._error_state = is_error
+            self._apply_theme()
 
     def _schedule_stats(self) -> None:
         if not self._stats_timer.isActive():
@@ -455,7 +519,6 @@ class SubagentCard(_CollapsibleBlock):
             self._title_label.setTextColor(text_color(mode))
         self._title_label.setTextPixelSize(13)
         self._title_label.setTextWeight(QFont.Weight.DemiBold)
-        self._apply_child_theme()
 
     def _apply_child_theme(self) -> None:
         for card in self._child_cards.values():

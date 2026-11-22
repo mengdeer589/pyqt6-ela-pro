@@ -94,7 +94,9 @@ def main() -> int:
             encoding="utf-8",
             errors="replace",
         )
-        payload = [line for line in proc.stdout.splitlines() if line.startswith("JSON ")]
+        payload = [
+            line for line in proc.stdout.splitlines() if line.startswith("JSON ")
+        ]
         if not payload:
             print("run FAILED: %s" % (proc.stderr or "")[-400:])
             continue
@@ -102,7 +104,10 @@ def main() -> int:
     if not runs:
         return 1
     rows = runs[-1]["rows"]
-    print("%-22s %10s %9s %7s  %s" % ("component", "ms/instance", "children", "native", "note"))
+    print(
+        "%-22s %10s %9s %7s  %s"
+        % ("component", "ms/instance", "children", "native", "note")
+    )
     for row in rows:
         print(
             "%-22s %10.3f %9s %7s  %s"

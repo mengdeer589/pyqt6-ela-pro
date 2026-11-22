@@ -12,12 +12,16 @@ import re
 from dataclasses import dataclass, field, replace
 from enum import StrEnum, nonmember
 from typing import Any, Optional, Tuple
+from uuid import uuid4
 
 from ._json import loads as _loads
 from ._pricing import formatCost
 
 #: 持久化格式版本。字段语义发生不兼容变更时 +1，读取方应按版本分支处理。
 SCHEMA_VERSION = 2
+
+#: 计数器类整数的安全上界（orjson 只接受 64 位有符号整数）
+_INT_MAX = (1 << 63) - 1
 
 
 def _as_str(value, default: str = "") -> str:
@@ -30,17 +34,19 @@ def _as_str(value, default: str = "") -> str:
 def _as_int(value, default: int = 0) -> int:
     """容错取整数（浮点截断、字符串解析、失败取默认值）。
     必须显式捕获 ``OverflowError``：``int(float('inf'))`` 抛的是它，而它不是
-    ``TypeError`` / ``ValueError`` 的子类。
+    ``TypeError`` / ``ValueError`` 的子类。上界夹到 64 位有符号整数，
+    避免 orjson 拒绝超大整数、也避免下游百分比运算溢出。
     """
     if value is None or isinstance(value, bool):
         return default
     try:
-        return int(value)
+        number = int(value)
     except (TypeError, ValueError, OverflowError):
         try:
-            return int(float(value))
+            number = int(float(value))
         except (TypeError, ValueError, OverflowError):
             return default
+    return min(number, _INT_MAX)
 
 
 def _as_float(value, default: float = 0.0) -> float:
@@ -208,10 +214,12 @@ def _format_size(size) -> str:
                     digits += ch
                 else:
                     break
+            if not digits:
+                return text
             try:
-                value = float(digits) if digits else 0.0
+                value = float(digits)
             except ValueError:
-                value = 0.0
+                return text
             # 带上单位后缀时按 1024 进制还原
             upper = text.upper()
             for unit, factor in (
@@ -291,11 +299,11 @@ class ElaChatAttachment:
     def toDict(self) -> dict:
         """转为纯 JSON 字典。"""
         return {
-            "name": self.name,
-            "path": self.path,
-            "size": _as_int(self.size),
-            "digest": self.digest,
-            "mime": self.mime,
+            "name": _as_str(self.name),
+            "path": _as_str(self.path),
+            "size": max(0, _as_int(self.size)),
+            "digest": _as_str(self.digest),
+            "mime": _as_str(self.mime),
         }
 
     @classmethod
@@ -515,12 +523,15 @@ class ElaChatStats:
     def merge(items) -> Optional["ElaChatStats"]:
         """把多个步骤用量合并为整轮汇总（``None`` 与空序列返回 ``None``）。
         词元与 ``cost_usd`` 求和，``ttft_ms`` 取首个非零值，``tps`` 按合计输出 /
-        合计耗时重算，``duration_ms`` 置 0（整轮耗时由消息级字段承载）。
+        合计耗时重算；多步时 ``duration_ms`` 置 0（整轮耗时由消息级字段承载），
+        单步保留原值。
         """
         values = [item for item in (items or ()) if item is not None]
         if not values:
             return None
         if len(values) == 1:
+            # 单步保留原始 duration / tps（journal 的步骤耗时靠它）；
+            # 多步才归零 duration、按合计重算 tps。
             return values[0]
         prompt = sum(item.prompt_tokens for item in values)
         completion = sum(item.completion_tokens for item in values)
@@ -615,7 +626,7 @@ class ElaChatStats:
             cache_write_tokens=_as_int(data.get("cache_write_tokens")),
             ttft_ms=_as_float(data.get("ttft_ms")),
             tps=_as_float(data.get("tps")),
-            duration_ms=_as_float(data.get("duration_ms")),
+            duration_ms=max(0.0, _as_float(data.get("duration_ms"))),
             cost_usd=_as_float(data.get("cost_usd")),
         )
 
@@ -992,7 +1003,7 @@ class ElaChatQuestion:
             "key": _as_str(self.key),
             "header": _as_str(self.header),
             "question": _as_str(self.question),
-            "options": [item.toDict() for item in self.options],
+            "options": [item.toDict() for item in self.options if item is not None],
             "multiple": bool(self.multiple),
             "custom": bool(self.custom),
         }
@@ -1009,7 +1020,11 @@ class ElaChatQuestion:
             key=key,
             header=_as_str(data.get("header")),
             question=_as_str(data.get("question")),
-            options=_as_tuple_of(data.get("options"), ElaChatOption.fromDict),
+            options=tuple(
+                option
+                for option in _as_tuple_of(data.get("options"), ElaChatOption.fromDict)
+                if option is not None
+            ),
             multiple=_as_bool(data.get("multiple"), False),
             # 缺省 True：模型无法关掉「自己写」那一行
             custom=_as_bool(data.get("custom"), True),
@@ -1066,9 +1081,12 @@ class ElaChatPermission:
         return data if isinstance(data, dict) else {}
 
     def withStatus(
-        self, status: str, answer: str = "", feedback: str = ""
+        self,
+        status: str,
+        answer: Optional[str] = None,
+        feedback: Optional[str] = None,
     ) -> "ElaChatPermission":
-        """返回替换状态后的新快照（非法状态回落 ``Pending``）。"""
+        """返回替换状态后的新快照（非法状态回落 ``Pending``；``None`` 保持原值）。"""
         return replace(
             self,
             status=(
@@ -1076,8 +1094,8 @@ class ElaChatPermission:
                 if status in ElaChatPermissionStatusType.All
                 else ElaChatPermissionStatusType.Pending
             ),
-            answer=answer or "",
-            feedback=feedback or "",
+            answer=self.answer if answer is None else (answer or ""),
+            feedback=self.feedback if feedback is None else (feedback or ""),
         )
 
     def toDict(self) -> dict:
@@ -1088,7 +1106,7 @@ class ElaChatPermission:
             "resources": [_as_str(item) for item in self.resources],
             "title": _as_str(self.title),
             "detail": _as_str(self.detail),
-            "questions": [item.toDict() for item in self.questions],
+            "questions": [item.toDict() for item in self.questions if item is not None],
             "status": _as_choice(
                 self.status,
                 ElaChatPermissionStatusType.All,
@@ -1115,7 +1133,13 @@ class ElaChatPermission:
             resources=_as_tuple_of(data.get("resources"), _as_str),
             title=_as_str(data.get("title")),
             detail=_as_str(data.get("detail")),
-            questions=_as_tuple_of(data.get("questions"), ElaChatQuestion.fromDict),
+            questions=tuple(
+                question
+                for question in _as_tuple_of(
+                    data.get("questions"), ElaChatQuestion.fromDict
+                )
+                if question is not None
+            ),
             status=_as_choice(
                 data.get("status"),
                 ElaChatPermissionStatusType.All,
@@ -1199,8 +1223,6 @@ class ElaChatPart:
     detail: str = ""
     #: 压缩掉的消息条数（``kind == Compaction``；``0`` = 不知道，不是「压了 0 条」）
     history_count: int = 0
-    #: 截止时间（epoch 毫秒；``kind == Notice`` 的 Retry 预留，暂未使用）
-    deadline: float = 0.0
 
     def withText(self, text: str) -> "ElaChatPart":
         """返回替换文本后的新快照。"""
@@ -1228,7 +1250,7 @@ class ElaChatPart:
 
     def withDuration(self, durationMs: float) -> "ElaChatPart":
         """返回替换耗时后的新快照。"""
-        return replace(self, duration_ms=float(durationMs or 0.0))
+        return replace(self, duration_ms=max(0.0, _as_float(durationMs)))
 
     def withHistoryCount(self, count: int) -> "ElaChatPart":
         """返回替换压缩历史条数后的新快照。"""
@@ -1250,7 +1272,6 @@ class ElaChatPart:
             "notice_type": _as_str(self.notice_type),
             "detail": _as_str(self.detail),
             "history_count": max(0, _as_int(self.history_count)),
-            "deadline": _as_float(self.deadline),
         }
 
     @classmethod
@@ -1278,12 +1299,11 @@ class ElaChatPart:
             stats=ElaChatStats.fromDict(data.get("stats")),
             permission=ElaChatPermission.fromDict(data.get("permission")),
             plan=ElaChatPlan.fromDict(data.get("plan")),
-            duration_ms=_as_float(data.get("duration_ms")),
+            duration_ms=max(0.0, _as_float(data.get("duration_ms"))),
             step=max(1, _as_int(data.get("step"), 1)),
             notice_type=_as_str(data.get("notice_type")),
             detail=_as_str(data.get("detail")),
             history_count=max(0, _as_int(data.get("history_count"))),
-            deadline=_as_float(data.get("deadline")),
         )
 
 
@@ -1472,7 +1492,11 @@ class ElaChatMessage:
         """返回替换思考层后的新快照。"""
         if reasoningMs is None:
             return replace(self, reasoning=reasoning or "")
-        return replace(self, reasoning=reasoning or "", reasoning_ms=float(reasoningMs))
+        return replace(
+            self,
+            reasoning=reasoning or "",
+            reasoning_ms=max(0.0, _as_float(reasoningMs)),
+        )
 
     def withToolCalls(self, toolCalls) -> "ElaChatMessage":
         """返回替换工具层后的新快照。"""
@@ -1480,6 +1504,27 @@ class ElaChatMessage:
 
     def withToolCall(self, toolCall: ElaChatToolCall) -> "ElaChatMessage":
         """按 id 合并单个工具调用（不存在则追加）。"""
+        if self.parts:
+            parts = list(self.parts)
+            for index, part in enumerate(parts):
+                if (
+                    part.kind == ElaChatPartKindType.Tool
+                    and part.tool_call is not None
+                    and part.tool_call.id == toolCall.id
+                ):
+                    parts[index] = part.withToolCall(toolCall)
+                    break
+            else:
+                parts.append(
+                    ElaChatPart(
+                        id=toolCall.id or uuid4().hex[:12],
+                        kind=ElaChatPartKindType.Tool,
+                        status=ElaChatStatusType.Done,
+                        tool_call=toolCall,
+                        step=max(1, self.stepCount),
+                    )
+                )
+            return self.withParts(parts)
         calls = list(self.tool_calls)
         for index, call in enumerate(calls):
             if call.id == toolCall.id:
@@ -1499,7 +1544,7 @@ class ElaChatMessage:
 
     def withDuration(self, durationMs: float) -> "ElaChatMessage":
         """返回替换总耗时后的新快照。"""
-        return replace(self, duration_ms=float(durationMs or 0.0))
+        return replace(self, duration_ms=max(0.0, _as_float(durationMs)))
 
     def withError(
         self, error: str, errorType: Optional[str] = None
@@ -1554,6 +1599,10 @@ class ElaChatMessage:
         """
         if not isinstance(data, dict):
             return cls(id=0, role=ElaChatRoleType.Assistant)
+        if cls.schemaOf(data) > SCHEMA_VERSION:
+            raise ValueError(
+                f"消息 schema 版本 {cls.schemaOf(data)} 高于当前支持的 {SCHEMA_VERSION}"
+            )
         base = cls(
             id=_as_int(data.get("id")),
             role=_as_choice(
@@ -1575,7 +1624,7 @@ class ElaChatMessage:
                 for item in _as_tuple_of(data.get("mentions"), ElaChatMention.fromDict)
                 if item is not None and item.isValid
             ),
-            duration_ms=_as_float(data.get("duration_ms")),
+            duration_ms=max(0.0, _as_float(data.get("duration_ms"))),
             attachments=_as_tuple_of(
                 data.get("attachments"), ElaChatAttachment.fromDict
             ),

@@ -96,8 +96,8 @@ class _TagBoxAnimMixin:
         self._rotate_animation = QPropertyAnimation(self, b"expandIconRotate")
         self._rotate_animation.setEasingCurve(Easing.type_name(Easing.Standard))
 
-        # 组合框族统一高度 30px
-        self.setFixedHeight(30)  # type: ignore[attr-defined]
+        # 组合框族统一高度 32px（与上游单行控件一致）
+        self.setFixedHeight(32)  # type: ignore[attr-defined]
         self._theme_mode = eTheme.getThemeMode()
 
         # 必须连标准钩子名 ``_onThemeChanged``：本 mixin 在 MRO 最前，搜索框系列

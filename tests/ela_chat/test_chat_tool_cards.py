@@ -4,10 +4,12 @@ from __future__ import annotations
 
 import random
 
+import pytest
 from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import QLabel, QVBoxLayout, QWidget
 from PyQt6ElaWidgetTools import ElaIconType
 
+from pyqt6_ela_pro._diff import ElaDiffFile
 from pyqt6_ela_pro.chat import (
     ElaChatPartKindType,
     ElaChatReasoningStyleType,
@@ -17,10 +19,12 @@ from pyqt6_ela_pro.chat import (
     ElaChatToolStatusType,
     ElaChatView,
     ReasoningBlock,
+    SubagentCard,
     ToolGroupPanel,
 )
 from pyqt6_ela_pro.chat.blocks import (
     ContextToolGroupCard,
+    ElaChatFileChanges,
     ErrorCard,
     MessageMeta,
     ThinkingRow,
@@ -34,6 +38,7 @@ from pyqt6_ela_pro.chat.blocks import (
     toolSubtitle,
     toolSubtitleParts,
 )
+from pyqt6_ela_pro.chat.blocks.tool_cards import BODY_MAX_CHARS
 from pyqt6_ela_pro.tooltips import _tooltip_dict
 
 
@@ -541,12 +546,10 @@ class TestBubbleMetaAndHover:
         bubble = make(ElaChatBubble, ElaChatRoleType.User, "hi")
         assert bubble.actionsHoverReveal() is True
         # 占位保留（RetainSizeWhenHidden），避免悬浮时消息区跳动；
-        # 隐藏态连绘制一起停掉（QGraphicsOpacityEffect(0) 仍会离屏渲染）。
+        # 隐藏态连绘制一起停掉（不挂 QGraphicsOpacityEffect）。
         assert bubble.actions().isHidden() is True
-        assert bubble._actions_effect.opacity() == 0.0
         assert bubble.actions().sizePolicy().retainSizeWhenHidden() is True
         bubble.setActionsHoverReveal(False)
-        assert bubble._actions_effect.opacity() == 1.0
         assert bubble.actions().isHidden() is False
 
     def test_action_tooltips_bound(self, qapp, make):
@@ -679,6 +682,159 @@ class TestHeaderSyncThemeWrites:
         card.setArguments('{"command": "echo ab"}')
         assert spy.call_count == 0
 
-        # 失败态变化才需要重刷（图标 / 颜色）
+        # 失败态变化才需要重刷（图标 / 颜色）；转 Error 还会自动展开并建 body，
+        # 新 body 的标签也要上色，因此这里会多一次。
         card.setStatus(ElaChatToolStatusType.Error)
-        assert spy.call_count == 1
+        assert card.isOpened() is True
+        assert spy.call_count == 2
+
+
+class TestReservedActionKeys:
+    def test_custom_action_cannot_shadow_builtin(self, qapp, make):
+        bubble = make(ElaChatBubble, ElaChatRoleType.Assistant)
+        for key in ("copy", "undo", "regenerate"):
+            with pytest.raises(ValueError):
+                bubble.actions().addCustomAction(key)
+
+
+class TestFileChangesLazyBody:
+    def test_default_collapsed_does_not_build_diff_body(self, qapp, make):
+        widget = make(ElaChatFileChanges)
+        widget.setDefaultOpen(False)
+        widget.setFiles([ElaDiffFile(path="a.py", lines=("-old", "+new"))])
+        assert widget._rows[0]["opened"] is False
+        assert widget._rows[0]["body"] is None
+
+    def test_refresh_keeps_expanded_paths(self, qapp, make):
+        widget = make(ElaChatFileChanges)
+        widget.setDefaultOpen(False)
+        widget.setFiles(
+            [ElaDiffFile(path="a.py"), ElaDiffFile(path="b.py")],
+        )
+        widget._toggle_row(widget._rows[0])
+        assert widget._expanded == {"a.py": True}
+        widget.setFiles(
+            [ElaDiffFile(path="a.py"), ElaDiffFile(path="c.py")],
+        )
+        assert widget._expanded == {"a.py": True}
+        assert widget._rows[0]["opened"] is True
+
+
+class TestToolBodyLimits:
+    def test_status_error_expands_body(self, qapp, make):
+        card = make(
+            ToolCallCard,
+            tool_call=ElaChatToolCall(id="t1", name="read", arguments="{}"),
+        )
+        assert not card.isOpened()
+        card.setStatus(ElaChatToolStatusType.Error)
+        assert card.isOpened()
+
+    def test_default_body_clips_but_keeps_snapshot(self, qapp, make):
+        arguments = '{"content": "' + "x" * (BODY_MAX_CHARS * 2) + '"}'
+        card = make(
+            ToolCallCard,
+            tool_call=ElaChatToolCall(id="t1", name="write", arguments=arguments),
+        )
+        card.setOpened(True)
+        assert len(card._args_value.text()) <= BODY_MAX_CHARS
+        assert card.arguments() == arguments
+
+
+class TestContextRowWidthElide:
+    def test_elides_by_width_and_puts_failure_result_in_tooltip(self, qapp, make):
+        group = make(ContextToolGroupCard)
+        group.resize(420, 80)
+        group.addToolCall(
+            ElaChatToolCall(
+                id="e1",
+                name="grep",
+                arguments='{"pattern": "%s"}' % ("p" * 120),
+                result="permission denied",
+                status=ElaChatToolStatusType.Error,
+            )
+        )
+        row = group._call_rows["e1"]
+        assert row.text().endswith("…")
+        tip = _tooltip_dict.get(row)
+        assert tip is not None
+        assert "permission denied" in tip._text
+
+
+class TestSubagentRepeatedReports:
+    def test_same_child_id_updates_pending_snapshot(self, qapp, make):
+        card = make(
+            SubagentCard,
+            tool_call=ElaChatToolCall(id="p1", name="delegate_task"),
+        )
+        card.addChild(ElaChatToolCall(id="c1", name="read", arguments="{}"))
+        card.addChild(
+            ElaChatToolCall(
+                id="c1",
+                name="read",
+                arguments='{"path": "a.py"}',
+                result="ok",
+                status=ElaChatToolStatusType.Done,
+                duration_ms=12,
+            )
+        )
+        call = card.toolCall("c1")
+        assert call.arguments == '{"path": "a.py"}'
+        assert call.result == "ok"
+        assert call.status == ElaChatToolStatusType.Done
+        assert call.duration_ms == 12.0
+
+    def test_unknown_child_result_does_not_hit_parent(self, qapp, make):
+        card = make(
+            SubagentCard,
+            tool_call=ElaChatToolCall(id="p1", name="delegate_task"),
+        )
+        card.updateResult("ghost", "bad", ok=False)
+        assert card.result() == ""
+        assert card.status() != ElaChatToolStatusType.Error
+        card.updateResult("p1", "done", ok=True)
+        assert card.result() == "done"
+
+    def test_materialized_child_accepts_repeated_report(self, qapp, make):
+        card = make(
+            SubagentCard,
+            tool_call=ElaChatToolCall(id="p1", name="delegate_task"),
+        )
+        card.addChild(ElaChatToolCall(id="c1", name="read", arguments="{}"))
+        card.setOpened(True)
+        child = card._child_cards["c1"]
+        card.addChild(
+            ElaChatToolCall(
+                id="c1",
+                name="read",
+                arguments='{"path": "b.py"}',
+                status=ElaChatToolStatusType.Error,
+                result="denied",
+            )
+        )
+        assert child.arguments() == '{"path": "b.py"}'
+        assert child.status() == ElaChatToolStatusType.Error
+        assert child.result() == "denied"
+
+    def test_nested_toggle_bubbles_once(self, qapp, make):
+        card = make(
+            SubagentCard,
+            tool_call=ElaChatToolCall(id="p1", name="delegate_task"),
+        )
+        card.addChild(ElaChatToolCall(id="s1", name="delegate_task"))
+        card.setOpened(True)
+        nested = card._child_cards["s1"]
+        seen = []
+        card.childToggled.connect(lambda: seen.append(1))
+        nested.setOpened(True)
+        assert seen == [1]
+
+    def test_status_error_refreshes_title_state(self, qapp, make):
+        card = make(
+            SubagentCard,
+            tool_call=ElaChatToolCall(id="p1", name="delegate_task"),
+        )
+        card.setStatus(ElaChatToolStatusType.Error)
+        assert card._error_state is True
+        card.setStatus(ElaChatToolStatusType.Done)
+        assert card._error_state is False

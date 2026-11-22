@@ -119,7 +119,7 @@ class PermissionRecord(_CollapsibleBlock):
                 if target:
                     break
         else:
-            target = permission.action or "工具执行"
+            target = permission.title or permission.action or "工具执行"
         # 一行放不下就截断（省略号由 Qt 自己加，这里只挡超长的一整段）
         if len(target) > 40:
             target = target[:40] + "…"
@@ -129,31 +129,32 @@ class PermissionRecord(_CollapsibleBlock):
         permission = self._permission
         if permission is None:
             return False
-        return bool(
-            permission.resources
-            or permission.detail
-            or permission.feedback
-            or permission.answer
-        )
+        if not permission.isQuestion and any(
+            str(item).strip() for item in permission.resources
+        ):
+            return True
+        return bool(self._raw_detail(permission))
 
     @staticmethod
     def _raw_detail(permission: ElaChatPermission) -> str:
         if permission.isQuestion:
-            if permission.detail:
-                return permission.detail
+            lines = [permission.detail] if permission.detail else []
             answers = permission.parsedAnswer()
-            lines = []
+            answer_lines = []
             for question in permission.questions:
                 value = answers.get(question.key)
                 if value is None:
                     continue
-                shown = (
-                    "、".join(str(item) for item in value)
-                    if isinstance(value, list)
-                    else str(value)
-                )
+                if isinstance(value, list):
+                    shown = "、".join(str(item) for item in value if str(item).strip())
+                else:
+                    shown = str(value).strip()
+                if not shown:
+                    continue
                 label = question.header or question.question or question.key
-                lines.append(f"{label}: {shown}")
+                answer_lines.append(f"{label}: {shown}")
+            if answer_lines:
+                lines.append("\n".join(answer_lines))
             return "\n".join(lines)
         if (
             permission.status == ElaChatPermissionStatusType.Rejected
@@ -169,7 +170,7 @@ class PermissionRecord(_CollapsibleBlock):
             self._detail.hide()
             self._detail_toggle.hide()
             return
-        resources = [item for item in permission.resources if item]
+        resources = [str(item) for item in permission.resources if item]
         if resources and not permission.isQuestion:
             shown = resources[:4]
             text = "\n".join(shown)
@@ -207,7 +208,10 @@ class PermissionRecord(_CollapsibleBlock):
             ElaChatPermissionStatusType.Rejected
         ):
             accent = statusColor(mode, ElaStatusRoleType.Error)
-        elif permission is not None and not permission.isPending:
+        elif permission is not None and permission.status in (
+            ElaChatPermissionStatusType.Allowed,
+            ElaChatPermissionStatusType.Always,
+        ):
             accent = statusColor(mode, ElaStatusRoleType.Success)
         else:
             accent = text_color(mode)

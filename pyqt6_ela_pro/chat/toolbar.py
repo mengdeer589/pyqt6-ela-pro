@@ -116,6 +116,7 @@ class ElaChatToolBar(ElaThemeWidget):
         self._separators: list = []
         #: 已登记的弹簧 ``(layout, spacer)``：``clear`` 要能一并移除
         self._stretches: list = []
+        self._protected_keys: set = set()
         self._seq = 0
 
         layout = QHBoxLayout(self)
@@ -362,11 +363,21 @@ class ElaChatToolBar(ElaThemeWidget):
         self._detach(separator)
         return True
 
+    def protectItem(self, key: str, on: bool = True) -> None:  # noqa: N802
+        """保护内置项不被 ``clear()`` 删除。"""
+        key = str(key or "")
+        if on:
+            self._protected_keys.add(key)
+        else:
+            self._protected_keys.discard(key)
+
     def clear(self, zone: Optional[str] = None) -> None:
         """移除已添加的全部按钮与控件（``zone`` 为 ``None`` 时两段都清；非法 zone 抛 ``ValueError``）。"""
         if zone is not None:
             zone = self._normalize_zone(zone)
         for key, widget in list(self._items.items()):
+            if key in self._protected_keys:
+                continue
             if zone is not None and not self._in_zone(widget, zone):
                 continue
             self._items.pop(key, None)

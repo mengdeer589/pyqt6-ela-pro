@@ -77,7 +77,15 @@ def _build_target(app, target: str, document: str, width: int, height: int):
     raise ValueError(target)
 
 
-def run(target: str, kind: str, styled: bool, steps: int, pixels: int, size: str, repeat: int):
+def run(
+    target: str,
+    kind: str,
+    styled: bool,
+    steps: int,
+    pixels: int,
+    size: str,
+    repeat: int,
+):
     width_text, _, height_text = size.partition("x")
     width, height = int(width_text), int(height_text)
     app = _make_app()
@@ -124,7 +132,9 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Markdown 滚动绘制探针")
     parser.add_argument("--doc", choices=_DOC_CHOICES, default="cjk")
     parser.add_argument("--target", choices=("native", "viewer"), default="viewer")
-    parser.add_argument("--styled", action="store_true", help="加标题 / 引用 / 行内代码")
+    parser.add_argument(
+        "--styled", action="store_true", help="加标题 / 引用 / 行内代码"
+    )
     parser.add_argument("--steps", type=int, default=20)
     parser.add_argument("--pixels", type=int, default=40)
     parser.add_argument("--size", default="1000x700")

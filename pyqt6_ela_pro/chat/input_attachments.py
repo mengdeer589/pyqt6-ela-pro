@@ -14,7 +14,7 @@ from PyQt6.QtCore import QBuffer, QByteArray, QIODevice
 from PyQt6.QtGui import QImage
 from PyQt6.QtWidgets import QFileDialog
 
-from ._mime import localFiles, mimeImage
+from ._mime import hasImage, hasLocalFiles, localFiles, mimeImage
 from .blocks import AttachmentStrip
 
 
@@ -55,9 +55,14 @@ class _InputAttachmentsMixin:
 
     def addAttachments(self, paths) -> list:
         """按本地路径批量添加附件，返回新增的快照列表。"""
+        if isinstance(paths, (str, os.PathLike)):
+            paths = [paths]
         items = []
-        for path in paths or []:
-            if not isinstance(path, str) or not path:
+        for raw in paths or []:
+            if not isinstance(raw, (str, os.PathLike)):
+                continue
+            path = os.fspath(raw)
+            if not path or not os.path.isfile(path):
                 continue
             name = os.path.basename(path) or path
             try:
@@ -66,7 +71,6 @@ class _InputAttachmentsMixin:
                 size = 0
             items.append({"name": name, "path": path, "size": size})
         return self._attachments.addAttachments(items)
-
     def addAttachment(self, name: str, path: str = "", size: int = 0):
         """添加一个附件（可直接给展示名 / 路径 / 大小）。"""
         return self._attachments.addAttachment(name, path, size)
@@ -85,6 +89,7 @@ class _InputAttachmentsMixin:
 
     def _on_attachments_changed(self, attachments: list) -> None:
         self._draft_timer.start()
+        self._sync_button()
         self.attachmentsChanged.emit(attachments)
 
     def _on_image_pasted(self, image: QImage) -> bool:
@@ -113,7 +118,14 @@ class _InputAttachmentsMixin:
                 stacklevel=2,
             )
             return
-        self._add_files([path])
+        if not self._add_files([path]):
+            # 同内容已在附件里（路径去重）：不能静默什么都不发生
+            self._edit.insertPlainText(text)
+            warnings.warn(
+                "相同内容已在附件中，已回退为直接插入文本",
+                RuntimeWarning,
+                stacklevel=2,
+            )
 
     @staticmethod
     def _write_paste_file(text: str) -> Optional[str]:
@@ -122,13 +134,13 @@ class _InputAttachmentsMixin:
         文件名带内容摘要（同内容同路径 → 天然幂等）。
         """
         try:
-            digest = hashlib.sha1(text.encode("utf-8")).hexdigest()[:8]
+            digest = hashlib.sha1(text.encode("utf-8")).hexdigest()[:16]
             directory = Path(tempfile.gettempdir()) / "pyqt6_ela_pro_paste"
             directory.mkdir(exist_ok=True)
             path = directory / f"粘贴文本-{digest}.txt"
-            path.write_text(text, encoding="utf-8")
+            path.write_text(text, encoding="utf-8", newline="\n")
             return str(path)
-        except OSError:
+        except (OSError, UnicodeError):
             return None
 
     def _add_files(self, paths: list) -> bool:
@@ -152,8 +164,11 @@ class _InputAttachmentsMixin:
         return hashlib.sha1(bytes(data)).hexdigest()
 
     def acceptsMime(self, mime) -> bool:
-        """mime 里是否有本组件能收下的内容（本地文件 / 图片）。"""
-        return bool(localFiles(mime) or mimeImage(mime) is not None)
+        """mime 里是否有本组件能收下的内容（本地文件 / 图片）。
+
+        拖拽移动事件会高频调用：这里只做廉价判定，``stat`` / 图片转换留到落点。
+        """
+        return hasLocalFiles(mime) or hasImage(mime)
 
     def attachMime(self, mime) -> bool:
         """把 mime 里的文件 / 图片收进附件（与粘贴图片同一处去重）；实际收下了才返回 ``True``。"""

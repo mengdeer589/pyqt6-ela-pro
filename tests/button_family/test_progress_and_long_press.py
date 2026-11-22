@@ -98,11 +98,11 @@ class TestElaLongPressBtn:
 
 
 class TestLongPressStyle:
-    """尺寸 / 变体 / 颜色与 ``ElaButton`` 共用（长按按钮不再只有 30px 一档）。"""
+    """尺寸 / 变体 / 颜色与 ``ElaButton`` 共用（长按按钮不再只有单一一档）。"""
 
     @pytest.mark.parametrize(
         ("size", "height"),
-        [("small", 22), ("middle", 30), ("large", 38)],
+        [("small", 24), ("middle", 32), ("large", 40)],
         ids=["small", "middle", "large"],
     )
     def test_size_presets(self, make, size, height):
@@ -427,8 +427,8 @@ class TestButtonGeometryAlignment:
     """
 
     def test_default_height(self, make):
-        assert make(ElaProgressButton).height() == 30
-        assert make(ElaLongPressBtn).height() == 30
+        assert make(ElaProgressButton).height() == 32
+        assert make(ElaLongPressBtn).height() == 32
 
     def test_long_press_face_height_same_in_both_states(self, make, qapp):
         """进度填充不改可见面高度（用实心变体量：透明底的「面」只有一圈描边）。"""

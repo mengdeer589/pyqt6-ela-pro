@@ -8,8 +8,8 @@ from typing import Callable, Optional
 from .message import ElaChatMention
 from .suggestions import ElaChatSuggestion
 
-_MENTION_RE = re.compile(r"(?:^|\s)@([^\s@]*)$")
-_COMMAND_RE = re.compile(r"(?:^|\s)/([^\s/]*)$")
+_MENTION_RE = re.compile(r"(?<![\w@])@([^\s@]*)$")
+_COMMAND_RE = re.compile(r"(?<![\w/])/([^\s/]*)$")
 _MENTION_TAIL = (
     r"(?![0-9A-Za-z_@"
     r"\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff"
@@ -101,6 +101,11 @@ class _InputCompletionMixin:
             self._set_edit_text(text[:start] + token + text[match.end(1) :])
         else:
             self._set_edit_text(self._join_token(text, token))
+        self._mentions = [
+            entry
+            for entry in self._mentions
+            if entry[0] != item.id and entry[1] != token
+        ]
         self._mentions.append((item.id, token, getattr(item, "kind", "")))
         self.mentionSelected.emit(item.id, item.label)
         self._popup_kind = ""
@@ -113,6 +118,7 @@ class _InputCompletionMixin:
         return text + token
 
     def _set_edit_text(self, text: str) -> None:
+        self._preedit = ""
         self._edit.setPlainText(text)
         cursor = self._edit.textCursor()
         cursor.movePosition(cursor.MoveOperation.End)
@@ -133,7 +139,7 @@ class _InputCompletionMixin:
             bare = token.strip()
             if not bare:
                 continue
-            if re.search(r"(?:^|\s)" + re.escape(bare) + _MENTION_TAIL, text):
+            if re.search(r"(?<![\w@])" + re.escape(bare) + _MENTION_TAIL, text):
                 out.append(mid)
         return out
 
@@ -147,17 +153,22 @@ class _InputCompletionMixin:
         if not text:
             return []
         result = []
+        seen: set = set()
         for entry in self._mentions:
             token = entry[1]
             kind = entry[2] if len(entry) > 2 else ""
             bare = token.strip()
             if not bare:
                 continue
-            pattern = re.compile(r"(?:^|\s)(" + re.escape(bare) + ")" + _MENTION_TAIL)
+            pattern = re.compile(r"(?<![\w@])(" + re.escape(bare) + ")" + _MENTION_TAIL)
             match = pattern.search(text)
             if match is None:
                 continue
             start = match.start(1)
+            key = (start, start + len(bare))
+            if key in seen:
+                continue
+            seen.add(key)
             result.append(
                 ElaChatMention(
                     start=start,

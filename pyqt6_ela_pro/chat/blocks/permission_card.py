@@ -63,8 +63,6 @@ class PermissionCard(_ThemeAwareMixin, ElaScrollPageArea):
     #: 「始终允许」的长按时长（毫秒）。持久授权误触代价高，点一下不够。
     ALWAYS_HOLD_MS = 700
 
-    _REJECT_ICON = ElaIconType.IconName.Ban
-    _OK_ICON = ElaIconType.IconName.CircleCheck
     _QUESTION_ICON = ElaIconType.IconName.Question
 
     def __init__(self, parent: Optional[QWidget] = None) -> None:
@@ -183,7 +181,6 @@ class PermissionCard(_ThemeAwareMixin, ElaScrollPageArea):
         self._question_box.hide()
         layout.addWidget(self._question_box)
         self._option_buttons: list = []  # 当前题的全部候选卡
-        self._custom_edit = None
 
         # ── 批准型的动作区（问答型不用） ───────────────────────────────
         # 三个动作按重要性分档：允许一次 = 实心强调色，始终允许 = 描边，拒绝 = 文字 + 危险色。
@@ -250,7 +247,7 @@ class PermissionCard(_ThemeAwareMixin, ElaScrollPageArea):
         self._feedback_edit.setFixedHeight(30)
         feedback_layout.addWidget(self._feedback_edit, 1)
         self._feedback_send = ElaButton(
-            "回车提交", size="small", parent=self._feedback_row
+            "提交", size="small", parent=self._feedback_row
         )
         safe_connect(
             self._feedback_send,
@@ -412,6 +409,9 @@ class PermissionCard(_ThemeAwareMixin, ElaScrollPageArea):
         self._custom_on.clear()
         self._drafts.clear()
         self._editing = ""
+        self._focus_row = 0
+        self._feedback_row.hide()
+        self._feedback_edit.clear()
 
     def _current_values(self, question) -> list:
         """该题当前的答案列表。
@@ -474,6 +474,8 @@ class PermissionCard(_ThemeAwareMixin, ElaScrollPageArea):
         self._title.setText(title)
         if permission.isQuestion:
             total = len(permission.questions)
+            if total and self._tab >= total:
+                self._tab = total - 1
             self._progress.setText(f"{self._tab + 1} / {total}")
             self._progress.setVisible(total > 1)
         else:
@@ -486,7 +488,7 @@ class PermissionCard(_ThemeAwareMixin, ElaScrollPageArea):
             return
         self._tag.setText("")
         self._tag.hide()
-        resources = [item for item in permission.resources if item]
+        resources = [str(item) for item in permission.resources if item]
         if resources:
             shown = resources[:4]
             text = "\n".join(shown)
@@ -619,6 +621,13 @@ class PermissionCard(_ThemeAwareMixin, ElaScrollPageArea):
         )
         safe_connect(
             row,
+            "editCleared",
+            lambda q=question: self._on_edit_cleared(q),
+            "permission.row_edit_cleared",
+            receiver=row,
+        )
+        safe_connect(
+            row,
             "moveFocus",
             self._move_focus,
             "permission.row_move",
@@ -722,6 +731,16 @@ class PermissionCard(_ThemeAwareMixin, ElaScrollPageArea):
         row = self._custom_row(key)
         if row is not None:
             row.setEditing(False)
+        self._refresh_rows()
+
+    def _on_edit_cleared(self, question) -> None:
+        """用户把自定义答案清空：撤回旧值，空文本不算答案。"""
+        key = question.key
+        self._custom.pop(key, None)
+        self._custom_on[key] = False
+        self._drafts.pop(key, None)
+        if self._editing == key:
+            self._editing = ""
         self._refresh_rows()
 
     def _select_value(self, question, value: str, checked: bool) -> None:
@@ -864,6 +883,8 @@ class PermissionCard(_ThemeAwareMixin, ElaScrollPageArea):
         self._set_tab(self._tab - 1)
 
     def _goto(self, index: int) -> None:
+        if not self._live():
+            return
         if not 0 <= index < len(self._questions()):
             return
         self._set_tab(index)
@@ -881,6 +902,7 @@ class PermissionCard(_ThemeAwareMixin, ElaScrollPageArea):
         self._sync_header(self._permission)
         self._sync_segments()
         self._sync_footer()
+        self._sync_options_enabled()
         if self._option_buttons:
             self._option_buttons[0].setFocus()
 
@@ -911,6 +933,11 @@ class PermissionCard(_ThemeAwareMixin, ElaScrollPageArea):
         )
         for button in (self._dismiss_button, self._back_button, self._next_button):
             button.setEnabled(enabled)
+        self._feedback_send.setEnabled(enabled)
+        self._feedback_edit.setEnabled(enabled)
+        # 进度段也能切题：responding / 落定后必须一起禁用。
+        for segment in self._segments:
+            segment.setEnabled(enabled)
         self._sync_options_enabled()
 
     def _action_buttons(self) -> tuple:
@@ -922,6 +949,10 @@ class PermissionCard(_ThemeAwareMixin, ElaScrollPageArea):
         self._feedback_edit.setFocus()
 
     def _submit_feedback(self) -> None:
+        if self._responding or self._permission is None:
+            return
+        if not self._permission.isPending:
+            return
         text = self._feedback_edit.toPlainText().strip()
         self._feedback_row.hide()
         self._emit_reply(ElaChatPermissionStatusType.Rejected, "", text)

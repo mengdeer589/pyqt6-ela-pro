@@ -80,6 +80,20 @@ class TestClearContextWiring:
         qapp.processEvents()
 
 
+class TestCompactionWiring:
+    def test_compaction_started_uses_current_view_api(self, qapp):
+        worker = ElaChatMockBackend()
+        window = DemoWindow(worker)
+        mid = window.chat.beginAssistantMessage()
+        window._active_message_id = mid
+        window.on_compaction_started("auto")
+        assert window._compaction_part_id
+        window.chat.endAssistantMessage(mid)
+        window.deleteLater()
+        worker.deleteLater()
+        qapp.processEvents()
+
+
 class TestClassifyError:
     """错误类型归一：决定错误卡的「重试」按钮亮不亮。
 
@@ -211,8 +225,8 @@ class TestErrorAndStatusWiring:
         window.chat.chatView().setMessageError(mid, "超时", "timeout")
 
         sent = []
-        window.start_turn = (
-            lambda prompt, attachments=None, regenerate=False: sent.append(prompt)
+        window.start_turn = lambda prompt, attachments=None, regenerate=False: (
+            sent.append(prompt)
         )
         window.chat.retryRequested.emit(mid)
 
@@ -237,10 +251,8 @@ class TestErrorAndStatusWiring:
         window.binder.beginTurn()
 
         sent = []
-        window.start_turn = (
-            lambda prompt, attachments=None, regenerate=False: sent.append(
-                (prompt, [a.name for a in (attachments or ())], regenerate)
-            )
+        window.start_turn = lambda prompt, attachments=None, regenerate=False: (
+            sent.append((prompt, [a.name for a in (attachments or ())], regenerate))
         )
         window.chat.regenerateRequested.emit(mid)
 

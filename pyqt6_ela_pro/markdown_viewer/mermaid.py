@@ -33,6 +33,9 @@ _MERMAID_PRIORITY_INTERVAL_MS = 80
 
 _MERMAID_IMAGE_MARGIN = 24
 
+#: 低于此宽度且不可见时不提交渲染：宿主还没布局，先渲染只会缓存低清图
+_MERMAID_MIN_LAYOUT_WIDTH = 160
+
 
 class _MarkdownMermaidMixin:
     def setMermaidRenderer(self, renderer=None) -> None:
@@ -212,7 +215,12 @@ class _MarkdownMermaidMixin:
 
     def _mermaid_view_max_width(self) -> float:
         """当前阅读列可用的图片最大宽度（像素）。"""
-        return max(self._content_text_width() - _MERMAID_IMAGE_MARGIN, 120)
+        width = self._content_text_width()
+        if width < _MERMAID_MIN_LAYOUT_WIDTH:
+            # 宿主还没布局：viewport 只有占位宽度，给足光栅化预算，
+            # 等真实宽度出来再由 _apply_images 缩小 / 放大
+            width = max(self.width() - _MERMAID_IMAGE_MARGIN, 800)
+        return max(width - _MERMAID_IMAGE_MARGIN, 120)
 
     def _mermaid_anchor_positions(self) -> dict:
         """一次遍历收集 ``mermaid-pending-`` 锚点的视口 y 坐标。"""
@@ -333,8 +341,14 @@ class _MarkdownMermaidMixin:
         resource_doc.addResource(
             QTextDocument.ResourceType.ImageResource, QUrl(url), image
         )
-        width = image.width() / 2.0
-        height = image.height() / 2.0
+        dpr = image.devicePixelRatio()
+        if dpr <= 0:
+            dpr = 1.0
+        if dpr == 1.0 and self._mermaid_override is not None:
+            # 自定义渲染器沿用旧契约：返回图按 2x 提供
+            dpr = 2.0
+        width = image.width() / dpr
+        height = image.height() / dpr
         max_width = self._mermaid_view_max_width()
         if width > max_width > 0:
             height = height * max_width / width

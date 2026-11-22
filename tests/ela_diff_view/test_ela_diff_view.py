@@ -195,10 +195,10 @@ class TestDiffView:
                     view._del_fg.hue()
                     == statusColor(mode, ElaStatusRoleType.Error).hue()
                 )
-                from pyqt6_ela_pro._colors import _contrast_ratio
+                from pyqt6_ela_pro._colors import contrastRatio
 
                 for color in (view._add_fg, view._del_fg):
-                    assert _contrast_ratio(color, view._gutter_bg) >= 4.5
+                    assert contrastRatio(color, view._gutter_bg) >= 4.5
         finally:
             eTheme.setThemeMode(previous)
 

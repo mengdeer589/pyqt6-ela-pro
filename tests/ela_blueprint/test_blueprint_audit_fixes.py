@@ -23,6 +23,8 @@ from __future__ import annotations
 
 import pytest
 from PyQt6.QtCore import QCoreApplication, QEvent, QPoint, QPointF, Qt
+
+from pyqt6_ela_pro._colors import contrastRatio
 from PyQt6.QtGui import QColor, QFocusEvent, QKeyEvent, QMouseEvent
 from PyQt6.QtWidgets import QApplication, QPushButton, QWidget
 from PyQt6ElaWidgetTools import ElaThemeType, eTheme
@@ -367,7 +369,7 @@ class TestTitleTextContrast:
         try:
             accent = QColor(str(_nw.T(f"color.{token}")))
             fg = _nw._text_on(accent)
-            ratio = _nw._contrast_ratio(accent, fg)
+            ratio = contrastRatio(accent, fg)
             assert ratio >= 4.5, (
                 f"{mode} / {token}: {fg.name()} on {accent.name()} 只有 {ratio:.2f}:1"
             )

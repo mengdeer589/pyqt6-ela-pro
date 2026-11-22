@@ -9,6 +9,7 @@ from PyQt6.QtCore import pyqtSignal
 from PyQt6ElaWidgetTools import ElaIconType, ElaMenu
 
 from .._internal import is_deleted, safe_connect
+from .._styles import coerceElaIcon
 from ..ela_dropdown_button import ElaDropDownButton
 from ..tooltip_targets import install_menu_tooltips, set_action_tooltip
 from ..tooltips import ElaToolTipPositionType, remove_tooltip, set_tooltip
@@ -57,12 +58,17 @@ class ElaChatSelector(ElaDropDownButton):
             else ElaChatSelectorItem(id=str(item), label=str(item))
             for item in (items or [])
         ]
+        previous = self._current
         if current is not None:
             self._current = str(current or "")
-        if not self._current and self._items:
-            self._current = self._items[0].id
+        valid = {item.id for item in self._items}
+        changed = self._current not in valid
+        if changed:
+            self._current = self._items[0].id if self._items else ""
         self._rebuild_menu()
         self._sync_label()
+        if changed and (previous or current is not None):
+            self.selectionChanged.emit(self._current)
 
     def items(self) -> list:
         """获取选项快照。"""
@@ -105,7 +111,7 @@ class ElaChatSelector(ElaDropDownButton):
         self._actions = {}
         for item in self._items:
             if item.icon is not None and item.icon != ElaIconType.IconName.None_:
-                action = menu.addElaIconAction(item.icon, item.label)
+                action = menu.addElaIconAction(coerceElaIcon(item.icon), item.label)
             else:
                 action = menu.addAction(item.label)
             action.setCheckable(True)

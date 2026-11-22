@@ -22,8 +22,8 @@ class TestElaTagMultiBoxInit:
         assert box._title_text == ""
         assert box._title_font_size == 13
         assert box._expand_mark_width == 0.0
-        # 与上游 ElaComboBox V3.0（35→30）的触发框同高。
-        assert box.height() == 30
+        # 与上游 ElaComboBox 的触发框同高（控件统一 32）。
+        assert box.height() == 32
         assert isinstance(box._mark_animation, QPropertyAnimation)
         assert box._mark_animation.duration() == Duration.Normal
         assert box.maxVisibleItems() == 10

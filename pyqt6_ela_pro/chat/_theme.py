@@ -9,7 +9,19 @@ from PyQt6ElaWidgetTools import ElaThemeType, eTheme
 from .._internal import system_cjk_font_family
 from .._theme import blend, surfaceRaised
 
-__all__ = ["MONO_FONT_STACK", "blend", "mono_font"]
+__all__ = [
+    "MONO_FONT_STACK",
+    "accent_color",
+    "base_color",
+    "blend",
+    "border_color",
+    "card_border_color",
+    "card_color",
+    "mono_font",
+    "muted_color",
+    "surface_color",
+    "text_color",
+]
 
 #: 等宽字体栈（非中文系统默认；中文系统收成单族 CJK 字体，见 ``mono_font``）
 MONO_FONT_STACK = ("Consolas", "Cascadia Mono", "Courier New")
@@ -69,10 +81,3 @@ def card_color(mode) -> QColor:
 def card_border_color(mode) -> QColor:
     """输入卡片边框色（``BasicBorder`` 令牌，原生输入框同款）。"""
     return eTheme.getThemeColor(mode, ElaThemeType.ThemeColor.BasicBorder)
-
-
-def role_accent(role: str, mode) -> QColor:
-    """按消息角色派生强调色（用户=主色，助手=中性）。"""
-    if role == "user":
-        return blend(base_color(mode), accent_color(mode), 0.16)
-    return blend(base_color(mode), text_color(mode), 0.10)

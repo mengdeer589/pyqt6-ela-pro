@@ -35,7 +35,20 @@ class TestGuardFunction:
         assert (
             guard_unpaired_html('[x](<foo> "title") tail') == '[x](<foo> "title") tail'
         )
-        assert guard_unpaired_html("<stub tail") == "<stub tail"
+        assert guard_unpaired_html("<stub tail") == "&lt;stub tail"
+
+    def test_incomplete_tags_are_escaped(self):
+        assert guard_unpaired_html('<div class="x"') == '&lt;div class="x"'
+        assert guard_unpaired_html("<details") == "&lt;details"
+        assert guard_unpaired_html("<table") == "&lt;table"
+        assert guard_unpaired_html("<script") == "&lt;script"
+        assert guard_unpaired_html("<style") == "&lt;style"
+
+    def test_incomplete_comment_like_blocks_are_escaped(self):
+        assert guard_unpaired_html("<!-- foo") == "&lt;!-- foo"
+        assert guard_unpaired_html("<![CDATA[") == "&lt;![CDATA["
+        assert guard_unpaired_html("<?xml") == "&lt;?xml"
+        assert guard_unpaired_html("<!DOCTYPE") == "&lt;!DOCTYPE"
 
     def test_indented_code_lines_are_kept(self):
         assert guard_unpaired_html("    <div>x") == "    <div>x"
@@ -112,6 +125,22 @@ class TestViewerIntegration:
         assert "<foo>" not in text
         assert "example.com" in text
         assert "tail" in text
+
+    def test_incomplete_block_tag_keeps_following_text(self, qapp, make):
+        viewer = make(ElaMarkdownViewer)
+        viewer.setMarkdown('<div class="x"\n*hi*')
+        text = viewer.toPlainText()
+        assert '<div class="x"' in text
+        assert "hi" in text
+
+    def test_streaming_incomplete_tag_keeps_text(self, qapp, make):
+        viewer = make(ElaMarkdownViewer)
+        viewer.beginStream()
+        viewer.appendMarkdown("<details")
+        qapp.processEvents()
+        assert "<details" in viewer.toPlainText()
+        viewer.endStream()
+        assert "<details" in viewer.toPlainText()
 
 
 class TestLargeDocument:

@@ -38,14 +38,18 @@ class T_IconDelegate(QStyledItemDelegate):
         iconFont = QFont("ElaAwesome")
         iconFont.setPixelSize(22)
         painter.setFont(iconFont)
-        painter.setPen(ElaThemeColor(self._themeMode, ElaThemeType.ThemeColor.BasicText))
+        painter.setPen(
+            ElaThemeColor(self._themeMode, ElaThemeType.ThemeColor.BasicText)
+        )
         painter.drawText(
             option.rect.x() + option.rect.width() // 2 - 11,
             option.rect.y() + option.rect.height() // 2 - 11,
             iconValue,
         )
 
-        painter.setPen(ElaThemeColor(self._themeMode, ElaThemeType.ThemeColor.BasicText))
+        painter.setPen(
+            ElaThemeColor(self._themeMode, ElaThemeType.ThemeColor.BasicText)
+        )
         titleFont = painter.font()
         titleFont.setPixelSize(13)
         painter.setFont(titleFont)

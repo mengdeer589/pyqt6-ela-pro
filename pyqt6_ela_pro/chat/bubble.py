@@ -24,7 +24,6 @@ from PyQt6.QtGui import (
 )
 from PyQt6.QtWidgets import (
     QApplication,
-    QGraphicsOpacityEffect,
     QHBoxLayout,
     QSizePolicy,
     QVBoxLayout,
@@ -68,6 +67,7 @@ from .message import (
     ElaChatPart,
     ElaChatPartKindType,
     ElaChatPermission,
+    ElaChatMention,
     ElaChatReasoningStyleType,
     ElaChatRoleType,
     ElaChatStatusType,
@@ -196,17 +196,22 @@ class _BubbleBody(QWidget):
 
     def paintEvent(self, _event) -> None:  # noqa: N802 (Qt 命名)
         painter = QPainter(self)
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-        rect = QRectF(self.rect().adjusted(0, 0, -1, -1))
-        path = self._rounded_path(rect)
-        painter.fillPath(path, self._bg)
-        if self._border.alpha() > 0:
-            pen = QPen(self._border)
-            pen.setWidthF(1.0)
-            painter.setPen(pen)
-            painter.setBrush(Qt.BrushStyle.NoBrush)
-            painter.drawPath(path)
-        painter.end()
+        try:
+            painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+            rect = QRectF(self.rect().adjusted(0, 0, -1, -1))
+            path = self._rounded_path(rect)
+            painter.fillPath(path, self._bg)
+            if self._border.alpha() > 0:
+                pen = QPen(self._border)
+                pen.setWidthF(1.0)
+                painter.setPen(pen)
+                painter.setBrush(Qt.BrushStyle.NoBrush)
+                painter.drawPath(path)
+        except Exception:
+            # 自绘异常不得穿出 Qt 回调（0xC0000409）
+            pass
+        finally:
+            painter.end()
 
 
 class ElaChatBubble(
@@ -250,6 +255,8 @@ class ElaChatBubble(
     toolToggled = pyqtSignal()
     #: 新建了可滚动的正文 / 内联思考查看器（view 据此安装嵌套滚动过滤器）
     viewerCreated = pyqtSignal(QWidget)
+    #: 分段控件即将整批销毁（view 据此回收对应的嵌套滚动 guard）
+    partsReset = pyqtSignal()
 
     def __init__(
         self,
@@ -338,6 +345,8 @@ class ElaChatBubble(
         self._current_tool_panel: Optional[ToolGroupPanel] = None
         self._panel_calls: dict = {}
         self._tool_cards: dict = {}
+        #: 子调用 id -> 宿主 SubagentCard（子卡尚未物化时也能继续挂孙调用）
+        self._subagent_parents: dict = {}
         #: 工具调用 id -> 开始时间（epoch 秒；回合结束 / 清空时回收）
         self._tool_started: dict = {}
         self._group_card = None
@@ -523,6 +532,7 @@ class ElaChatBubble(
             self._stats_layout.setContentsMargins(0, 0, 0, 0)
             self._stats_layout.setSpacing(4)
             self._disclaimer = ColorText(self._disclaimer_text, self)
+            self._disclaimer.setTextFormat(Qt.TextFormat.PlainText)
             self._disclaimer.setTextPixelSize(_DISCLAIMER_PIXEL_SIZE)
             self._disclaimer.setWordWrap(False)
             self._disclaimer.setVisible(self._disclaimer_visible)
@@ -548,8 +558,6 @@ class ElaChatBubble(
         self._actions.actionTriggered.connect(self.actionTriggered)
         # 不挂 QGraphicsOpacityEffect：即使 opacity=0 且控件隐藏，效果器仍会让
         # 每个滚动帧走一次离屏渲染；显隐交给 setVisible + RetainSizeWhenHidden
-        self._actions_effect = QGraphicsOpacityEffect(self._actions)
-        self._actions_effect.setOpacity(0.0 if self._actions_hover_reveal else 1.0)
         # 隐藏时仍占位（否则悬停出现时消息区整体跳动）；必须用 RetainSizeWhenHidden
         policy = self._actions.sizePolicy()
         policy.setRetainSizeWhenHidden(True)
@@ -590,9 +598,7 @@ class ElaChatBubble(
     def _set_actions_revealed(self, on: bool) -> None:
         """显示 / 隐藏操作栏（保留占位，消息区不跳动）。"""
         on = bool(on) or not self._actions_hover_reveal
-        self._actions_effect.setOpacity(1.0 if on else 0.0)
         self._actions.setMouseTransparent(not on)
-        # 隐藏时连绘制也停掉：QGraphicsOpacityEffect(0) 仍会走离屏渲染。
         self._actions.setVisible(on)
 
     def enterEvent(self, event) -> None:  # noqa: N802 (Qt 命名)
@@ -716,12 +722,27 @@ class ElaChatBubble(
         text = self._identity_text()
         if self._role == ElaChatRoleType.User:
             self._header.setContext(text)
+        elif self._role == ElaChatRoleType.System:
+            self._meta.hide()
         else:
             self._meta.setContext(text)
+            self._meta.show()
+
+    def _sync_meta_visibility(self) -> None:
+        """system 气泡没有 meta 布局槽：任何字段写入后都要重新藏起来。"""
+        if self._role == ElaChatRoleType.System:
+            self._meta.hide()
 
     def setMentions(self, mentions) -> None:
         """设置用户文本里的 @ 引用区间并立即重绘高亮。"""
-        self._mentions = tuple(mentions or ())
+        self._mentions = tuple(
+            item
+            if isinstance(item, ElaChatMention)
+            else ElaChatMention.fromDict(item)
+            for item in (mentions or ())
+            if item is not None
+        )
+        self._mentions = tuple(item for item in self._mentions if item is not None)
         if self._role == ElaChatRoleType.User:
             self._render_user_text()
             # RichText 标签是 HTML（含 span），气泡宽度必须按原文重算，否则会撑宽
@@ -736,11 +757,7 @@ class ElaChatBubble(
         if self._label is None or self._role != ElaChatRoleType.User:
             return
         text = self._user_text
-        spans = [
-            item
-            for item in self._mentions
-            if getattr(item, "isValid", bool(item.end > item.start))
-        ]
+        spans = [item for item in self._mentions if item.isValid]
         if not spans:
             self._label.setTextFormat(Qt.TextFormat.PlainText)
             self._label.setText(text)
@@ -1137,6 +1154,8 @@ class ElaChatBubble(
 
         工具面板必须一起清：只清 ``_parts`` 会让旧卡片留在界面上。
         """
+        self.partsReset.emit()
+        self._changes_row_last_key = None
         self._current_text_id = None
         self._current_reasoning_id = None
         self._current_stats_id = None
@@ -1164,6 +1183,7 @@ class ElaChatBubble(
         self._parts = []
         self._part_widgets = {}
         self._tool_cards = {}
+        self._subagent_parents = {}
         self._tool_started.clear()
         self._panel_calls = {}
         self._panel_steps = {}
@@ -1291,6 +1311,8 @@ class ElaChatBubble(
         self.errorCard().setMessage(message, errorType)
         if message:
             self.setStatus(ElaChatStatusType.Error)
+        elif self._status == ElaChatStatusType.Error:
+            self.setStatus(ElaChatStatusType.Stopped)
 
     def error(self) -> str:
         """获取错误文本。"""

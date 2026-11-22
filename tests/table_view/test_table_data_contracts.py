@@ -114,6 +114,42 @@ class TestDataShapeValidation:
         assert _column(table, 0) == ["1"]
 
 
+class TestRowHeaderVisibility:
+    """``verticalHeader()`` 是 QHeaderView，不能用 ``if vh`` 判存在。"""
+
+    def test_hidden_on_construction(self, make):
+        table = make(ElaDataTable)
+        assert table.verticalHeader().isHidden()
+
+    def test_hidden_after_first_sync_fill(self, make):
+        table = make(ElaDataTable)
+        table.setTableData([["h"]] + [[f"r{i}"] for i in range(5)])
+        assert table.verticalHeader().isHidden()
+
+    def test_hidden_after_second_sync_fill(self, make):
+        table = make(ElaDataTable)
+        rows = [["h"]] + [[f"r{i}"] for i in range(5)]
+        table.setTableData(rows)
+        table.setTableData(rows)
+        assert table.verticalHeader().isHidden()
+
+    def test_show_row_index_then_hide_again(self, make):
+        table = make(ElaDataTable)
+        table.setTableData([["h"], ["r"]], show_row_index=True)
+        assert not table.verticalHeader().isHidden()
+        assert table.model().verticalHeaderItem(0).text() == "1"
+        table.setTableData([["h"], ["r"]])
+        assert table.verticalHeader().isHidden()
+
+    def test_async_default_hides_immediately_and_after_finish(self, make, qapp):
+        table = make(ElaDataTable)
+        table.setTableData([["h"], ["r"]], show_row_index=True)
+        table.setTableDataAsync([["h"], ["r"]], show_row_index=False)
+        assert table.verticalHeader().isHidden()
+        _settle(qapp)
+        assert table.verticalHeader().isHidden()
+
+
 class TestColumnTypeSampling:
     """F22 回归：列类型采样只数**非空**单元格（空值不占名额）。
 

@@ -771,11 +771,11 @@ class TestApproveActions:
         assert reject.isDanger(), "拒绝必须走危险色，否则和「允许」长得一样"
 
     def test_three_buttons_share_small_size(self, qapp, make):
-        """三键必须同高（22px）：长按按钮以前只有 30px 一档，会突出一截。"""
+        """三键必须同高（24px）：长按按钮以前只有单一一档，会突出一截。"""
         _chat, _mid, card = self._approve_card(make)
         allow, always, reject = card._action_buttons()
         assert {b.buttonSize() for b in (allow, always, reject)} == {"small"}
-        assert {b.height() for b in (allow, always, reject)} == {22}
+        assert {b.height() for b in (allow, always, reject)} == {24}
 
     def test_always_button_needs_hold(self, qapp, make):
         """短按不通过（只连 ``longPressed``），避免误发持久授权。"""

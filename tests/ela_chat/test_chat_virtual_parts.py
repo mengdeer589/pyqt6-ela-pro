@@ -240,7 +240,7 @@ class TestVirtualList:
         view.importSession(_bundle(300, steps=1))
         qapp.processEvents()
 
-        view.materializeMessage(1)
+        view.materializeMessage(1, reveal=True)
         bubble = view.bubble(1)
         assert bubble is not None
         assert bubble.isVisible() is True
@@ -265,6 +265,54 @@ class TestVirtualList:
         view.setVirtualListEnabled(False)
         assert view._virtual_list_mode is False
         assert all(view.bubble(message.id) is not None for message in view.messages())
+
+    def test_expanded_bubble_is_parked_not_destroyed(self, qapp, make):
+        view = make(ElaChatView)
+        view.resize(640, 480)
+        view.show()
+        qapp.processEvents()
+        view.importSession(_bundle(300, steps=1))
+        qapp.processEvents()
+        view.materializeMessage(150, reveal=True)
+        bubble = view.bubble(150)
+        assert bubble is not None
+        card = next(iter(bubble._tool_cards.values()))
+        card.setOpened(True)
+        assert bubble.hasExpandedSections() is True
+
+        view._dematerialize_virtual_bubble(150)
+        assert view.bubble(150) is bubble
+        assert bubble.isHidden() is True
+        assert 150 not in view._virtual_bubble_ids
+
+        view._materialize_virtual_bubble(150)
+        assert bubble.isHidden() is False
+        assert 150 in view._virtual_bubble_ids
+
+    def test_estimate_uses_content_width(self, qapp, make):
+        from pyqt6_ela_pro.chat import ElaChatPart
+        from pyqt6_ela_pro.chat.timeline import estimate_parts_height
+
+        part = ElaChatPart(id="t", kind=ElaChatPartKindType.Text, text="长文本 " * 400)
+        wide = estimate_parts_height((part,), 900)
+        narrow = estimate_parts_height((part,), 420)
+        assert narrow > wide
+
+    def test_materialize_does_not_change_scroll(self, qapp, make):
+        view = make(ElaChatView)
+        view.resize(640, 480)
+        view.show()
+        qapp.processEvents()
+        view.importSession(_bundle(300, steps=1))
+        qapp.processEvents()
+        bar = view._scroll.verticalScrollBar()
+        bar.setValue(bar.maximum())
+        qapp.processEvents()
+        before = bar.value()
+        stick = view._stick
+        view.materializeMessage(1)
+        assert bar.value() == before
+        assert view._stick is stick
 
     def test_materialized_window_stays_contiguous(self, qapp, make):
         """物化分帧后窗口仍是**连续**切片：spacer 列表没有逐条占位，留洞会错位。"""
@@ -409,7 +457,7 @@ class TestVirtualListNewMessage:
         qapp.processEvents()
         view.importSession(_bundle(300, steps=1))
         qapp.processEvents()
-        view.materializeMessage(300)
+        view.materializeMessage(300, reveal=True)
         previous = view.bubble(300)
         assert previous is not None
 

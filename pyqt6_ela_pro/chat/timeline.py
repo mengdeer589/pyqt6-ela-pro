@@ -43,7 +43,18 @@ def estimate_parts_height(parts, width: int, stats_mode: str = "footer") -> int:
     stats_height = 24 if stats_mode == "steps" else 0
     total = 0
     last_step = 0
-    for part in parts or ():
+    items = list(parts or ())
+    steps = sorted({max(1, int(getattr(part, "step", 1) or 1)) for part in items})
+    windowed = len(steps) > STEP_MATERIALIZE_LIMIT
+    allowed = set(steps[-STEP_WINDOW_TAIL:]) if windowed else None
+    if windowed:
+        total += 28
+    for part in items:
+        if (
+            allowed is not None
+            and max(1, int(getattr(part, "step", 1) or 1)) not in allowed
+        ):
+            continue
         step = max(1, int(getattr(part, "step", 1) or 1))
         if step != last_step:
             total += 28
@@ -121,8 +132,12 @@ class ChatPartTimeline:
         if widget.parentWidget() is self._bubble._stats_host:
             # 已停靠底部行的整轮汇总徽标不参与重排，否则会被拽回时间线。
             return
-        self._bubble._parts_layout.removeWidget(widget)
-        self._bubble._parts_layout.addWidget(widget)
+        layout = self._bubble._parts_layout
+        last = layout.itemAt(layout.count() - 1) if layout.count() else None
+        if last is not None and last.widget() is widget:
+            return
+        layout.removeWidget(widget)
+        layout.addWidget(widget)
 
     def _replace_part(self, partId: str, part: ElaChatPart) -> None:
         for index, item in enumerate(self._bubble._parts):
@@ -142,6 +157,7 @@ class ChatPartTimeline:
             self._bubble._docked_stats = None
         seen = set()
         for part in removed:
+            self._bubble._disclosure.pop(part.id, None)
             self._bubble._discard_part_state(part.id)
             self._bubble._suspended_viewers.pop(part.id, None)
             widget = self._bubble._part_widgets.pop(part.id, None)
@@ -164,6 +180,7 @@ class ChatPartTimeline:
             and self._bubble._docked_stats[0] == partId
         ):
             self._bubble._docked_stats = None
+        self._bubble._disclosure.pop(partId, None)
         self._bubble._discard_part_state(partId)
         self._bubble._suspended_viewers.pop(partId, None)
         widget = self._bubble._part_widgets.pop(partId, None)
@@ -179,12 +196,9 @@ class ChatPartTimeline:
         )
 
     def _last_text_part_id(self) -> Optional[str]:
-        """最后一个正文段的 id（无则返回 ``None``）。"""
+        """最后一个正文段的 id（无则返回 ``None``）。不要求已物化。"""
         for part in reversed(self._bubble._parts):
-            if (
-                part.kind == ElaChatPartKindType.Text
-                and part.id in self._bubble._part_widgets
-            ):
+            if part.kind == ElaChatPartKindType.Text:
                 return part.id
         return None
 
@@ -280,6 +294,7 @@ class ChatPartTimeline:
         if self._bubble._footer is not None:
             self._bubble._sync_footer()
         self._bubble._sync_changes_row()
+        self._bubble.applyTimelineDetail()
         self._bubble.updateGeometry()
         if self._bubble.layout() is not None:
             self._bubble.layout().activate()
@@ -362,6 +377,10 @@ class ChatPartTimeline:
         # setParts 会把 _parts 覆盖成窗口分段；恢复完整时间线，让导出 / 搜索看到全量。
         self._bubble._parts = list(parts)
         self._bubble._parts_windowed = True
+        self._bubble._apply_stats_mode()
+        self._bubble._sync_stats_duration()
+        self._bubble._sync_changes_row()
+        self._bubble.applyTimelineDetail()
         button = ElaButton(
             f"展开全部 {len(groups)} 个步骤（当前显示末尾 {STEP_WINDOW_TAIL} 步）",
             parent=self._bubble._parts_container or self._bubble._content or self,
@@ -440,6 +459,8 @@ class ChatPartTimeline:
         elif kind == ElaChatPartKindType.Tool:
             call = part.tool_call
             if call is None:
+                # 已知 kind 但缺 payload：保留数据（导出 / 重存不丢段），只是不建卡
+                self._bubble._append_part(part, None)
                 return
             callId = self._bubble.addToolCall(
                 call.name,
@@ -476,6 +497,8 @@ class ChatPartTimeline:
         elif kind == ElaChatPartKindType.Stats:
             if part.stats is not None:
                 self._bubble.setStepStats(part.stats, part.id or None)
+            else:
+                self._bubble._append_part(part, None)
         elif kind == ElaChatPartKindType.Synthetic:
             self._bubble.addSteerNotice(part.text, part.id or None)
         elif kind == ElaChatPartKindType.Compaction:
@@ -493,6 +516,8 @@ class ChatPartTimeline:
             request = part.permission
             if request is not None:
                 self._bubble._restore_permission(part.id, request)
+            else:
+                self._bubble._append_part(part, None)
         elif kind == ElaChatPartKindType.Plan:
             if part.plan is not None:
                 widget = PlanPanel(
@@ -501,6 +526,8 @@ class ChatPartTimeline:
                 )
                 self._bubble._append_part(part, widget)
                 self._bubble._apply_part_visibility(part.id)
+            else:
+                self._bubble._append_part(part, None)
 
     def _restore_compaction(self, part) -> None:
         """重放压缩分段（恢复路径：直接建卡并灌摘要，不走流式接口）。"""

@@ -339,10 +339,14 @@ def _print_report(env: dict, fonts: dict, results: list[dict]) -> None:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="聊天组件性能基线")
-    parser.add_argument("--messages", type=int, default=100, help="构造 / 交互场景的消息数")
+    parser.add_argument(
+        "--messages", type=int, default=100, help="构造 / 交互场景的消息数"
+    )
     parser.add_argument("--rich", type=int, default=20, help="富消息条数")
     parser.add_argument("--chunks", type=int, default=400, help="流式分片数")
-    parser.add_argument("--offscreen", action="store_true", help="用 offscreen 平台（无实屏绘制）")
+    parser.add_argument(
+        "--offscreen", action="store_true", help="用 offscreen 平台（无实屏绘制）"
+    )
     parser.add_argument("--json", default="", help="把结果额外写到该 JSON 文件")
     args = parser.parse_args()
 

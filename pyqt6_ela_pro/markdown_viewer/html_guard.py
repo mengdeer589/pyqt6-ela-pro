@@ -5,7 +5,7 @@ from __future__ import annotations
 import re
 from typing import NamedTuple
 
-_TAG_START_RE = re.compile(r"<(/?)([A-Za-z][A-Za-z0-9-]*)(?=[\s/>])")
+_TAG_START_RE = re.compile(r"<(/?)([A-Za-z][A-Za-z0-9-]*)(?=[\s/>]|$)")
 
 #: 分段扫描块大小（只控制单次循环跨度，不是标签长度上限）。
 _TAG_SCAN_CHUNK = 4096
@@ -118,8 +118,14 @@ def _is_link_destination(text: str, start: int, end: int) -> bool:
     return cursor < len(text) and text[cursor] == ")"
 
 
-def _scan_tags(text: str) -> list[_Tag]:
+def _scan_tags(text: str) -> tuple[list[_Tag], list[int]]:
+    """扫描完整标签与不完整标签的 ``<`` 起点。
+
+    不完整标签（``<div class="x"`` / ``<details`` / 未闭合注释）同样会让
+    Qt 导入器吞掉后续正文，必须和未配对标签一起转义。
+    """
     tags: list[_Tag] = []
+    incomplete: list[int] = []
     cursor = 0
     length = len(text)
     while cursor < length:
@@ -128,7 +134,35 @@ def _scan_tags(text: str) -> list[_Tag]:
             break
         if text.startswith("<!--", start):
             close = text.find("-->", start + 4)
-            cursor = length if close < 0 else close + 3
+            if close < 0:
+                if not _is_escaped(text, start) and not _is_indented_code(text, start):
+                    incomplete.append(start)
+                break
+            cursor = close + 3
+            continue
+        if text.startswith("<![CDATA[", start):
+            close = text.find("]]>", start + 9)
+            if close < 0:
+                if not _is_escaped(text, start) and not _is_indented_code(text, start):
+                    incomplete.append(start)
+                break
+            cursor = close + 3
+            continue
+        if text.startswith("<?", start):
+            close = text.find("?>", start + 2)
+            if close < 0:
+                if not _is_escaped(text, start) and not _is_indented_code(text, start):
+                    incomplete.append(start)
+                break
+            cursor = close + 2
+            continue
+        if text.startswith("<!", start):
+            end = _find_tag_end(text, start + 2)
+            if end < 0:
+                if not _is_escaped(text, start) and not _is_indented_code(text, start):
+                    incomplete.append(start)
+                break
+            cursor = end + 1
             continue
         match = _TAG_START_RE.match(text, start)
         if match is None:
@@ -136,6 +170,8 @@ def _scan_tags(text: str) -> list[_Tag]:
             continue
         end = _find_tag_end(text, match.end(2))
         if end < 0:
+            if not _is_escaped(text, start) and not _is_indented_code(text, start):
+                incomplete.append(start)
             cursor = start + 1
             continue
         cursor = end + 1
@@ -157,7 +193,7 @@ def _scan_tags(text: str) -> list[_Tag]:
                 self_closing=text[name_end] == "/",
             )
         )
-    return tags
+    return tags, incomplete
 
 
 def _paired_indexes(tags: list[_Tag]) -> set[int]:
@@ -176,15 +212,14 @@ def _paired_indexes(tags: list[_Tag]) -> set[int]:
 
 
 def guard_unpaired_html(text: str) -> str:
-    """转义未配对的开 / 闭标签；void 开标签补成自闭合，避免 Qt 吞掉后续正文。"""
-    if "<" not in text or ">" not in text:
-        # 没有闭合的 `>`：Qt 不会把任何 `<字母...` 当标签，按原文保留
+    """转义未配对 / 不完整的标签；void 开标签补成自闭合，避免 Qt 吞掉后续正文。"""
+    if "<" not in text:
         return text
-    tags = _scan_tags(text)
-    if not tags:
-        return text
+    tags, incomplete = _scan_tags(text)
     paired = _paired_indexes(tags)
-    edits: list[tuple[int, int, str]] = []
+    edits: list[tuple[int, int, str]] = [
+        (start, start + 1, "&lt;") for start in incomplete
+    ]
     for index, tag in enumerate(tags):
         if index in paired or tag.self_closing:
             continue
@@ -196,6 +231,7 @@ def guard_unpaired_html(text: str) -> str:
             edits.append((tag.start, tag.start + 1, "&lt;"))
     if not edits:
         return text
+    edits.sort()
     # _scan_tags 按文档顺序产出、标签互不重叠，edits 天然升序
     parts: list[str] = []
     last = 0

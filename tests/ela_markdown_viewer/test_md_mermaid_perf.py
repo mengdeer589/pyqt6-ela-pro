@@ -9,7 +9,10 @@ import threading
 import time
 from unittest.mock import patch
 
+import pytest
+
 from _qthelpers import wait_until as _wait_until
+from PyQt6.QtCore import QUrl
 from PyQt6.QtGui import QColor, QImage
 
 import pyqt6_ela_pro.mermaid_support as support
@@ -20,6 +23,7 @@ from pyqt6_ela_pro.ela_markdown_viewer import (
 from pyqt6_ela_pro.mermaid_support import (
     ElaMermaidRenderer,
     adaptive_zoom,
+    mermaidx_available,
     svg_size,
 )
 
@@ -189,6 +193,36 @@ class _FakeRenderer:
 
     def request(self, code, theme, callback=None):
         self.requested.append((code, theme))
+
+
+class TestInitialLayoutWidth:
+    def test_prelayout_width_has_render_budget(self):
+        viewer = ElaMarkdownViewer()
+        viewer.resize(1000, 600)
+        assert viewer._mermaid_view_max_width() >= 700
+        viewer.deleteLater()
+
+    @pytest.mark.slow
+    def test_builtin_mermaid_prelayout_keeps_natural_size(self, qapp):
+        if not mermaidx_available():
+            pytest.skip("mermaidx 未安装")
+        code = """flowchart LR
+    A[提出需求] --> B{可行?}
+    B -->|是| C[实现并测试]
+    B -->|否| D[调整方案]
+    D --> B
+    C --> E[交付]"""
+        viewer = ElaMarkdownViewer()
+        viewer.resize(900, 600)
+        viewer.setMarkdown(f"```mermaid\n{code}\n```\n")
+        assert _wait_until(qapp, lambda: bool(_images(viewer)), timeout_ms=15000)
+
+        image_format = _images(viewer)[0].charFormat().toImageFormat()
+        assert image_format.width() > 300
+        image = viewer.document().resource(2, QUrl(image_format.name()))
+        assert image is not None
+        assert image.devicePixelRatio() > 1
+        viewer.deleteLater()
 
 
 class TestViewportPriority:

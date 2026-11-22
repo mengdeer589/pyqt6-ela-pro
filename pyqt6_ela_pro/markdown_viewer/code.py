@@ -383,6 +383,12 @@ class _MarkdownCodeMixin:
         不自己开关编辑块：调用方（``_insert_fenced_code`` / ``_embed_mermaid``）
         """
         document = cursor.document()
+        container_block = cursor.block()
+        container_format = container_block.blockFormat()
+        if container_format.indent():
+            container_margin = container_format.indent() * document.indentWidth()
+        else:
+            container_margin = max(0.0, container_format.leftMargin())
         cursor.removeSelectedText()
 
         lines = code_text.split("\n")
@@ -396,9 +402,9 @@ class _MarkdownCodeMixin:
         visible_code = (
             "\n".join(lines[: self._code_collapse_lines]) if collapsed else code_text
         )
-        table = cursor.insertTable(
-            1, 1, self._code_table_format(lang, code_text, source_lines)
-        )
+        table_format = self._code_table_format(lang, code_text, source_lines)
+        table_format.setLeftMargin(container_margin)
+        table = cursor.insertTable(1, 1, table_format)
         code_cell = table.cellAt(0, 0)
         line_count = visible_code.count("\n") + 1
         code_cell.setFormat(

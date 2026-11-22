@@ -6,7 +6,7 @@ import pytest
 from PyQt6.QtGui import QColor
 from PyQt6ElaWidgetTools import ElaIconType, eTheme, ElaThemeType
 
-from pyqt6_ela_pro._colors import _contrast_ratio, get_color_scheme
+from pyqt6_ela_pro._colors import contrastRatio, get_color_scheme
 from pyqt6_ela_pro._theme import blend, surfaceRaised
 from pyqt6_ela_pro.ela_chip import ElaChip
 
@@ -165,7 +165,7 @@ class TestElaChipContrast:
         finally:
             eTheme.setThemeMode(previous)
         for hovered, pressed, fg, composited in samples:
-            assert _contrast_ratio(fg, composited) >= 4.5, (
+            assert contrastRatio(fg, composited) >= 4.5, (
                 color.name,
                 mode,
                 hovered,

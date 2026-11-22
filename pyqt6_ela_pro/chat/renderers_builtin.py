@@ -15,7 +15,7 @@ from PyQt6.QtGui import QImageReader
 from PyQt6.QtWidgets import QSizePolicy, QVBoxLayout, QWidget
 from PyQt6ElaWidgetTools import ElaImageCard, eTheme
 
-from .._diff import diffLines, filesFromMetadata, parseUnifiedDiff
+from .._diff import parseUnifiedDiff
 from .._internal import _ThemeAwareMixin
 from .._styles import ColorText
 from ..terminal_view import ElaTerminalView
@@ -23,7 +23,7 @@ from . import _json
 from ._theme import muted_color
 from .blocks.file_changes import ElaChatFileChanges
 from .blocks.plan_panel import PlanListView
-from .message import ElaChatPlan
+from .message import ElaChatPlan, ElaChatToolCall
 from .renderers import (
     ToolRenderContext,
     parseToolArguments,
@@ -31,6 +31,7 @@ from .renderers import (
     toolRenderer,
     unregisterToolRenderer,
 )
+from ._changes import filesFromToolCall
 
 #: ANSI 转义序列（SGR / 光标 / 清屏等）
 _ANSI_RE = re.compile(r"\x1b\[[0-9;?]*[ -/]*[@-~]")
@@ -74,7 +75,24 @@ class _EmptyBody(_ThemeAwareMixin, QWidget):
         self._label.setTextFormat(Qt.TextFormat.PlainText)
         self._label.setTextPixelSize(12)
         layout.addWidget(self._label)
+        self._body = None
         self._apply_theme()
+
+    #: 工具卡据此判断「当前只是占位，结果到了要换可更新 body」
+    isPlaceholderBody = True
+
+    def updateToolResult(self, result: str, status: str) -> None:
+        """结果到达后把占位换成可滚动的终端输出（保持同一控件实例）。"""
+        text = str(result or "")
+        if not text.strip():
+            return
+        if self._body is None:
+            self._body = _ShellBody(
+                max_lines=CONSOLE_MAX_LINES, auto_scroll=True, parent=self
+            )
+            self.layout().addWidget(self._body)
+            self._label.hide()
+        self._body.setOutput(text)
 
     def _apply_theme(self) -> None:
         self._label.setTextColor(muted_color(self._theme_mode, 0.5))
@@ -211,21 +229,10 @@ class _FileChangesBody(ElaChatFileChanges):
         self._sync()
 
     def _sync(self) -> None:
-        files = []
-        raw = self._ctx.metadata.get("files")
-        if isinstance(raw, list):
-            files = filesFromMetadata(raw)
-        if not files:
-            args = self._ctx.parsedArguments()
-            path = str(args.get("path") or args.get("file") or "")
-            if path:
-                before = args.get("oldString")
-                after = args.get("newString")
-                if isinstance(before, str) or isinstance(after, str):
-                    files = [diffLines(before or "", after or "", path)]
-                elif isinstance(args.get("content"), str):
-                    files = [diffLines("", args.get("content") or "", path)]
-        self.setFiles(files)
+        call = ElaChatToolCall(
+            id="", name="", arguments=self._ctx.arguments, metadata=self._ctx.metadata
+        )
+        self.setFiles(filesFromToolCall(call))
 
     def updateToolResult(self, result: str, status: str) -> None:
         # metadata / 参数是建卡时的快照；结果里如果自带 unified diff，补建文件列表。
@@ -234,6 +241,9 @@ class _FileChangesBody(ElaChatFileChanges):
         parsed = parseUnifiedDiff(result or "")
         if parsed:
             self.setFiles(parsed)
+        elif result:
+            # 没有 diff 时至少把错误 / 文本结果摆出来，别用「没有文件变更」吞掉
+            self.setEmptyText(result)
 
 
 def _fileFactory(ctx: ToolRenderContext):
@@ -391,7 +401,6 @@ _INSTALLED: set = set()
 _OWN_FACTORIES = (
     _shellFactory,
     _fileFactory,
-    _readImageFactory,
     _readFactory,
     _listFactory,
     _searchFactory,
@@ -407,6 +416,11 @@ def installBuiltinToolRenderers() -> list:
         ("shell", _shellFactory, None),
         ("bash", _shellFactory, None),
         ("execute", _shellFactory, None),
+        ("run", _shellFactory, None),
+        ("exec", _shellFactory, None),
+        ("terminal", _shellFactory, None),
+        ("cmd", _shellFactory, None),
+        ("powershell", _shellFactory, None),
         ("edit", _fileFactory, None),
         ("write", _fileFactory, None),
         ("patch", _fileFactory, None),
@@ -414,14 +428,17 @@ def installBuiltinToolRenderers() -> list:
         ("read", _readFactory, _pathSubtitle),
         ("view", _readFactory, _pathSubtitle),
         ("cat", _readFactory, _pathSubtitle),
-        ("glob", _listFactory, _pathSubtitle),
+        ("glob", _listFactory, _searchSubtitle),
         ("list", _listFactory, _pathSubtitle),
         ("ls", _listFactory, _pathSubtitle),
         ("grep", _searchFactory, _searchSubtitle),
         ("search", _searchFactory, _searchSubtitle),
         ("find", _searchFactory, _searchSubtitle),
+        ("web_search", _searchFactory, _searchSubtitle),
         ("fetch", _fetchFactory, _fetchSubtitle),
         ("webfetch", _fetchFactory, _fetchSubtitle),
+        ("web_fetch", _fetchFactory, _fetchSubtitle),
+        ("fetch_url", _fetchFactory, _fetchSubtitle),
         ("web", _fetchFactory, _fetchSubtitle),
         ("curl", _fetchFactory, _fetchSubtitle),
         ("mcp", _mcpFactory, _mcpSubtitle),

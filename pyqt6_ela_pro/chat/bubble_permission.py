@@ -18,6 +18,7 @@ from .message import (
     ElaChatPartKindType,
     ElaChatPermission,
     ElaChatPermissionStatusType,
+    ElaChatRoleType,
     ElaChatStatusType,
 )
 
@@ -25,16 +26,16 @@ from .message import (
 class _BubblePermissionMixin:
     """方法组 mixin：状态由 ``ElaChatBubble.__init__`` 建立。"""
 
-    def beginPermission(
-        self, request: ElaChatPermission, partId: Optional[str] = None
-    ) -> str:
+    def beginPermission(self, request: ElaChatPermission) -> str:
         """登记一次工具审批 / 提问，返回分段 id。
         交互卡交给输入区上方的 dock（``permissionDockRequested``）而非时间线：审批是
         新建记录卡。只发信号不阻塞（Qt 里挂起等按钮会卡死事件循环）；传入的 ``request``
         """
+        if self._role != ElaChatRoleType.Assistant:
+            return ""
         self._ensure_parts_materialized()
         self._mark_generation_started()
-        partId = partId or uuid4().hex[:12]
+        partId = uuid4().hex[:12]
         part = ElaChatPart(
             id=partId,
             kind=ElaChatPartKindType.Permission,
@@ -86,6 +87,8 @@ class _BubblePermissionMixin:
         part = self._find_part(partId)
         if part is None or part.permission is None:
             return
+        if not part.permission.isPending:
+            return
         settled = part.permission.withStatus(reply, answer, feedback)
         self._replace_part(
             partId, part.withPermission(settled).withStatus(ElaChatStatusType.Done)
@@ -102,7 +105,6 @@ class _BubblePermissionMixin:
             return
         interactive = self._interactive_cards.pop(partId, None)
         if interactive is not None and not is_deleted(interactive):
-            interactive.setPermission(settled)  # 让 dock 里那张也显示最终态
             interactive.deleteLater()
         record = self._permission_cards.get(partId)
         if record is not None and not is_deleted(record):

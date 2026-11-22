@@ -32,8 +32,8 @@ class TestElaSplitButtonInit:
         assert btn._is_right_hovered is False
         assert btn._is_left_pressed is False
         assert btn._is_right_pressed is False
-        # 与按钮族一致（ElaPushButton V3.0 / ElaButton middle 都是 30）。
-        assert btn.height() == 30
+        # 与按钮族一致（ElaPushButton V3.0 / ElaButton middle 都是 32）。
+        assert btn.height() == 32
         assert btn.hasMouseTracking() is True
         assert callable(btn.clicked)
 

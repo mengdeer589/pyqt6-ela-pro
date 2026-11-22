@@ -63,29 +63,29 @@ ElaButtonSize = Literal["small", "middle", "large"]
 # ── Size presets ─────────────────────────────────────────────
 
 #: 可见按钮面与控件边缘的内缩（px）。与上游 ``ElaPushButton`` V3.0 的
-#: ``rect().adjusted(1, 1, -1, -1)`` 同值：控件高 30 → 可见面 28。
+#: ``rect().adjusted(1, 1, -1, -1)`` 同值：控件高 32 → 可见面 30。
 _FACE_INSET = 1
 
 #: ``fontDelta`` 是相对 ``eApp.getFontPixelSize()`` 的偏移；middle 与上游
 #: ``ElaPushButton``（``eApp + 2``）一致。
-#: 高度 22/30/38 → 可见面 20/28/36（档距保持 8；middle 与上游 V3.0 逐值一致）。
+#: 高度 24/32/40 → 可见面 22/30/38（档距保持 8；middle 与上游 V3.0 逐值一致）。
 _SIZE_MAP: dict[str, dict[str, int]] = {
     "small": {
-        "height": 22,
+        "height": 24,
         "fontDelta": 0,
         "paddingH": 12,
         "iconSize": 14,
         "radius": 4,
     },
     "middle": {
-        "height": 30,
+        "height": 32,
         "fontDelta": 2,
         "paddingH": 16,
         "iconSize": 16,
         "radius": 6,
     },
     "large": {
-        "height": 38,
+        "height": 40,
         "fontDelta": 4,
         "paddingH": 20,
         "iconSize": 18,
@@ -151,7 +151,7 @@ class ElaButton(_ThemeAwareMixin, QPushButton):
         self._danger = danger
         self._border_radius = 6
         self._padding_h = 16
-        self._size_height = 30
+        self._size_height = 32
         #: ElaAwesome 图标（``ElaIconType.IconName`` 或其整数值，入口即归一）。
         #: 绘制路径只接受枚举成员：int 会在 ``paintEvent`` 里抛 TypeError，穿出
         #: Qt 回调 = 0xC0000409；归一必须在 setter / 构造期完成（``coerceElaIcon``）。
@@ -557,7 +557,7 @@ class ElaButton(_ThemeAwareMixin, QPushButton):
 
             w = self.width()
             h = self.height()
-            # 可见按钮面：与上游 ElaPushButton V3.0 一样内缩 1px（控件高 30 → 面 28）
+            # 可见按钮面：与上游 ElaPushButton V3.0 一样内缩 1px（控件高 32 → 面 30）
             fw = w - 2 * _FACE_INSET
             fh = h - 2 * _FACE_INSET
             br = self._border_radius

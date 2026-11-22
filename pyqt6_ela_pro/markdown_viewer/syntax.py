@@ -32,25 +32,57 @@ def _clamp_pos(document: QTextDocument, position: int) -> int:
 
 _FENCE_MARKERS = ("```", "~~~")
 
+_FENCE_OPEN_RE = re.compile(
+    r"^(?P<prefix>(?:(?:[ \t]*>[ \t]?)|(?:[ \t]*(?:[-+*]|\d+[.)])[ \t]+))*"
+    r"[ \t]*)(?P<marker>`{3,}|~{3,})(?P<info>.*)$"
+)
 
-def _fence_open(line: str) -> tuple[str, str]:
+
+def _fence_open(line: str) -> tuple[str, str, str]:
     """判断一行是否开启围栏代码块。
 
-    :returns: ``(完整围栏串, 语言)``；不是围栏则 ``("", "")``。围栏串是
-        **完整**的连续标记（`` ```` `` / `` ```` ``），不是固定 3 个字符。
+    :returns: ``(完整围栏串, 语言, 容器前缀)``；不是围栏则 ``("", "", "")``。
+        前缀保留引用 / 列表缩进，供预处理把代码 token 放回容器内。
     """
-    stripped = line.lstrip()
-    if not stripped.startswith(_FENCE_MARKERS):
-        return "", ""
-    i = 0
-    while i < len(stripped) and stripped[i] in "`~":
-        i += 1
-    marker = stripped[:i]
-    # 纯标记行（没有语言）时长度就是围栏长度；有语言时取标记部分
-    return marker, stripped[i:].strip().split(" ", 1)[0].lower()
+    match = _FENCE_OPEN_RE.match(line)
+    if match is None:
+        return "", "", ""
+    marker = match.group("marker")
+    info = match.group("info")
+    # CommonMark：反引号围栏的 info string 不能再含反引号
+    if marker[0] == "`" and "`" in info:
+        return "", "", ""
+    language = info.strip().split(" ", 1)[0].lower()
+    return marker, language, match.group("prefix")
 
 
-def _fence_close(line: str, fence: str) -> bool:
+def _strip_code_container_prefix(line: str, prefix: str) -> str:
+    """去掉围栏所在容器的前缀，保留代码自身的相对缩进。"""
+    if prefix and line.startswith(prefix):
+        return line[len(prefix) :]
+    without_quote = re.sub(r"^(?:[ \t]*>[ \t]?)+", "", line)
+    if without_quote != line:
+        line = without_quote
+        if prefix and line.startswith(prefix):
+            return line[len(prefix) :]
+    width = len(prefix)
+    if width and len(line) >= width and not line[:width].strip():
+        return line[width:]
+    return line
+
+
+def _is_indented_code_line(line: str) -> bool:
+    """行首 4 空格 / tab（剥掉 ``>`` 引用前缀后）视为缩进代码。"""
+    without_quote = re.sub(r"^(?:[ \t]*>[ \t]?)+", "", line)
+    if without_quote.startswith("\t"):
+        return True
+    stripped = without_quote.lstrip(" ")
+    if len(without_quote) - len(stripped) < 4:
+        return False
+    return not re.match(r"^(?:[-+*]|\d+[.)])(?:[ \t]|$)", stripped)
+
+
+def _fence_close(line: str, fence: str, prefix: str = "") -> bool:
     """判断一行是否闭合 ``fence`` 开启的围栏。
 
     两条规则都必要，缺一条就会静默改坏代码内容：
@@ -61,6 +93,10 @@ def _fence_close(line: str, fence: str) -> bool:
     """
     if not fence:
         return False
+    if prefix and line.startswith(prefix):
+        line = line[len(prefix) :]
+    else:
+        line = re.sub(r"^(?:(?:[ \t]*>[ \t]?)+[ \t]*|[ \t]*)", "", line)
     stripped = line.strip()
     if not stripped.startswith(fence):
         return False
@@ -229,10 +265,10 @@ def _stable_cut(
     while i < n:
         line = lines[i]
         stripped = line.strip()
-        opened, _lang = _fence_open(line)
+        opened, _lang, prefix = _fence_open(line)
         if opened:
             i += 1
-            while i < n and not _fence_close(lines[i], opened):
+            while i < n and not _fence_close(lines[i], opened, prefix):
                 i += 1
             i += 1
             continue
@@ -275,7 +311,7 @@ def _stable_cut(
     return cut, min(cut, outside_end)
 
 
-_DETAILS_OPEN_RE = re.compile(r"^<details>\s*$", re.IGNORECASE)
+_DETAILS_OPEN_RE = re.compile(r"^<details(?P<attrs>\s[^>]*)?>\s*$", re.IGNORECASE)
 
 _DETAILS_CLOSE_RE = re.compile(r"^</details>\s*$", re.IGNORECASE)
 

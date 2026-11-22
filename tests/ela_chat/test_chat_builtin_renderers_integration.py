@@ -9,6 +9,7 @@ from PyQt6ElaWidgetTools import ElaImageCard
 from _qthelpers import wait_until as _wait_until
 
 from pyqt6_ela_pro.chat import (
+    ElaChatFileChanges,
     ElaChatRoleType,
     ElaChatToolCall,
     ElaChatView,
@@ -53,6 +54,10 @@ class TestBuiltinRendererIntegration:
             call_id = bubble.addToolCall("edit", "", toolCallId="t1", tool_call=call)
             card = bubble._tool_cards[call_id]
             card.setOpened(True)
+            qapp.processEvents()
+            changes = bubble.findChildren(ElaChatFileChanges)
+            assert changes
+            changes[0].expandAll()
             qapp.processEvents()
             assert bubble.findChildren(ElaDiffView)
         finally:

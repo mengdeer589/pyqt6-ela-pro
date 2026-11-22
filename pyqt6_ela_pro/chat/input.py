@@ -237,10 +237,9 @@ class ElaChatInput(
         # ``chatInput().setContextUsage(used, window, costUsd)`` 提供
         self._usage_ring = _ContextUsageRing(self._surface)
         self._toolbar.addWidget(self._usage_ring, zone="leading", key="usage")
+        for key in ("new_topic", "add_file", "clear", "usage"):
+            self._toolbar.protectItem(key)
         self._usage_ring.clicked.connect(self.contextUsageClicked)
-        self._usage_used = 0
-        self._usage_window = 0
-        self._usage_cost = 0.0
         self._toolbar.addSeparator(zone="trailing")
         self._button = ElaButton(
             icon=ElaIconType.IconName.ArrowUp,
@@ -264,7 +263,8 @@ class ElaChatInput(
             self._button,
         ):
             control.setFocusPolicy(Qt.FocusPolicy.NoFocus)
-        self._toolbar.addWidget(self._button, zone="trailing")
+        self._toolbar.addWidget(self._button, zone="trailing", key="send")
+        self._toolbar.protectItem("send")
         surface_layout.addWidget(self._toolbar)
 
         self.setAcceptDrops(True)
@@ -286,6 +286,7 @@ class ElaChatInput(
 
     def clear(self) -> None:
         """清空草稿（文本 / ``@`` 引用 / 附件）与补全浮层。"""
+        self._preedit = ""
         self._edit.clear()
         self.clearMentions()
         self._attachments.clear()
@@ -323,11 +324,15 @@ class ElaChatInput(
         同时发出 ``submitted`` 与 ``submittedFull``，并清空输入与附件。
         """
         text = self._edit.toPlainText().strip()
-        if not text:
+        attachments = self.attachments()
+        if not text and not attachments:
+            return False
+        if self._preedit:
             return False
         if self._generating and not self._queue_enabled:
             return False
-        attachments = self.attachments()
+        if self._shell_mode and not text:
+            return False
         if self._history is not None:
             self._history.add(
                 text,
@@ -362,6 +367,11 @@ class ElaChatInput(
         return True
 
     def _on_button_clicked(self) -> None:
+        if self._preedit:
+            # 组合中的字还没进文档：生成中优先保证「停止」可用
+            if self._generating and not self._edit.toPlainText().strip():
+                self.stopRequested.emit()
+            return
         if self._generating and not self._edit.toPlainText().strip():
             self.stopRequested.emit()
             return
@@ -380,8 +390,9 @@ class ElaChatInput(
         return self._generating
 
     def _sync_button(self) -> None:
-        has_draft = bool(self._edit.toPlainText().strip())
-        stopping = self._generating and not has_draft
+        text = self._edit.toPlainText().strip()
+        has_draft = bool(text) or bool(self._preedit) or self.attachmentCount() > 0
+        stopping = self._generating and not text
         icon = (
             ElaIconType.IconName.CircleStop
             if stopping
@@ -475,12 +486,14 @@ class ElaChatInput(
     def _on_preedit_changed(self, text: str) -> None:
         """记录输入法组合文本（``inputMethod().isVisible()`` 焦点在框内即恒真，不能用作判据）。"""
         self._preedit = text
+        self._sync_button()
 
     def _on_edit_focus_changed(self, focused: bool) -> None:
         self._surface.setFocused(focused)
         if not focused:
             # 失焦时系统会取消组合：清掉残留，否则之后回车会被当成组合中
             self._preedit = ""
+            self._close_popup()
 
     def _handle_edit_key(self, event) -> bool:
         """编辑框按键处理器（由 ``_ChatPlainTextEdit.keyPressEvent`` 调用）。
@@ -489,6 +502,16 @@ class ElaChatInput(
         """
         key = event.key()
         modifiers = event.modifiers()
+
+        # 组合态只让输入法消费按键（Ctrl/Alt 组合仍放行给快捷键）
+        if self._preedit and not (
+            modifiers
+            & (
+                Qt.KeyboardModifier.ControlModifier
+                | Qt.KeyboardModifier.AltModifier
+            )
+        ):
+            return False
 
         # 补全导航
         if self._popup.isOpen() and not (
@@ -514,7 +537,7 @@ class ElaChatInput(
             if not cursor.hasSelection():
                 if key == Qt.Key.Key_Up and cursor.blockNumber() == 0:
                     entry = self._history.previous(
-                        self._historyMode(), self._edit.toPlainText()
+                        self._historyMode(), self.draftState()
                     )
                     if entry is not None:
                         self._applyHistoryEntry(entry)
@@ -568,6 +591,9 @@ class ElaChatInput(
                 return False
             if self._generating and not self._edit.toPlainText().strip():
                 return False
+            if not self._edit.toPlainText().strip() and self.attachmentCount() == 0:
+                # 空草稿 + 无附件：回车不该往空输入框里插一个换行
+                return True
             # 提交被拒（生成中 + 禁用排队）时把事件还给编辑器：插入换行，
             # 而不是静默吃掉这次回车
             return bool(self.submit())

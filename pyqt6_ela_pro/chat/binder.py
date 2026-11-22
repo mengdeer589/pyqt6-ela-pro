@@ -83,6 +83,8 @@ class ElaChatStreamBinder:
         self._auto_activity = True
         self._activity_provider = None
         self._activity_text = ""
+        self._activity_kind = ""
+        self._activity_detail = ""
         if worker is not None:
             self.connectWorker(worker)
 
@@ -142,7 +144,7 @@ class ElaChatStreamBinder:
         显式调用（不做隐式自动）；后端没有 ``shutdown`` 方法时忽略。
         """
         onClose = _guarded(lambda: self.shutdownWorker(timeoutMs))
-        if self._close_filter is not None:
+        if self._close_filter is not None and not is_deleted(self._close_filter):
             # 幂等：重复调用不再叠第二个事件过滤器 / 第二条 destroyed 连接
             return
         self._close_filter = _WindowCloseFilter(window, onClose)
@@ -183,7 +185,9 @@ class ElaChatStreamBinder:
         """
         self._activity_provider = provider if callable(provider) else None
         if self._activity_text:
-            self._set_activity(self._activity_text)
+            self._set_activity(
+                self._activity_text, self._activity_kind, self._activity_detail
+            )
 
     def _activity_for_tool(self, name: str) -> str:
         key = str(name or "").lower()
@@ -209,11 +213,18 @@ class ElaChatStreamBinder:
                 custom = None
             if custom is not None:
                 text = str(custom)
-        self._activity_text = str(text or "")
-        self._chat.chatView().setActivity(self._activity_text)
+        text = str(text or "")
+        self._activity_kind = str(kind or "")
+        self._activity_detail = str(detail or "")
+        if text == self._activity_text:
+            return
+        self._activity_text = text
+        self._chat.chatView().setActivity(text)
 
     def _clear_activity(self) -> None:
         self._activity_text = ""
+        self._activity_kind = ""
+        self._activity_detail = ""
         self._chat.chatView().setActivity("")
 
     def _clear_retry(self) -> None:
@@ -250,9 +261,14 @@ class ElaChatStreamBinder:
         """
         if self._worker is None:
             return None
+        if self.isOpen():
+            # 上一回合还没收尾就开新回合：旧回合没有 token 的分片会落到新消息上。
+            # 先作废旧回合，宁可丢半截旧输出，也不把两轮内容混在一起。
+            self.abortTurn()
         method = self._worker.regenerate if regenerate else self._worker.ask
         turn = method(prompt or "", list(attachments or ()))
         if turn is None:
+            self._chat.setGenerating(False)
             return None
         # view 层方法都要求显式传 messageId，binder 必须自己攥着这个 id。
         self._message_id = self._chat.beginAssistantMessage(
@@ -303,15 +319,13 @@ class ElaChatStreamBinder:
         组件侧只负责「留回执 + 发信号」；把文本送进后端是宿主的事。
         """
         chat = self._chat
-        if not getattr(chat, "steerEnabled", lambda: True)():
+        if not chat.steerEnabled():
             return
-        drain = getattr(chat, "drainSteer", None)
-        if callable(drain):
-            drain()
+        chat.drainSteer()
 
     def isOpen(self) -> bool:
         """是否处于回合中（``beginTurn`` 之后、``finish`` 之前）且有目标消息。
-        判据是显式的 ``_turn_open`` 标志，不是 ``_turn_start != 0.0``：``clock``
+        判据是 ``_flow.open`` 与显式消息 id，不是 ``_turn_start != 0.0``：``clock``
         可注入，返回 0.0 的假时钟会让整回合被静默丢弃。
         """
         return self._flow.open and self._message_id is not None
@@ -324,9 +338,9 @@ class ElaChatStreamBinder:
         """追加推理分片（同一轮复用同一思考段；回合外忽略）。"""
         if not text or not self.isOpen():
             return
-        self._set_activity("正在思考…", "thinking")
         if not self._flow.reasoning_open:
             self._flow.begin_reasoning()
+            self._set_activity("正在思考…", "thinking")
             self._chat.chatView().beginReasoning(self._target())
         self._chat.chatView().appendReasoning(self._target(), text)
 
@@ -337,10 +351,12 @@ class ElaChatStreamBinder:
         """
         if not text or not self.isOpen():
             return
+        had_text = self._flow.had_text
         if self._flow.note_content(text):
             self._endReasoning()
             self._clear_retry()
-            self._set_activity("", "answer")
+            if not had_text:
+                self._set_activity("", "answer")
         self._chat.chatView().appendText(self._target(), text)
 
     def stream(self, chunk) -> None:
@@ -365,6 +381,7 @@ class ElaChatStreamBinder:
         title: str = "",
         locations=None,
         parentId: str = "",
+        metadata=None,
     ) -> None:
         """工具调用开始（``arguments`` 支持 dict 或 JSON 字符串；回合外忽略）。"""
         if not self.isOpen():
@@ -383,6 +400,7 @@ class ElaChatStreamBinder:
             name,
             arguments,
             callId or None,
+            metadata=metadata,
             kind=kind,
             title=title,
             locations=locations,
@@ -420,6 +438,7 @@ class ElaChatStreamBinder:
             title=toolCall.get("title") or "",
             locations=toolCall.get("locations"),
             parentId=toolCall.get("parent_id") or toolCall.get("parentId") or "",
+            metadata=toolCall.get("metadata"),
         )
 
     def toolCallEnded(self, toolCall: dict, result: str) -> None:
@@ -472,6 +491,16 @@ class ElaChatStreamBinder:
     def finish(
         self, turn, status: Optional[str] = None
     ) -> Optional[ElaChatTurnSummary]:
+        """结束回合（防 Qt 槽异常穿透的公开入口）。"""
+        try:
+            return self._finish(turn, status)
+        except Exception:
+            logger.exception("binder.finish 失败")
+            return None
+
+    def _finish(
+        self, turn, status: Optional[str] = None
+    ) -> Optional[ElaChatTurnSummary]:
         """结束回合：补整轮耗时、结束消息，返回摘要（幂等）。
 
         :param turn: 回合 token。与当前回合不符说明是迟到信号（后端 ``cancel()``
@@ -479,9 +508,9 @@ class ElaChatStreamBinder:
         :param status: 最终状态；缺省时按是否调用过 :meth:`cancel` 取 ``Stopped`` / ``Done``
         :returns: 本回合摘要；``turn`` 陈旧时为 ``None``（宿主据此跳过状态更新）
         """
-        if turn != self._turn_token:
-            logger.warning(
-                "丢弃迟到的回合收尾：token=%r，当前回合 token=%r",
+        if turn is None or not self._flow.open or turn != self._turn_token:
+            logger.debug(
+                "丢弃迟到 / 无效的回合收尾：token=%r，当前回合 token=%r",
                 turn,
                 self._turn_token,
             )
@@ -508,6 +537,7 @@ class ElaChatStreamBinder:
         # 先清本回合状态再触发宿主回调：endAssistantMessage 会同步续发排队消息，
         # 宿主槽里可能立刻 startTurn() 开新回合 —— 晚清会抹掉新回合的落点。
         self._flow.reset()
+        # roundIndex() 在回合结束后保留最后一轮序号（宿主状态栏会读）
         self._flow.round = rounds
         self._turn_token = None
         self._message_id = None
@@ -546,7 +576,9 @@ class ElaChatStreamBinder:
             self.cancel()
             summary = self.finish(self._turn_token, ElaChatStatusType.Stopped)
             if cancelBackend and self._worker is not None:
-                self._worker.cancel()
+                cancel = getattr(self._worker, "cancel", None)
+                if callable(cancel):
+                    cancel()
             return summary
         finally:
             self._chat.setAutoSendQueue(autoSend)

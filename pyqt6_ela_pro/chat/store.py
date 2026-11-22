@@ -14,7 +14,6 @@ class ChatMessageStore:
         self.items: list[ElaChatMessage] = []
         self.index: dict[int, ElaChatMessage] = {}
         self.positions: dict[int, int] = {}
-        self.height_meta: dict[int, tuple] = {}
         self.dirty: set[int] = set()
         self.next_id = 1
 
@@ -24,20 +23,14 @@ class ChatMessageStore:
     def message(self, message_id: int) -> Optional[ElaChatMessage]:
         return self.index.get(message_id)
 
-    def last(self) -> Optional[ElaChatMessage]:
-        return self.items[-1] if self.items else None
-
-    def contains(self, message_id: int) -> bool:
-        return message_id in self.index
-
-    def ids(self) -> list[int]:
-        return list(self.index)
-
     def add(self, message: ElaChatMessage) -> None:
+        if message.id in self.index:
+            raise ValueError(f"消息 id {message.id} 已存在")
         self.items.append(message)
         self.positions[message.id] = len(self.items) - 1
         self.index[message.id] = message
-        self.height_meta.pop(message.id, None)
+        if message.id >= self.next_id:
+            self.next_id = message.id + 1
 
     def replace_items(self, items) -> None:
         self.items = list(items)
@@ -45,21 +38,18 @@ class ChatMessageStore:
 
     def remove(self, message_id: int) -> None:
         self.replace_items(item for item in self.items if item.id != message_id)
-        self.height_meta.pop(message_id, None)
         self.dirty.discard(message_id)
 
     def remove_ids(self, message_ids) -> None:
         doomed = set(message_ids)
         self.replace_items(item for item in self.items if item.id not in doomed)
         for message_id in doomed:
-            self.height_meta.pop(message_id, None)
             self.dirty.discard(message_id)
 
     def clear(self) -> None:
         self.items.clear()
         self.index.clear()
         self.positions.clear()
-        self.height_meta.clear()
         self.dirty.clear()
 
     def reindex(self) -> None:
@@ -79,8 +69,10 @@ class ChatMessageStore:
                 return False
         updated = updater(self.items[position])
         self.items[position] = updated
+        if updated.id != message_id:
+            self.reindex()
+            return True
         self.index[message_id] = updated
-        self.height_meta.pop(message_id, None)
         return True
 
     def replace_at(self, index: int, message: ElaChatMessage) -> None:
@@ -93,24 +85,8 @@ class ChatMessageStore:
             self.reindex()
         else:
             self.positions[message.id] = index
-        self.height_meta.pop(message.id, None)
-
-    def mark_dirty(self, message_id: int) -> None:
-        self.dirty.add(message_id)
-
-    def discard_dirty(self, message_id: int) -> None:
-        self.dirty.discard(message_id)
 
     def take_dirty(self) -> set[int]:
         dirty = self.dirty
         self.dirty = set()
         return dirty
-
-    def height_meta_for(self, message_id: int) -> Optional[tuple]:
-        return self.height_meta.get(message_id)
-
-    def set_height_meta(self, message_id: int, meta: tuple) -> None:
-        self.height_meta[message_id] = meta
-
-    def invalidate_height(self, message_id: int) -> None:
-        self.height_meta.pop(message_id, None)

@@ -137,15 +137,23 @@ class TestInlineHighlight:
         assert "==" not in v.document().toPlainText()
         v.deleteLater()
 
-    def test_mark_with_markdown_special_left_alone(self):
+    def test_mark_with_nested_emphasis(self):
         v = ElaMarkdownViewer()
         v.setMarkdown("==*not* mark==")
 
         text = v.document().toPlainText()
-        assert "==" in text and "not" in text
+        assert "==" not in text and "not" in text
         marks = _fragments_with_text(v, "not")
         assert marks
-        assert marks[0].charFormat().background().style() == Qt.BrushStyle.NoBrush
+        assert marks[0].charFormat().background().color() == v._mark_bg
+        v.deleteLater()
+
+    def test_mark_with_unsupported_special_left_alone(self):
+        v = ElaMarkdownViewer()
+        v.setMarkdown("==<not> mark==")
+
+        text = v.document().toPlainText()
+        assert "==" in text and "<not>" in text
         v.deleteLater()
 
     def test_mark_inside_inline_code_untouched(self):
@@ -236,13 +244,13 @@ class TestCallout:
                         v._callout_caution_color.hue()
                         == statusColor(mode, ElaStatusRoleType.Error).hue()
                     )
-                    from pyqt6_ela_pro._colors import _contrast_ratio
+                    from pyqt6_ela_pro._colors import contrastRatio
 
                     for color in (
                         v._callout_warning_color,
                         v._callout_caution_color,
                     ):
-                        assert _contrast_ratio(color, v._callout_bg) >= 4.5
+                        assert contrastRatio(color, v._callout_bg) >= 4.5
                 finally:
                     v.deleteLater()
         finally:

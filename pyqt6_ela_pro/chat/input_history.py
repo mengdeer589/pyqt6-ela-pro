@@ -16,14 +16,11 @@ class _InputHistoryMixin:
         """获取当前草稿（文本 + 可序列化附件 + mentions）。"""
         attachments = []
         for item in self.attachments():
-            attachments.append(
-                {
-                    "name": getattr(item, "name", ""),
-                    "path": getattr(item, "path", ""),
-                    "size": getattr(item, "size", 0),
-                    "mime": getattr(item, "mime", ""),
-                }
-            )
+            to_dict = getattr(item, "toDict", None)
+            if callable(to_dict):
+                attachments.append(to_dict())
+            elif isinstance(item, dict):
+                attachments.append(dict(item))
         return {
             "text": self.text(),
             "attachments": attachments,
@@ -50,6 +47,7 @@ class _InputHistoryMixin:
         try:
             self.clearMentions()
             self._set_edit_text(str(entry.get("text") or ""))
+            self._close_popup()
             attachments = entry.get("attachments")
             if isinstance(attachments, list):
                 self.setAttachments(attachments)

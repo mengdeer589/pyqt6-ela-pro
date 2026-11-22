@@ -131,8 +131,7 @@ class ElaDataTable(ElaTableView):
 
         self.setAlternatingRowColors(True)
         vh = self.verticalHeader()
-        if vh:
-            vh.setHidden(True)
+        vh.setHidden(True)
         hh = self.horizontalHeader()
         if hh:
             hh.setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
@@ -141,8 +140,7 @@ class ElaDataTable(ElaTableView):
                 Qt.AlignmentFlag.AlignCenter | Qt.AlignmentFlag.AlignVCenter
             )
         self.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
-        if vh:
-            vh.setMinimumSectionSize(TABLE_ROW_MIN_HEIGHT)
+        vh.setMinimumSectionSize(TABLE_ROW_MIN_HEIGHT)
 
         self._columnWidths: dict[int | str, int] = {}
         self._columnAlignments: dict[int, Qt.AlignmentFlag] = {}
@@ -477,18 +475,15 @@ class ElaDataTable(ElaTableView):
 
             vh = self.verticalHeader()
             if show_row_index:
-                if vh:
-                    vh.setHidden(False)
                 self.setVerticalHeaderLabels(
                     [str(row_index_start + i) for i in range(len(rows))]
                 )
-            elif vh:
+                vh.setHidden(False)
+                vh.resizeSections(QHeaderView.ResizeMode.ResizeToContents)
+            else:
                 # 若上一批数据用 show_row_index=True 填过表，行号会留在新数据旁边
                 vh.setHidden(True)
                 self.setVerticalHeaderLabels([])
-
-            if show_row_index and vh:
-                vh.resizeSections(QHeaderView.ResizeMode.ResizeToContents)
 
             for row_idx, row_data in enumerate(rows):
                 for col_idx, cell_data in enumerate(row_data):
@@ -521,6 +516,11 @@ class ElaDataTable(ElaTableView):
         """
         if not data:
             return
+
+        if not show_row_index:
+            vh = self.verticalHeader()
+            vh.setHidden(True)
+            self.setVerticalHeaderLabels([])
 
         if self._load_thread is not None:
             self._retire_thread(self._load_thread)
@@ -557,11 +557,10 @@ class ElaDataTable(ElaTableView):
             self._model.layoutChanged.emit()
             if show_row_index:
                 vh = self.verticalHeader()
-                if vh:
-                    vh.setHidden(False)
                 self.setVerticalHeaderLabels(
                     [str(row_index_start + i) for i in range(len(rows_data))]
                 )
+                vh.setHidden(False)
                 vh.resizeSections(QHeaderView.ResizeMode.ResizeToContents)
             if callback is not None:
                 callback()

@@ -7,7 +7,7 @@ from typing import Optional
 
 from PyQt6.QtCore import Qt, QTimer, pyqtSignal
 from PyQt6.QtGui import QPalette
-from PyQt6.QtWidgets import QHBoxLayout, QWidget
+from PyQt6.QtWidgets import QHBoxLayout, QVBoxLayout, QWidget
 from PyQt6ElaWidgetTools import (
     ElaIconButton,
     ElaIconType,
@@ -38,10 +38,6 @@ class ElaChatSearchHit:
     part_id: str
     #: 该分段内的第几个匹配（从 0 开始）
     occurrence: int
-    #: 命中片段（用于预览 / 测试）
-    snippet: str = ""
-    #: 是否为用户消息
-    user: bool = False
 
 
 class ElaChatSearchBar(_ThemeAwareMixin, QWidget):
@@ -61,9 +57,13 @@ class ElaChatSearchBar(_ThemeAwareMixin, QWidget):
         self._count = 0
         self._index = -1
         self.setFixedHeight(SEARCH_BAR_HEIGHT + 4)
-        layout = QHBoxLayout(self)
-        layout.setContentsMargins(0, 2, 0, 2)
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(0, 2, 0, 2)
+        outer.setSpacing(0)
+        layout = QHBoxLayout()
+        layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(6)
+        outer.addLayout(layout)
         self._edit = ElaLineEdit(self)
         self._edit.setPlaceholderText("在对话中查找…")
         self._edit.setIsClearButtonEnable(True)
@@ -109,6 +109,12 @@ class ElaChatSearchBar(_ThemeAwareMixin, QWidget):
         layout.addWidget(self._prev)
         layout.addWidget(self._next)
         layout.addWidget(self._close)
+        self._preview = ColorText(self)
+        self._preview.setTextFormat(Qt.TextFormat.PlainText)
+        self._preview.setWordWrap(False)
+        self._preview.setTextPixelSize(11)
+        self._preview.hide()
+        outer.addWidget(self._preview)
         self._timer = QTimer(self)
         self._timer.setSingleShot(True)
         self._timer.setInterval(SEARCH_DEBOUNCE_MS)
@@ -137,10 +143,27 @@ class ElaChatSearchBar(_ThemeAwareMixin, QWidget):
         self._prev.setEnabled(self._count > 0)
         self._next.setEnabled(self._count > 0)
 
+    def setPreview(self, text: str) -> None:
+        """设置当前命中的一行预览（空串隐藏）。"""
+        text = " ".join(str(text or "").split())
+        self._preview.setText(text)
+        self._preview.setVisible(bool(text))
+        self.setFixedHeight(SEARCH_BAR_HEIGHT + 4 + (18 if text else 0))
+        self.updateGeometry()
+
+    def preview(self) -> str:
+        """当前命中预览文本。"""
+        return self._preview.text()
+
     def closeBar(self) -> None:
         """隐藏并清空。"""
+        self._edit.blockSignals(True)
+        try:
+            self._edit.clear()
+        finally:
+            self._edit.blockSignals(False)
         self._timer.stop()
-        self._edit.clear()
+        self.setPreview("")
         self.hide()
         self.closed.emit()
 
@@ -166,6 +189,8 @@ class ElaChatSearchBar(_ThemeAwareMixin, QWidget):
         mode = self._theme_mode
         self._count_label.setTextColor(textMuted(mode))
         self._count_label.setTextPixelSize(11)
+        self._preview.setTextColor(textMuted(mode))
+        self._preview.setTextPixelSize(11)
         palette = self._edit.palette()
         palette.setColor(QPalette.ColorRole.Text, text_color(mode))
         palette.setColor(QPalette.ColorRole.PlaceholderText, textMuted(mode))

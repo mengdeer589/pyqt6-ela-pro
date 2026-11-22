@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import math
 import time
 from bisect import bisect_right
 from dataclasses import dataclass, replace
@@ -66,6 +67,7 @@ from ._theme import (
     text_color,
 )
 from ._trace import ElaChatTraceResult, ElaChatTraceRow, buildTraceRows
+from .message import _as_int
 from .blocks._helpers import formatDuration, toolIconFor
 
 logger = logging.getLogger(__name__)
@@ -93,16 +95,17 @@ _KIND_ICONS = {
     "permission": ElaIconType.IconName.Comment,
     "compaction": ElaIconType.IconName.BoxArchive,
 }
-_GRAPH_TYPES = {
-    "turn": "trace.turn",
-    "response": "trace.response",
-    "step": "trace.step",
-    "tool": "trace.tool",
-    "reasoning": "trace.reasoning",
-    "plan": "trace.plan",
-    "permission": "trace.permission",
-    "compaction": "trace.compaction",
-}
+_GRAPH_TYPE_SPECS = (
+    ("trace.turn", "回合", "primary"),
+    ("trace.response", "响应", "primary"),
+    ("trace.step", "步骤", "primary"),
+    ("trace.tool", "工具", "primary"),
+    ("trace.reasoning", "思考", "warning"),
+    ("trace.plan", "计划", "success"),
+    ("trace.permission", "审批", "warning"),
+    ("trace.compaction", "压缩", None),
+)
+_GRAPH_TYPES = {name: name for name, _title, _accent in _GRAPH_TYPE_SPECS}
 
 
 @dataclass(frozen=True)
@@ -161,6 +164,8 @@ def _summary_duration(ms: float) -> str:
         seconds = max(0.0, float(ms)) / 1000.0
     except (TypeError, ValueError, OverflowError):
         return ""
+    if not math.isfinite(seconds):
+        return ""
     if seconds >= 3600:
         return f"{int(seconds // 3600)}h {int(seconds % 3600 // 60)}m"
     return formatDuration(ms)
@@ -214,17 +219,7 @@ def _graph_body(node, container: QWidget) -> None:
 
 
 def _register_graph_types() -> None:
-    specs = (
-        ("trace.turn", "回合", "primary"),
-        ("trace.response", "响应", "primary"),
-        ("trace.step", "步骤", "primary"),
-        ("trace.tool", "工具", "primary"),
-        ("trace.reasoning", "思考", "warning"),
-        ("trace.plan", "计划", "success"),
-        ("trace.permission", "审批", "warning"),
-        ("trace.compaction", "压缩", None),
-    )
-    for type_name, title, accent in specs:
+    for type_name, title, accent in _GRAPH_TYPE_SPECS:
         register_node_type(
             type_name,
             title,
@@ -311,20 +306,6 @@ class _TraceCanvas(QWidget):
     def visualRows(self) -> list:
         return list(self._visual)
 
-    def rowAtPoint(self, pos: QPointF) -> Optional[_VisualRow]:
-        index = self._indexAt(pos.y())
-        return self._visual[index] if index >= 0 else None
-
-    def currentRow(self) -> Optional[ElaChatTraceRow]:
-        if self._hover_index < 0:
-            return None
-        return self._visual[self._hover_index].row
-
-    def hoveredVisualRow(self) -> Optional[_VisualRow]:
-        if 0 <= self._hover_index < len(self._visual):
-            return self._visual[self._hover_index]
-        return None
-
     def clearHover(self, *_args) -> None:
         """滚动时收起 hover 浮层，避免卡片停在旧行上。"""
         if self._hover_index < 0:
@@ -401,14 +382,6 @@ class _TraceCanvas(QWidget):
         bounds = self._response_bounds.get(str(key or ""))
         return int(bounds[1]) if bounds is not None else 0
 
-    def responseSpan(self, key: str) -> float:
-        bounds = self._response_bounds.get(str(key or ""))
-        return max(1.0, float(bounds[4])) if bounds is not None else 1.0
-
-    def responseTurn(self, key: str) -> int:
-        bounds = self._response_bounds.get(str(key or ""))
-        return int(bounds[0]) if bounds is not None else -1
-
     def playhead(self) -> Optional[float]:
         return self._playhead_ms
 
@@ -467,14 +440,16 @@ class _TraceCanvas(QWidget):
         self._response_order = []
         y = 6
         for turn_index, turn in enumerate(self._result.rows):
-            if self._filter == "errors" and not turn.error_below:
+            if self._filter == "errors" and not (turn.error_below or turn.isError):
                 continue
             turn_y = y
             self._visual.append(_VisualRow(turn, turn_index, y, _TURN_H, 0))
             y += _TURN_H
             if _row_key(turn) not in self._collapsed:
                 for response in turn.children:
-                    if self._filter == "errors" and not response.error_below:
+                    if self._filter == "errors" and not (
+                        response.error_below or response.isError
+                    ):
                         continue
                     scope_start = max(0.0, response.start_ms)
                     scope_span = max(1.0, response.span_ms)
@@ -494,7 +469,9 @@ class _TraceCanvas(QWidget):
                     y += _RESP_H
                     if _row_key(response) not in self._collapsed:
                         for step in response.children:
-                            if self._filter == "errors" and not step.error_below:
+                            if self._filter == "errors" and not (
+                                step.error_below or step.isError
+                            ):
                                 continue
                             self._visual.append(
                                 _VisualRow(
@@ -526,6 +503,21 @@ class _TraceCanvas(QWidget):
                         y,
                         scope_start,
                         scope_span,
+                    )
+                    self._response_order.append(response.part_id)
+            if _row_key(turn) in self._collapsed:
+                # 折叠时没有响应行；仍登记回放边界，playhead 落在轮头上。
+                for response in turn.children:
+                    if self._filter == "errors" and not (
+                        response.error_below or response.isError
+                    ):
+                        continue
+                    self._response_bounds[response.part_id] = (
+                        turn_index,
+                        turn_y,
+                        turn_y + _TURN_H,
+                        max(0.0, response.start_ms),
+                        max(1.0, response.span_ms),
                     )
                     self._response_order.append(response.part_id)
             self._turn_bounds.append((turn_index, turn_y, y, turn.span_ms))
@@ -603,8 +595,9 @@ class _TraceCanvas(QWidget):
         span = max(1.0, float(visual.scope_span or 1.0))
         start = max(0.0, row.start_ms - visual.scope_start)
         x0 = lane.left() + (start / span) * lane.width()
+        x0 = min(lane.right(), max(lane.left(), x0))
         width = max(2.0, (max(0.0, row.span_ms) / span) * lane.width())
-        return QRectF(x0, 0, min(width, lane.right() - x0), 0)
+        return QRectF(x0, 0, max(0.0, min(width, lane.right() - x0)), 0)
 
     def _computePlayheadRect(self) -> QRect:
         if self._playhead_ms is None or not self._playhead_key:
@@ -781,7 +774,7 @@ class _TraceCanvas(QWidget):
             rect.width(),
             8.0,
         )
-        self._paintSpan(painter, bar, row, item.turn_index, lane)
+        self._paintSpan(painter, bar, row, lane)
 
     def _paintTurn(self, painter: QPainter, item: _VisualRow, _clip: QRect) -> None:
         row = item.row
@@ -871,7 +864,6 @@ class _TraceCanvas(QWidget):
         painter: QPainter,
         bar: QRectF,
         row: ElaChatTraceRow,
-        turnIndex: int,
         lane: QRectF,
     ) -> None:
         if bar.right() < lane.left() or bar.left() > lane.right():
@@ -1141,11 +1133,11 @@ class _TraceTrends(QWidget):
                 if item.kind == "tool":
                     tools += 1
                 if item.stats is not None:
-                    prompt += int(item.stats.prompt_tokens or 0)
-                    cache += int(item.stats.cache_read_tokens or 0) + int(
-                        item.stats.cache_write_tokens or 0
+                    prompt += _as_int(item.stats.prompt_tokens, 0)
+                    cache += _as_int(item.stats.cache_read_tokens, 0) + _as_int(
+                        item.stats.cache_write_tokens, 0
                     )
-                    completion += int(item.stats.completion_tokens or 0)
+                    completion += _as_int(item.stats.completion_tokens, 0)
                 if item.context_tokens:
                     context = max(context, item.context_tokens)
             rows.append((tools, prompt, cache, completion, context))
@@ -1245,8 +1237,9 @@ class _TraceTrends(QWidget):
                 painter.setPen(QPen(self._colors["accent"], 1.0))
                 painter.drawPolyline(QPolygonF(points))
                 if self._context_window:
+                    scale = self._context_window / max_context
                     for ratio in (0.7, 0.9):
-                        y = 82.0 - 14.0 * ratio
+                        y = 82.0 - 14.0 * ratio * scale
                         pen = QPen(self._colors["warning"], 1.0)
                         pen.setStyle(Qt.PenStyle.DashLine)
                         painter.setPen(pen)
@@ -1409,11 +1402,11 @@ class _TraceGraphPage(QWidget):
         try:
             self._rebuild_impl()
         except Exception:
+            self._dirty = True
             logger.exception("trace graph rebuild failed")
 
     def _rebuild_impl(self) -> None:
         self._dirty = False
-        _register_graph_types()
         if self._result is None or not self._result.rows:
             self._label.setText("")
             if self._canvas is not None:
@@ -1787,6 +1780,9 @@ class ElaChatTracePanel(ElaThemeWidget):
         """筛选：``all`` / ``errors``。"""
         self._filter = "errors" if value == "errors" else "all"
         self._canvas.setFilter(self._filter)
+        self._build_replay_timeline()
+        self._scroll.verticalScrollBar().setValue(0)
+        self._empty.setVisible(self._result.isEmpty() or not self.rows())
         self._sync_filter_pivot()
 
     def filter(self) -> str:
@@ -1807,7 +1803,7 @@ class ElaChatTracePanel(ElaThemeWidget):
         self._trends.setCurrentTurn(self._current_turn)
         self._sync_tracks_visible()
         self._graph_page.setTurn(self._current_turn)
-        self._empty.setVisible(self._result.isEmpty())
+        self._empty.setVisible(self._result.isEmpty() or not self.rows())
         self._stack.setVisible(not self._result.isEmpty())
         self._sync_filter_pivot()
 
@@ -1819,7 +1815,13 @@ class ElaChatTracePanel(ElaThemeWidget):
         spans = []
         total = 0.0
         for turn_index, turn in enumerate(self._result.rows):
+            if self._filter == "errors" and not (turn.error_below or turn.isError):
+                continue
             for response in turn.children:
+                if self._filter == "errors" and not (
+                    response.error_below or response.isError
+                ):
+                    continue
                 span = max(1.0, float(response.span_ms or 1.0))
                 offsets.append(total)
                 keys.append(response.part_id)
@@ -1980,6 +1982,8 @@ class ElaChatTracePanel(ElaThemeWidget):
             ):
                 self._last_replay_ui = now
                 self.setCurrentTurn(turn_index)
+                if not self._replay_active:
+                    return
                 y = self._canvas.responseY(key)
                 if y >= 0:
                     self._scroll.verticalScrollBar().setValue(max(0, y - 4))
@@ -2011,13 +2015,23 @@ class ElaChatTracePanel(ElaThemeWidget):
     # 内部
     def _onRowActivated(self, messageId: int, partId: str) -> None:
         try:
-            visual = self._canvas.hoveredVisualRow()
-            if visual is not None:
-                self.setCurrentTurn(visual.turn_index)
+            # 流程图节点自带所属轮；时间轴行按 partId 反查，别读另一页的状态。
+            if self._stack.currentWidget() is self._graph_page:
+                turn_index = self._graph_page.currentTurn()
+            else:
+                turn_index = self._turn_for_response(partId)
+            self.setCurrentTurn(turn_index)
             self.rowActivated.emit(int(messageId or 0))
             self.partActivated.emit(int(messageId or 0), str(partId or ""))
         except Exception:
             logger.debug("trace row activation failed", exc_info=True)
+
+    def _turn_for_response(self, partId: str) -> int:
+        key = str(partId or "")
+        for index, turn in enumerate(self._result.rows):
+            if any(response.part_id == key for response in turn.children):
+                return index
+        return self._current_turn
 
     def _onTurnActivated(self, index: int) -> None:
         self.setCurrentTurn(index)
@@ -2080,6 +2094,7 @@ class ElaChatTracePanel(ElaThemeWidget):
 
     def _sync_options(self) -> None:
         graph = self._options.view == "graph"
+        was_graph = self._stack.currentWidget() is self._graph_page
         self._stack.setCurrentWidget(self._graph_page if graph else self._timeline_page)
         self._syncing = True
         try:
@@ -2091,12 +2106,13 @@ class ElaChatTracePanel(ElaThemeWidget):
         self._replay_button.setVisible(self._options.replay)
         self._speed_button.setVisible(self._options.replay)
         if graph:
-            index = self._canvas.turnAtY(
-                self._scroll.verticalScrollBar().value()
-                + self._scroll.viewport().height() // 2
-            )
-            if index >= 0:
-                self.setCurrentTurn(index)
+            if not was_graph:
+                index = self._canvas.turnAtY(
+                    self._scroll.verticalScrollBar().value()
+                    + self._scroll.viewport().height() // 2
+                )
+                if index >= 0:
+                    self.setCurrentTurn(index)
             self._graph_page.setTurn(self._current_turn)
         if not self._options.replay:
             self.stopReplay()

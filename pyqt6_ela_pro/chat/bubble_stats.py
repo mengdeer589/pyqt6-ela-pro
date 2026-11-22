@@ -61,7 +61,7 @@ class _BubbleStatsMixin:
             for part in self._parts
             if part.kind == ElaChatPartKindType.Stats and part.stats is not None
         ]
-        if not stats_parts:
+        if not stats_parts or self._parts_deferred:
             return
         if self._stats_mode == "none" or self._status == ElaChatStatusType.Streaming:
             for part in stats_parts:
@@ -81,6 +81,9 @@ class _BubbleStatsMixin:
             if isinstance(widget, StatsBadge) and not is_deleted(widget):
                 widget.hide()
         for part in visible_parts:
+            if self._parts_windowed and part.id not in self._part_widgets:
+                # 窗口化只物化了末尾步骤，别为不可见的前段补建徽标。
+                continue
             badge = self._ensure_stats_badge(part)
             badge.show()
         if self._stats_mode == "footer":
@@ -90,6 +93,8 @@ class _BubbleStatsMixin:
             last_badge.setStats(merged if merged is not None else last_part.stats)
         else:
             for part in stats_parts:
+                if self._parts_windowed and part.id not in self._part_widgets:
+                    continue
                 self._ensure_stats_badge(part).setStats(part.stats)
         # 判据是消息状态而不是 ``_stream_ended``：``setParts`` / ``setStatus``
         # 收尾都不经过 ``endStream``，用该标志会把恢复出的汇总徽标留在时间线里。
@@ -112,7 +117,19 @@ class _BubbleStatsMixin:
     def _sync_stats_duration(self) -> None:
         """把端到端耗时同步到最后一个用量徽标的悬浮提示。"""
         badge = self.statsBadge()
-        if badge is None:
+        stats = badge.stats() if badge is not None else None
+        empty = stats is None or not (
+            stats.contextTokens()
+            or stats.total_tokens
+            or stats.prompt_tokens
+            or stats.completion_tokens
+            or stats.cache_read_tokens
+            or stats.cache_write_tokens
+        )
+        if badge is None or (badge.isHidden() and empty):
+            # 末步 token 全零时徽标会被隐藏；耗时必须回到底部 meta，别一起失踪。
+            if badge is not None:
+                badge.setMessageDuration(0.0)
             self._meta.setDuration(self._duration_ms)
             return
         badge.setMessageDuration(self._duration_ms)
@@ -147,7 +164,7 @@ class _BubbleStatsMixin:
             if not self._stats_batch:
                 # 回放期只登记数据，可见徽标由 _apply_stats_mode 按需创建
                 badge = StatsBadge(self._parts_container or self._content or self)
-                badge._setStats(stats, deferShow=False)
+                badge._setStats(stats)
             self._append_part(
                 ElaChatPart(
                     id=partId,

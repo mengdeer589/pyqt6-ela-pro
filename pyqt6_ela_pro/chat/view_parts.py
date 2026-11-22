@@ -16,7 +16,7 @@ from PyQt6ElaWidgetTools import ElaIconType, ElaThemeType
 
 from .._internal import safe_connect
 from .._styles import ColorText
-from .._theme import surfaceRaised
+from .._theme import currentMode, surfaceRaised
 from ..ela_button import ElaButton
 from ..widget_base import ElaThemeWidget
 from ._theme import muted_color, text_color
@@ -157,7 +157,6 @@ class EmptyState(ElaThemeWidget):
                 receiver=button,
             )
             self._suggestions_box.addWidget(button, 0, Qt.AlignmentFlag.AlignHCenter)
-        self._suggestions_box.setEnabled(bool(self._suggestions))
 
     def suggestions(self) -> list:
         """获取建议列表。"""
@@ -203,7 +202,7 @@ class DeferredPlaceholder(QWidget):
         painter = QPainter(self)
         try:
             painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
-            color = QColor(self.palette().color(QPalette.ColorRole.WindowText))
+            color = QColor(muted_color(currentMode(), 0.35))
             color.setAlpha(26)
             painter.setBrush(color)
             painter.setPen(Qt.PenStyle.NoPen)

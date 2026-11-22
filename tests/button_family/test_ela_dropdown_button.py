@@ -29,8 +29,8 @@ class TestElaDropDownButtonInit:
         assert btn.menu() is None
         assert btn._is_hover is False
         assert btn._is_pressed is False
-        # 与按钮族一致（ElaPushButton V3.0 / ElaButton middle 都是 30）。
-        assert btn.height() == 30
+        # 与按钮族一致（ElaPushButton V3.0 / ElaButton middle 都是 32）。
+        assert btn.height() == 32
         assert btn.hasMouseTracking() is True
 
     def test_initialization_with_text_and_icon(self, make):

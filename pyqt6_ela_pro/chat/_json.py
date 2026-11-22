@@ -50,7 +50,12 @@ def dumps(obj: Any, allow_nan: bool = False, indent: int = 0) -> str:
         option = _ORJSON_OPTIONS
         if indent:
             option |= _ORJSON_INDENT
-        return _orjson.dumps(obj, option=option).decode("utf-8")
+        try:
+            return _orjson.dumps(obj, option=option).decode("utf-8")
+        except TypeError:
+            # orjson 对大整数 / 非字符串键比标准库严格；回退标准库保持
+            # 「两个后端语义一致」这条承诺。
+            pass
     if indent:
         return json.dumps(
             obj,

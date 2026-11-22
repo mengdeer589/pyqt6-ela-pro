@@ -9,7 +9,7 @@ from PyQt6.QtGui import QFocusEvent, QImage, QPainter
 from PyQt6.QtTest import QTest
 from PyQt6ElaWidgetTools import eApp, eTheme, ElaIconType, ElaPushButton, ElaThemeType
 
-from pyqt6_ela_pro._colors import _contrast_ratio
+from pyqt6_ela_pro._colors import contrastRatio
 from pyqt6_ela_pro._theme import surface
 from pyqt6_ela_pro.ela_button import ElaButton
 
@@ -34,8 +34,8 @@ COLORS = [
     "gold",
 ]
 
-# size -> (height, borderRadius)；可见面 = 高度 − 2×面内缩（20/28/36）
-SIZES = {"small": (22, 4), "middle": (30, 6), "large": (38, 8)}
+# size -> (height, borderRadius)；可见面 = 高度 − 2×面内缩（22/30/38）
+SIZES = {"small": (24, 4), "middle": (32, 6), "large": (40, 8)}
 
 
 @pytest.fixture
@@ -248,9 +248,9 @@ class TestElaButtonIcon:
 class TestElaButtonMatchesPushButton:
     """与上游 ``ElaPushButton``（V3.0）对齐：控件高 / 字号 / 可见按钮面。
 
-    上游 V3.0 重构把 ``ElaPushButton`` 改成控件高 30、面内缩
-    ``rect().adjusted(1, 1, -1, -1)``（面 28）。``ElaButton`` 的 middle 档
-    与它逐值一致（30/28），small / large 按 8px 档距下移（22/38 → 面 20/36）。
+    上游 V3.0 重构把 ``ElaPushButton`` 改成控件高 32、面内缩
+    ``rect().adjusted(1, 1, -1, -1)``（面 30）。``ElaButton`` 的 middle 档
+    与它逐值一致（32/30），small / large 按 8px 档距下移（24/40 → 面 22/38）。
     回归：``ElaButton`` 曾按旧上游（控件 38、面 32、3px 阴影边距）对齐 ——
     V3.0 后混排高度与可见面都对不上。
     """
@@ -258,7 +258,7 @@ class TestElaButtonMatchesPushButton:
     def test_middle_widget_height_and_font_match_push_button(self, make):
         push = make(ElaPushButton, "确定")
         ela = make(ElaButton, "确定")
-        assert ela.height() == push.height() == 30
+        assert ela.height() == push.height() == 32
         assert push.font().pixelSize() == eApp.getFontPixelSize() + 2
         assert ela.font().pixelSize() == push.font().pixelSize()
 
@@ -277,7 +277,7 @@ class TestElaButtonMatchesPushButton:
         assert btn.minimumSizeHint().width() == 50
 
     def test_visible_face_height_matches_push_button(self, make, qapp):
-        """抓图量可见按钮面：两种按钮都应是 28px（控件 30 − 2×1 面内缩）。
+        """抓图量可见按钮面：两种按钮都应是 30px（控件 32 − 2×1 面内缩）。
 
         用暗色主题：浅色下 ``ElaPushButton`` 还有 1px 边框，量出来会把边框
         算成/排除掉，让容差没有意义。
@@ -384,7 +384,7 @@ class TestElaButtonAccentText:
         finally:
             eTheme.setThemeMode(previous)
         assert fg.name() == scheme["accentText"].name()
-        assert _contrast_ratio(fg, scheme["accentBg"]) >= 4.5
+        assert contrastRatio(fg, scheme["accentBg"]) >= 4.5
 
 
 class TestElaButtonDisabled:

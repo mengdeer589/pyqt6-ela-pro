@@ -12,9 +12,9 @@ class _WidgetInputApiMixin:
         """当前输入中仍有效的 ``@`` 引用 id 列表。"""
         return self._input.mentions()
 
-    def mentionSpans(self) -> list:
+    def mentionSpans(self, text=None) -> list:
         """当前文本里的 ``@`` 引用区间（``ElaChatMention`` 列表）。"""
-        return self._input.mentionSpans()
+        return self._input.mentionSpans(text)
 
     def setCommandProvider(self, provider) -> None:
         """设置 ``/`` 命令候选提供者（``provider(query) -> list``）。"""

@@ -359,7 +359,7 @@ requires-dist = [
     { name = "pygments", marker = "extra == 'all'", specifier = ">=2.15" },
     { name = "pypinyin", specifier = ">=0.50.0" },
     { name = "pyqt6", path = "PyElaWidgetTools/wheels/pyqt6-win7/PyQt6-6.8.1-cp39-abi3-win_amd64.whl" },
-    { name = "pyqt6-elawidgettools", path = "PyElaWidgetTools/wheels/pyqt6-win7/pyqt6_elawidgettools-0.14.0-cp39-abi3-win_amd64.whl" },
+    { name = "pyqt6-elawidgettools", path = "PyElaWidgetTools/wheels/pyqt6-win7/pyqt6_elawidgettools-0.14.1-cp39-abi3-win_amd64.whl" },
     { name = "pyqt6-qt6", path = "PyElaWidgetTools/wheels/pyqt6-win7/PyQt6_Qt6-6.8.2-py3-none-win_amd64.whl" },
     { name = "pyqt6-sip", marker = "python_full_version < '3.12'", path = "PyElaWidgetTools/wheels/pyqt6-win7/pyqt6_sip-13.13.0-cp311-cp311-win_amd64.whl" },
     { name = "pyqt6-sip", marker = "python_full_version >= '3.12'", specifier = "==13.13.0" },
@@ -390,13 +390,13 @@ dev = [
 
 [[package]]
 name = "pyqt6-elawidgettools"
-version = "0.14.0"
-source = { path = "PyElaWidgetTools/wheels/pyqt6-win7/pyqt6_elawidgettools-0.14.0-cp39-abi3-win_amd64.whl" }
+version = "0.14.1"
+source = { path = "PyElaWidgetTools/wheels/pyqt6-win7/pyqt6_elawidgettools-0.14.1-cp39-abi3-win_amd64.whl" }
 dependencies = [
     { name = "pyqt6" },
 ]
 wheels = [
-    { filename = "pyqt6_elawidgettools-0.14.0-cp39-abi3-win_amd64.whl", hash = "sha256:628c7bd29dde8767a64b223e09ed58c3e2a16f03e131be09771c390f99cc91a2" },
+    { filename = "pyqt6_elawidgettools-0.14.1-cp39-abi3-win_amd64.whl", hash = "sha256:1072bd467b43456228a37e9da421da861c7fdc5fd9a3d859dc4ffc3b1c391fc8" },
 ]
 
 [package.metadata]

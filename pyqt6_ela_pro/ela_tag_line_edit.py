@@ -41,8 +41,8 @@ class ElaTagLineEdit(_ThemeAwareMixin, ElaLineEdit):
         self._title_font_size = 13
         self._is_error = False
 
-        # 固定高度 35px
-        self.setFixedHeight(35)
+        # 固定高度 32px（与上游单行控件一致）
+        self.setFixedHeight(32)
         self._updateMargins()
 
         self._textChangedSlot = self._onTextChanged  # 断连要同一对象（lambda / partial 必须存引用）

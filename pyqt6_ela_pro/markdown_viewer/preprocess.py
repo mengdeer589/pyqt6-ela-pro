@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import re
+from html import escape as _html_escape
+from html.entities import html5 as _HTML5_ENTITIES
 from typing import Optional
 
 from PyQt6.QtCore import Qt
@@ -14,6 +16,7 @@ from PyQt6.QtGui import (
     QTextCharFormat,
     QTextCursor,
     QTextDocument,
+    QTextDocumentFragment,
 )
 from PyQt6ElaWidgetTools import ElaThemeType
 
@@ -27,6 +30,8 @@ from .syntax import (
     _clamp_pos,
     _fence_close,
     _fence_open,
+    _is_indented_code_line,
+    _strip_code_container_prefix,
 )
 from .themes import _QUOTE_LEFT_MARGIN
 from .tokens import (
@@ -43,6 +48,7 @@ from .tokens import (
     _MERMAID_TOKEN_PREFIX,
     _PROTECT_TOKEN_PREFIX,
     _TOC_TOKEN,
+    merge_anchor_format,
 )
 
 
@@ -62,13 +68,23 @@ _SUB_RE = re.compile(r"(?<![\d~])~([0-9A-Za-z]+)~(?!~)")
 
 _SUP_RE = re.compile(r"(?<!\^)\^([0-9A-Za-z]+)\^(?!\^)")
 
-_LONE_TILDE_RE = re.compile(r"(?<!~)~(?!~)")
+_LONE_TILDE_RE = re.compile(r"(?<!\\)(?<!~)~(?!~)")
 
 _MARK_RE = re.compile(r"==([^=\s](?:[^=]*[^=\s])?)==")
 
-_MARK_SPECIAL_CHARS = ("*", "_", "[", "]", "`", "~", "<", ">")
+_MARK_RICH_RE = re.compile(r"==([^=\s](?:.*?[^=\s])?)==")
+
+_MARK_SPECIAL_CHARS = ("[", "]", "`", "~", "<", ">")
 
 _EMOJI_RE = re.compile(r":([a-z0-9_+-]+):")
+
+_NAMED_ENTITY_RE = re.compile(r"&([A-Za-z][A-Za-z0-9]+);")
+
+_NUMERIC_WS_ENTITY_RE = re.compile(
+    r"&#(?:0*9|0*10|0*13|x0*9|x0*10|x0*13);", re.IGNORECASE
+)
+
+_ENTITY_SKIP = frozenset({"amp", "apos", "gt", "lt", "nbsp", "quot"})
 
 _EMOJI_MAP = {
     "smile": "😄",
@@ -167,6 +183,199 @@ _FOOTNOTE_REF_RE = re.compile(r"\[\^([^\]\s]+)\]")
 
 _TOC_LINE_RE = re.compile(r"^\[toc\]$", re.IGNORECASE)
 
+_DETAILS_INLINE_RE = re.compile(
+    r"^<details>\s*<summary>(.*?)</summary>(.*?)</details>\s*$", re.IGNORECASE
+)
+
+_DETAILS_SUMMARY_OPEN_RE = re.compile(
+    r"^<details(?P<attrs>\s[^>]*)?>\s*<summary>(.*?)</summary>\s*$",
+    re.IGNORECASE,
+)
+
+_EMPTY_HEADING_RE = re.compile(r"^ {0,3}(#{1,6})[ \t]*#*[ \t]*$")
+
+_EMPTY_LIST_ITEM_RE = re.compile(r"^((?:[ \t]*>[ \t]?)*[ \t]*(?:[-+*]|\d+[.)])[ \t]*)$")
+
+_BARE_URL_RE = re.compile(
+    r"(?:https?://|ftp://|mailto:|xmpp:|www\.)[^\s<>]+", re.IGNORECASE
+)
+
+_LINK_LABEL_RE = re.compile(r"\[([^\]]*)\]\(")
+
+_TABLE_DELIM_RE = re.compile(r"^\s*\|?\s*:?-{3,}:?\s*(?:\|\s*:?-{3,}:?\s*)*\|?\s*$")
+
+_IMAGE_LINK_RE = re.compile(
+    r"\[!\[([^\]]*)\]\(([^)\s]+)(?:\s+\"([^\"]*)\")?\)\]"
+    r"\(([^)\s]+)(?:\s+\"([^\"]*)\")?\)"
+)
+
+
+def _image_link_html(match: re.Match) -> str:
+    """纯图片链接 → HTML：Qt 对 Markdown 图片 label 不保留外链 anchor。"""
+    alt, src, img_title, href, link_title = match.groups()
+    if any(char in src + href for char in '<>"\n'):
+        return match.group(0)
+    parts = [
+        f'<a href="{_html_escape(href, quote=True)}"',
+        f' title="{_html_escape(link_title, quote=True)}"' if link_title else "",
+        ">",
+        f'<img src="{_html_escape(src, quote=True)}"',
+        f' alt="{_html_escape(alt, quote=True)}"' if alt else "",
+        f' title="{_html_escape(img_title, quote=True)}"' if img_title else "",
+        "></a>",
+    ]
+    return "".join(parts)
+
+
+def _trim_url_tail(url: str) -> str:
+    """去掉裸 URL 末尾的句读 / 不成对右括号（GFM autolink 的常见裁剪）。"""
+    while url:
+        char = url[-1]
+        if char in ".,;:!?":
+            url = url[:-1]
+            continue
+        if char in ")]}":
+            opener = {")": "(", "]": "[", "}": "{"}[char]
+            if url.count(char) > url.count(opener):
+                url = url[:-1]
+                continue
+        break
+    return url
+
+
+def _split_url_tail(url: str) -> tuple[str, str]:
+    """在第一个不成对右括号处截断（``(business))+ok`` → ``(business)``）。"""
+    depth = 0
+    for index, char in enumerate(url):
+        if char == "(":
+            depth += 1
+        elif char == ")":
+            if depth == 0:
+                return _trim_url_tail(url[:index]), url[index:]
+            depth -= 1
+    trimmed = _trim_url_tail(url)
+    return trimmed, url[len(trimmed) :]
+
+
+def _label_ranges(segment: str) -> list[tuple[int, int]]:
+    """当前片段里 Markdown 链接 label 的字符区间（不含方括号）。"""
+    return [
+        (match.start(1), match.end(1)) for match in _LINK_LABEL_RE.finditer(segment)
+    ]
+
+
+def _table_row_flags(lines: list[str]) -> list[bool]:
+    """标记表格块内的行（表头 / 分隔行 / 数据行）。"""
+    flags = [False] * len(lines)
+    index = 0
+    while index < len(lines):
+        if "|" not in lines[index] or not _TABLE_DELIM_RE.match(lines[index]):
+            index += 1
+            continue
+        flags[index] = True
+        cursor = index - 1
+        while cursor >= 0 and lines[cursor].strip() and "|" in lines[cursor]:
+            flags[cursor] = True
+            cursor -= 1
+        cursor = index + 1
+        while cursor < len(lines) and lines[cursor].strip() and "|" in lines[cursor]:
+            flags[cursor] = True
+            cursor += 1
+        index = cursor
+    return flags
+
+
+def _decode_named_entities(segment: str) -> str:
+    """补 Qt 缺失的 HTML5 命名实体；XML 五件套与 nbsp 留给导入器。"""
+
+    def replace(match: re.Match) -> str:
+        name = match.group(1)
+        if name.lower() in _ENTITY_SKIP:
+            return match.group(0)
+        if _is_escaped(segment, match.start()):
+            return match.group(0)
+        value = _HTML5_ENTITIES.get(f"{name};")
+        # 只补 Qt 缺的非 ASCII 字符；ASCII 标点/字母交给导入器，
+        # 避免 &LT; 重新造出真实标签。
+        if value is None or value.isascii() or "\n" in value or "\r" in value:
+            return match.group(0)
+        return value
+
+    segment = _NUMERIC_WS_ENTITY_RE.sub(" ", segment)
+    return _NAMED_ENTITY_RE.sub(replace, segment)
+
+
+def _is_escaped(text: str, index: int) -> bool:
+    count = 0
+    cursor = index - 1
+    while cursor >= 0 and text[cursor] == "\\":
+        count += 1
+        cursor -= 1
+    return count % 2 == 1
+
+
+def _details_is_open(attrs: Optional[str]) -> bool:
+    return (
+        bool(attrs)
+        and re.search(r"(?:^|\s)open(?:\s|=|$)", attrs, re.IGNORECASE) is not None
+    )
+
+
+def _is_footnote_continuation(line: str) -> bool:
+    """脚注续行：剥掉 ``>`` 后仍有 4 空格 / tab（列表标记也算续行）。"""
+    stripped = re.sub(r"^(?:[ \t]*>[ \t]?)+", "", line)
+    return stripped.startswith("\t") or stripped.startswith("    ")
+
+
+def _escape_label_url(url: str) -> str:
+    """打断 label 内裸 URL 的 autolink，避免它抢走外层链接的 href。"""
+    if url.lower().startswith("www."):
+        return url[:3] + "\\" + url[3:]
+    scheme = re.match(r"[A-Za-z][A-Za-z0-9+.-]*:", url)
+    if scheme is not None:
+        colon = scheme.end() - 1
+        return url[:colon] + "\\" + url[colon:]
+    return url
+
+
+def _front_matter_end(lines: list[str]) -> Optional[tuple[int, str]]:
+    """首行 front matter 定界符且有闭合行时返回 ``(闭合行号, 语言)``。"""
+    if not lines:
+        return None
+    opening = lines[0].lstrip("\ufeff").strip()
+    if opening == "---":
+        closers, language = ("---", "..."), "yaml"
+    elif opening == "+++":
+        closers, language = ("+++",), "toml"
+    else:
+        return None
+    for index in range(1, len(lines)):
+        if lines[index].strip() in closers:
+            if index <= 1:
+                return None
+            body = lines[1:index]
+            if not _looks_like_front_matter(body, language):
+                return None
+            return index, language
+    return None
+
+
+def _looks_like_front_matter(lines: list[str], language: str) -> bool:
+    """避免把「首尾都是 ``---`` 的普通正文」误判成 front matter。"""
+    for line in lines:
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        if language == "toml":
+            if "=" in stripped or stripped.startswith("["):
+                return True
+            continue
+        if re.match(r"^[A-Za-z_][\w.-]*\s*:(?!//)", stripped):
+            return True
+        if stripped.startswith(("- ", "{", "[", "...")):
+            return True
+    return False
+
 
 class _MarkdownPreprocessMixin:
     @staticmethod
@@ -176,20 +385,56 @@ class _MarkdownPreprocessMixin:
         indices: set[int] = set()
         seen: set[str] = set()
         fence: Optional[str] = None
-        for index, line in enumerate(lines):
+        fence_prefix = ""
+        index = 0
+        while index < len(lines):
+            line = lines[index]
             if fence is not None:
-                if _fence_close(line, fence):
+                if _fence_close(line, fence, fence_prefix):
                     fence = None
+                    fence_prefix = ""
+                index += 1
                 continue
-            opened, _lang = _fence_open(line)
+            opened, _lang, prefix = _fence_open(line)
             if opened:
                 fence = opened
+                fence_prefix = prefix
+                index += 1
+                continue
+            if _is_indented_code_line(line):
+                index += 1
                 continue
             match = _FOOTNOTE_DEF_RE.match(line)
-            if match and match.group(1) not in seen:
-                seen.add(match.group(1))
-                indices.add(index)
-                defs.append((match.group(1), match.group(2).strip()))
+            if match is None:
+                index += 1
+                continue
+            fid = match.group(1)
+            parts = [match.group(2).strip()]
+            indices.add(index)
+            cursor = index + 1
+            while cursor < len(lines):
+                following = lines[cursor]
+                if not following.strip():
+                    lookahead = cursor + 1
+                    while lookahead < len(lines) and not lines[lookahead].strip():
+                        lookahead += 1
+                    if lookahead < len(lines) and _is_footnote_continuation(
+                        lines[lookahead]
+                    ):
+                        parts.append("")
+                        cursor = lookahead
+                        continue
+                    break
+                if not _is_footnote_continuation(following):
+                    break
+                parts.append(following.strip())
+                indices.add(cursor)
+                cursor += 1
+            body = " ".join(part for part in parts if part).strip()
+            if fid not in seen:
+                seen.add(fid)
+                defs.append((fid, body))
+            index = cursor
         return defs, indices
 
     def _extract_folds(self, lines: list[str]) -> tuple[list[str], list[dict]]:
@@ -211,6 +456,7 @@ class _MarkdownPreprocessMixin:
             re.compile(rf"^</{re.escape(tag)}>\s*$", re.IGNORECASE) if tag else None
         )
         fence: Optional[str] = None
+        fence_prefix = ""
         index = 0
         i = 0
         total = len(lines)
@@ -240,15 +486,38 @@ class _MarkdownPreprocessMixin:
         while i < total:
             stripped = lines[i].strip()
             if fence is not None:
-                if _fence_close(lines[i], fence):
+                if _fence_close(lines[i], fence, fence_prefix):
                     fence = None
+                    fence_prefix = ""
                 append(lines[i], i)
                 i += 1
                 continue
-            opened, _lang = _fence_open(lines[i])
+            opened, _lang, prefix = _fence_open(lines[i])
             if opened:
                 fence = opened
+                fence_prefix = prefix
                 append(lines[i], i)
+                i += 1
+                continue
+            if _is_indented_code_line(lines[i]):
+                append(lines[i], i)
+                i += 1
+                continue
+            inline_details = _DETAILS_INLINE_RE.match(stripped)
+            if inline_details is not None:
+                label = inline_details.group(1).strip() or "详情"
+                body = inline_details.group(2).strip()
+                if result and result[-1].strip():
+                    append("", i)
+                append(f"{_FOLD_TOKEN_PREFIX}{index}{_CODE_TOKEN_SUFFIX}", i)
+                append("", i)
+                if body:
+                    append(body, i)
+                append("", i)
+                append(f"{_FOLD_END_TOKEN_PREFIX}{index}{_CODE_TOKEN_SUFFIX}", i)
+                append("", i)
+                folds.append({"kind": "details", "label": label, "pending": False})
+                index += 1
                 i += 1
                 continue
             if open_re is not None and open_re.match(stripped):
@@ -269,11 +538,20 @@ class _MarkdownPreprocessMixin:
                 )
                 i = j + 1 if closed else total
                 continue
-            if _DETAILS_OPEN_RE.match(stripped):
+            summary_open = _DETAILS_SUMMARY_OPEN_RE.match(stripped)
+            details_open = _DETAILS_OPEN_RE.match(stripped)
+            if details_open or summary_open is not None:
                 depth = 1
-                label = "详情"
+                attrs = (
+                    summary_open.group("attrs")
+                    if summary_open is not None
+                    else details_open.group("attrs")
+                )
+                is_open = _details_is_open(attrs)
+                fold_index = index
+                label = summary_open.group(2).strip() if summary_open else "详情"
                 content_start = i + 1
-                if content_start < total:
+                if summary_open is None and content_start < total:
                     summary = _SUMMARY_RE.match(lines[content_start].strip())
                     if summary:
                         label = summary.group(1).strip() or label
@@ -281,7 +559,11 @@ class _MarkdownPreprocessMixin:
                 k = content_start
                 while k < total and depth > 0:
                     inner = lines[k].strip()
-                    if _DETAILS_OPEN_RE.match(inner):
+                    if (
+                        _DETAILS_OPEN_RE.match(inner)
+                        or _DETAILS_SUMMARY_OPEN_RE.match(inner)
+                        or _DETAILS_INLINE_RE.match(inner)
+                    ):
                         depth += 1
                     elif _DETAILS_CLOSE_RE.match(inner):
                         depth -= 1
@@ -292,10 +574,17 @@ class _MarkdownPreprocessMixin:
                 append_fold(
                     content_start,
                     k if closed else total,
-                    {"kind": "details", "label": label, "pending": not closed},
+                    {
+                        "kind": "details",
+                        "label": label,
+                        "pending": not closed,
+                        "open": is_open,
+                    },
                     closed,
                     i,
                 )
+                if is_open and fold_index not in self._collapsed_folds:
+                    self._expanded_folds.add(fold_index)
                 i = k + 1 if closed else total
                 continue
             append(lines[i], i)
@@ -307,9 +596,24 @@ class _MarkdownPreprocessMixin:
         围栏代码 / 脚注 / Callout / [toc] / 折叠块替换为占位符，任务列表换成 ■/□，
         行内代码 / 上下标 / 高亮 / emoji 在此展开。
         """
-        # front matter（`---` 头部）：Qt 6 的 Markdown 导入器原生剥离，无需预处理
         raw_lines = text.split("\n")
+        # 首行 frontmatter 会被 Qt 的 Markdown 导入器整块吞掉；转成对应
+        # 语言围栏保留原文，只替换两行定界符，源码行号不漂。
+        if self._front_matter_mode == "fence":
+            meta = _front_matter_end(raw_lines)
+            if meta is not None:
+                end, language = meta
+                content = "\n".join(raw_lines[1:end])
+                max_run = max((len(m) for m in re.findall(r"`+", content)), default=0)
+                fence = "`" * max(3, max_run + 1)
+                raw_lines[0] = f"{fence}{language}"
+                raw_lines[end] = fence
+            elif raw_lines and raw_lines[0].lstrip("\ufeff").strip() == "---":
+                # Qt 会把首行 --- + 后续 --- 整块当 front matter 吞掉；
+                # 不是 YAML 时换成等价的分隔线，保住正文。
+                raw_lines[0] = "***"
         lines, folds, index_map = self._extract_folds(raw_lines)
+        table_rows = _table_row_flags(lines)
         fn_defs, fn_def_lines = self._collect_footnote_defs(raw_lines)
         defined = {fid for fid, _ in fn_defs}
         #: 脚注首次引用顺序（编号按引用顺序而不是定义顺序）
@@ -326,7 +630,6 @@ class _MarkdownPreprocessMixin:
         link_dest_re = re.compile(r"\]\(([^)\n]*)\)")
         angle_autolink_re = re.compile(r"<(?:https?|ftp)://[^>\s]+>", re.IGNORECASE)
         tag_re = re.compile(r"<[^>\n]+>")
-        bare_url_re = re.compile(r"(?:https?://|ftp://|www\.)[^\s<>]+", re.IGNORECASE)
 
         def protect_span(span: str) -> str:
             token = f"{_PROTECT_TOKEN_PREFIX}{len(protected)}{_CODE_TOKEN_SUFFIX}"
@@ -336,6 +639,8 @@ class _MarkdownPreprocessMixin:
         def protect_inline(segment: str) -> str:
             if not segment:
                 return segment
+            # 图片链接先转成 HTML：Qt 不会给「纯图片 label」的图片片段挂 anchor
+            segment = _IMAGE_LINK_RE.sub(lambda match: _image_link_html(match), segment)
             # 链接目标只保护 (...) 内部；label 仍参与加粗 / 斜体等转换
             segment = link_dest_re.sub(
                 lambda match: "](" + protect_span(match.group(1)) + ")", segment
@@ -344,12 +649,49 @@ class _MarkdownPreprocessMixin:
                 lambda match: protect_span(match.group(0)), segment
             )
             segment = tag_re.sub(lambda match: protect_span(match.group(0)), segment)
+            labels = _label_ranges(segment)
 
             def protect_bare_url(match):
-                # Qt 导入器会把裸 URL 里的 ~x~ 当上下标，转义后仍显示原文
-                return protect_span(match.group(0).replace("~", "\\~"))
+                raw = match.group(0)
+                start = match.start()
+                label_end = next(
+                    (right for left, right in labels if left <= start < right),
+                    None,
+                )
+                if label_end is not None:
+                    # label 内的 URL 交给外层链接；转义起点阻止它自己变成 autolink。
+                    # 只保护 label 里的 URL 部分，别吃掉收尾的 == / ** / ]。
+                    limit = min(len(raw), max(0, label_end - start))
+                    url_part = raw[:limit]
+                    tail = raw[limit:]
+                    for marker in ("**", "__", "==", "~~", "*", "_", "~"):
+                        if url_part.endswith(marker):
+                            url_part = url_part[: -len(marker)]
+                            tail = marker + tail
+                            break
+                    return (
+                        protect_span(_escape_label_url(url_part).replace("~", "\\~"))
+                        + tail
+                    )
+                if "](" in raw:
+                    return protect_span(raw.replace("~", "\\~"))
+                url, tail = _split_url_tail(raw)
+                if not url:
+                    return raw
+                lowered = url.lower()
+                if lowered.startswith(("http://", "https://", "ftp://")):
+                    return protect_span(f"<{url}>") + tail
+                if lowered.startswith(("mailto:", "xmpp:")):
+                    href = _html_escape(url, quote=True)
+                    return protect_span(f'<a href="{href}">{href}</a>') + tail
+                if lowered.startswith("www.") and not any(
+                    char in url for char in "[]<>\"'"
+                ):
+                    label = _escape_label_url(url).replace("*", "\\*")
+                    return protect_span(f"[{label}](<http://{url}>)") + tail
+                return protect_span(raw.replace("~", "\\~"))
 
-            return bare_url_re.sub(protect_bare_url, segment)
+            return _BARE_URL_RE.sub(protect_bare_url, segment)
 
         fenced_blocks: list[tuple[str, str]] = []
         fenced_source_lines: list[tuple[int, int]] = []
@@ -359,30 +701,34 @@ class _MarkdownPreprocessMixin:
         tasks: list[tuple[int, bool]] = []
         fence: Optional[str] = None
         fence_lang = ""
+        fence_prefix = ""
         fence_start = 0
         buffer: list[str] = []
 
         def emit_closed_fence(
-            lang: str, code: str, start_line: int, end_line: int
+            lang: str, code: str, start_line: int, end_line: int, prefix: str
         ) -> None:
             """闭合围栏：mermaid 且启用渲染时产出 Mermaid 占位符，否则代码卡片。"""
             if lang == "mermaid" and code.strip() and self._mermaid_enabled():
                 mermaid_blocks.append(code)
                 out.append(
-                    f"{_MERMAID_TOKEN_PREFIX}{len(mermaid_blocks) - 1}"
+                    prefix + f"{_MERMAID_TOKEN_PREFIX}{len(mermaid_blocks) - 1}"
                     f"{_CODE_TOKEN_SUFFIX}"
                 )
                 return
             token = f"{_CODE_TOKEN_PREFIX}{len(fenced_blocks)}{_CODE_TOKEN_SUFFIX}"
             fenced_blocks.append((lang, code, True))
             fenced_source_lines.append((start_line, end_line))
-            out.append(token)
+            out.append(prefix + token)
 
         def transform(segment: str) -> str:
             # 每个 sub 先做触发字符检查再进正则：正则固定开销远贵于 in 的 C 级扫描，
             # 正文命中率 <0.5%；各触发串都是对应正则的必要前置，跳过行为逐字节一致。
             if not segment:
                 return segment
+
+            if "&" in segment:
+                segment = _decode_named_entities(segment)
 
             # 空 alt 图片补一个空格，否则 Qt 导入器整张丢弃（见正则注释）
             if "![" in segment:
@@ -414,7 +760,9 @@ class _MarkdownPreprocessMixin:
 
                 def replace_mark(match):
                     content = match.group(1)
-                    if any(ch in content for ch in _MARK_SPECIAL_CHARS):
+                    if "\ue000" in content or any(
+                        ch in content for ch in _MARK_SPECIAL_CHARS
+                    ):
                         return match.group(0)
                     marks.append(content)
                     return f"{_MARK_TOKEN_PREFIX}{len(marks) - 1}{_CODE_TOKEN_SUFFIX}"
@@ -429,8 +777,34 @@ class _MarkdownPreprocessMixin:
                 )
             return segment
 
-        def transform_line(line: str) -> str:
+        def extract_rich_marks(line: str) -> str:
+            """提取含行内代码 / 链接的高亮：内容交给 QTextDocumentFragment 渲染。"""
+            if "==" not in line:
+                return line
+            skip_spans = [
+                (match.start(), match.end()) for match in _INLINE_CODE_RE.finditer(line)
+            ]
+            for pattern in (link_dest_re, angle_autolink_re, tag_re):
+                skip_spans.extend(
+                    (match.start(), match.end()) for match in pattern.finditer(line)
+                )
+
+            def replace(match: re.Match) -> str:
+                content = match.group(1)
+                if not ("`" in content or "[" in content):
+                    return match.group(0)
+                if "<" in content or ">" in content:
+                    return match.group(0)
+                if any(start < match.start() < end for start, end in skip_spans):
+                    return match.group(0)
+                marks.append(content)
+                return f"{_MARK_TOKEN_PREFIX}{len(marks) - 1}{_CODE_TOKEN_SUFFIX}"
+
+            return _MARK_RICH_RE.sub(replace, line)
+
+        def transform_line(line: str, in_table: bool = False) -> str:
             """行内语法转换（行内代码换成唯一占位符，文本另存）。"""
+            line = extract_rich_marks(line)
             # 没有反引号的行直接走纯文本转换：``_INLINE_CODE_RE.finditer``
             # 每行都要起一次正则引擎（命中率低的文档是纯开销）
             if "`" not in line:
@@ -445,7 +819,10 @@ class _MarkdownPreprocessMixin:
                     f"{_INLINE_CODE_TOKEN_PREFIX}{len(inline_codes)}"
                     f"{_CODE_TOKEN_SUFFIX}"
                 )
-                inline_codes.append(match.group(2))
+                code_text = match.group(2)
+                if in_table:
+                    code_text = code_text.replace("\\|", "|")
+                inline_codes.append(code_text)
                 inline_tokens.append(token)
                 pieces.append(token)
                 last = match.end()
@@ -456,15 +833,20 @@ class _MarkdownPreprocessMixin:
             raw_index = index_map[line_no]
             stripped = line.strip()
             if fence is not None:
-                if _fence_close(line, fence):
+                if _fence_close(line, fence, fence_prefix):
                     emit_closed_fence(
-                        fence_lang, "\n".join(buffer), fence_start, raw_index + 1
+                        fence_lang,
+                        "\n".join(buffer),
+                        fence_start,
+                        raw_index + 1,
+                        fence_prefix,
                     )
                     fence = None
                     fence_lang = ""
+                    fence_prefix = ""
                     buffer = []
                 else:
-                    buffer.append(line)
+                    buffer.append(_strip_code_container_prefix(line, fence_prefix))
                 continue
 
             if raw_index in fn_def_lines:
@@ -472,12 +854,25 @@ class _MarkdownPreprocessMixin:
                 out.append("")
                 continue
 
-            opened, opened_lang = _fence_open(line)
+            opened, opened_lang, opened_prefix = _fence_open(line)
             if opened:
                 fence = opened
                 fence_lang = opened_lang
+                fence_prefix = opened_prefix
                 fence_start = raw_index
                 continue
+
+            if _is_indented_code_line(line):
+                out.append(line)
+                continue
+
+            empty_heading = _EMPTY_HEADING_RE.match(line)
+            if empty_heading is not None:
+                line = f"{empty_heading.group(1)} \u200b"
+            else:
+                empty_item = _EMPTY_LIST_ITEM_RE.match(line)
+                if empty_item is not None:
+                    line = f"{empty_item.group(1).rstrip()} \u200b"
 
             callout = _CALLOUT_RE.match(stripped)
             if callout is not None:
@@ -485,6 +880,13 @@ class _MarkdownPreprocessMixin:
                 out.append(
                     f"> {_CALLOUT_TOKEN_PREFIX}{len(callouts) - 1}{_CODE_TOKEN_SUFFIX}"
                 )
+                following = (
+                    lines[line_no + 1].lstrip("> ").strip()
+                    if line_no + 1 < len(lines)
+                    else ""
+                )
+                if following.startswith("|"):
+                    out.append(">")
                 continue
 
             if _TOC_LINE_RE.match(stripped):
@@ -498,14 +900,18 @@ class _MarkdownPreprocessMixin:
                 return f"{match.group(1)}[{marker}](#elatask-{len(tasks) - 1})"
 
             line = _TASK_LIST_RE.sub(replace_task, line)
-            out.append(transform_line(line))
+            out.append(
+                transform_line(
+                    line, table_rows[line_no] if line_no < len(table_rows) else False
+                )
+            )
 
         if fence is not None:
             # 未闭合围栏：同样按代码块渲染（GitHub 语义），流式期间体验更好
             token = f"{_CODE_TOKEN_PREFIX}{len(fenced_blocks)}{_CODE_TOKEN_SUFFIX}"
             fenced_blocks.append((fence_lang, "\n".join(buffer), False))
             fenced_source_lines.append((fence_start, len(raw_lines)))
-            out.append(token)
+            out.append(fence_prefix + token)
 
         if fn_defs:
             by_id = dict(fn_defs)
@@ -537,9 +943,10 @@ class _MarkdownPreprocessMixin:
         self._mermaid_blocks = mermaid_blocks
         self._fold_blocks = folds
         text = "\n".join(out)
-        for index, span in enumerate(protected):
+        # 逆序还原：裸 URL / angle autolink 的 span 可能包住更早的链接目标 token
+        for index in range(len(protected) - 1, -1, -1):
             text = text.replace(
-                f"{_PROTECT_TOKEN_PREFIX}{index}{_CODE_TOKEN_SUFFIX}", span
+                f"{_PROTECT_TOKEN_PREFIX}{index}{_CODE_TOKEN_SUFFIX}", protected[index]
             )
         return guard_unpaired_html(text)
 
@@ -555,8 +962,23 @@ class _MarkdownPreprocessMixin:
         ]
 
         def replace(found: QTextCursor, content: str) -> None:
+            original = found.charFormat()
             found.removeSelectedText()
-            found.insertText(content, fmt)
+            start = found.position()
+            if any(char in content for char in "*_`["):
+                found.insertFragment(QTextDocumentFragment.fromMarkdown(content))
+            else:
+                found.insertText(content)
+            end = found.position()
+            range_fmt = fmt
+            if original.isAnchor():
+                range_fmt = QTextCharFormat(fmt)
+                merge_anchor_format(range_fmt, original)
+            if end > start:
+                cursor = QTextCursor(found.document())
+                cursor.setPosition(start)
+                cursor.setPosition(end, QTextCursor.MoveMode.KeepAnchor)
+                cursor.mergeCharFormat(range_fmt)
 
         self._replace_tokens_in_order(document, entries, replace)
 
@@ -722,7 +1144,33 @@ class _MarkdownPreprocessMixin:
             fmt.setAnchor(True)
             fmt.setAnchorHref(f"#elafold-{index}")
             found.removeSelectedText()
-            found.insertText(f"{marker} {label}", fmt)
+            start = found.position()
+            found.insertText(f"{marker} ", fmt)
+            if label and "<" not in label:
+                found.insertFragment(QTextDocumentFragment.fromMarkdown(label))
+            elif label:
+                found.insertText(label, fmt)
+            end = found.position()
+            block = found.block()
+            iterator = block.begin()
+            ranges: list[tuple[int, int]] = []
+            while not iterator.atEnd():
+                fragment = iterator.fragment()
+                if fragment.isValid():
+                    position = fragment.position()
+                    stop = position + fragment.length()
+                    if (
+                        position >= start
+                        and stop <= end
+                        and not fragment.charFormat().isAnchor()
+                    ):
+                        ranges.append((position, stop))
+                iterator += 1
+            edit = QTextCursor(document)
+            for position, stop in ranges:
+                edit.setPosition(position)
+                edit.setPosition(stop, QTextCursor.MoveMode.KeepAnchor)
+                edit.mergeCharFormat(fmt)
             start_search.setPosition(found.position())
             label_block = document.findBlock(max(found.position() - 1, 0))
             if not label_block.isValid():
@@ -852,3 +1300,20 @@ class _MarkdownPreprocessMixin:
     def reasoningLabel(self) -> str:
         """获取推理块折叠标签文案。"""
         return self._reasoning_label
+
+    def setFrontMatterMode(self, mode: str) -> None:
+        """首行 frontmatter 处理方式：``"fence"``（默认，保留为 YAML 代码块）
+        或 ``"strip"``（交给 Qt 原生剥离）。
+        """
+        value = str(mode or "").strip().lower()
+        if value not in ("fence", "strip"):
+            raise ValueError("frontMatterMode 只支持 'fence' / 'strip'")
+        if value == self._front_matter_mode:
+            return
+        self._front_matter_mode = value
+        if self._source:
+            self._render()
+
+    def frontMatterMode(self) -> str:
+        """获取首行 frontmatter 处理方式。"""
+        return self._front_matter_mode

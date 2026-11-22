@@ -15,7 +15,8 @@
 - 表格斑马纹（默认关闭）与列宽设置；
 - 任务列表可点击勾选；
 - `<details>` 折叠块；
-- YAML front matter 自动剥离；
+- YAML / TOML front matter 默认保留为对应围栏代码块；首尾 `---` 之间的普通正文不会被误判；
+  `setFrontMatterMode("strip")` 恢复 Qt 原生剥离；
 - `[toc]` 目录与标题锚点（锚点跳转可返回上一位置）。
 
 ## 缺字形兜底（Win7）
@@ -117,23 +118,27 @@ viewer.setBodyFontFamily(family)
 
 ## GFM 与扩展语法
 
-- GFM：表格 / 任务列表（含引用块内的任务列表）/ 删除线；
+- GFM：表格 / 任务列表（含引用块内的任务列表）/ 删除线 / 裸 URL 与邮箱 autolink；
+  裸 URL 的路径括号、`%20`、`~`、`*`、`==`、`[]` 都可点击；
 - GitHub Alert 提示块（`> [!NOTE]` / `[!TIP]` / `[!WARNING]` 等）；
-- 脚注：跳转与回跳，编号按**首次引用顺序**（不是定义顺序）；
+- 脚注：跳转与回跳，编号按**首次引用顺序**（不是定义顺序）；支持缩进续行；
+- HTML5 命名实体（`&check;` / `&Dcaron;` 等）在 Qt 支持范围外补齐；
 - 行内高亮 `==text==`；上下标 `~x~` `^x^`（**内容限字母数字**：`H~2~O`、`x^2^`；
   正文里的其它 `~`（如范围值 `1~23、45~67`）按字面渲染）；emoji 短代码；
   链接目标 / 裸 URL / HTML 标签内的这些字符按字面保留，不参与行内转换；
 - 推理块（`think` 围栏）：折叠展示，流式未闭合时标签显示「思考中…」，
   可用 `setReasoningTag` / `setReasoningLabel` 修改或关闭；
-- 裸 HTML 标签守卫：未配对的开 / 闭标签按字面文本渲染；`<br>` / `<img>` 等
-  void 开标签自动补成自闭合，避免 Qt 导入器吞掉后续正文；成对标签、自闭合
-  标签、autolink、围栏 / 行内 / 缩进代码块不受影响；
+- 裸 HTML 标签守卫：未配对的开 / 闭标签、**行首不完整标签**（`<div class="x"` /
+  `<details` / `<table`）、未闭合注释 / CDATA / PI / DOCTYPE 都按字面文本渲染；
+  `<br>` / `<img>` 等 void 开标签自动补成自闭合，避免 Qt 导入器吞掉后续正文；
+  成对标签、自闭合标签、autolink、围栏 / 行内 / 缩进代码块不受影响；
 - `diff` 围栏行级着色；链接悬浮显示地址；
 - Callout 的 warning / caution 与 diff 增删色走 Ela 状态色，语法 token 仍由 Markdown 主题决定。
 
 ## 代码块
 
 - 语法高亮与语言标签（可选依赖 `pygments`，缺失自动降级为纯文本）；
+- 列表 / 引用块 / Alert 内的围栏保留代码卡，代码按容器前缀 dedent；
 - 高亮缓存分两层：与主题无关的词法 token（主题切换不重新 lex）+
   最终字符格式（`setHighlightCacheSize()` 控条数，`0` 同时关闭两层）；
 - 悬停复制按钮；超长折叠（**导出 / 打印 / 复制全文会临时展开**，
@@ -153,7 +158,8 @@ viewer.setBodyFontFamily(family)
 - `\boxed` / `\overbrace` / `\xrightarrow` / `\boldsymbol` / `\textcolor` / `\cancel`；
 - 公式编号 `\tag` / `\tag*`（编号右对齐在公式末尾，`\tag*` 不补括号）；
 - 极限算子自动堆叠；`\newcommand` / `\def` 宏展开；中文按系统字体回退；
-- 容错：未收录命令原样显示为字面文本，只有结构性错误才回退源码。
+- 4 空格 / tab 缩进代码块不提取公式；`\(\)` 等空公式按字面括号保留；
+- 容错：未收录命令原样显示为字面文本，只有结构性错误才回退源码（保留原定界符）。
 
 ## Mermaid 图
 
@@ -162,7 +168,8 @@ viewer.setBodyFontFamily(family)
 - 按视口距离优先渲染可见图；
 - 主题切换时先用旧主题的图顶替；
 - `themeVariables` 默认跟随 Ela 主题（Light/Dark），仍可用 `setThemeVariables` 覆盖；
-- 光栅化倍率随显示宽度自适应；
+- 光栅化倍率随显示宽度自适应；图片按 SVG 原始尺寸显示（`QImage` DPR 记录倍率），
+  宿主未布局时按 800px 预算先渲染，布局完成后只缩放不重渲染；
 - 可选引擎预热 `setMermaidPrewarm(True)`。
 
 ## 图片与媒体
@@ -196,13 +203,16 @@ viewer.setBodyFontFamily(family)
 
 ## 长文档与性能
 
-- **分块渐进渲染**：超过 64KB 的文档自动分块（每块 16KB，**只在围栏 / 公式 /
-  details / 推理块之外的空行切**，表格与长段落不会被拆开）、按时间片
-  逐块提交，首屏很快出现、UI 不冻结；`isRendering()` 查询状态，`renderingProgress` /
-  `renderingFinished` 回报进度，渲染途中再调 `setMarkdown` 会取消在途分块；
+- **分块渐进渲染**：超过 64KB 的文档自动分块（默认每块 16KB，**超过 256KB 降到
+  8KB**，只在围栏 / 公式 / details / 推理块之外的空行切，表格与长段落不会被拆开）、
+  按时间片逐块提交，首屏很快出现、UI 不冻结；`isRendering()` 查询状态，
+  `renderingProgress` / `renderingFinished` 回报进度，渲染途中再调 `setMarkdown`
+  会取消在途分块；
 - **无图片文档不做图片扫描**：布局刷新只在「processed 文本含 `![` / `<img>`，或本文档
   有 Mermaid 块」时遍历文档（`_image_candidates`），否则整趟跳过 —— 那是「块 × 片段」
   的 Python 遍历，235KB 文档三趟实测 ~16ms；
+- **大文档切主题分块**：可见文档超过 128KB 时，`setMarkdownTheme` 等主题重渲染
+  改走分块（保留滚动位置、`renderingProgress` 继续上报），不再整窗冻结数秒；
 - **流式收尾的大文档分帧**：`endStream` 仍是全量重渲染（提交边界上的列表 / 表格 /
   脚注只有全量渲染才对），但**不可见的后台查看器**（后台标签页）走分块渲染，
   收尾不再阻塞 100~300ms；`streamFinished` 仍立即发出，`isRendering()` 为真、
@@ -234,6 +244,9 @@ viewer.setBodyFontFamily(family)
   文档模型，屏幕外内容仍需进文档。要「离屏不保留」请走宿主层：聊天用
   `ElaChatView.setViewportSuspension`（默认开，视口外 ±2 屏的消息查看器整个
   挂起、滚动回来重渲染）；独立长文档用分块渲染 + `renderingProgress` 进度指示。
+- **语法覆盖审计**：`uv run python tools/audit_markdown_specs.py` 对拍
+  CommonMark 0.31.2 的 652 例与 GFM 扩展章节；`--strict` 在空文档 / 非图片降级时
+  返回非零。文本/结构差异会逐条打印。
 
 ## 渲染管线（实现说明）
 

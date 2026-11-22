@@ -22,8 +22,8 @@ class TestElaTagBoxInit:
         assert box._title_font_size == 13
         assert box._expand_mark_width == 0.0
         assert box._expand_icon_rotate == 0.0
-        # 与上游 ElaComboBox V3.0（35→30）的触发框同高。
-        assert box.height() == 30
+        # 与上游 ElaComboBox 的触发框同高（控件统一 32）。
+        assert box.height() == 32
         for attr in ("_mark_animation", "_rotate_animation"):
             anim = getattr(box, attr)
             assert isinstance(anim, QPropertyAnimation)

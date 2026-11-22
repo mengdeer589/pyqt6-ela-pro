@@ -22,37 +22,50 @@ from pyqt6_ela_pro.chat import (
     ElaChatBubble,
     ToolRenderContext,
     clearToolRenderers,
+    contextTools,
+    isContextTool,
+    registerContextTool,
     registerToolRenderer,
+    resetContextTools,
     toolRenderer,
     toolRendererGroupable,
     toolRendererNames,
     unregisterToolRenderer,
 )
 from pyqt6_ela_pro.chat.blocks import (
-    CONTEXT_TOOLS,
     ToolCallCard,
     toolArgumentPairs,
 )
 from pyqt6_ela_pro.chat.message import ElaChatToolCall, ElaChatToolStatusType
 from pyqt6_ela_pro.chat.renderers import (
-    _CONTEXT_TOOLS,
     parseToolArguments,
     toolRendererSubtitle,
 )
 
 
-class TestContextToolsParity:
-    def test_renderers_copy_matches_blocks(self):
-        """renderers 不能 import blocks（成环），复制的上下文工具清单必须一致。"""
-        assert set(CONTEXT_TOOLS) == set(_CONTEXT_TOOLS)
+class TestContextToolsRegistry:
+    def test_default_context_tools(self):
+        assert {"read", "glob", "grep", "list"} <= set(contextTools())
+        assert isContextTool("read")
+        assert isContextTool("read_file") is False
+
+    def test_register_and_remove(self):
+        registerContextTool("read_file", label="个文件")
+        assert isContextTool("read_file")
+        assert toolRendererGroupable("read_file") is True
+        registerContextTool("read_file", enabled=False)
+        assert isContextTool("read_file") is False
+        assert toolRendererGroupable("read_file") is False
 
 
 @pytest.fixture(autouse=True)
 def _clean_registry():
     """用例之间隔离注册表状态。"""
     clearToolRenderers()
+    resetContextTools()
     yield
     clearToolRenderers()
+    resetContextTools()
 
 
 class _Recorder(QWidget):
@@ -123,17 +136,22 @@ class TestRegistryContract:
             registerToolRenderer(name, factory)
 
     def test_groupable_defaults(self):
-        # 上下文工具注册渲染器 -> 默认退出分组（否则会被分组卡绕过）
+        # 注册渲染器默认不进组（渲染器优先），避免分组卡绕过内容区
         registerToolRenderer("read", lambda ctx: QWidget())
         registerToolRenderer("patch", lambda ctx: QWidget())
         assert toolRendererGroupable("read") is False
-        assert toolRendererGroupable("patch") is True
-        # 未注册的工具行为与注册表引入前一致
+        assert toolRendererGroupable("patch") is False
+        # 未注册的内置上下文工具默认可进组；宿主工具名未注册则不进组
         assert toolRendererGroupable("grep") is True
+        assert toolRendererGroupable("read_file") is False
 
     def test_groupable_explicit_override(self):
         registerToolRenderer("read", lambda ctx: QWidget(), groupable=True)
         assert toolRendererGroupable("read") is True
+
+    def test_groupable_host_tool_joins(self):
+        registerToolRenderer("read_file", lambda ctx: QWidget(), groupable=True)
+        assert toolRendererGroupable("read_file") is True
 
     def test_subtitle_shape_and_failure_fallback(self):
         registerToolRenderer(

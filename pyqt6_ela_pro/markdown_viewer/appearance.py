@@ -31,6 +31,7 @@ from .code import (
     _font_family_available,
 )
 from .fonts import _normalize_font_family, _warn_once, isFontFamilyAvailable
+from .stream import _THEME_CHUNK_CHARS
 from .themes import _md_layout_spec, _md_theme_spec
 
 
@@ -664,7 +665,11 @@ class _MarkdownAppearanceMixin:
         on_screen = self._is_on_screen()
         if self._source:
             if on_screen:
-                self._render()
+                if len(self._source) > _THEME_CHUNK_CHARS and not self._stream_active:
+                    self._begin_large_render()
+                    self._needs_render = False
+                else:
+                    self._render()
             else:
                 # 不在屏幕上时不重建：整篇重解析 + 重高亮在宿主规模下是秒级。
                 # 文档文本不变，可见时由 showEvent / 绘制补齐（见 _schedule_pending_render）。

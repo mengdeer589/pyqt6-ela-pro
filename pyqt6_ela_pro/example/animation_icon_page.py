@@ -289,7 +289,7 @@ class AnimationIconPage(ExamplePage):
         )
         self._searchEdit = ElaLineEdit(self)
         self._searchEdit.setPlaceholderText("搜索图标")
-        self._searchEdit.setFixedSize(300, 35)
+        self._searchEdit.setFixedSize(300, 32)
         self._searchEdit.textEdited.connect(self._onSearchEditTextEdit)
         parent_layout.addWidget(self._searchEdit)
         parent_layout.addWidget(self._iconView)
@@ -472,7 +472,7 @@ class AnimationIconPage(ExamplePage):
         self._svgView = svg_list_view
         svg_search_edit = ElaLineEdit(self)
         svg_search_edit.setPlaceholderText("搜索图标")
-        svg_search_edit.setFixedSize(300, 35)
+        svg_search_edit.setFixedSize(300, 32)
         svg_search_edit.textEdited.connect(
             lambda text: self._onSvgSearchEditTextEdit(text, svg_model, svg_list_view)
         )

@@ -67,6 +67,7 @@ class ElaChatFileChanges(_ThemeAwareMixin, QWidget):
         self._layout.setContentsMargins(0, 0, 0, 0)
         self._layout.setSpacing(2)
         self._empty_label: Optional[ColorText] = None
+        self._empty_text = "没有文件变更"
 
     def setFiles(self, files) -> None:
         """整体替换文件列表（``ElaDiffFile`` / dict / None）。"""
@@ -79,7 +80,11 @@ class ElaChatFileChanges(_ThemeAwareMixin, QWidget):
                 if parsed is not None:
                     items.append(parsed)
         self._files = items
-        self._expanded.clear()
+        # 只保留仍在列表里的路径：刷新结果不该把用户展开的 diff 一起折回去。
+        present = {file.path for file in items}
+        self._expanded = {
+            path: opened for path, opened in self._expanded.items() if path in present
+        }
         self._show_all = False
         self._rebuild()
 
@@ -101,9 +106,15 @@ class ElaChatFileChanges(_ThemeAwareMixin, QWidget):
         return self._max_visible
 
     def setDefaultOpen(self, on: bool) -> None:
-        """设置新文件行默认展开（默认开）。"""
+        """设置新文件行默认展开（默认开；``_ensure_body`` 只建可见行）。"""
         self._default_open = bool(on)
         self._rebuild()
+
+    def setEmptyText(self, text: str) -> None:
+        """设置无文件时显示的占位文本（错误结果用它保留原因）。"""
+        self._empty_text = str(text or "没有文件变更")
+        if self._empty_label is not None:
+            self._empty_label.setText(self._empty_text)
 
     def setDiffMaxHeight(self, height: int) -> None:
         """设置单个 diff body 的最大高度。"""
@@ -121,7 +132,7 @@ class ElaChatFileChanges(_ThemeAwareMixin, QWidget):
 
     def collapseAll(self) -> None:
         """收起全部文件。"""
-        self._expanded.clear()
+        self._expanded = {file.path: False for file in self._files}
         self._rebuild()
 
     def _clear(self) -> None:
@@ -139,8 +150,9 @@ class ElaChatFileChanges(_ThemeAwareMixin, QWidget):
     def _rebuild(self) -> None:
         self._clear()
         if not self._files:
-            self._empty_label = ColorText("没有文件变更", self)
+            self._empty_label = ColorText(self._empty_text, self)
             self._empty_label.setTextFormat(Qt.TextFormat.PlainText)
+            self._empty_label.setWordWrap(True)
             self._empty_label.setTextPixelSize(12)
             self._apply_theme()
             self._layout.addWidget(self._empty_label)

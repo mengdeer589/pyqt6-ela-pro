@@ -2,9 +2,16 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import replace
 
 from .message import ElaChatStats, _as_float, _as_int
+
+
+def _get(value, key, default=0):
+    if isinstance(value, Mapping):
+        return value.get(key, default)
+    return getattr(value, key, default)
 
 
 def _positive(*values) -> int:
@@ -29,38 +36,38 @@ def stats_from_usage(usage, ttftMs: float = 0.0, tps: float = 0.0) -> ElaChatSta
             stats = replace(stats, tps=_as_float(tps))
         return stats
 
-    details = getattr(usage, "prompt_tokens_details", None)
-    completionDetails = getattr(usage, "completion_tokens_details", None)
+    details = _get(usage, "prompt_tokens_details", None)
+    completionDetails = _get(usage, "completion_tokens_details", None)
     cacheRead = _positive(
-        getattr(usage, "prompt_cache_hit_tokens", 0),
-        getattr(details, "cached_tokens", 0),
-        getattr(usage, "cache_read_input_tokens", 0),
+        _get(usage, "prompt_cache_hit_tokens", 0),
+        _get(details, "cached_tokens", 0),
+        _get(usage, "cache_read_input_tokens", 0),
     )
     cacheWrite = _positive(
-        getattr(usage, "cache_creation_input_tokens", 0),
-        getattr(details, "cache_write_tokens", 0),
+        _get(usage, "cache_creation_input_tokens", 0),
+        _get(details, "cache_write_tokens", 0),
     )
     reasoning = _positive(
-        getattr(usage, "reasoning_tokens", 0),
-        getattr(completionDetails, "reasoning_tokens", 0),
+        _get(usage, "reasoning_tokens", 0),
+        _get(completionDetails, "reasoning_tokens", 0),
     )
-    rawPrompt = _as_int(getattr(usage, "prompt_tokens", 0))
-    inputPrompt = _as_int(getattr(usage, "input_tokens", 0))
+    rawPrompt = max(0, _as_int(_get(usage, "prompt_tokens", 0)))
+    inputPrompt = max(0, _as_int(_get(usage, "input_tokens", 0)))
     if rawPrompt > 0 or not inputPrompt:
         # OpenAI / DeepSeek：prompt 含缓存，扣成「未命中缓存」才是一路
         raw = max(0, rawPrompt)
         cacheRead = min(cacheRead, raw)
         cacheWrite = min(cacheWrite, raw - cacheRead)
         prompt = raw - cacheRead - cacheWrite
-        completion = _as_int(getattr(usage, "completion_tokens", 0))
+        completion = max(0, _as_int(_get(usage, "completion_tokens", 0)))
     else:
         # Anthropic：input_tokens 本身不含缓存
         prompt = max(0, inputPrompt)
-        completion = _as_int(getattr(usage, "output_tokens", 0))
+        completion = max(0, _as_int(_get(usage, "output_tokens", 0)))
     return ElaChatStats(
         prompt_tokens=prompt,
         completion_tokens=completion,
-        total_tokens=_as_int(getattr(usage, "total_tokens", 0)),
+        total_tokens=max(0, _as_int(_get(usage, "total_tokens", 0))),
         reasoning_tokens=reasoning,
         cache_read_tokens=cacheRead,
         cache_write_tokens=cacheWrite,

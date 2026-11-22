@@ -58,9 +58,9 @@ class TestElaGhostBoxInit:
     def test_initialization_with_defaults(self, box, attr, expected):
         assert getattr(box, attr) == expected
 
-    def test_default_height_is_30(self, box):
-        """与上游 ElaComboBox V3.0（35→30）的触发框同高。"""
-        assert box.height() == 30
+    def test_default_height_is_32(self, box):
+        """与上游 ElaComboBox 的触发框同高（控件统一 32）。"""
+        assert box.height() == 32
 
     def test_items_empty(self, box):
         assert box.items == []

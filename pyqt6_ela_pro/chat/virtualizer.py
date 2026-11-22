@@ -34,7 +34,10 @@ class ChatVirtualizer:
     def _disable_virtual_list(self) -> None:
         """退出 spacer 模式：物化全部消息并移除上下占位。"""
         for messageId in list(self._view._message_index):
-            if messageId not in self._view._bubbles:
+            if (
+                messageId not in self._view._bubbles
+                or messageId not in self._view._virtual_bubble_ids
+            ):
                 self._view._materialize_virtual_bubble(messageId)
         for spacer in (
             self._view._virtual_top_spacer,
@@ -121,12 +124,17 @@ class ChatVirtualizer:
     def _materialize_virtual_bubble(self, messageId: int) -> Optional[ElaChatBubble]:
         """在 spacer 列表里物化一条消息（插到正确的可见顺序位置）。"""
         message = self._view._message_index.get(messageId)
-        if message is None or messageId in self._view._bubbles:
-            return self._view._bubbles.get(messageId)
+        if message is None:
+            return None
+        existing = self._view._bubbles.get(messageId)
+        if existing is not None:
+            if messageId not in self._view._virtual_bubble_ids:
+                self._show_parked_bubble(messageId, existing)
+            return existing
         order_pos = self._view._virtual_index.get(messageId, 0)
         position = 0
-        for existing in self._view._virtual_bubble_ids:
-            if self._view._virtual_index.get(existing, 0) > order_pos:
+        for current in self._view._virtual_bubble_ids:
+            if self._view._virtual_index.get(current, 0) > order_pos:
                 break
             position += 1
         deferred = message.role == ElaChatRoleType.Assistant and bool(
@@ -164,10 +172,38 @@ class ChatVirtualizer:
         self._view._virtual_prefix_dirty = True
         return bubble
 
+    def _show_parked_bubble(self, messageId: int, bubble: ElaChatBubble) -> None:
+        """把暂时移出布局的气泡放回正确顺序位置。"""
+        order_pos = self._view._virtual_index.get(messageId, 0)
+        position = 0
+        for current in self._view._virtual_bubble_ids:
+            if self._view._virtual_index.get(current, 0) > order_pos:
+                break
+            position += 1
+        self._view._content_layout.insertWidget(1 + position, bubble)
+        self._view._virtual_bubble_ids.insert(position, messageId)
+        bubble.show()
+        self._view._virtual_prefix_dirty = True
+
+    def _park_virtual_bubble(self, messageId: int) -> None:
+        """把不能销毁的气泡移出布局但保留实例（展开态 / 流式分片不丢）。"""
+        bubble = self._view._bubbles.get(messageId)
+        if bubble is None:
+            return
+        self._flush_dirty_before_destroy(messageId, bubble)
+        height = bubble.height()
+        if height > 0:
+            self._view._virtual_heights[messageId] = max(40, height)
+        if messageId in self._view._virtual_bubble_ids:
+            self._view._virtual_bubble_ids.remove(messageId)
+        bubble.hide()
+        self._view._content_layout.removeWidget(bubble)
+        self._view._virtual_prefix_dirty = True
+
     def _dematerialize_virtual_bubble(self, messageId: int) -> None:
         """从 spacer 列表移除一条已物化消息（保留实际高度）。
-        在途回合 / 待答审批 / 用户手动展开的区块不回收：销毁气泡会丢掉未落定分片
-        与交互状态（与 ``_dematerialize_shell`` 同一组守卫）。
+        在途回合 / 待答审批 / 用户手动展开的区块不销毁，只移出布局：销毁气泡会
+        丢掉未落定分片与交互状态。
         """
         bubble = self._view._bubbles.get(messageId)
         if bubble is None:
@@ -177,6 +213,7 @@ class ChatVirtualizer:
             or bubble.pendingPermissions()
             or bubble.hasExpandedSections()
         ):
+            self._park_virtual_bubble(messageId)
             return
         self._flush_dirty_before_destroy(messageId, bubble)
         self._view._bubbles.pop(messageId, None)
@@ -232,6 +269,16 @@ class ChatVirtualizer:
         if self._view._batch_depth > 0:
             return
         if not self._view._messages:
+            self._view._virtual_list_mode = False
+            for spacer in (
+                self._view._virtual_top_spacer,
+                self._view._virtual_bottom_spacer,
+            ):
+                if spacer is not None:
+                    spacer.setFixedHeight(0)
+            self._view._virtual_bubble_ids.clear()
+            self._view._virtual_heights.clear()
+            self._view._empty.setVisible(True)
             return
         self._view._init_virtual_spacers()
         if (
@@ -414,14 +461,22 @@ class ChatVirtualizer:
             placeholder.setFixedHeight(self._view._estimate_shell_height(message))
         self._view._virtual_prefix_dirty = True
 
-    def _materialize_shell(self, messageId: int) -> Optional[ElaChatBubble]:
+    def _materialize_shell(
+        self, messageId: int, *, reveal: bool = False
+    ) -> Optional[ElaChatBubble]:
         """把占位消息换成真实气泡（分段仍可延迟物化）。"""
         bubble = self._view._bubbles.get(messageId)
         if bubble is not None:
             return bubble
         if self._view._virtual_list_mode:
-            self._view._scroll_to_virtual_message(messageId)
-            return self._view._bubbles.get(messageId)
+            if reveal:
+                self._view._scroll_to_virtual_message(messageId)
+                return self._view._bubbles.get(messageId)
+            bubble = self._materialize_virtual_bubble(messageId)
+            if bubble is not None and messageId in self._view._virtual_bubble_ids:
+                # 只是为了让写入路径有控件；不在当前窗口就放回 park，别扰动 spacer。
+                self._park_virtual_bubble(messageId)
+            return bubble
         placeholder = self._view._shell_placeholders.pop(messageId, None)
         message = self._view._message_index.get(messageId)
         if message is None:
@@ -545,9 +600,13 @@ class ChatVirtualizer:
         if (
             not self._view._suspension_enabled
             or self._view.count() < self._view._suspension_min
-            or not self._view.isVisible()
         ):
             self._view._restore_all_suspended()
+            # 挂起阈值不能连带卡住壳占位物化：骨架滚到视口里就该换成真控件。
+            if self._view.isVisible():
+                self._view._materialize_visible_placeholder()
+            return
+        if not self._view.isVisible():
             return
         if self._view._resize_frozen_width > 0:
             return  # 拖动 resize 期间几何未定，停手后统一更新
@@ -632,13 +691,22 @@ class ChatVirtualizer:
         return True
 
     def _materialize_visible_placeholder(
-        self, top: int, bottom: int, margin: float
+        self,
+        top: Optional[int] = None,
+        bottom: Optional[int] = None,
+        margin: Optional[float] = None,
     ) -> None:
         """每次挂起更新物化**一个**视口内的占位消息（时间片，避免成批建卡）。"""
         if not self._view._shell_placeholders or self._view._batch_depth > 0:
             return
         if self._view._resize_frozen_width > 0:
             return
+        if top is None or bottom is None or margin is None:
+            bar = self._view._scroll.verticalScrollBar()
+            top = bar.value()
+            viewport = self._view._scroll.viewport().height()
+            bottom = top + viewport
+            margin = viewport * _SUSPEND_MARGIN_VIEWPORTS
         self._view._ensure_virtual_prefix()
         if not self._view._virtual_order:
             return

@@ -29,8 +29,8 @@ from .widget_base import ElaThemeWidget
 #: 全透明（基础态 / 禁用态不画底）
 _TRANSPARENT = QColor(0, 0, 0, 0)
 
-#: 控件高度：与按钮族一致（ElaPushButton V3.0 / ElaButton middle 都是 30）
-_HEIGHT = 30
+#: 控件高度：与按钮族一致（ElaPushButton V3.0 / ElaButton middle 都是 32）
+_HEIGHT = 32
 
 
 class ElaSplitButton(ElaThemeWidget):

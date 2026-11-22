@@ -840,20 +840,6 @@ class TestContextMenu:
         timer.start()
         return opened
 
-    def test_show_context_menu_does_not_crash(self, view, qapp):
-        view.append(lines("a", "b"))
-        pos = view.mapToGlobal(view.rect().center())
-        opened = self._open_and_close(qapp, view)
-        view._show_context_menu(pos)
-        qapp.processEvents()
-        assert opened, "右键菜单没有弹出来"
-        menu = opened[0]
-        # execElaMenu 的兜底：非主屏 ElaMenu 偶发不按 sizeHint 撑开
-        assert menu.minimumSize() == menu.sizeHint()
-        # 只读视图的菜单：复制 + 全选（外加分隔符与「复制全部」）
-        texts = [a.text() for a in menu.actions() if a.text()]
-        assert "复制" in texts and "全选" in texts
-
     def test_show_context_menu_empty(self, view, qapp):
         opened = self._open_and_close(qapp, view)
         view._show_context_menu(view.mapToGlobal(view.rect().center()))

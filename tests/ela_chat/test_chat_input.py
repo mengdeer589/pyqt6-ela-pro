@@ -265,7 +265,7 @@ class TestToolBarExtension:
             "add_file",
             "clear",
             "usage",
-            "widget-1",
+            "send",
             "custom",
         ]
 

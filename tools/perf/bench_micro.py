@@ -98,7 +98,11 @@ def run_once() -> int:
     bench("width()", lambda: probe.width(), 50000)
     bench("setToolTip('x')", lambda: probe.setToolTip("x"), 20000)
     bench("objectName()", lambda: probe.objectName(), 50000)
-    bench("setVisible(True) x2", lambda: (probe.setVisible(True), probe.setVisible(True)), 5000)
+    bench(
+        "setVisible(True) x2",
+        lambda: (probe.setVisible(True), probe.setVisible(True)),
+        5000,
+    )
 
     # ④ 信号
     slot = lambda: None  # noqa: E731
@@ -126,7 +130,9 @@ def main() -> int:
             encoding="utf-8",
             errors="replace",
         )
-        payload = [line for line in proc.stdout.splitlines() if line.startswith("JSON ")]
+        payload = [
+            line for line in proc.stdout.splitlines() if line.startswith("JSON ")
+        ]
         if not payload:
             print("run FAILED: %s" % (proc.stderr or "")[-400:])
             continue
@@ -134,7 +140,10 @@ def main() -> int:
     if not runs:
         return 1
     first = runs[0]
-    print("=== %s %s | Qt %s ===" % (first["stack"], first["binding_version"], first["qt"]))
+    print(
+        "=== %s %s | Qt %s ==="
+        % (first["stack"], first["binding_version"], first["qt"])
+    )
     keys = [k for k in first if k not in ("stack", "binding_version", "qt")]
     print("%-34s %12s" % ("op (ms/op)", "median"))
     for key in keys:

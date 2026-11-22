@@ -127,6 +127,7 @@ class TestFrontMatter:
 
     def test_full_render_strips_front_matter(self):
         v = ElaMarkdownViewer()
+        v.setFrontMatterMode("strip")
         v.setMarkdown(self.SOURCE)
 
         text = _plain(v)
@@ -136,12 +137,9 @@ class TestFrontMatter:
         v.deleteLater()
 
     def test_fragment_render_strips_front_matter(self, qapp):
-        """Qt 6 的 Markdown 导入器原生剥离 front matter：流式 / 全量一致。
-
-        （Qt 5.15 没有这个能力，旧实现自己在 ``_preprocess`` 里剥；迁移到 Qt6
-        后那套机制是死代码，已删除 —— 这里钉「流式中途也不会漏出 front matter」。）
-        """
+        """``strip`` 模式恢复 Qt 原生剥离：流式 / 全量一致。"""
         v = ElaMarkdownViewer()
+        v.setFrontMatterMode("strip")
         v.beginStream()
         v.appendMarkdown(self.SOURCE)
         QTest.qWait(80)

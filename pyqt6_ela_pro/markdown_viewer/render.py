@@ -25,6 +25,7 @@ from .._internal import applyMissingGlyphFonts, is_deleted
 from ..math_lite import extract_math
 from ..tooltip_targets import DOCUMENT_TOOLTIP_PROPERTY, document_format_tooltip
 from .media import _IMAGE_SYNTAX_RE
+from .stream import _THEME_CHUNK_CHARS
 from .syntax import _clamp_pos
 from .themes import _QUOTE_LEFT_MARGIN
 from .tokens import (
@@ -33,6 +34,7 @@ from .tokens import (
     _CODE_MARKER_VALUE,
     _CONTROL_ANCHOR_PREFIXES,
     _HR_MARK,
+    merge_anchor_format,
 )
 
 logger = logging.getLogger(__name__)
@@ -86,11 +88,16 @@ class _MarkdownRenderMixin:
             return
         if self._needs_render and self._source:
             self._needs_render = False
-            self._render()
+            if len(self._source) > _THEME_CHUNK_CHARS and not self._stream_active:
+                self._begin_large_render()
+            else:
+                self._render()
 
     def showEvent(self, event: QShowEvent) -> None:
         super().showEvent(event)
         self._ensure_rendered()
+        if self._mermaid_jobs:
+            self._schedule_mermaid_pump()
 
     @staticmethod
     def _replace_tokens_in_order(document: QTextDocument, entries, replace) -> None:
@@ -240,6 +247,10 @@ class _MarkdownRenderMixin:
             if fmt is None:
                 fmt = self._code_format(family)
                 formats[family] = fmt
+            original = found.charFormat()
+            if original.isAnchor():
+                fmt = QTextCharFormat(fmt)
+                merge_anchor_format(fmt, original)
             found.removeSelectedText()
             found.insertText(code_text, fmt)
 
@@ -621,6 +632,11 @@ class _MarkdownRenderMixin:
         border_width = table_layout["border_width"]
         header_background = table_layout["header_background"]
         zebra = self._table_zebra
+        header_alignments = []
+        if table.rows() > 1:
+            for column in range(table.columns()):
+                block = table.cellAt(1, column).firstCursorPosition().block()
+                header_alignments.append(block.blockFormat().alignment())
         for row in range(table.rows()):
             for column in range(table.columns()):
                 cell = table.cellAt(row, column)
@@ -642,6 +658,12 @@ class _MarkdownRenderMixin:
                 else:
                     cell_format.setBackground(QBrush())
                 cell.setFormat(cell_format)
+                if row == 0 and header_alignments:
+                    block = cell.firstCursorPosition().block()
+                    block_format = block.blockFormat()
+                    block_format.setAlignment(header_alignments[column])
+                    cursor = QTextCursor(block)
+                    cursor.setBlockFormat(block_format)
 
     def _schedule_pending_render(self) -> None:
         """被绘制说明已经在屏幕上：把懒掉的整篇重渲染排到下一拍。

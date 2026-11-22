@@ -52,6 +52,7 @@ from pyqt6_ela_pro.chat._question import (
     CUSTOM_ANSWER_LABEL,
     GLOW_ALPHA,
     QuestionOptionCard,
+    QuestionSegment,
     question_colors,
 )
 from pyqt6_ela_pro.chat.blocks import PermissionCard, PermissionRecord
@@ -955,7 +956,8 @@ class TestKeyboard:
         custom.activate.emit("")
         custom.setEditorText("one")
         one = custom._editor.sizeHint().height()
-        custom.setEditorText("one\ntwo\nthree")
+        # 直接写编辑器：setEditorText 是「回填」，不覆盖已有未提交文本。
+        custom._editor.setPlainText("one\ntwo\nthree")
         three = custom._editor.sizeHint().height()
         assert three > one + 20, f"三行应比一行高不少：{one} -> {three}"
 
@@ -1369,7 +1371,7 @@ class TestOptionCardContract:
         row.setEditing(True)
         row.setEditorText("a")
         one = row._editor.sizeHint().height()
-        row.setEditorText("a\nb\nc")
+        row._editor.setPlainText("a\nb\nc")
         assert row._editor.sizeHint().height() > one + 20
 
     def test_full_mark_click_toggles_once(self, qapp, make):
@@ -1514,6 +1516,117 @@ class TestWizardDraftRetention:
         card._enter_editing("q0")
 
         assert row.editorText() == "打了一半的草稿"
+
+
+class TestQuestionInteractionGuards:
+    def test_escape_draft_survives_refresh_before_submit(self, qapp, make):
+        """Esc 保留的草稿不能被「回填已提交值」抹掉（否则提交时答案丢失）。"""
+        chat = make(ElaChatWidget)
+        card = _single(chat, _turn(chat), multiple=True, options=(("A", ""), ("B", "")))
+        custom = card._option_buttons[-1]
+        custom.activate.emit("")
+        custom.setEditorText("draft")
+        custom._on_editor_dismissed()
+        card._on_mark_clicked(card._questions()[0], "A")
+
+        assert custom.editorText() == "draft"
+        card._go_next()
+        assert set(card.answers()["q0"]) == {"A", "draft"}
+
+    def test_responding_disables_progress_segments(self, qapp, make):
+        chat = make(ElaChatWidget)
+        card = _wizard(chat, _turn(chat), count=2)
+        card._set_tab(1)
+        card.setResponding(True)
+        assert all(not segment.isEnabled() for segment in card._segments)
+        card._goto(0)
+        assert card.tabIndex() == 1, "responding 期间进度段不能再切题"
+
+    def test_reset_wizard_clears_feedback_and_focus(self, qapp, make):
+        card = make(PermissionCard)
+        card.setPermission(
+            ElaChatPermission(
+                request_id="r1", action="question", questions=(_q("q0"), _q("q1"))
+            )
+        )
+        card._focus_row = 1
+        card._open_feedback()
+        card._feedback_edit.setPlainText("nope")
+        card.setPermission(
+            ElaChatPermission(request_id="r2", action="question", questions=(_q("q0"),))
+        )
+        assert card._feedback_row.isHidden()
+        assert card._feedback_edit.toPlainText() == ""
+        assert card.focusedRowIndex() == 0
+
+    def test_right_click_does_not_activate_or_jump(self, qapp, make):
+        row = make(QuestionOptionCard, value="A")
+        row.resize(300, 44)
+        acts = []
+        row.activate.connect(acts.append)
+        pos = QPointF(QPoint(160, 22))
+        row.mousePressEvent(
+            QMouseEvent(
+                QEvent.Type.MouseButtonPress,
+                pos,
+                Qt.MouseButton.RightButton,
+                Qt.MouseButton.RightButton,
+                Qt.KeyboardModifier.NoModifier,
+            )
+        )
+        row.mouseReleaseEvent(
+            QMouseEvent(
+                QEvent.Type.MouseButtonRelease,
+                pos,
+                Qt.MouseButton.RightButton,
+                Qt.MouseButton.NoButton,
+                Qt.KeyboardModifier.NoModifier,
+            )
+        )
+        assert acts == []
+        assert row.isDown() is False
+
+        segment = make(QuestionSegment, 0)
+        jumped = []
+        segment.jumped.connect(jumped.append)
+        segment.mousePressEvent(
+            QMouseEvent(
+                QEvent.Type.MouseButtonPress,
+                QPointF(QPoint(8, 8)),
+                Qt.MouseButton.RightButton,
+                Qt.MouseButton.RightButton,
+                Qt.KeyboardModifier.NoModifier,
+            )
+        )
+        assert jumped == []
+
+
+class TestPermissionRecordMergedDetail:
+    def test_question_detail_keeps_answers_below(self, qapp, make):
+        permission = ElaChatPermission(
+            request_id="r1",
+            action="question",
+            questions=(_q("q0"),),
+            detail="工具输出摘要",
+            answer='{"q0": "A"}',
+            status=ElaChatPermissionStatusType.Allowed,
+        )
+        record = make(PermissionRecord, permission)
+        text = record._raw_detail(permission)
+        assert "工具输出摘要" in text
+        assert text.index("工具输出摘要") < text.index("A")
+
+    def test_question_resources_alone_are_not_a_body(self, qapp, make):
+        permission = ElaChatPermission(
+            request_id="r1",
+            action="question",
+            questions=(_q("q0"),),
+            resources=("a.py",),
+            answer='{"q0": ""}',
+            status=ElaChatPermissionStatusType.Allowed,
+        )
+        record = make(PermissionRecord, permission)
+        assert record._has_body() is False
 
 
 class TestCustomEditorHeight:

@@ -6,12 +6,11 @@
 
 from __future__ import annotations
 
-import functools
 from typing import Optional
 
-from .._internal import is_deleted
+from .._internal import is_deleted, safe_connect
 from PyQt6.QtCore import QEvent, QPoint, QRect, QSize, Qt, pyqtSignal
-from PyQt6.QtGui import QIcon
+from PyQt6.QtGui import QIcon, QKeySequence, QShortcut
 from PyQt6.QtWidgets import (
     QApplication,
     QHBoxLayout,
@@ -27,8 +26,8 @@ from PyQt6ElaWidgetTools import (
     ElaWidget,
 )
 
-from .._internal import connect_theme_signal, disconnect_theme
-from .._styles import ColorText
+from .._internal import connect_theme_signal
+from .._styles import ColorText, coerceElaIcon
 from .._theme import ElaStatusRoleType, currentMode, statusColor, textMuted
 from ..ela_button import ElaButton
 from ..ela_markdown_viewer import ElaMarkdownViewer
@@ -44,12 +43,10 @@ _EDGE_GAP = 6
 _PAD = 12
 #: 落点偏移（弹窗水平居中于落点后，再往下让一点；放不下就翻到上方）
 _PLACE_OFFSET = QPoint(0, 18)
-#: app bar 高度（ElaWidget 默认 45）
+#: app bar 高度（ElaWidget 默认 32）
 _APP_BAR_HEIGHT = 32
 #: 状态行忙碌指示的边长
 _RING_SIZE = 16
-#: 标题栏图标的物理边长
-_TITLE_ICON_PX = 18
 #: 原文预览参与省略计算的字符上限：省略到控件宽度后更远内容露不出来，
 #: 只喂前 400 字让 ``elidedText`` 的拷贝与扫描保持常数级。
 _PREVIEW_SOURCE_MAX = 400
@@ -67,19 +64,6 @@ _TEXT_PREPARING = "准备中…"
 _TEXT_STREAMING = "生成中…"
 _TEXT_STOPPED = "已停止"
 _TEXT_FAILED = "生成失败"
-
-
-def _cleanup_on_destroy(dialog, _object=None) -> None:  # noqa: ANN001
-    """对话框析构时断开主题信号。
-    必须是普通函数而非绑定方法；无父顶层窗在进程退出期不一定会派发
-    ``deleteLater()``，残留连接会在下次切主题时打到已释放的 C++ 对象。
-    """
-    if is_deleted(dialog):
-        return
-    try:
-        disconnect_theme(dialog)
-    except Exception:  # noqa: BLE001 - 析构路径不允许异常逃逸
-        pass
 
 
 class _PreviewText(ColorText):
@@ -216,8 +200,23 @@ class ElaSelectionResultDialog(ElaWidget):
         self._build_ui()
         self._sync_controls()
         connect_theme_signal(self)
-        self.destroyed.connect(functools.partial(_cleanup_on_destroy, self))
         self._apply_theme(currentMode())
+
+        # 查看器一旦获得焦点，QTextBrowser 会吞掉 Ctrl+C；用窗口级快捷键抢回来。
+        self._copy_shortcut = QShortcut(QKeySequence.StandardKey.Copy, self)
+        self._copy_shortcut.setContext(
+            Qt.ShortcutContext.WidgetWithChildrenShortcut
+        )
+        safe_connect(
+            self._copy_shortcut, "activated", self.copyPlainText, "result.copy_key"
+        )
+        self._md_shortcut = QShortcut(QKeySequence("Ctrl+Shift+C"), self)
+        self._md_shortcut.setContext(
+            Qt.ShortcutContext.WidgetWithChildrenShortcut
+        )
+        safe_connect(
+            self._md_shortcut, "activated", self._on_copy, "result.copy_md_key"
+        )
 
     # ── UI ─────────────────────────────────────────────────────
 
@@ -394,6 +393,8 @@ class ElaSelectionResultDialog(ElaWidget):
 
     def beginStream(self) -> int:
         """开始流式回合（清空正文并显示忙碌指示），返回 turn token。"""
+        if self._streaming:
+            self._endTurn("replaced")
         self._turn_id += 1
         self._streaming = True
         self._settled = False
@@ -439,6 +440,8 @@ class ElaSelectionResultDialog(ElaWidget):
     def setResult(self, text: str) -> None:
         """一次性设置完整结果（非流式，等价于 begin + append + end）。"""
         self._turn_id += 1
+        if self._streaming:
+            self._endTurn("replaced")
         self._streaming = False
         self._settled = True
         self._turn_started = True
@@ -455,7 +458,9 @@ class ElaSelectionResultDialog(ElaWidget):
 
         本回合流式过时必须冲掉查看器缓冲，否则错误行会与仍在闪的光标 / 半截正文并存。
         """
-        wasStreaming = self._streaming or self._viewer.isStreaming()
+        wasStreaming = self._streaming or (
+            self._aliveViewer() and self._viewer.isStreaming()
+        )
         self._streaming = False
         self._settled = False
         self._turn_started = True
@@ -594,6 +599,9 @@ class ElaSelectionResultDialog(ElaWidget):
         self._streaming = False
         if was_streaming:
             self.stopRequested.emit(self._action_id)
+        if is_deleted(self):
+            # 宿主可能在上面的槽里销毁整个对话框（abort 后顺手关窗）
+            return
         if was_streaming:
             # 必须冲掉查看器的流式缓冲：分片攒在 QTimer 里，停止 / 关窗时半截
             # 内容还没进文档。判据用 was_streaming 而非 reason == "stopped"。
@@ -637,8 +645,8 @@ class ElaSelectionResultDialog(ElaWidget):
             status = _TEXT_STREAMING
         elif self._error:
             status = _TEXT_FAILED
-        elif has_text and not self._settled:
-            status = _TEXT_STOPPED  # 有内容但没落定 = 被中止了
+        elif self._turn_started and not self._settled:
+            status = _TEXT_STOPPED  # 有内容但没落定 = 被中止了；空结果也是
         elif has_text:
             status = ""  # 已落定，状态行无事可说
         else:
@@ -672,7 +680,7 @@ class ElaSelectionResultDialog(ElaWidget):
             return QIcon()
         try:
             return ElaIcon.getInstance().getElaIcon(
-                self._icon_name, textMuted(currentMode())
+                coerceElaIcon(self._icon_name), textMuted(currentMode())
             )
         except Exception:  # noqa: BLE001 - 图标不可用不该炸掉整个对话框
             return QIcon()

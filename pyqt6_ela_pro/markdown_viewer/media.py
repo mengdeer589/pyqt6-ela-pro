@@ -22,7 +22,11 @@ from PyQt6.QtWidgets import QApplication, QFileDialog
 from ..math_lite import render_formula
 from ..tooltip_targets import DOCUMENT_TOOLTIP_PROPERTY
 from .syntax import _clamp_pos
-from .tokens import _MERMAID_IMAGE_PREFIX, _MERMAID_TIP_PREFIX
+from .tokens import (
+    _MERMAID_IMAGE_PREFIX,
+    _MERMAID_TIP_PREFIX,
+    merge_anchor_format,
+)
 
 
 _IMAGE_SYNTAX_RE = re.compile(r"!\[|<img", re.IGNORECASE)
@@ -167,12 +171,13 @@ class _MarkdownMediaMixin:
         plain_format = QTextCharFormat()
         plain_format.setForeground(self._text_color)
         search = QTextCursor(document)
-        for index, (latex, display) in enumerate(maths):
+        for index, (latex, display, original_source) in enumerate(maths):
             marker = self._math_mark.format(index)
             found = document.find(marker, search)
             if found.isNull():
                 continue
             search.setPosition(found.position())
+            original = found.charFormat()
             point_size = base_point_size * (1.55 if display else 1.3)
             report: dict = {}
             image = render_formula(
@@ -180,8 +185,12 @@ class _MarkdownMediaMixin:
             )
             if image is None:
                 self._record_issue("math", latex)
-                text = latex if display else f"${latex}$"
-                found.insertText(text, plain_format)
+                text = original_source or (latex if display else f"${latex}$")
+                fallback_fmt = plain_format
+                if original.isAnchor():
+                    fallback_fmt = QTextCharFormat(plain_format)
+                    merge_anchor_format(fallback_fmt, original)
+                found.insertText(text, fallback_fmt)
                 if display:
                     block_format = found.blockFormat()
                     block_format.setAlignment(Qt.AlignmentFlag.AlignHCenter)
@@ -202,6 +211,7 @@ class _MarkdownMediaMixin:
             image_format.setName(url)
             image_format.setWidth(image.width() / 2.0)
             image_format.setHeight(image.height() / 2.0)
+            merge_anchor_format(image_format, original)
             image_format.setProperty(DOCUMENT_TOOLTIP_PROPERTY, f"LaTeX: {latex}")
             image_format.setVerticalAlignment(
                 QTextCharFormat.VerticalAlignment.AlignMiddle
@@ -406,9 +416,13 @@ class _MarkdownMediaMixin:
         width = image.width()
         height = image.height()
         if source.scheme() == "elamermaid":
-            # Mermaid 按 2x 超采样渲染，显示尺寸减半
-            width /= 2.0
-            height /= 2.0
+            dpr = image.devicePixelRatio()
+            if dpr <= 0:
+                dpr = 1.0
+            if dpr == 1.0 and self._mermaid_override is not None:
+                dpr = 2.0
+            width /= dpr
+            height /= dpr
         if width > max_width > 0:
             height = height * max_width / float(width)
             width = max_width
@@ -444,6 +458,11 @@ class _MarkdownMediaMixin:
         """把无法加载的图片替换为灰字占位（记录到渲染问题）。"""
         if detail:
             self._record_issue("image", detail)
+        original = fragment.charFormat()
+        insert_fmt = placeholder_fmt
+        if original.isAnchor():
+            insert_fmt = QTextCharFormat(placeholder_fmt)
+            merge_anchor_format(insert_fmt, original)
         cursor = QTextCursor(document)
         cursor.setPosition(fragment.position())
         cursor.setPosition(
@@ -451,7 +470,7 @@ class _MarkdownMediaMixin:
             QTextCursor.MoveMode.KeepAnchor,
         )
         cursor.removeSelectedText()
-        cursor.insertText("[图片]", placeholder_fmt)
+        cursor.insertText("[图片]", insert_fmt)
 
     def _record_issue(self, kind: str, detail: str) -> None:
         """记录一次渲染降级（去重）。"""

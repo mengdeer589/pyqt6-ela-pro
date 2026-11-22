@@ -22,8 +22,8 @@ class TestElaTagSearchMultiBoxInit:
         """一次钉住构造期接线 + 继承来的搜索 / 多选能力没被 tag 外观盖掉。"""
         assert box._title_text == ""
         assert box._title_font_size == 13
-        # 与上游 ElaComboBox V3.0（35→30）的触发框同高。
-        assert box.height() == 30
+        # 与上游 ElaComboBox 的触发框同高（控件统一 32）。
+        assert box.height() == 32
         for attr in ("_mark_animation", "_rotate_animation"):
             anim = getattr(box, attr)
             assert isinstance(anim, QPropertyAnimation)

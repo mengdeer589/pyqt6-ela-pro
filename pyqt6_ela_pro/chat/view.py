@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+import logging
 from collections import deque
 from typing import Optional
 
@@ -24,7 +25,7 @@ from PyQt6ElaWidgetTools import (
     ElaScrollArea,
 )
 
-from .._internal import safe_connect
+from .._internal import is_deleted, safe_connect
 from ..tooltips import ElaToolTipPositionType, set_tooltip
 from ..widget_base import ElaThemeWidget
 from .blocks import (
@@ -58,6 +59,8 @@ from .view_metrics import (
     _READING_MAX_WIDTH,
 )
 
+logger = logging.getLogger(__name__)
+
 #: 交互 resize 延迟重排：停手多久后统一 reflow（毫秒）
 _RESIZE_REFLOW_DELAY_MS = 120
 #: 交互 resize 延迟重排的最小消息数（小会话保持实时 reflow）
@@ -70,8 +73,6 @@ _SHELL_VIRTUAL_MIN_MESSAGES = 80
 _VIRTUAL_LIST_MIN_MESSAGES = 200
 #: 视口外查看器挂起的最小消息数
 _SUSPEND_MIN_MESSAGES = 80
-#: 批量渐进渲染的时间片预算（毫秒）
-_BATCH_RENDER_BUDGET_MS = 8
 #: 批量加载时**先渲染**的最新消息条数（用户的视线通常停在底部）
 _BATCH_EAGER_COUNT = 12
 #: 首屏渲染的时间上限（毫秒）：超过就把剩余消息留给懒加载，先把画面放出来
@@ -274,6 +275,8 @@ class ElaChatView(
         #: 本次批量恢复是否启用了壳虚拟化（滚动时允许把远处气泡收回占位）
         self._shell_recycling = False
         self._render_queue: deque = deque()
+        self._render_queue_reversed = False
+        self._render_failed = False
         self._render_timer = QTimer(self)
         self._render_timer.setSingleShot(True)
         safe_connect(
@@ -364,8 +367,10 @@ class ElaChatView(
     def _refresh_shell_heights(self) -> None:
         self._virtualizer._refresh_shell_heights()
 
-    def _materialize_shell(self, messageId: int) -> Optional[ElaChatBubble]:
-        return self._virtualizer._materialize_shell(messageId)
+    def _materialize_shell(
+        self, messageId: int, *, reveal: bool = False
+    ) -> Optional[ElaChatBubble]:
+        return self._virtualizer._materialize_shell(messageId, reveal=reveal)
 
     def _schedule_lazy_fill(self) -> None:
         self._virtualizer._schedule_lazy_fill()
@@ -389,7 +394,10 @@ class ElaChatView(
         return self._virtualizer._dematerialize_shell(messageId)
 
     def _materialize_visible_placeholder(
-        self, top: int, bottom: int, margin: float
+        self,
+        top: Optional[int] = None,
+        bottom: Optional[int] = None,
+        margin: Optional[float] = None,
     ) -> None:
         self._virtualizer._materialize_visible_placeholder(top, bottom, margin)
 
@@ -406,10 +414,6 @@ class ElaChatView(
     @property
     def _message_index(self) -> dict[int, ElaChatMessage]:
         return self._store.index
-
-    @property
-    def _height_meta_cache(self) -> dict[int, tuple]:
-        return self._store.height_meta
 
     @property
     def _next_id(self) -> int:
@@ -445,8 +449,6 @@ class ElaChatView(
         """批量加载时是否延迟建分段控件（默认开）；关闭时当场物化已延迟的消息。"""
         self._virtual_parts_enabled = bool(on)
         if not self._virtual_parts_enabled:
-            for messageId in list(self._shell_placeholders):
-                self._materialize_shell(messageId)
             for bubble in self._bubbles.values():
                 if bubble.partsDeferred():
                     bubble.materializeParts()
@@ -493,15 +495,18 @@ class ElaChatView(
         """是否启用气泡壳延迟物化。"""
         return self._virtual_shells_enabled
 
-    def materializeMessage(self, messageId: int, flush: bool = True) -> bool:
+    def materializeMessage(
+        self, messageId: int, flush: bool = True, *, reveal: bool = False
+    ) -> bool:
         """物化指定消息的分段控件（虚拟化 / 延迟加载的显式入口）。
 
+        ``reveal=True`` 时才把消息滚进视口；默认只准备控件，不动滚动位置。
         :returns: 是否真的执行了物化或 Markdown 渲染
         """
         self._require_int_id(messageId, "materializeMessage")
         bubble = self._bubbles.get(messageId)
         if bubble is None:
-            bubble = self._materialize_shell(messageId)
+            bubble = self._materialize_shell(messageId, reveal=reveal)
         if bubble is None:
             if self._strict_ids:
                 raise KeyError(f"materializeMessage: 消息 {messageId} 不存在")
@@ -517,7 +522,7 @@ class ElaChatView(
     def scrollToMessage(self, messageId: int) -> bool:
         """物化并滚动到指定消息；返回消息是否存在。"""
         self._require_int_id(messageId, "scrollToMessage")
-        self.materializeMessage(messageId, flush=True)
+        self.materializeMessage(messageId, flush=True, reveal=True)
         bubble = self._bubbles.get(messageId)
         if bubble is None:
             return False
@@ -544,17 +549,21 @@ class ElaChatView(
                 f"（{type(messageId).__name__}）"
             )
 
-    def _require_bubble(
-        self, messageId: int, api: str = "", materialize: bool = True
-    ) -> ElaChatBubble:
+    def _require_bubble(self, messageId: int, api: str = "") -> ElaChatBubble:
         """取气泡；非法 id 抛 :class:`TypeError`，严格模式下不存在抛 :class:`KeyError`。
-        壳被延迟物化的消息会先 ``_materialize_shell``；``materialize=False`` 时留给
-        调用方处理（如 ``removeMessage`` 不需要建壳）。
+        壳被延迟物化的消息会先 ``_materialize_shell``。
         """
         self._require_int_id(messageId, api)
         bubble = self._bubbles.get(messageId)
-        if bubble is None and materialize and messageId in self._shell_placeholders:
+        if bubble is None and messageId in self._shell_placeholders:
             bubble = self._materialize_shell(messageId)
+            if bubble is not None and (
+                bubble.partsDeferred() or bubble.renderDeferred()
+            ):
+                # 写路径拿到的是半成品壳：不补齐分段会停在灰占位。
+                bubble.materializeParts()
+                bubble.setRenderDeferred(False)
+                bubble.flushRender()
         if bubble is None and self._strict_ids:
             raise KeyError(
                 f"{api or '该操作'}：消息 id {messageId!r} 不存在"
@@ -589,6 +598,7 @@ class ElaChatView(
         """
         self._batch_depth += 1
         if self._batch_depth == 1:
+            self._render_failed = False
             self._scroll.viewport().setUpdatesEnabled(False)
 
     def endBatch(self) -> None:
@@ -604,8 +614,11 @@ class ElaChatView(
             self._finish_batch_render()
             return
         if self._render_queue:
-            # 打开会话时停在底部：从最新一条往前渲染，首屏才有内容
-            self._render_queue = deque(reversed(self._render_queue))
+            # 打开会话时停在底部：从最新一条往前渲染，首屏才有内容。
+            # 只在入队方向尚未倒序时反转；连续两次 batch 不能把顺序翻回去。
+            if not self._render_queue_reversed:
+                self._render_queue = deque(reversed(self._render_queue))
+                self._render_queue_reversed = True
             self._batch_eager_rendered = 0
             self._render_timer.start(0)
         else:
@@ -617,36 +630,56 @@ class ElaChatView(
 
     def _process_render_queue(self) -> None:
         """渲染队列中的消息（**从最新一条往前**，只渲染首屏附近的）。"""
+        if self._batch_depth > 0:
+            return
         if not self._render_queue:
             self._finish_batch_render()
             return
-        timer = QElapsedTimer()
-        timer.start()
-        while self._render_queue:
-            if (
-                self._batch_eager_rendered >= _BATCH_EAGER_COUNT
-                or timer.elapsed() >= _BATCH_EAGER_BUDGET_MS
-            ):
-                break
-            messageId = self._render_queue.popleft()
-            bubble = self._materialize_shell(messageId)
-            if bubble is None:
-                continue
-            bubble.materializeParts()
-            bubble.setRenderDeferred(False)
-            bubble.flushRender()
-            self._sync_parts(messageId)
-            self._batch_eager_rendered += 1
-        if self._render_queue:
-            # 剩下的都是更早的消息：保持升序交给懒加载（快照仍要标记同步）
-            self._lazy_ids.extend(reversed(self._render_queue))
-            for messageId in self._render_queue:
+        try:
+            timer = QElapsedTimer()
+            timer.start()
+            current_id = None
+            while self._render_queue:
+                if (
+                    self._batch_eager_rendered >= _BATCH_EAGER_COUNT
+                    or timer.elapsed() >= _BATCH_EAGER_BUDGET_MS
+                ):
+                    break
+                messageId = self._render_queue.popleft()
+                current_id = messageId
+                bubble = self._materialize_shell(messageId)
+                if bubble is None:
+                    continue
+                bubble.materializeParts()
+                bubble.setRenderDeferred(False)
+                bubble.flushRender()
                 self._sync_parts(messageId)
+                current_id = None
+                self._batch_eager_rendered += 1
+            if self._render_queue:
+                # 剩下的都是更早的消息：保持升序交给懒加载（快照仍要标记同步）
+                self._lazy_ids.extend(reversed(self._render_queue))
+                for messageId in self._render_queue:
+                    self._sync_parts(messageId)
+                self._render_queue.clear()
+        except Exception:
+            # 单个坏消息不能让 beginBatch 关掉的视口永久停更；同一批只记一次。
+            if not self._render_failed:
+                logger.exception("批量渲染消息失败")
+                self._render_failed = True
+            if current_id is not None:
+                # 出错的那条既不渲染也不结算，正文会永久丢在快照之外
+                if current_id not in self._lazy_ids:
+                    self._lazy_ids.append(current_id)
+                self._sync_parts(current_id)
+            self._lazy_ids.extend(reversed(self._render_queue))
             self._render_queue.clear()
-        self._finish_batch_render()
+        finally:
+            self._finish_batch_render()
 
     def _finish_batch_render(self) -> None:
         """批量渲染收尾：恢复刷新、激活布局、贴底并通知宿主。"""
+        self._render_queue_reversed = False
         self._scroll.viewport().setUpdatesEnabled(True)
         self._scroll.viewport().update()
         self._content_layout.activate()
@@ -700,6 +733,9 @@ class ElaChatView(
             return None
         guard = NestedScrollGuard(area)
         area.viewport().installEventFilter(guard)
+        self._scroll_guards[:] = [
+            item for item in self._scroll_guards if not is_deleted(item)
+        ]
         self._scroll_guards.append(guard)
         return guard
 

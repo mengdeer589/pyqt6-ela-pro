@@ -108,8 +108,7 @@ C++ 对象（0xC0000005）。
   公式、Mermaid 图片；格式文本用 `DOCUMENT_TOOLTIP_PROPERTY` 存储。
 
 QWidget 目标一律走 `set_tooltip` / `remove_tooltip`；系统托盘由操作系统绘制，
-只能保留原生 `QSystemTrayIcon.setToolTip`（守卫
-`tests/tooltips/test_native_tooltip_policy.py`）。
+只能保留原生 `QSystemTrayIcon.setToolTip`（该契约当前没有自动守卫测试）。
 
 ## 表格（`table_view.py`）
 

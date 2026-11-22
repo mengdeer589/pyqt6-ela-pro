@@ -2193,7 +2193,7 @@ class ChatPlaygroundPage(ExamplePage):
     def _demo_compaction(self, chat: ElaChatWidget) -> None:
         view = chat.chatView()
         mid = view.beginMessage(ElaChatRoleType.Assistant)
-        part = view.beginCompaction(mid, "auto")
+        part = view.beginCompaction(mid)
         view.appendCompactionSummary(mid, part, "## 目标\n- 保留关键文件路径\n")
         view.endCompaction(mid, part, "done", 24)
 

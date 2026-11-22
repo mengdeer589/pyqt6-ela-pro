@@ -8,7 +8,6 @@ from .blocks._helpers import toolKindOf
 from .message import (
     ElaChatPartKindType,
     ElaChatToolKindType,
-    ElaChatToolStatusType,
 )
 from .timeline_detail import (
     DEFAULT_TIMELINE_DETAIL,
@@ -31,8 +30,21 @@ class _BubbleDetailMixin:
 
     def applyTimelineDetail(self) -> None:
         """把当前密度作用到全部分段控件（不重建文档）。"""
+        # 一组上下文工具共享一张分组卡：同 widget 只应用一次，手动展开优先。
+        groups: dict = {}
         for part in list(self._parts):
-            self._apply_part_visibility(part.id)
+            widget = self._part_widgets.get(part.id)
+            if widget is None:
+                continue
+            groups.setdefault(id(widget), (widget, []))[1].append(part)
+        for _widget, parts in groups.values():
+            manual = [
+                self._disclosure[part.id]
+                for part in parts
+                if part.id in self._disclosure
+            ]
+            opened = any(manual) if manual else None
+            self._apply_part_visibility(parts[0].id, opened)
         self._refresh_tool_panels()
         row = self._thinking_row
         if row is None:
@@ -88,7 +100,9 @@ class _BubbleDetailMixin:
             return False
         return self.timelineDetail().section(section).hidden
 
-    def _apply_part_visibility(self, partId: str) -> None:
+    def _apply_part_visibility(
+        self, partId: str, opened=None, *, apply_open: bool = True
+    ) -> None:
         part = self._find_part(partId)
         widget = self._part_widgets.get(partId)
         if part is None or widget is None:
@@ -105,7 +119,10 @@ class _BubbleDetailMixin:
             widget.setVisible(False)
             return
         widget.setVisible(True)
-        opened = self._disclosure.get(str(partId))
+        if not apply_open:
+            return
+        if opened is None:
+            opened = self._disclosure.get(str(partId))
         if opened is None:
             opened = section.expanded
         setter = getattr(widget, "setOpenedSilently", None)
@@ -120,20 +137,10 @@ class _BubbleDetailMixin:
         for panel in list(self._panels):
             calls = list(self._panel_calls.get(id(panel), ()))
             visible = [callId for callId in calls if not self._is_call_hidden(callId)]
-            completed = 0
-            for callId in visible:
-                part = self._find_part(callId)
-                call = getattr(part, "tool_call", None) if part is not None else None
-                if call is not None and call.status in ElaChatToolStatusType.Settled:
-                    completed += 1
             if not visible:
                 panel.setVisible(False)
                 continue
             panel.setVisible(True)
-            try:
-                panel.setCounts(completed, len(visible))
-            except Exception:
-                pass
             self._sync_tool_panel(panel)
 
     def _is_call_hidden(self, callId: str) -> bool:

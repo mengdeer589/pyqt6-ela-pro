@@ -142,7 +142,9 @@ def _fenced_ranges(text: str) -> list[tuple[int, int]]:
     fence = ""
     start = 0
     for line in text.splitlines(keepends=True):
-        stripped = line.strip()
+        stripped = re.sub(r"^(?:[ \t]*>[ \t]?)+", "", line.strip())
+        if not stripped.startswith(("```", "~~~")):
+            stripped = re.sub(r"^[ \t]*(?:[-+*]|\d+[.)])[ \t]+", "", stripped)
         if fence:
             if stripped == fence:
                 ranges.append((start, offset + len(line)))

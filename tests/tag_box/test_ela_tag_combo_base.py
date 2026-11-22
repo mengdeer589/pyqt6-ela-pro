@@ -108,7 +108,7 @@ class TestTagBoxAnimMixin:
         assert host._title_font_size == 13
         assert host._expand_mark_width == 0.0
         assert host._expand_icon_rotate == 0.0
-        assert host.height() == 30
+        assert host.height() == 32
         host.deleteLater()
 
     def test_set_title(self):

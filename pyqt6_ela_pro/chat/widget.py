@@ -159,9 +159,17 @@ class ElaChatWidget(
         self._sync_composer_width()
         #: 当前占据审批 dock 的 partId（空 = dock 上没有审批卡）
         self._permission_dock_part = ""
+        #: dock 上那张卡的 Python 引用（识别宿主是否直接换了卡）
+        self._permission_dock_card = None
 
         self._view.suggestionClicked.connect(self.suggestionClicked)
         self._view.messageUpdated.connect(self.messageUpdated)
+        safe_connect(
+            self._view,
+            "messageRemoved",
+            self._on_view_message_removed,
+            "widget.message_removed",
+        )
         self._view.copyRequested.connect(self.copyRequested)
         self._view.undoRequested.connect(self.undoRequested)
         self._view.regenerateRequested.connect(self.regenerateRequested)
@@ -239,7 +247,10 @@ class ElaChatWidget(
             "widget.queue_remove",
         )
         safe_connect(
-            self._queue_dock, "reorderRequested", self.moveQueued, "widget.queue_move"
+            self._queue_dock,
+            "reorderRequested",
+            self.moveQueued,
+            "widget.queue_move",
         )
         safe_connect(
             self._queue_dock, "steerRequested", self.steerQueued, "widget.queue_steer"
@@ -374,6 +385,7 @@ class ElaChatWidget(
     def clearPermissionDock(self) -> None:  # noqa: N802
         """撤下审批 dock 上的交互卡（**不改变审批状态**）。"""
         self._permission_dock_part = ""
+        self._permission_dock_card = None
         self._permission_dock.clear()
 
     def _on_input_dock_changed(self, has_content: bool) -> None:
@@ -388,56 +400,80 @@ class ElaChatWidget(
             self._permission_dock.setQueued(self._permission_dock.queued() + 1)
             return
         self._permission_dock_part = str(partId)
+        self._permission_dock_card = card
         self._permission_dock.setCard(card)
 
     def _on_permission_settled(self, messageId: int, partId: str) -> None:
         """有审批落定 -> 撤下 dock 上的卡，再把下一张待答的顶上来。
         补位不只在「落定的正是当前卡」时发生：宿主撤卡后 dock 与影子字段都为空，
-        任何一次落定都要重新 promote，否则剩余 pending 卡既看不见也点不到。
+        任何一次落定都要重新 promote。判据同时看影子字段与卡实体，宿主直接换卡时
+        不覆盖用户正在答的那一张。
         """
-        if (
-            self._permission_dock_part != str(partId)
-            and self._permission_dock_part
-            and self._permission_dock.card() is not None
-        ):
+        current = self._permission_dock.card()
+        same_part = self._permission_dock_part == str(partId)
+        if not same_part and current is not None:
+            self._recount_permission_queue()
+            return
+        if same_part and current is not None and current is not self._permission_dock_card:
+            # 宿主直接 setCard(other)：不要用 promote 把 other 顶掉
+            self._permission_dock_part = ""
+            self._permission_dock_card = None
+            self._recount_permission_queue()
             return
         self._permission_dock_part = ""
+        self._permission_dock_card = None
         self._promote_next_permission()
 
-    def _promote_next_permission(self) -> None:
-        """把时间线上最早那张未答的审批放进 dock（没有就清空 dock）。
-        必须全时间线取最早：卡被撤下后 part 仍是 pending，按「已落定消息之后」
-        过滤会让它永远回不到 dock。
-        """
+    def _pending_permission_parts(self) -> list:
+        """全时间线仍待答复的 ``(bubble, partId)``（虚拟化未物化的消息跳过）。"""
         pending = []
         for message in self._view.messages():
             bubble = self._view.bubble(message.id)
             if bubble is None:
                 continue
             for partId, _permission in bubble.pendingPermissionParts():
-                card = bubble.ensureInteractivePermissionCard(partId)
-                if card is not None:
-                    pending.append((partId, card))
+                pending.append((bubble, partId))
+        return pending
+
+    def _recount_permission_queue(self) -> None:
+        """按最新待答数量刷新 dock 的“还有 N 个”，不换卡。"""
+        pending = self._pending_permission_parts()
+        if not pending and self._permission_dock.card() is None:
+            self._permission_dock_part = ""
+            self._permission_dock_card = None
+            return
+        self._permission_dock.setQueued(max(0, len(pending) - 1))
+
+    def _promote_next_permission(self) -> None:
+        """把时间线上最早那张未答的审批放进 dock（没有就清空 dock）。
+        必须全时间线取最早：卡被撤下后 part 仍是 pending，按「已落定消息之后」
+        过滤会让它永远回不到 dock。
+        """
+        pending = self._pending_permission_parts()
         if not pending:
             self._permission_dock.clear()
             self._permission_dock_part = ""
+            self._permission_dock_card = None
             return
-        partId, card = pending[0]
+        bubble, partId = pending[0]
+        card = bubble.ensureInteractivePermissionCard(partId)
+        if card is None:
+            self._permission_dock.clear()
+            self._permission_dock_part = ""
+            self._permission_dock_card = None
+            return
         self._permission_dock_part = partId
+        self._permission_dock_card = card
         self._permission_dock.setCard(card)
-        self._permission_dock.setQueued(len(pending) - 1)
+        self._permission_dock.setQueued(max(0, len(pending) - 1))
 
     def pendingPermissionCards(self) -> list:
         """当前所有仍在 dock 里等用户操作的审批卡（宿主调试用）。"""
         cards = []
-        for message in self._view.messages():
-            bubble = self._view.bubble(message.id)
-            if bubble is None:
-                continue
-            for partId, _permission in bubble.pendingPermissionParts():
-                card = bubble.interactivePermissionCard(partId)
-                if card is not None:
-                    cards.append(card)
+        for bubble, partId in self._pending_permission_parts():
+            card = bubble.interactivePermissionCard(partId)
+            if card is not None:
+                cards.append(card)
         return cards
 
     def toolBar(self) -> ElaChatToolBar:

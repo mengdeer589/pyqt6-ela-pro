@@ -182,7 +182,7 @@ class TestPinColorContrast:
         ids=["light", "dark"],
     )
     def test_builtin_pins_clear_ui_contrast(self, qapp, mode):
-        from pyqt6_ela_pro._colors import _contrast_ratio
+        from pyqt6_ela_pro._colors import contrastRatio
         from pyqt6_ela_pro._theme import surface, surfacePopup
 
         previous = eTheme.getThemeMode()
@@ -192,7 +192,7 @@ class TestPinColorContrast:
             for name in self.BUILTIN:
                 color = QColor(pin_color(name))
                 for surface_name, bg in backgrounds.items():
-                    ratio = _contrast_ratio(color, bg)
+                    ratio = contrastRatio(color, bg)
                     assert ratio >= 3.0, (
                         f"{mode.name}/{name} on {surface_name}: "
                         f"{color.name()} 只有 {ratio:.2f}:1"

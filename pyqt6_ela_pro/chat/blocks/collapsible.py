@@ -292,31 +292,26 @@ class ReasoningBlock(_CollapsibleBlock):
         """结束思考，标题显示耗时并自动收起。"""
         self._flush_chunks()
         self.setBusy(False)
-        # 宿主可能传非数值（如 JSON 里的 "1.2s"），算术会抛异常；本方法常在信号槽中
-        # 被调用，异常穿出 Qt 回调 = 0xC0000409。
-        try:
-            millis = float(durationMs) if durationMs else 0.0
-        except (TypeError, ValueError, OverflowError):
-            millis = 0.0
-        if millis > 0:
-            self.setTitle(f"思考完成 ({millis / 1000:.1f}s)")
-        else:
-            self.setTitle("思考完成")
+        self.setTitle(self._completion_title(durationMs))
         self.setOpened(False)
 
     def finishSilently(self, durationMs: Optional[float] = None) -> None:
         """恢复历史时的收尾：直接落成「已完成 + 收起」，不触发 toggled / 布局链。"""
         self._flush_chunks()
         self.setBusy(False)
+        self.setTitle(self._completion_title(durationMs))
+        self.setOpenedSilently(False)
+
+    @staticmethod
+    def _completion_title(durationMs: Optional[float]) -> str:
+        """完成标题；耗时可能来自 JSON（非数值按未统计处理）。"""
         try:
             millis = float(durationMs) if durationMs else 0.0
         except (TypeError, ValueError, OverflowError):
             millis = 0.0
         if millis > 0:
-            self.setTitle(f"思考完成 ({millis / 1000:.1f}s)")
-        else:
-            self.setTitle("思考完成")
-        self.setOpenedSilently(False)
+            return f"思考完成 ({millis / 1000:.1f}s)"
+        return "思考完成"
 
     def text(self) -> str:
         """获取思考文本（含尚未刷新的分片）。"""
@@ -400,7 +395,6 @@ class ThinkingRow(ElaThemeWidget):
         self._ring.setFixedSize(14, 14)
         self._ring.setIsTransparent(True)
         self._ring.setBusyingWidth(2)
-        self._ring.setIsBusying(True)
         self._label = ColorText("思考中", self)
         self._label.setWordWrap(False)
         self._heading_label = ColorText(self)

@@ -11,6 +11,7 @@ from .bubble_shared import _STREAMING_PLACEHOLDER
 
 from .blocks import (
     CompactionSeparator,
+    SubagentCard,
 )
 from .message import (
     ElaChatPartKindType,
@@ -39,8 +40,8 @@ class _BubbleStreamMixin:
         self.setStatus(ElaChatStatusType.Streaming)
 
     def endStream(self, status: str = ElaChatStatusType.Done) -> None:
-        """结束流式生成（仅助手消息）。"""
-        if self._role != ElaChatRoleType.Assistant:
+        """结束流式生成（仅助手消息；重复调用只生效一次）。"""
+        if self._role != ElaChatRoleType.Assistant or self._stream_ended:
             return
         self._abortStream(status)
         self._stream_ended = True
@@ -59,6 +60,7 @@ class _BubbleStreamMixin:
         self._settle_open_tools(status)
         self._finish_tool_group()
         self.cancelPendingPermissions()
+        self._stream_ended = True
 
     def _settle_open_tools(self, status: str) -> None:
         """把仍处于 pending / running 的工具调用落到终态。
@@ -88,17 +90,48 @@ class _BubbleStreamMixin:
             card = self._tool_cards.get(part.id)
             if card is not None and hasattr(card, "setStatus"):
                 card.setStatus(settled, durationMs=duration)
+            elif card is not None and hasattr(card, "updateResult"):
+                # 分组卡没有单调用 setStatus，按 callId 更新成员行。
+                card.updateResult(
+                    part.id,
+                    part.tool_call.result,
+                    ok=settled != ElaChatToolStatusType.Error,
+                    durationMs=duration,
+                    status=settled,
+                )
+            elif part.tool_call.parent_id:
+                parent = self._tool_cards.get(
+                    part.tool_call.parent_id
+                ) or self._subagent_parents.get(part.tool_call.parent_id)
+                if isinstance(parent, SubagentCard):
+                    parent.updateResult(
+                        part.id,
+                        part.tool_call.result,
+                        ok=settled != ElaChatToolStatusType.Error,
+                        durationMs=duration,
+                        status=settled,
+                    )
         for panel in self.toolPanels():
             self._sync_tool_panel(panel)
-        # 通用清扫：回合结束后不允许残留 streaming 的 part
+        # 通用清扫：回合结束后不允许残留 streaming 的 part。
+        # Tool part 的状态由 tool_call 承载，已在第一段结算；这里跳过，
+        # 否则「已成功但 part 尚未落定」的工具会被错误标成 Error。
         for part in self._parts:
-            if part.status == ElaChatStatusType.Streaming:
-                self._replace_part(part.id, part.withStatus(part_status))
-                if part.kind == ElaChatPartKindType.Compaction:
-                    # 压缩卡状态只由 setCompactionStatus 驱动，不同步会停在「压缩中…」
+            if part.kind == ElaChatPartKindType.Tool:
+                continue
+            if part.kind == ElaChatPartKindType.Compaction:
+                if part.status in (
+                    ElaChatStatusType.Streaming,
+                    ElaChatStatusType.Queued,
+                ):
+                    new_status = part_status
+                    self._replace_part(part.id, part.withStatus(new_status))
                     widget = self._part_widgets.get(part.id)
                     if isinstance(widget, CompactionSeparator):
-                        widget.setCompactionStatus(part_status)
+                        widget.setCompactionStatus(new_status)
+                continue
+            if part.status == ElaChatStatusType.Streaming:
+                self._replace_part(part.id, part.withStatus(part_status))
 
     def isStreaming(self) -> bool:
         """是否正在流式生成。"""
@@ -144,6 +177,7 @@ class _BubbleStreamMixin:
             status if status in ElaChatStatusType.All else ElaChatStatusType.Done
         )
         self._meta.setInterrupted(self._status == ElaChatStatusType.Stopped)
+        self._sync_meta_visibility()
         self._sync_header_status()
         self._sync_footer()
         self._sync_changes_row()

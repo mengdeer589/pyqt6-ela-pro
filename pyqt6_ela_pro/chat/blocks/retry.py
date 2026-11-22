@@ -30,6 +30,7 @@ from ..._theme import (
 )
 from ...tooltips import ElaToolTipPositionType, remove_tooltip, set_tooltip
 from ...ela_button import ElaButton
+from ..message import _as_float, _as_int
 
 
 class ElaChatRetryCard(_ThemeAwareMixin, ElaScrollPageArea):
@@ -47,6 +48,7 @@ class ElaChatRetryCard(_ThemeAwareMixin, ElaScrollPageArea):
         self._message = ""
         self._next_at = 0.0
         self._rail_color = QColor(0, 0, 0, 0)
+        self._active = False
         self.setMinimumHeight(0)
         self.setMaximumHeight(16777215)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
@@ -113,9 +115,9 @@ class ElaChatRetryCard(_ThemeAwareMixin, ElaScrollPageArea):
 
     def setRetry(self, attempt: int, message: str, nextAt: float) -> None:
         """设置重试状态（``nextAt`` 为 epoch 毫秒；``0`` 表示无倒计时）。"""
-        self._attempt = max(1, int(attempt or 1))
+        self._attempt = max(1, _as_int(attempt, 1))
         self._message = str(message or "")
-        self._next_at = float(nextAt or 0.0)
+        self._next_at = max(0.0, _as_float(nextAt, 0.0))
         if self._message:
             set_tooltip(
                 self._message_label,
@@ -127,8 +129,10 @@ class ElaChatRetryCard(_ThemeAwareMixin, ElaScrollPageArea):
         else:
             remove_tooltip(self._message_label)
         self._sync_text()
+        self._active = True
         self.show()
-        if self._next_at > 0:
+        # 父链不可见时 show() 不会真的显示：定时器交给 showEvent 启动，隐藏卡不空转。
+        if self.isVisible() and self._next_at > 0:
             self._timer.start()
         else:
             self._timer.stop()
@@ -136,6 +140,7 @@ class ElaChatRetryCard(_ThemeAwareMixin, ElaScrollPageArea):
     def clear(self) -> None:
         """清空并隐藏。"""
         self._timer.stop()
+        self._active = False
         self._attempt = 0
         self._message = ""
         self._next_at = 0.0
@@ -149,8 +154,8 @@ class ElaChatRetryCard(_ThemeAwareMixin, ElaScrollPageArea):
         return (self._attempt, self._message, self._next_at)
 
     def isActive(self) -> bool:
-        """是否正在显示重试状态。"""
-        return self.isVisible() and self._attempt > 0
+        """是否处于重试状态（显式状态，与当前是否可见无关）。"""
+        return self._active
 
     def _remaining_seconds(self) -> int:
         if self._next_at <= 0:
@@ -166,7 +171,16 @@ class ElaChatRetryCard(_ThemeAwareMixin, ElaScrollPageArea):
         self._elide_message()
 
     def _elide_message(self) -> None:
-        width = max(80, self.width() - 190)
+        # 按相邻按钮的真实宽度 + 布局间距算可用宽度，别用魔法数 190。
+        reserved = self._rail.width() + self._icon.sizeHint().width()
+        reserved += self._retry_button.sizeHint().width()
+        reserved += self._cancel_button.sizeHint().width()
+        layout = self.layout()
+        if layout is not None:
+            margins = layout.contentsMargins()
+            reserved += margins.left() + margins.right()
+            reserved += layout.spacing() * 4
+        width = max(80, self.width() - reserved)
         metrics = QFontMetrics(self._message_label.font())
         self._message_label.setText(
             metrics.elidedText(self._message, Qt.TextElideMode.ElideRight, width)
@@ -184,7 +198,7 @@ class ElaChatRetryCard(_ThemeAwareMixin, ElaScrollPageArea):
 
     def showEvent(self, event) -> None:  # noqa: N802 (Qt 命名)
         super().showEvent(event)
-        if self._next_at > 0 and not self._timer.isActive():
+        if self._active and self._next_at > 0 and not self._timer.isActive():
             self._timer.start()
 
     def hideEvent(self, event) -> None:  # noqa: N802 (Qt 命名)
@@ -206,8 +220,15 @@ class ElaChatRetryCard(_ThemeAwareMixin, ElaScrollPageArea):
         super().paintEvent(event)
         # 左侧语义竖条（与 ErrorCard 同一套语言）
         painter = QPainter(self)
-        rect = self.rect().adjusted(0, 6, 0, -6)
-        painter.fillRect(rect.left(), rect.top(), 2, rect.height(), self._rail_color)
+        try:
+            rect = self.rect().adjusted(0, 6, 0, -6)
+            painter.fillRect(
+                rect.left(), rect.top(), 2, rect.height(), self._rail_color
+            )
+        except Exception:
+            pass
+        finally:
+            painter.end()
 
     def _onThemeChanged(self, mode) -> None:
         self._theme_mode = mode

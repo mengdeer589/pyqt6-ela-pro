@@ -45,17 +45,20 @@ class _BubbleReasoningMixin:
         self._rebuild_reasoning_widgets()
 
     def _rebuild_reasoning_widgets(self) -> None:
-        """按当前形态重建全部思考分段控件（分段数据保持不变）。"""
-        # 写路径：重建的控件要拿到真实文本
+        """按当前形态重建已有思考分段控件（不物化延迟 / 窗口外分段）。"""
+        # 在途分片先落定；否则重建时 _discard_part_state 会把缓冲清掉
         self._materialize_all()
         layout = self._parts_layout
         streaming_id = None
         for part in list(self._parts):
             if part.kind != ElaChatPartKindType.Reasoning:
                 continue
+            old = self._part_widgets.get(part.id)
+            if old is None:
+                # 延迟物化 / 窗口外分段：等 setParts / expandParts 时按新形态建
+                continue
             if part.id in self._suspended_viewers:
                 continue  # 挂起中：保留等高占位，恢复时按新形态重建
-            old = self._part_widgets.get(part.id)
             index = (
                 layout.indexOf(old) if layout is not None and old is not None else -1
             )
@@ -150,7 +153,11 @@ class _BubbleReasoningMixin:
         part = ElaChatPart(
             id=partId,
             kind=ElaChatPartKindType.Reasoning,
-            status=ElaChatStatusType.Streaming,
+            status=(
+                ElaChatStatusType.Streaming
+                if self._status == ElaChatStatusType.Streaming
+                else ElaChatStatusType.Done
+            ),
             step=self._step_index,
         )
         widget = self._create_reasoning_widget()
@@ -181,19 +188,16 @@ class _BubbleReasoningMixin:
             )
         return self._thinking_row
 
-    def reasoningBlock(self) -> ReasoningBlock:
-        """获取当前折叠式思考块（``collapse`` 形态）。
-        流式回合内没有段时按需创建；非流式且不存在思考段时抛 ``RuntimeError``
-        —— 读取操作不凭空追加分段。
-        """
-        if self._reasoning_style != ElaChatReasoningStyleType.Collapse:
-            raise RuntimeError("inline 形态请使用 inlineReasoningViewer()")
+    def _current_reasoning_widget(self, widget_type, style, style_error: str):
+        """按当前形态取思考控件；流式回合内没有段时按需创建。"""
+        if self._reasoning_style != style:
+            raise RuntimeError(style_error)
         partId = self._current_reasoning_id
         if partId is None:
             for part in reversed(self._parts):
                 widget = self._part_widgets.get(part.id)
                 if part.kind == ElaChatPartKindType.Reasoning and isinstance(
-                    widget, ReasoningBlock
+                    widget, widget_type
                 ):
                     return widget
             if self._status != ElaChatStatusType.Streaming:
@@ -201,25 +205,21 @@ class _BubbleReasoningMixin:
         partId = self._ensure_reasoning_part()
         return self._part_widgets.get(partId)
 
+    def reasoningBlock(self) -> ReasoningBlock:
+        """获取当前折叠式思考块（``collapse`` 形态）。"""
+        return self._current_reasoning_widget(
+            ReasoningBlock,
+            ElaChatReasoningStyleType.Collapse,
+            "inline 形态请使用 inlineReasoningViewer()",
+        )
+
     def inlineReasoningViewer(self) -> ElaMarkdownViewer:
-        """获取当前内联思考查看器（需先 ``setReasoningStyle(Inline)``）。
-        与 :meth:`reasoningBlock` 同一契约：读取不建分段，形态不对或非流式且
-        没有思考段时抛 ``RuntimeError``。
-        """
-        if self._reasoning_style != ElaChatReasoningStyleType.Inline:
-            raise RuntimeError("当前不是 inline 形态，请先 setReasoningStyle()")
-        partId = self._current_reasoning_id
-        if partId is None:
-            for part in reversed(self._parts):
-                widget = self._part_widgets.get(part.id)
-                if part.kind == ElaChatPartKindType.Reasoning and isinstance(
-                    widget, ElaMarkdownViewer
-                ):
-                    return widget
-            if self._status != ElaChatStatusType.Streaming:
-                raise RuntimeError("当前没有思考段（非流式读取不会凭空创建）")
-        partId = self._ensure_reasoning_part()
-        return self._part_widgets.get(partId)
+        """获取当前内联思考查看器（需先 ``setReasoningStyle(Inline)``）。"""
+        return self._current_reasoning_widget(
+            ElaMarkdownViewer,
+            ElaChatReasoningStyleType.Inline,
+            "当前不是 inline 形态，请先 setReasoningStyle()",
+        )
 
     def setReasoning(self, text: str, durationMs: Optional[float] = None) -> None:
         """整体设置当前思考段内容（可选耗时，结束后自动收起）。
@@ -238,23 +238,28 @@ class _BubbleReasoningMixin:
         if text:
             self._mark_generation_started()
         self._discard_part_state(partId)
+        part = self._find_part(partId)
+        duration = (
+            durationMs
+            if durationMs is not None
+            else (part.duration_ms if part is not None else 0.0)
+        )
         widget = self._part_widgets.get(partId)
         if isinstance(widget, ReasoningBlock):
             widget.setText(text)
-            if durationMs:
-                widget.end(durationMs)
-            else:
-                widget.setOpened(bool(text))
+            widget.end(duration)
         elif isinstance(widget, ElaMarkdownViewer):
             self._write_viewer_text(partId, widget, text)
+            scanner = _HeadingScanner()
+            heading = scanner.push(text)
+            self._heading_scanners[partId] = scanner
             if self._thinking_row is not None:
-                self._thinking_row.setHeading(_HeadingScanner().push(text))
-        part = self._find_part(partId)
+                self._thinking_row.setHeading(heading)
         if part is not None:
             updated = (
                 part.withText(text)
                 .withStatus(ElaChatStatusType.Done)
-                .withDuration(float(durationMs) if durationMs else 0.0)
+                .withDuration(duration)
             )
             self._replace_part(partId, updated)
         # 「整体设置」不是流式开始：之后 appendReasoning 应新起一段，而不是往
@@ -278,23 +283,14 @@ class _BubbleReasoningMixin:
                 return part.id
         return None
 
-    def beginReasoning(self, partId: Optional[str] = None) -> None:
+    def beginReasoning(self) -> None:
         """开始思考（折叠块展示「思考中」；内联形态附状态行）。
-        同一步骤内重复开始会复用已有思考块继续追加；``partId`` 由
-        :meth:`setParts` 传入时强制新建分段（恢复时保留原分段 id）。
+
+        同一步骤内重复开始会复用已有思考块继续追加。
         """
         if self._role != ElaChatRoleType.Assistant:
             return
         self._ensure_parts_materialized()
-        if partId is not None:
-            new_id = self._ensure_reasoning_part(partId)
-            widget = self._part_widgets.get(new_id)
-            if isinstance(widget, ReasoningBlock):
-                widget.begin()
-            elif isinstance(widget, ElaMarkdownViewer):
-                self._begin_thinking_row(widget)
-                widget.setMarkdown("")
-            return
         self._current_reasoning_id = None
         existing = self._current_step_reasoning_id()
         if existing is not None:

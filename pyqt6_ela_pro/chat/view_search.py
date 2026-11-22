@@ -25,59 +25,37 @@ class _ViewSearchMixin:
             self._sync_search_bar()
             return 0
         needle = query if caseSensitive else query.lower()
-        for message in self.messages():
-            if message.role == ElaChatRoleType.Assistant:
-                for part in message.parts:
-                    if part.kind != ElaChatPartKindType.Text or not part.text:
-                        continue
-                    haystack = part.text if caseSensitive else part.text.lower()
-                    start = 0
-                    occurrence = 0
-                    while True:
-                        at = haystack.find(needle, start)
-                        if at < 0:
-                            break
-                        self._search_hits.append(
-                            ElaChatSearchHit(
-                                message_id=message.id,
-                                part_id=part.id,
-                                occurrence=occurrence,
-                                snippet=part.text[
-                                    max(0, at - 20) : at + len(query) + 20
-                                ],
-                            )
-                        )
-                        occurrence += 1
-                        start = at + max(1, len(query))
-                        if len(self._search_hits) >= SEARCH_HIT_LIMIT:
-                            break
-                    if len(self._search_hits) >= SEARCH_HIT_LIMIT:
-                        break
-            elif message.role == ElaChatRoleType.User and message.text:
-                haystack = message.text if caseSensitive else message.text.lower()
-                start = 0
-                occurrence = 0
-                while True:
-                    at = haystack.find(needle, start)
-                    if at < 0:
-                        break
-                    self._search_hits.append(
-                        ElaChatSearchHit(
-                            message_id=message.id,
-                            part_id="",
-                            occurrence=occurrence,
-                            snippet=message.text[
-                                max(0, at - 20) : at + len(query) + 20
-                            ],
-                            user=True,
-                        )
+
+        def scan(body: str, messageId: int, partId: str) -> None:
+            haystack = body if caseSensitive else body.lower()
+            start = 0
+            occurrence = 0
+            while len(self._search_hits) < SEARCH_HIT_LIMIT:
+                at = haystack.find(needle, start)
+                if at < 0:
+                    return
+                self._search_hits.append(
+                    ElaChatSearchHit(
+                        message_id=messageId,
+                        part_id=partId,
+                        occurrence=occurrence,
                     )
-                    occurrence += 1
-                    start = at + max(1, len(query))
-                    if len(self._search_hits) >= SEARCH_HIT_LIMIT:
-                        break
+                )
+                occurrence += 1
+                start = at + max(1, len(query))
+
+        for message in self.messages():
             if len(self._search_hits) >= SEARCH_HIT_LIMIT:
                 break
+            if message.role == ElaChatRoleType.Assistant:
+                for part in message.parts:
+                    if part.kind == ElaChatPartKindType.Text and part.text:
+                        scan(part.text, message.id, part.id)
+                # 无 parts 的旧格式助手消息正文只在 message.text 里。
+                if not message.parts and message.text:
+                    scan(message.text, message.id, "")
+            elif message.role == ElaChatRoleType.User and message.text:
+                scan(message.text, message.id, "")
         if self._search_hits:
             self._goto_search_hit(0)
         else:
@@ -102,6 +80,24 @@ class _ViewSearchMixin:
         self._search_hits = []
         self._search_index = -1
         self._clear_search_highlights()
+        self._sync_search_bar()
+
+    def _prune_search_hits(self, messageIds) -> None:
+        """消息删除后摘掉对应命中，避免计数与导航指向幽灵。"""
+        if not self._search_hits:
+            return
+        doomed = set(messageIds)
+        old = self._search_hits
+        current = self._search_index
+        removed_before = sum(
+            1 for hit in old[: max(0, current)] if hit.message_id in doomed
+        )
+        self._search_hits = [hit for hit in old if hit.message_id not in doomed]
+        if not self._search_hits:
+            self._search_index = -1
+        else:
+            self._search_index = max(0, current - removed_before)
+            self._search_index = min(self._search_index, len(self._search_hits) - 1)
         self._sync_search_bar()
 
     def searchHits(self) -> list:
@@ -148,10 +144,41 @@ class _ViewSearchMixin:
         self._search_bar = bar
         return bar
 
+    def _search_preview(self) -> str:
+        if not self._search_hits or self._search_index < 0:
+            return ""
+        hit = self._search_hits[min(self._search_index, len(self._search_hits) - 1)]
+        message = self.message(hit.message_id)
+        if message is None:
+            return ""
+        text = ""
+        if hit.part_id:
+            part = message.part(hit.part_id)
+            if part is not None:
+                text = part.text or ""
+        else:
+            text = message.text or ""
+        if not text:
+            return ""
+        needle = self._search_query if self._search_case else self._search_query.lower()
+        haystack = text if self._search_case else text.lower()
+        start = 0
+        at = -1
+        for _ in range(max(0, hit.occurrence) + 1):
+            at = haystack.find(needle, start)
+            if at < 0:
+                return ""
+            start = at + max(1, len(needle))
+        left = max(0, at - 30)
+        right = min(len(text), at + len(needle) + 50)
+        snippet = " ".join(text[left:right].split())
+        return ("…" if left else "") + snippet + ("…" if right < len(text) else "")
+
     def _sync_search_bar(self) -> None:
         bar = getattr(self, "_search_bar", None)
         if bar is not None:
             bar.setState(len(self._search_hits), self._search_index)
+            bar.setPreview(self._search_preview())
 
     def _clear_search_highlights(self) -> None:
         for bubble in list(self._bubbles.values()):
@@ -179,13 +206,17 @@ class _ViewSearchMixin:
             and bubble._part_widgets.get(hit.part_id) is None
         ):
             bubble.expandParts()
+            # 展开会改变气泡高度，滚一次到新的命中位置。
+            self.scrollToMessage(hit.message_id)
         if bubble is not None and hit.part_id:
             widget = bubble._part_widgets.get(hit.part_id)
             if isinstance(widget, ElaMarkdownViewer):
-                count = widget.searchText(self._search_query, self._search_case)
+                widget.searchText(self._search_query, self._search_case)
                 for _ in range(max(0, hit.occurrence)):
                     widget.findNext(False)
-                if count == 0:
-                    self._search_index = index
+                browser = widget.textBrowser()
+                if browser is not None:
+                    browser.ensureCursorVisible()
+                self._scroll.ensureWidgetVisible(widget, 0, 20)
         self._sync_search_bar()
         return True
