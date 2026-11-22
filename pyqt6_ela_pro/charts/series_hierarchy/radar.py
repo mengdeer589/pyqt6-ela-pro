@@ -17,7 +17,7 @@ from PyQt6.QtGui import (
 from .._utils import clamp as _clamp
 from .._utils import to_float as _to_float
 from .._utils import single_option, with_alpha
-from .._utils import parse_color
+from ..axes import formatValue
 from ..core import SeriesRenderer
 from ._shared import (
     _dist_to_polygon_edge,
@@ -116,10 +116,26 @@ class RadarSeriesRenderer(SeriesRenderer):
         radius_opt = self.opt.get("radius")
         if radius_opt is None:
             radius_opt = radar_opt.get("radius")
+        if radius_opt is None:
+            radius_opt = "75%"
         if isinstance(radius_opt, (list, tuple)):
-            radius_opt = radius_opt[1] if len(radius_opt) > 1 else radius_opt[0]
-        base = max(12.0, half - 34.0)
-        self._radius = max(12.0, _parse_pct(radius_opt, base, base))
+            if len(radius_opt) > 1:
+                radius_opt = radius_opt[1]
+            elif radius_opt:
+                radius_opt = radius_opt[0]
+            else:
+                radius_opt = "75%"
+        # 半径百分比按 ECharts 语义相对内容区短边一半；维度名另按实际行高收窄。
+        base = max(12.0, half)
+        radius = max(12.0, _parse_pct(radius_opt, base, base))
+        axis_name_opt = dict(
+            self.opt.get("axisName") or radar_opt.get("axisName") or {}
+        )
+        if bool(axis_name_opt.get("show", True)):
+            lead = 16.0 + QFontMetricsF(_label_font(self, axis_name_opt)).height() / 2.0
+            limit = max(12.0, half * 0.5, half - lead)
+            radius = min(radius, limit)
+        self._radius = radius
         base_idx = (
             self.chart.seriesRenderers.index(self)
             if self in self.chart.seriesRenderers
@@ -171,6 +187,7 @@ class RadarSeriesRenderer(SeriesRenderer):
         if not self._indicators:
             return
         p.save()
+        self._label_rects = []
         n = len(self._indicators)
         split = max(1, int(_to_float(self.opt.get("splitNumber"), 5)))
         c_grid = _text_color("color.border", self.chart)
@@ -186,15 +203,15 @@ class RadarSeriesRenderer(SeriesRenderer):
         if not bool(axis_name_opt.get("show", True)):
             axis_name_opt["_hide"] = True
         if isinstance(axis_name_opt.get("color"), str) and axis_name_opt["color"]:
-            c_text = parse_color(axis_name_opt["color"])
+            c_text = self.resolveColor(axis_name_opt["color"])
         if isinstance(split_line_opt.get("lineStyle"), dict):
             raw = split_line_opt["lineStyle"].get("color")
             if isinstance(raw, str) and raw:
-                c_grid = parse_color(raw)
+                c_grid = self.resolveColor(raw)
         if isinstance(axis_line_opt.get("lineStyle"), dict):
             raw = axis_line_opt["lineStyle"].get("color")
             if isinstance(raw, str) and raw:
-                c_axis = parse_color(raw)
+                c_axis = self.resolveColor(raw)
         font = _label_font(self, axis_name_opt)
         p.setFont(font)
         fm = QFontMetricsF(font)
@@ -240,20 +257,17 @@ class RadarSeriesRenderer(SeriesRenderer):
         for k, poly in enumerate(self._polys):
             pts = self._animated_polygon(poly, anim_t)
             qpoly = QPolygonF(pts)
-            color = parse_color(self.itemColor(k, default=poly["color"]))
+            color = self.dataColor(k, default=poly["color"])
             alpha = self.itemOpacity(k)
-            if hovered is not None:
-                if k == hovered:
-                    emphasis = self.emphasisColor(k)
-                    color = emphasis if emphasis is not None else color.lighter(112)
-                elif self.blursOtherItems():
-                    blur = self.blurOpacity()
-                    alpha *= blur if blur is not None else 0.35
+            border_color, border_w = self.itemBorder(k)
+            color, alpha, border_color, border_w = self.stateStyle(
+                k, hovered, color, alpha, border_color, border_w
+            )
             if area_opt is not None:
                 p.setPen(Qt.PenStyle.NoPen)
                 p.setBrush(with_alpha(color, opacity * 255 * alpha))
                 p.drawPolygon(qpoly)
-            pen = QPen(color, 2)
+            pen = QPen(border_color or color, border_w or 2)
             pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
             p.setPen(pen)
             p.setBrush(Qt.BrushStyle.NoBrush)
@@ -264,15 +278,26 @@ class RadarSeriesRenderer(SeriesRenderer):
             for pt in pts:
                 p.drawEllipse(pt, 2.5, 2.5)
             if show_label:
-                p.setPen(self.labelColor())
+                item = None
+                data = self.data()
+                if 0 <= k < len(data):
+                    item = data[k]
+                p.setPen(self.labelColorFor(k))
                 for j, pt in enumerate(pts):
                     value = poly["values"][j] if j < len(poly["values"]) else 0.0
-                    text = self.labelText(j, value)
-                    p.drawText(
-                        QRectF(pt.x() - 30, pt.y() - fm.height() - 2, 60, fm.height()),
-                        Qt.AlignmentFlag.AlignCenter,
-                        text,
+                    text = self.hierarchyLabelText(
+                        k,
+                        poly["name"] or self.name,
+                        value,
+                        item,
+                        dimension_index=j,
+                        fallback=formatValue(value),
                     )
+                    rect = QRectF(
+                        pt.x() - 30, pt.y() - fm.height() - 2, 60, fm.height()
+                    )
+                    p.drawText(rect, Qt.AlignmentFlag.AlignCenter, text)
+                    self._label_rects.append((k, rect, text))
         p.restore()
 
     def _animated_polygon(self, poly, anim_t):
@@ -303,7 +328,7 @@ class RadarSeriesRenderer(SeriesRenderer):
             "series": self.name,
             "dataIndex": index,
             # 数据项颜色：tooltip 圆点与事件 params 都用它，拿系列色两条多边形会同色。
-            "color": self.itemColor(index, default=poly["color"]),
+            "color": self.dataColor(index, default=poly["color"]),
             # 标题 = 数据项名（ECharts radar formatTooltip 的 header）
             "title": name,
             # 逐维度 (指标名, 值)：Tooltip 渲染成多行

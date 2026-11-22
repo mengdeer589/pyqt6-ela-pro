@@ -5,23 +5,33 @@ from __future__ import annotations
 
 import math
 import time
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QFont, QPen
 
 from ..._internal import system_cjk_font_family
 from .._tokens import FONT_FAMILIES, T
-from .._utils import to_float as _utils_to_float, warn_once
-from .._utils import parse_color
+from .._utils import single_font_family
+from .._utils import to_float as _utils_to_float
+from .._utils import resolve_color_option
 
 _EXTENT_CACHE: dict = {}
 _EXTENT_CACHE_LIMIT = 16
+
+
+def clearExtentCache() -> None:
+    """丢弃全局数值范围缓存（销毁图表 / 大规模 clear 后释放数据引用）。"""
+    _EXTENT_CACHE.clear()
 _MAX_TICKS = 2000
 _MAX_SEGMENTS = 200
 _MAX_DATE_YEAR = 9999
 _TIME_EPOCH = datetime(1970, 1, 1)
 _TIME_LOCAL_OFFSET_MS = time.timezone * 1000.0
+#: ``datetime`` 可表示范围（毫秒时间戳）：越界（如误用纳秒）直接丢弃，
+#: 否则 ``timedelta`` 会 OverflowError 并从 setOption 穿出。
+_MIN_TIMESTAMP_MS = -62135596800000.0
+_MAX_TIMESTAMP_MS = 253402300799999.0
 
 
 def _dt_to_ms(dt: datetime) -> float:
@@ -30,27 +40,46 @@ def _dt_to_ms(dt: datetime) -> float:
 
 
 def _ms_to_dt(ms) -> datetime:
-    """毫秒时间戳 → 本地朴素 datetime（跨 1970 前后 / 9999 年都可用）。"""
-    return _TIME_EPOCH + timedelta(milliseconds=float(ms) - _TIME_LOCAL_OFFSET_MS)
+    """毫秒时间戳 → 本地朴素 datetime（越界夹到 datetime 支持范围）。"""
+    try:
+        return _TIME_EPOCH + timedelta(milliseconds=float(ms) - _TIME_LOCAL_OFFSET_MS)
+    except (OverflowError, ValueError):
+        return datetime.max if float(ms) > 0 else datetime.min
 
 
-def single_font_family(value) -> str:
-    """用户给的字体族 → 单个族名（多族在 Win7 上是慢 shaping 且进程级毒化，取首个并告警）。"""
-    if not isinstance(value, str):
-        return ""
-    text = value.strip().strip("'\"").strip()
-    if not text:
-        return ""
-    parts = [p.strip().strip("'\"") for p in text.split(",")]
-    parts = [p for p in parts if p]
-    if not parts:
-        return ""
-    if len(parts) > 1:
-        warn_once(
-            "font-family:multiple",
-            f"图表只支持单个字体族，已取 {parts[0]!r}（忽略 {len(parts) - 1} 个回退族）",
-        )
-    return parts[0]
+def _to_timestamp(value):
+    """日期 / ISO 字符串 / 数字 → 毫秒时间戳（失败 None）；数字按毫秒处理。"""
+    if value is None or isinstance(value, bool):
+        return None
+    if isinstance(value, (int, float)):
+        v = float(value)
+        if not math.isfinite(v) or v < _MIN_TIMESTAMP_MS or v > _MAX_TIMESTAMP_MS:
+            return None
+        return v
+    if isinstance(value, datetime):
+        if value.tzinfo is not None:
+            value = value.astimezone().replace(tzinfo=None)
+        return _dt_to_ms(value)
+    if isinstance(value, date):
+        return _dt_to_ms(datetime(value.year, value.month, value.day))
+    if isinstance(value, (list, tuple)):
+        try:
+            parts = [int(v) for v in value[:6]]
+            while len(parts) < 3:
+                parts.append(1)
+            return _dt_to_ms(datetime(*parts))
+        except (TypeError, ValueError, OverflowError):
+            return None
+    if isinstance(value, str):
+        text = value.strip()
+        if not text:
+            return None
+        try:
+            parsed = datetime.fromisoformat(text.replace("/", "-"))
+        except (TypeError, ValueError, OverflowError):
+            return None
+        return _to_timestamp(parsed)
+    return None
 
 
 def chartFont(
@@ -206,7 +235,10 @@ def _format_log_tick(value) -> str:
     if 1e-4 <= a < 1e6:
         return formatValue(v)
     exp = int(math.floor(math.log10(a)))
-    mant = v / (10.0**exp)
+    scale = 10.0**exp
+    if not math.isfinite(scale) or scale == 0.0:
+        return f"{v:g}"
+    mant = v / scale
     if abs(mant - round(mant)) < 1e-9:
         mant = float(round(mant))
     text = f"{mant:g}e{exp}"
@@ -222,6 +254,9 @@ def _log_ticks(vmin: float, vmax: float, base: float, segments: int = 5) -> list
     e1 = int(math.ceil(math.log(vmax) / log_base))
     if e1 <= e0:
         e1 = e0 + 1
+    # 先按数量级上限判断，别先物化上千万个幂值再截断。
+    if e1 - e0 > _MAX_TICKS:
+        return [vmin, vmax]
     ticks = [base**e for e in range(e0, e1 + 1)]
     # 不足三个数量级时只有 2~3 个幂次标签太稀，补 2/5 子刻度。
     if e1 - e0 <= 2 and abs(base - 10.0) < 1e-9:
@@ -231,8 +266,18 @@ def _log_ticks(vmin: float, vmax: float, base: float, segments: int = 5) -> list
         ticks = [vmin, vmax]
     limit = max(2, min(int(segments) + 1, _MAX_TICKS))
     if len(ticks) > limit:
-        step = max(1, int(math.ceil(len(ticks) / float(limit))))
-        ticks = ticks[::step]
+        # 1/2/5 混合刻度按步长抽样会得到 1,5,20,100 这种不等距序列；
+        # 超限时退回纯数量级刻度，标签少但间隔均匀。
+        powers = [
+            base**e
+            for e in range(e0, e1 + 1)
+            if vmin * (1.0 - 1e-9) <= base**e <= vmax * (1.0 + 1e-9)
+        ]
+        if len(powers) >= 2:
+            ticks = powers
+        else:
+            step = max(1, int(math.ceil(len(ticks) / float(limit))))
+            ticks = ticks[::step]
         if ticks[-1] != vmax:
             ticks.append(vmax)
     return ticks
@@ -391,11 +436,11 @@ def _axis_index(value, count: int) -> int:
     return min(max(idx, 0), count - 1)
 
 
-def _line_pen(opt: dict, default_color, default_width=1.0) -> QPen:
+def _line_pen(opt: dict, default_color, default_width=1.0, chart=None) -> QPen:
     """解析 ``{lineStyle: {color, width, type}}`` → QPen。"""
     style = opt.get("lineStyle")
     style = style if isinstance(style, dict) else {}
-    color = parse_color(style.get("color") or default_color)
+    color = resolve_color_option(style.get("color"), chart, default_color)
     try:
         width = max(0.5, float(style.get("width", default_width)))
     except (TypeError, ValueError, OverflowError):
@@ -442,6 +487,138 @@ def _datum_x(item):
     if isinstance(v, (list, tuple)) and v:
         return _finite_or_none(v[0])
     return None
+
+
+def _gantt_bounds(item):
+    """甘特条目 → ``(start, end)`` 毫秒时间戳 / 数值；非法返回 ``None``。
+
+    支持 ``{"name","start","end"}``、``{"value":[start,end,...]}``、
+    ``[start, end, ...]``；缺 ``end`` 时按里程碑处理（``end = start``）。
+    """
+    if isinstance(item, dict):
+        if any(key in item for key in ("start", "begin", "end", "finish")):
+            start_raw = item.get("start", item.get("begin"))
+            end_raw = item.get("end", item.get("finish"))
+        else:
+            value = item.get("value")
+            if isinstance(value, (list, tuple)):
+                start_raw = value[0] if value else None
+                end_raw = value[1] if len(value) >= 2 else None
+            else:
+                start_raw = value
+                end_raw = None
+    elif isinstance(item, (list, tuple)):
+        start_raw = item[0] if item else None
+        end_raw = item[1] if len(item) >= 2 else None
+    else:
+        return None
+    start = _to_timestamp(start_raw)
+    end = _to_timestamp(end_raw) if end_raw is not None else start
+    if start is None or end is None:
+        return None
+    if end < start:
+        start, end = end, start
+    return start, end
+
+
+def _gantt_progress(item):
+    """甘特条目进度 0~1（缺省 ``None``；大于 1 且 ≤100 按百分比）。"""
+    raw = None
+    if isinstance(item, dict):
+        raw = item.get("progress")
+        value = item.get("value")
+        if raw is None and isinstance(value, (list, tuple)) and len(value) >= 3:
+            raw = value[2]
+    elif isinstance(item, (list, tuple)) and len(item) >= 3:
+        raw = item[2]
+    progress = _to_float(raw, None)
+    if progress is None:
+        return None
+    if 1.0 < progress <= 100.0:
+        progress /= 100.0
+    return max(0.0, min(1.0, progress))
+
+
+def _gantt_baseline(item):
+    """甘特条目基线 → ``(start, end)``；支持 ``{start,end}`` / ``[start,end]``。"""
+    if not isinstance(item, dict):
+        return None
+    raw = item.get("baseline")
+    if isinstance(raw, dict):
+        start_raw = raw.get("start", raw.get("begin"))
+        end_raw = raw.get("end", raw.get("finish"))
+    elif isinstance(raw, (list, tuple)) and len(raw) >= 2:
+        start_raw, end_raw = raw[0], raw[1]
+    else:
+        return None
+    start = _to_timestamp(start_raw)
+    end = _to_timestamp(end_raw) if end_raw is not None else start
+    if start is None or end is None:
+        return None
+    if end < start:
+        start, end = end, start
+    return start, end
+
+
+def _gantt_deadline(item):
+    """甘特条目截止日期 → 毫秒时间戳 / 数值；缺省返回 ``None``。"""
+    if not isinstance(item, dict):
+        return None
+    raw = item.get("deadline")
+    return None if raw is None else _to_timestamp(raw)
+
+
+def _gantt_span_bounds(item, series_opt=None):
+    """甘特条目在 x 轴上的完整跨度：任务、基线、截止日期三者并集。"""
+    values = []
+    bounds = _gantt_bounds(item)
+    if bounds is not None:
+        values.extend(bounds)
+    include_baseline = True
+    include_deadline = True
+    if isinstance(series_opt, dict):
+        raw = series_opt.get("baseline")
+        if raw is False or (isinstance(raw, dict) and raw.get("show") is False):
+            include_baseline = False
+        raw = series_opt.get("deadline")
+        if raw is False or (isinstance(raw, dict) and raw.get("show") is False):
+            include_deadline = False
+    if include_baseline:
+        baseline = _gantt_baseline(item)
+        if baseline is not None:
+            values.extend(baseline)
+    if include_deadline:
+        deadline = _gantt_deadline(item)
+        if deadline is not None:
+            values.append(deadline)
+    if not values:
+        return None
+    return min(values), max(values)
+
+
+def _gantt_item_name(item, index: int):
+    """甘特条目名 → ``(name, 是否显式给了 name)``。"""
+    if isinstance(item, dict):
+        name = item.get("name", item.get("title"))
+        if name is not None and str(name).strip():
+            return str(name), True
+    return str(index), False
+
+
+def _gantt_display_rows(series_opt: dict) -> list:
+    """甘特有效任务行（跳过非法 start / end）；``named`` 表示是否显式给 name。"""
+    if not isinstance(series_opt, dict):
+        return []
+    data = series_opt.get("data")
+    if not isinstance(data, (list, tuple)) or not data:
+        return []
+    rows = []
+    for index, item in enumerate(data):
+        if _gantt_bounds(item) is None:
+            continue
+        name, named = _gantt_item_name(item, index)
+        rows.append({"index": index, "name": name, "named": named})
+    return rows
 
 
 _MONTH_LABELS = [

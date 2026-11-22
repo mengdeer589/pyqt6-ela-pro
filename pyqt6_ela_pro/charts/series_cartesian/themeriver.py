@@ -18,7 +18,7 @@ from .._utils import with_alpha
 from .._utils import parse_color
 from ..axes import chartFont
 from ..core import SeriesRenderer
-from ._shared import _smooth_path
+from ._shared import _reversed_path, _smooth_path
 
 
 class ThemeRiverSeriesRenderer(SeriesRenderer):
@@ -33,36 +33,66 @@ class ThemeRiverSeriesRenderer(SeriesRenderer):
         self._times = []
         self._matrix = {}  # (name, t_idx) -> value
         self._area = QRectF()
+        self._hidden_items = set()
+        self._index_map = {}  # (stream, time) -> data index
+
+    def setHiddenItems(self, names) -> None:
+        self._hidden_items = {str(n) for n in (names or [])}
+
+    def _stream_indices(self) -> dict:
+        """全量流带名 → 稳定调色板下标（隐藏流带不改变其余颜色）。"""
+        out = {}
+        for item in self.data():
+            v = item.get("value") if isinstance(item, dict) else item
+            if isinstance(v, (list, tuple)) and len(v) >= 3:
+                name = str(v[2])
+                if name and name not in out:
+                    out[name] = len(out)
+        return out
+
+    def legendItems(self) -> list:
+        """主题河流的图例条目 = 每条流带名。"""
+        names = self._stream_indices()
+        palette = self.chart.palette()
+        return [
+            (name, parse_color(palette[index % len(palette)]))
+            for name, index in names.items()
+        ]
 
     def _parse(self):
         times = []
         names = []
         matrix = {}
-        for item in self.data():
+        index_map = {}
+        for item_index, item in enumerate(self.data()):
             v = item.get("value") if isinstance(item, dict) else item
             if not isinstance(v, (list, tuple)) or len(v) < 3:
                 continue
             t, val, name = v[0], _to_float(v[1], None), str(v[2])
-            if val is None:
+            if val is None or name in self._hidden_items:
                 continue
+            val = max(0.0, val)
             t = str(t)
             if t not in times:
                 times.append(t)
             if name not in names:
                 names.append(name)
             matrix[(name, t)] = matrix.get((name, t), 0.0) + val
+            index_map[(name, t)] = item_index
         times.sort()
-        return times, names, matrix
+        return times, names, matrix, index_map
 
     def layout(self, rect: QRectF) -> None:
         self._streams = []
         self._times = []
         self._matrix = {}
-        times, names, matrix = self._parse()
+        self._index_map = {}
+        times, names, matrix, index_map = self._parse()
         if not times or not names:
             return
         self._times = times
         self._matrix = matrix
+        self._index_map = index_map
         self._area = QRectF(
             rect.left() + 24,
             rect.top() + 20,
@@ -75,6 +105,7 @@ class ThemeRiverSeriesRenderer(SeriesRenderer):
         max_total = max(totals) if totals else 1.0
         scale = (self._area.height() * 0.9) / max(1e-9, max_total)
         cy = self._area.center().y()
+        stream_indices = self._stream_indices()
         for k, name in enumerate(names):
             top = []
             bot = []
@@ -85,12 +116,20 @@ class ThemeRiverSeriesRenderer(SeriesRenderer):
                 y1 = y0 + v * scale
                 top.append(QPointF(xs[i], y0))
                 bot.append(QPointF(xs[i], y1))
-            self._streams.append({"name": name, "top": top, "bot": bot, "color_idx": k})
+            self._streams.append(
+                {
+                    "name": name,
+                    "top": top,
+                    "bot": bot,
+                    "color_idx": stream_indices.get(name, k),
+                }
+            )
 
     def paint(self, p: QPainter, anim_t: float) -> None:
         if not self._streams:
             return
         p.save()
+        self._label_rects = []
         # 覆盖兜底 grid 轴线背景（跟随图表 backgroundColor）
         p.setPen(Qt.PenStyle.NoPen)
         p.setBrush(self.chart._background_color())
@@ -104,8 +143,34 @@ class ThemeRiverSeriesRenderer(SeriesRenderer):
         )
         palette = self.chart.palette()
         grow = max(0.0, min(1.0, anim_t))
+        opacity = self.itemOpacity(None)
+        hover = self.chart.hoverInfo()
+        hover_name = (
+            hover[1].get("name") if hover is not None and hover[0] is self else None
+        )
+        legend_hover = self.chart._legend_hover
+        focus_name = hover_name or legend_hover
+        last_time = self._times[-1] if self._times else None
         for s in self._streams:
-            color = parse_color(palette[s["color_idx"] % len(palette)])
+            color = self.visualColorForValue(
+                self._matrix.get((s["name"], last_time), 0.0)
+            ) or parse_color(palette[s["color_idx"] % len(palette)])
+            data_index = self._index_map.get((s["name"], last_time))
+            stream_alpha = opacity
+            if focus_name == s["name"]:
+                emphasis = (
+                    self.emphasisColor(data_index)
+                    if isinstance(data_index, int)
+                    else None
+                )
+                color = emphasis if emphasis is not None else color.lighter(112)
+                if isinstance(data_index, int):
+                    emp_opacity = self.emphasisOpacity(data_index)
+                    if emp_opacity is not None:
+                        stream_alpha = emp_opacity
+            elif focus_name is not None and self.blursOtherItems():
+                blur = self.blurOpacity()
+                stream_alpha *= blur if blur is not None else 0.35
             top = []
             bot = []
             for a, b in zip(s["top"], s["bot"]):
@@ -114,27 +179,12 @@ class ThemeRiverSeriesRenderer(SeriesRenderer):
                 bot.append(QPointF(b.x(), mid + (b.y() - mid) * grow))
             if len(top) >= 2:
                 path = _smooth_path(top, 0.5)
-                bottom_path = _smooth_path(bot, 0.5)
-                # 反向拼接下缘
-                rev = QPainterPath()
-                elems = [
-                    bottom_path.elementAt(i) for i in range(bottom_path.elementCount())
-                ]
-                rev.moveTo(elems[-1].x, elems[-1].y)
-                i = len(elems) - 1
-                while i >= 3:  # 贝塞尔段逆放（控制点交换）
-                    rev.cubicTo(
-                        QPointF(elems[i - 1].x, elems[i - 1].y),
-                        QPointF(elems[i - 2].x, elems[i - 2].y),
-                        QPointF(elems[i - 3].x, elems[i - 3].y),
-                    )
-                    i -= 3
-                path.connectPath(rev)
+                path.connectPath(_reversed_path(_smooth_path(bot, 0.5)))
                 path.closeSubpath()
             else:
                 path = QPainterPath()
-            p.setPen(QPen(with_alpha(color, 200), 1))
-            p.setBrush(with_alpha(color, 150))
+            p.setPen(QPen(with_alpha(color, int(200 * stream_alpha)), 1))
+            p.setBrush(with_alpha(color, int(150 * stream_alpha)))
             if not path.isEmpty():
                 p.drawPath(path)
         # 底部时间轴标签（约 5 个均布）
@@ -153,32 +203,43 @@ class ThemeRiverSeriesRenderer(SeriesRenderer):
                 self._times[i],
             )
         # 流带标签（带端显示系列名）
-        label_opt = dict(self.opt.get("label") or {})
+        label_raw = self.opt.get("label")
+        label_opt = dict(label_raw) if isinstance(label_raw, dict) else {}
         if bool(label_opt.get("show", True)) and n:
             label_font = self.labelFont()
             p.setFont(label_font)
             label_fm = QFontMetricsF(label_font)
-            p.setPen(self.labelColor())
             last = n - 1
             for s in self._streams:
                 y0 = s["top"][last].y()
                 y1 = s["bot"][last].y()
                 if y1 - y0 < label_fm.height() * 0.9:
                     continue
-                text = (
-                    str(label_opt.get("formatter") or "").replace("{b}", s["name"])
-                    or s["name"]
+                # 流带半透明，contrastLabelColor 会按统一策略回退到主题文字色。
+                color = parse_color(palette[s["color_idx"] % len(palette)])
+                data_index = self._index_map.get((s["name"], last_time))
+                p.setPen(self.contrastLabelColor(with_alpha(color, 150)))
+                text = self.hierarchyLabelText(
+                    data_index if isinstance(data_index, int) else -1,
+                    s["name"],
+                    self._matrix.get((s["name"], last_time), 0.0),
+                    self.data()[data_index]
+                    if isinstance(data_index, int) and data_index < len(self.data())
+                    else None,
+                )
+                rect = QRectF(
+                    self._area.left() + self._area.width() * (last + 0.5) / n - 60,
+                    (y0 + y1) / 2 - label_fm.height() / 2,
+                    120,
+                    label_fm.height(),
                 )
                 p.drawText(
-                    QRectF(
-                        self._area.left() + self._area.width() * (last + 0.5) / n - 60,
-                        (y0 + y1) / 2 - label_fm.height() / 2,
-                        120,
-                        label_fm.height(),
-                    ),
+                    rect,
                     Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignVCenter,
                     text,
                 )
+                if isinstance(data_index, int):
+                    self._label_rects.append((data_index, rect, text))
         p.restore()
 
     def hitTest(self, pos: QPointF):
@@ -200,16 +261,19 @@ class ThemeRiverSeriesRenderer(SeriesRenderer):
             y1 = s["bot"][best_i].y()
             if min(y0, y1) - 2 <= pos.y() <= max(y0, y1) + 2 and y1 > y0:
                 palette = self.chart.palette()
-                color = (
+                value = self._matrix.get((s["name"], self._times[best_i]), 0.0)
+                color = self.visualColorForValue(value) or (
                     parse_color(palette[s["color_idx"] % len(palette)])
                     if palette
                     else self.color()
                 )
+                data_index = self._index_map.get((s["name"], self._times[best_i]))
                 return {
                     "name": s["name"],
-                    "value": self._matrix.get((s["name"], self._times[best_i]), 0.0),
+                    "value": value,
                     "color": color,
                     "series": self.name,
                     "x": self._times[best_i],
+                    "dataIndex": data_index,
                 }
         return None

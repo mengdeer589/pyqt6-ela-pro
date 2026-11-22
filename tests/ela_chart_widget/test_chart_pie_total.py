@@ -48,9 +48,7 @@ class TestPieCenterTotal:
     def test_default_scales_with_inner_radius(self, make):
         chart = _donut(make, {"show": True})
         renderer = chart.seriesRenderers[0]
-        expected = int(
-            round(max(12.0, min(22.0, max(13.0, renderer._r_in * 0.32))))
-        )
+        expected = int(round(max(12.0, min(22.0, max(13.0, renderer._r_in * 0.32)))))
         assert _paint_font(chart) == expected
 
     def test_font_size_override(self, make):
@@ -60,7 +58,5 @@ class TestPieCenterTotal:
     def test_invalid_font_size_falls_back(self, make):
         chart = _donut(make, {"show": True, "fontSize": "not-a-number"})
         renderer = chart.seriesRenderers[0]
-        expected = int(
-            round(max(12.0, min(22.0, max(13.0, renderer._r_in * 0.32))))
-        )
+        expected = int(round(max(12.0, min(22.0, max(13.0, renderer._r_in * 0.32)))))
         assert _paint_font(chart) == expected

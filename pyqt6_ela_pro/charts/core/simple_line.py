@@ -142,7 +142,7 @@ class SimpleLineSeriesRenderer(SeriesRenderer):
         }
 
     def valueAtIndex(self, index: int):
-        idx = self._full_index(index)  # dataZoom 窗口偏移换算
+        idx = index
         if not isinstance(idx, int) or not (0 <= idx < len(self._entries)):
             return None
         x, y = self._entries[idx]

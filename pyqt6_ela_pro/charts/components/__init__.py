@@ -9,11 +9,9 @@ from .mark import (
     _SeriesMarkBase,
     _TYPE_LABELS,
 )
-from .graphic import (
-    GraphicComponent,
-    lerp_color,
-)
+from .graphic import GraphicComponent
 from .annotation import AnnotationComponent
+from ..series_map import DEMO_MAP, MapSeriesRenderer
 
 from ..core._shared import registerComponent
 
@@ -33,5 +31,4 @@ __all__ = [
     "MarkPointComponent",
     "_SeriesMarkBase",
     "_TYPE_LABELS",
-    "lerp_color",
 ]

@@ -12,11 +12,14 @@ from .._utils import (
     clamp,
     merged_text_style,
     parse_color,
+    resolve_color_option,
     text_italic,
     text_weight,
 )
 from .._utils import to_float as _to_float
 from ..axes import GridCoord, chartFont
+from ..models import OptionModel
+from ..models import event_from_dict
 
 
 def _is_paper(ref) -> bool:
@@ -73,7 +76,11 @@ class AnnotationComponent:
     def __init__(self, chart, opt):
         self.chart = chart
         self._source = opt if isinstance(opt, dict) else {}
-        self.opt = dict(self._source)
+        self.opt = (
+            self._source
+            if isinstance(self._source, OptionModel)
+            else dict(self._source)
+        )
         #: 所属系列 option（core 注入；顶层实例化为 None）
         self.series_opt = None
         self._anchor = QPointF()
@@ -342,11 +349,8 @@ class AnnotationComponent:
             style.get("fontFamily"),
             text_italic(style.get("fontStyle")),
         )
-        color = (
-            parse_color(style.get("color") or self.opt.get("color"))
-            if (style.get("color") or self.opt.get("color"))
-            else QColor()
-        )
+        raw_color = style.get("color") or self.opt.get("color")
+        color = resolve_color_option(raw_color, self.chart) if raw_color else QColor()
         if not color.isValid():
             color = QColor(T("color.text.primary", self.chart))
         self._text_color = color
@@ -358,7 +362,7 @@ class AnnotationComponent:
         elif _is_no_color(bg_value):
             bg = QColor(0, 0, 0, 0)
         else:
-            bg = parse_color(bg_value)
+            bg = resolve_color_option(bg_value, self.chart)
             if not bg.isValid():
                 bg = QColor(T("color.bg.elevated", self.chart))
                 bg.setAlpha(235)
@@ -371,7 +375,7 @@ class AnnotationComponent:
         elif _is_no_color(border_value):
             border = QColor()
         else:
-            border = parse_color(border_value)
+            border = resolve_color_option(border_value, self.chart)
         self._border = border
         border_width = _to_float(
             self.opt.get("borderwidth", self.opt.get("borderWidth")), 1.0
@@ -403,10 +407,9 @@ class AnnotationComponent:
         self._yanchor = yanchor if yanchor in ("top", "middle", "bottom") else "middle"
 
         self._show_arrow = bool(self.opt.get("showarrow", True))
+        arrow_raw = self.opt.get("arrowColor") or self.opt.get("arrowcolor")
         arrow_color = (
-            parse_color(self.opt.get("arrowcolor"))
-            if self.opt.get("arrowcolor")
-            else QColor()
+            resolve_color_option(arrow_raw, self.chart) if arrow_raw else QColor()
         )
         self._arrow_color = (
             arrow_color if arrow_color.isValid() else parse_color(self._text_color)
@@ -585,8 +588,22 @@ class AnnotationComponent:
         chart.update()
         return True
 
+    def cancelDrag(self) -> None:
+        """取消拖动（失焦 / Escape / 松开丢失时复位，避免下次悬停继续拖）。"""
+        if self._dragging:
+            self._dragging = False
+            self._drag_moved = False
+            self.chart.setCursor(Qt.CursorShape.OpenHandCursor)
+            self.chart.update()
+
     def onMouseMove(self, pos: QPointF) -> bool:
         if self._dragging:
+            if (
+                getattr(self.chart, "_press_button", Qt.MouseButton.LeftButton)
+                != Qt.MouseButton.LeftButton
+            ):
+                self.cancelDrag()
+                return False
             self._move_to(pos)
             return True
         hovered = self.boxHitTest(pos)
@@ -619,7 +636,9 @@ class AnnotationComponent:
         if self._drag_moved:
             self._drag_moved = False
             try:
-                self.chart.annotationDragged.emit(self._drag_payload())
+                self.chart.annotationDragged.emit(
+                    event_from_dict("annotationDragged", self._drag_payload())
+                )
             except Exception:
                 pass
         return True

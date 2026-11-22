@@ -66,6 +66,9 @@ class TestTimeNumber:
         assert AxisModel.toNumber("not-a-date") is None
         assert AxisModel.toNumber(None) is None
 
+    def test_iso_with_timezone_is_accepted(self):
+        assert AxisModel.toNumber("2026-01-01T00:00:00+08:00") is not None
+
 
 class TestTimeAxis:
     def test_time_axis_uses_value_geometry(self, qapp, make):

@@ -15,10 +15,10 @@ from PyQt6.QtGui import (
 from ..._motion import start_idle_loop
 from .._tokens import T
 from .._utils import clamp as _clamp
-from .._utils import merged_text_style, text_italic, text_weight
+from .._utils import merged_text_style, resolve_color_option, text_italic, text_weight
 from .._utils import to_float as _to_float
-from .._utils import parse_color
 from ..axes import chartFont
+from ..models import OptionModel
 
 
 class ChartTimeline(QObject):
@@ -37,7 +37,7 @@ class ChartTimeline(QObject):
     def __init__(self, chart, opt):
         super().__init__()
         self.chart = chart
-        self.opt = dict(opt or {})
+        self.opt = opt if isinstance(opt, OptionModel) else dict(opt or {})
         self.labels = [str(d) for d in (self.opt.get("data") or [])]
         if "currentIndex" in self.opt:
             current = int(_to_float(self.opt.get("currentIndex"), 0) or 0)
@@ -45,9 +45,10 @@ class ChartTimeline(QObject):
             current = int(getattr(chart, "_timeline_index", 0) or 0)
         self.current = _clamp(current, 0, max(0, len(self.labels) - 1))
         chart._timeline_index = self.current
-        playing = getattr(chart, "_timeline_playing", None)
-        if playing is None:
-            playing = bool(self.opt.get("autoPlay", False))
+        if "autoPlay" in self.opt:
+            playing = bool(self.opt.get("autoPlay"))
+        else:
+            playing = bool(getattr(chart, "_timeline_playing", False))
         self._playing = bool(playing)
         chart._timeline_playing = self._playing
         # 定时器（父对象 chart；重建时清理旧实例防累积）
@@ -72,8 +73,10 @@ class ChartTimeline(QObject):
 
     def dispose(self) -> None:
         """停表并从 chart 上解挂（``core._rebuild`` 丢弃旧组件时调用）。
+
         必须连 ``deleteLater()`` 一起做，只 ``stop()`` 会在 chart 上留下停摆
         QObject（每次 ``setOption`` 泄一个）；``deleteLater`` 延迟投递，
+        不会在信号回调中销毁自己。
         """
         if getattr(self.chart, "_timeline_timer", None) is self._timer:
             self.chart._timeline_timer = None
@@ -118,7 +121,8 @@ class ChartTimeline(QObject):
         self._playing = not self._playing
         self.chart._timeline_playing = self._playing
         if self._playing:
-            self._timer.start()
+            # 走动效策略：Reduced/Disabled 下不自动推进，用户仍可手动切帧。
+            start_idle_loop(self._timer, self._timer.interval())
         else:
             self._timer.stop()
         self.chart.update()
@@ -146,11 +150,15 @@ class ChartTimeline(QObject):
 
     def reserveBottom(self) -> float:
         """底部时间轴条带高度（含间距；无标签时为 0）。"""
-        if self.labels:
+        if self.opt.get("show", True) is not False and self.labels:
             return self.BAND_H + 4.0
         return 0.0
 
     def layout(self, rect: QRectF) -> None:
+        if self.opt.get("show", True) is False:
+            self._band = QRectF()
+            self._node_pts = []
+            return
         h = self.BAND_H
         self._band = QRectF(
             rect.left() + 8, rect.bottom() - h - 2, max(60.0, rect.width() - 16), h
@@ -171,6 +179,8 @@ class ChartTimeline(QObject):
                 self._node_pts.append(QPointF(x, cy))
 
     def paint(self, p: QPainter, anim_t: float = 1.0) -> None:
+        if self.opt.get("show", True) is False:
+            return
         if not self.labels or not self._node_pts:
             return
         p.save()
@@ -192,7 +202,11 @@ class ChartTimeline(QObject):
         )
         checkpoint = self._style(
             "checkpointStyle",
-            {"color": T("color.primary", self.chart), "borderColor": None, "symbolSize": None},
+            {
+                "color": T("color.primary", self.chart),
+                "borderColor": None,
+                "symbolSize": None,
+            },
         )
         control = self._style(
             "controlStyle",
@@ -202,10 +216,16 @@ class ChartTimeline(QObject):
                 "borderWidth": 1.2,
             },
         )
-        primary = parse_color(checkpoint.get("color") or T("color.primary", self.chart))
-        c_line = parse_color(line_style.get("color") or T("color.border.strong", self.chart))
+        primary = resolve_color_option(
+            checkpoint.get("color"), self.chart, T("color.primary", self.chart)
+        )
+        c_line = resolve_color_option(
+            line_style.get("color"), self.chart, T("color.border.strong", self.chart)
+        )
         line_w = max(0.5, _to_float(line_style.get("width"), 1.0))
-        c_text = parse_color(style.get("color") or T("color.text.secondary", self.chart))
+        c_text = resolve_color_option(
+            style.get("color"), self.chart, T("color.text.secondary", self.chart)
+        )
         # 轴线
         p.setPen(QPen(c_line, line_w))
         p.drawLine(self._node_pts[0], self._node_pts[-1])
@@ -216,7 +236,7 @@ class ChartTimeline(QObject):
             cur = i == self.current
             p.setPen(
                 QPen(
-                    parse_color(cp_border)
+                    resolve_color_option(cp_border, self.chart)
                     if cur and cp_border
                     else (primary if cur else c_line),
                     1.6,
@@ -225,7 +245,11 @@ class ChartTimeline(QObject):
             p.setBrush(
                 primary
                 if cur
-                else parse_color(control.get("color") or T("color.bg.elevated", self.chart))
+                else resolve_color_option(
+                    control.get("color"),
+                    self.chart,
+                    T("color.bg.elevated", self.chart),
+                )
             )
             r = cp_size / 2 if cur and cp_size else (5.0 if cur else 4.0)
             p.drawEllipse(pt, r, r)
@@ -237,11 +261,17 @@ class ChartTimeline(QObject):
                     label,
                 )
         # 播放 / 暂停按钮
-        ctrl_border = parse_color(
-            control.get("borderColor") or T("color.border.strong", self.chart)
+        ctrl_border = resolve_color_option(
+            control.get("borderColor"),
+            self.chart,
+            T("color.border.strong", self.chart),
         )
         p.setPen(QPen(ctrl_border, _to_float(control.get("borderWidth"), 1.2)))
-        p.setBrush(parse_color(control.get("color") or T("color.bg.elevated", self.chart)))
+        p.setBrush(
+            resolve_color_option(
+                control.get("color"), self.chart, T("color.bg.elevated", self.chart)
+            )
+        )
         p.drawEllipse(self._play_rect)
         c = self._play_rect.center()
         p.setPen(Qt.PenStyle.NoPen)

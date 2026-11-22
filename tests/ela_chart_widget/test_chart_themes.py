@@ -13,7 +13,7 @@ import pytest
 from PyQt6.QtGui import QImage
 from PyQt6ElaWidgetTools import ElaThemeType, eTheme
 
-from pyqt6_ela_pro._colors import _contrast_ratio
+from pyqt6_ela_pro._colors import contrastRatio
 from pyqt6_ela_pro.charts import (
     ECHARTS_PALETTE,
     ElaChartWidget,
@@ -26,13 +26,14 @@ from pyqt6_ela_pro.charts import (
     setDefaultChartTheme,
     unregisterChartTheme,
 )
+from pyqt6_ela_pro.charts._theme import ELA_PALETTE_DARK, ELA_PALETTE_LIGHT
 from pyqt6_ela_pro.charts._tokens import theme_ramp
 from pyqt6_ela_pro.charts._utils import parse_color
 from pyqt6_ela_pro.charts.interact.visualmap import VisualMapComponent
 
 BUILTINS = ("ela", "echarts", "matlab", "plotly", "ggplot2", "seaborn", "tableau")
 PALETTES = {
-    "ela": (ECHARTS_PALETTE, 9),
+    "ela": (ELA_PALETTE_LIGHT, 9),
     "echarts": (ECHARTS_PALETTE, 9),
     "matlab": (["#0072bd", "#d95319", "#edb120", "#7e2f8e", "#77ac30"], 7),
     "plotly": (["#636efa", "#ef553b", "#00cc96", "#ab63fa", "#ffa15a"], 10),
@@ -110,15 +111,22 @@ class TestBuiltins:
     def test_all_colors_are_valid(self, name):
         spec = chartThemeSpec(name)
         assert all(parse_color(c).isValid() for c in spec["palette"])
+        assert all(parse_color(c).isValid() for c in spec.get("palette_dark") or [])
         for variant in ("light", "dark"):
             for key, value in spec[variant].items():
                 colors = value if key == "color.ramp" else [value]
                 assert all(parse_color(c).isValid() for c in colors), (name, key)
 
-    def test_default_theme_keeps_echarts_palette(self, make):
+    def test_default_theme_uses_ela_palette(self, make):
         chart = _chart(make)
         assert chart.chartTheme() == "ela"
-        assert [color.name() for color in chart.palette()] == ECHARTS_PALETTE
+        expected = (
+            ELA_PALETTE_DARK
+            if eTheme.getThemeMode() == ElaThemeType.ThemeMode.Dark
+            else ELA_PALETTE_LIGHT
+        )
+        assert [color.name() for color in chart.palette()] == expected
+        assert chartThemeSpec("ela")["palette_dark"] == ELA_PALETTE_DARK
 
     def test_default_palette_follows_default_theme(self):
         assert setDefaultChartTheme("matlab") is True
@@ -132,7 +140,7 @@ class TestBuiltins:
             background = colors.get("color.bg.base")
             primary = colors.get("color.text.primary")
             assert background and primary, f"{name}.{variant} 缺少底色 / 正文色"
-            ratio = _contrast_ratio(parse_color(background), parse_color(primary))
+            ratio = contrastRatio(parse_color(background), parse_color(primary))
             assert ratio >= 4.5, f"{name}.{variant} 正文对比度只有 {ratio:.2f}"
 
     @pytest.mark.parametrize("name", BUILTINS[1:], ids=list(BUILTINS[1:]))
@@ -266,6 +274,23 @@ class TestRegistry:
         chart = _chart(make, "test-custom")
         assert chart.palette()[0].name() == "#010203"
         assert chart.palette()[1].name() == "#040506"
+
+    def test_register_dark_palette(self, make):
+        registerChartTheme(
+            "test-custom",
+            palette=["#010203"],
+            palette_dark=["#a1b2c3"],
+        )
+        spec = chartThemeSpec("test-custom")
+        assert spec["palette"] == ["#010203"]
+        assert spec["palette_dark"] == ["#a1b2c3"]
+        chart = _chart(make, "test-custom")
+        once = chart.palette()[0].name()
+        # 暗色板只在暗色模式生效；浅色下仍是主色板
+        if eTheme.getThemeMode() == ElaThemeType.ThemeMode.Dark:
+            assert once == "#a1b2c3"
+        else:
+            assert once == "#010203"
 
     def test_partial_registration_merges(self):
         registerChartTheme("test-partial", light={"color.primary": "#123456"})

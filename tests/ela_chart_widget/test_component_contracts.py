@@ -427,6 +427,11 @@ class TestGraphicAnchorAndText:
         assert abs(pt.x() - (comp.rect.left() + 40)) < 1.0
         assert abs(pt.y() - (comp.rect.top() + 30)) < 1.0
 
+    def test_right_bottom_anchor(self, make):
+        pt, comp = self._elem_anchor(make, {"type": "rect", "right": 10, "bottom": 20})
+        assert abs(pt.x() - (comp.rect.right() - 10)) < 1.0
+        assert abs(pt.y() - (comp.rect.bottom() - 20)) < 1.0
+
     def test_text_with_valid_fill_still_draws(self, make, capsys):
         chart = _chart(
             make,
@@ -487,3 +492,151 @@ class TestGraphicAnchorAndText:
         )
         chart.grab()
         assert "非法" in capsys.readouterr().err
+
+
+def _paint_graphic(comp, width=400, height=300):
+    from PyQt6.QtGui import QColor, QImage, QPainter
+
+    image = QImage(width, height, QImage.Format.Format_ARGB32)
+    image.fill(QColor("#ffffff"))
+    painter = QPainter(image)
+    try:
+        comp.paint(painter)
+    finally:
+        painter.end()
+    return image
+
+
+def _graphic_chart(make, elements):
+    chart = _chart(
+        make,
+        {
+            "animation": False,
+            "xAxis": {"type": "category", "data": ["a", "b", "c"]},
+            "yAxis": {},
+            "series": [{"type": "bar", "data": [1, 2, 3]}],
+            "graphic": elements,
+        },
+    )
+    comp = next(c for c in chart.components if getattr(c, "optionKey", "") == "graphic")
+    return chart, comp
+
+
+def _group_rect(fill="none", **shape):
+    return {
+        "type": "rect",
+        "shape": {"x": 0, "y": 0, "width": 40, "height": 20, **shape},
+        "style": {"fill": fill, "stroke": "none"},
+    }
+
+
+class TestGraphicGroupAndTransform:
+    def test_group_offsets_children(self, make):
+        _chart_obj, comp = _graphic_chart(
+            make,
+            [
+                {
+                    "type": "group",
+                    "left": 100,
+                    "top": 100,
+                    "children": [_group_rect("#ff0000")],
+                }
+            ],
+        )
+        image = _paint_graphic(comp)
+        x = int(comp.rect.left() + 120)
+        y = int(comp.rect.top() + 110)
+        assert image.pixelColor(x, y).name() == "#ff0000"
+
+    def test_nested_group_offsets_accumulate(self, make):
+        _chart_obj, comp = _graphic_chart(
+            make,
+            [
+                {
+                    "type": "group",
+                    "left": 100,
+                    "top": 100,
+                    "children": [
+                        {
+                            "type": "group",
+                            "left": 30,
+                            "top": 20,
+                            "children": [_group_rect("#00ff00")],
+                        }
+                    ],
+                }
+            ],
+        )
+        image = _paint_graphic(comp)
+        x = int(comp.rect.left() + 130 + 10)
+        y = int(comp.rect.top() + 120 + 10)
+        assert image.pixelColor(x, y).name() == "#00ff00"
+
+    def test_group_rotation_about_origin(self, make):
+        _chart_obj, comp = _graphic_chart(
+            make,
+            [
+                {
+                    "type": "group",
+                    "left": 100,
+                    "top": 100,
+                    "rotation": 90,
+                    "children": [_group_rect("#ff0000")],
+                }
+            ],
+        )
+        image = _paint_graphic(comp)
+        # 40x20 的矩形绕 (0,0) 顺时针转 90° → 占据 base 左下 20x40。
+        inside = image.pixelColor(
+            int(comp.rect.left() + 90), int(comp.rect.top() + 120)
+        )
+        outside = image.pixelColor(
+            int(comp.rect.left() + 120), int(comp.rect.top() + 110)
+        )
+        assert inside.name() == "#ff0000"
+        assert outside.name() == "#ffffff"
+
+    def test_group_scale(self, make):
+        _chart_obj, comp = _graphic_chart(
+            make,
+            [
+                {
+                    "type": "group",
+                    "left": 100,
+                    "top": 100,
+                    "scale": 2,
+                    "children": [_group_rect("#0000ff")],
+                }
+            ],
+        )
+        image = _paint_graphic(comp)
+        x = int(comp.rect.left() + 100 + 70)
+        y = int(comp.rect.top() + 100 + 30)
+        assert image.pixelColor(x, y).name() == "#0000ff"
+
+    def test_z_order_within_group(self, make):
+        _chart_obj, comp = _graphic_chart(
+            make,
+            [
+                {
+                    "type": "rect",
+                    "left": 100,
+                    "top": 100,
+                    "z": 2,
+                    "shape": {"x": 0, "y": 0, "width": 60, "height": 40},
+                    "style": {"fill": "#00ff00", "stroke": "none"},
+                },
+                {
+                    "type": "rect",
+                    "left": 110,
+                    "top": 110,
+                    "z": 1,
+                    "shape": {"x": 0, "y": 0, "width": 60, "height": 40},
+                    "style": {"fill": "#ff0000", "stroke": "none"},
+                },
+            ],
+        )
+        image = _paint_graphic(comp)
+        x = int(comp.rect.left() + 130)
+        y = int(comp.rect.top() + 130)
+        assert image.pixelColor(x, y).name() == "#00ff00"

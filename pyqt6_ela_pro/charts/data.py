@@ -6,6 +6,7 @@ from array import array as _array
 from collections.abc import Sequence
 
 from . import _downsample as _ds
+from .stream import DataRing
 
 __all__ = [
     "numpyAvailable",
@@ -96,14 +97,17 @@ class ElaNumericBuffer(Sequence):
             import numpy as _np_local
 
             arr = _np_local.frombuffer(self._buf, dtype=float)
-        needs_copy = bool(copy)
+        # 默认返回副本：内部缓冲是只读契约，不能让 numpy.asarray() 拿到可写视图。
+        needs_copy = copy is not False
         if dtype is not None and _np is not None:
-            if needs_copy:
-                return arr.astype(dtype, copy=True)
-            return arr.astype(dtype, copy=False)
-        if needs_copy:
-            return arr.copy()
-        return arr
+            out = arr.astype(dtype, copy=needs_copy)
+        elif needs_copy:
+            out = arr.copy()
+        else:
+            out = arr.view()
+        if not needs_copy:
+            out.setflags(write=False)
+        return out
 
     def __repr__(self) -> str:
         return f"ElaNumericBuffer(len={len(self)})"
@@ -144,10 +148,12 @@ class ElaNumericBuffer(Sequence):
         int dtype 也要走 ``float()`` —— 直接 ``tolist()`` 会返回 Python int。
         """
         if _np is not None and isinstance(self._buf, _np.ndarray):
-            if self._buf.dtype.kind == "f":
-                return self._buf.tolist()
-            return [float(v) for v in self._buf.tolist()]
-        return [float(v) for v in self._buf]
+            raw = self._buf.tolist()
+        else:
+            raw = self._buf
+        if raw and isinstance(raw[0], (list, tuple)):
+            return [[float(v) for v in row] for row in raw]
+        return [float(v) for v in raw]
 
     @property
     def raw(self):
@@ -197,12 +203,19 @@ def toBuffer(data, minLen: int = _BUFFER_MIN_LEN):
     return ElaNumericBuffer(buf)
 
 
+def dataVersion(value) -> int:
+    """可按引用持有的数据版本号（原地增长 / 环形窗口用）。"""
+    return int(getattr(value, "_version", 0) or 0)
+
+
 def unwrapData(value):
     """把紧凑存储还原为 list（供 ``getOption`` 对外输出用）。
-    裸 ndarray / ``array.array`` 也要转：``getOption()`` 承诺返回脱离的副本，
-    从 Qt 回调里抛就是 0xC0000409）。
+    裸 ndarray / ``array.array`` / ``DataRing`` 也要转：``getOption()`` 承诺
+    返回脱离的副本，从 Qt 回调里抛就是 0xC0000409）。
     """
     if isinstance(value, ElaNumericBuffer):
+        return value.toList()
+    if isinstance(value, DataRing):
         return value.toList()
     if isBufferLike(value):
         try:

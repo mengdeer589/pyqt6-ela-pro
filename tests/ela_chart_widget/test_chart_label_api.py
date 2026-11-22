@@ -133,7 +133,9 @@ class TestUpdateSeries:
         assert chart.updateSeries({"label": {"fontSize": 13}}, seriesName="S0") is True
         assert chart.getOption()["series"][0]["label"]["fontSize"] == 13
 
-        assert chart.updateSeries({"label": {"color": "#00ff00"}}, seriesId="s0") is True
+        assert (
+            chart.updateSeries({"label": {"color": "#00ff00"}}, seriesId="s0") is True
+        )
         assert chart.getOption()["series"][0]["label"]["color"] == "#00ff00"
 
     def test_missing_selector_returns_false(self, make):
@@ -146,9 +148,7 @@ class TestAxisLabelFormatter:
     def test_callable_gets_tick_index(self, make):
         chart = _chart(make)
         assert (
-            chart.setAxisLabelFormatter(
-                "x", lambda value, index: f"{value}#{index}", 1
-            )
+            chart.setAxisLabelFormatter("x", lambda value, index: f"{value}#{index}", 1)
             is True
         )
         axis = chart.coords[0].x_axes[1]

@@ -20,12 +20,16 @@ from ._shared import (
     _lerp,
     _monotone_path,
     _numeric_xy,
+    _reversed_path,
     _seq_len,
     _smooth_path,
     _win_span,
 )
 from .bar import (
     BarSeriesRenderer,
+)
+from .gantt import (
+    GanttSeriesRenderer,
 )
 from .line import (
     LineSeriesRenderer,
@@ -61,6 +65,7 @@ from .themeriver import (
 from ..core import registerSeries
 
 registerSeries("bar", BarSeriesRenderer)
+registerSeries("gantt", GanttSeriesRenderer)
 registerSeries("pictorialBar", PictorialBarSeriesRenderer)
 registerSeries("line", LineSeriesRenderer)
 registerSeries("scatter", ScatterSeriesRenderer)
@@ -77,6 +82,7 @@ __all__ = [
     "BoxplotSeriesRenderer",
     "CandlestickSeriesRenderer",
     "EffectScatterSeriesRenderer",
+    "GanttSeriesRenderer",
     "HeatmapSeriesRenderer",
     "ImageSeriesRenderer",
     "LineSeriesRenderer",
@@ -101,6 +107,7 @@ __all__ = [
     "_lerp",
     "_monotone_path",
     "_numeric_xy",
+    "_reversed_path",
     "_seq_len",
     "_smooth_path",
     "_win_span",

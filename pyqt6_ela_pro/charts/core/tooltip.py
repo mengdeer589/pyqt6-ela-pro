@@ -18,15 +18,23 @@ from PyQt6.QtGui import (
     QPen,
 )
 
+from .._style import TOOLTIP_PAD_X, TOOLTIP_PAD_Y, TOOLTIP_RADIUS
 from .._tokens import (
     T,
 )
-from .._utils import merged_text_style, parse_color, text_italic, text_weight
+from .._utils import (
+    merged_text_style,
+    parse_color,
+    resolve_color_option,
+    text_italic,
+    text_weight,
+)
 from ..axes import (
     GridCoord,
     chartFont,
     formatValue,
 )
+from ..models import OptionModel
 
 if TYPE_CHECKING:
     from .widget import ElaChartWidget
@@ -53,6 +61,7 @@ class Tooltip:
         self.setOption(opt)
         self._active = False
         self._pos = QPointF()  # 鼠标位置（跟随）
+        self._box = QRectF()
         self._marker_pos = None  # 十字线锚点（None 用 _pos）
         self._lines = []  # [(QColor, name, value_str)]
         self._markers = []  # axis 模式：每条系列命中点的 [(QPointF, QColor)]
@@ -61,9 +70,16 @@ class Tooltip:
         self._pointer_axis = "x"  # 指示线 / 轴气泡朝向（x / y；横向柱用 y）
         self._coord = None  # 本帧 axis 提示所属坐标系（多网格）
         self._x_axis_index = 0
+        self._y_axis_index = 0
+        self._linked_axes = []
 
     def setOption(self, opt: dict) -> None:
-        if isinstance(opt, dict):
+        if isinstance(opt, OptionModel):
+            model = type(opt).from_dict(opt)
+            model.setdefault("show", True)
+            model.setdefault("trigger", "item")
+            self.opt = model
+        elif isinstance(opt, dict):
             merged = {"show": True, "trigger": "item"}
             merged.update(opt)
             self.opt = merged
@@ -88,27 +104,43 @@ class Tooltip:
             text_italic(style.get("fontStyle")),
         )
 
+    def confine(self) -> bool:
+        """``tooltip.confine``：浮层限制在图表内。"""
+        return bool(self.opt.get("confine", False))
+
+    def enterable(self) -> bool:
+        """``tooltip.enterable``：鼠标可进入浮层（进入后暂停跟随）。"""
+        return bool(self.opt.get("enterable", False))
+
+    def _axisPointer(self) -> dict:
+        """顶层 ``axisPointer`` + ``tooltip.axisPointer``（后者优先）。"""
+        out = {}
+        chart_opt = getattr(self.chart, "_option", None)
+        top = chart_opt.get("axisPointer") if isinstance(chart_opt, dict) else None
+        if isinstance(top, dict):
+            out.update(top)
+        local = self.opt.get("axisPointer")
+        if isinstance(local, dict):
+            out.update(local)
+        return out
+
     def axisPointerType(self) -> str:
-        ap = self.opt.get("axisPointer")
-        kind = str((ap or {}).get("type") or "line") if isinstance(ap, dict) else "line"
+        kind = str(self._axisPointer().get("type") or "line")
         return kind if kind in ("line", "shadow", "cross", "none") else "line"
 
     def axisPointerLabelOption(self) -> dict:
         """``axisPointer.label``（show / 颜色 / 字号 / formatter）。"""
-        ap = self.opt.get("axisPointer")
-        label = ap.get("label") if isinstance(ap, dict) else None
+        label = self._axisPointer().get("label")
         return label if isinstance(label, dict) else {}
 
     def axisPointerLineStyle(self) -> dict:
         """``axisPointer.lineStyle``（颜色 / 线宽 / 线型）。"""
-        ap = self.opt.get("axisPointer")
-        style = ap.get("lineStyle") if isinstance(ap, dict) else None
+        style = self._axisPointer().get("lineStyle")
         return style if isinstance(style, dict) else {}
 
     def axisPointerSnap(self, category: bool) -> bool:
         """``axisPointer.snap``：auto = category 吸附、value 跟随光标。"""
-        ap = self.opt.get("axisPointer")
-        raw = (ap or {}).get("snap", "auto") if isinstance(ap, dict) else "auto"
+        raw = self._axisPointer().get("snap", "auto")
         if isinstance(raw, str) and raw.strip().lower() == "auto":
             return bool(category)
         return bool(raw)
@@ -134,7 +166,11 @@ class Tooltip:
     def _safe_format(template: str, params: dict) -> Optional[str]:
         """``{}`` 模板安全替换（缺失键 → 空串；失败返回 None）。"""
         try:
-            return template.format_map(defaultdict(str, params))
+            safe = {
+                key: formatValue(value) if isinstance(value, float) else value
+                for key, value in params.items()
+            }
+            return template.format_map(defaultdict(str, safe))
         except Exception:
             return None
 
@@ -160,6 +196,13 @@ class Tooltip:
             "a": series,
             "c": value,
         }
+        if hit.get("percent") is not None:
+            # 饼图 / 漏斗：tooltip 模板的 {d} / {percent} 与 label 一样给数值
+            pct = hit["percent"]
+            if isinstance(pct, float) and pct.is_integer():
+                pct = int(pct)
+            params["percent"] = pct
+            params["d"] = pct
         title: Optional[str] = None
         if title_raw is not None:
             title = _default_tooltip_title(title_raw)
@@ -231,6 +274,8 @@ class Tooltip:
         pointer_axis: str = "x",
         coord=None,
         x_axis_index: int = 0,
+        y_axis_index: int = 0,
+        linked_axes: list = None,
     ) -> None:
         """显示浮层。
         ``lines``: ``[(color, name, value_str), ...]``；``markers``: axis 模式下
@@ -246,6 +291,8 @@ class Tooltip:
         self._pointer_axis = "y" if str(pointer_axis).lower() == "y" else "x"
         self._coord = coord
         self._x_axis_index = int(x_axis_index)
+        self._y_axis_index = int(y_axis_index)
+        self._linked_axes = list(linked_axes or [])
 
     def hide(self) -> None:
         self._active = False
@@ -255,6 +302,9 @@ class Tooltip:
         self._axis_label = None
         self._pointer_axis = "x"
         self._coord = None
+        self._y_axis_index = 0
+        self._linked_axes = []
+        self._box = QRectF()
 
     def paint(self, p: QPainter) -> None:
         if not self.shown or not self.active:
@@ -267,14 +317,43 @@ class Tooltip:
             and coord is not None
             and self.axisPointerType() != "none"
         ):
-            coord.paintTooltipMarker(
-                p,
-                marker,
-                self.axisPointerType(),
-                self._x_axis_index,
-                self.axisPointerLineStyle(),
-                axis=self._pointer_axis,
-            )
+            if isinstance(coord, GridCoord):
+                coord.paintTooltipMarker(
+                    p,
+                    marker,
+                    self.axisPointerType(),
+                    self._x_axis_index,
+                    self.axisPointerLineStyle(),
+                    axis=self._pointer_axis,
+                    y_axis_index=self._y_axis_index,
+                )
+            else:
+                coord.paintTooltipMarker(
+                    p, marker, self.axisPointerType(), self.axisPointerLineStyle()
+                )
+            if self._linked_axes and isinstance(coord, GridCoord):
+                for kind, axis_index, value in self._linked_axes:
+                    try:
+                        if kind == "y":
+                            axis = coord.y_axes[int(axis_index)]
+                            py = axis.map(value, coord.plot.bottom(), coord.plot.top())
+                            point = QPointF(marker.x(), py)
+                            direction = "y"
+                        else:
+                            axis = coord.x_axes[int(axis_index)]
+                            px = axis.map(value, coord.plot.left(), coord.plot.right())
+                            point = QPointF(px, marker.y())
+                            direction = "x"
+                        coord.paintTooltipMarker(
+                            p,
+                            point,
+                            self.axisPointerType(),
+                            int(axis_index),
+                            self.axisPointerLineStyle(),
+                            axis=direction,
+                        )
+                    except Exception:
+                        continue
         # axis 模式：每条系列在命中点画一个强调圆点（ECharts 同款）
         if self._axis_pointer and self._markers:
             p.save()
@@ -303,7 +382,8 @@ class Tooltip:
         font = self._font()
         p.setFont(font)
         fm = QFontMetricsF(font)
-        pad_x, pad_y, line_gap, dot = 10.0, 8.0, 3.0, 8.0
+        pad_x, pad_y = TOOLTIP_PAD_X, TOOLTIP_PAD_Y
+        line_gap, dot = 3.0, 8.0
         line_h = fm.height()
         rows = []
         for color, name, value in self._lines:
@@ -312,18 +392,20 @@ class Tooltip:
         text_w = max((fm.horizontalAdvance(t) for _, t in rows), default=0.0)
         w = pad_x * 2 + (dot + 5 if any(c is not None for c, _ in rows) else 0) + text_w
         h = pad_y * 2 + len(rows) * line_h + max(0, len(rows) - 1) * line_gap
-        # 跟随鼠标：右侧偏移，越界翻转 / 收敛
+        # 跟随鼠标：右侧偏移；confine=True 时越界翻转 / 收敛。
         area = QRectF(0, 0, self.chart.width(), self.chart.height())
         x = self._pos.x() + 14
         y = self._pos.y() + 14
-        if x + w > area.right() - 4:
-            x = self._pos.x() - w - 14
-        if y + h > area.bottom() - 4:
-            y = self._pos.y() - h - 14
-        x = min(max(x, 4.0), max(4.0, area.right() - w - 4))
-        y = min(max(y, 4.0), max(4.0, area.bottom() - h - 4))
+        if self.confine():
+            if x + w > area.right() - 4:
+                x = self._pos.x() - w - 14
+            if y + h > area.bottom() - 4:
+                y = self._pos.y() - h - 14
+            x = min(max(x, 4.0), max(4.0, area.right() - w - 4))
+            y = min(max(y, 4.0), max(4.0, area.bottom() - h - 4))
         box = QRectF(x, y, w, h)
-        radius = float(T("radius.md"))
+        self._box = QRectF(box)
+        radius = TOOLTIP_RADIUS
         # 近似阴影：三层外扩低透明度圆角矩形
         shadow_c = QColor(T("color.text.primary", self.chart))
         for i, alpha in ((6, 16), (4, 22), (2, 30)):
@@ -345,17 +427,22 @@ class Tooltip:
             border_w = 1.0
         if border_w > 0:
             p.setPen(
-                QPen(parse_color(border or T("color.border", self.chart)), border_w)
+                QPen(
+                    resolve_color_option(
+                        border, self.chart, T("color.border", self.chart)
+                    ),
+                    border_w,
+                )
             )
         else:
             p.setPen(Qt.PenStyle.NoPen)
         p.setBrush(
-            parse_color(bg) if bg else QColor(T("color.bg.elevated", self.chart))
+            resolve_color_option(bg, self.chart, T("color.bg.elevated", self.chart))
         )
         p.drawRoundedRect(box, radius, radius)
         # 文本行（缩进仅对带圆点的行生效；标题行 color 为 None 不缩进）
-        text_color = parse_color(
-            style.get("color") or T("color.text.primary", self.chart)
+        text_color = resolve_color_option(
+            style.get("color"), self.chart, T("color.text.primary", self.chart)
         )
         ty = box.top() + pad_y
         for color, label in rows:
@@ -425,18 +512,26 @@ class Tooltip:
         box = QRectF(x, y, w, h)
         p.setPen(
             QPen(
-                parse_color(
-                    opt.get("borderColor") or T("color.border.strong", self.chart)
+                resolve_color_option(
+                    opt.get("borderColor"),
+                    self.chart,
+                    T("color.border.strong", self.chart),
                 ),
                 1,
             )
         )
         p.setBrush(
-            parse_color(
-                opt.get("backgroundColor") or T("color.bg.elevated", self.chart)
+            resolve_color_option(
+                opt.get("backgroundColor"),
+                self.chart,
+                T("color.bg.elevated", self.chart),
             )
         )
         p.drawRoundedRect(box, 3, 3)
-        p.setPen(parse_color(style.get("color") or T("color.text.primary", self.chart)))
+        p.setPen(
+            resolve_color_option(
+                style.get("color"), self.chart, T("color.text.primary", self.chart)
+            )
+        )
         p.drawText(box, Qt.AlignmentFlag.AlignCenter, text)
         p.restore()

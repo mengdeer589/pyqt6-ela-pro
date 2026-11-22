@@ -5,13 +5,40 @@ from __future__ import annotations
 from typing import Optional
 
 from PyQt6.QtGui import QColor
-from PyQt6ElaWidgetTools import ElaThemeType
+from PyQt6ElaWidgetTools import ElaThemeType, eTheme
 
-from .._colors import parse_color
+from .._colors import contrastRatio, mixColor, parse_color, relativeLuminance
+from .models import ChartTheme
 
 # 色板（内置主题）
 
-#: ECharts 5 默认 9 色（``ela`` / ``echarts`` 共用）
+#: Ela / Fluent 分类色板（浅色）
+ELA_PALETTE_LIGHT = [
+    "#0067c0",
+    "#00b7c3",
+    "#107c10",
+    "#d18f00",
+    "#ca5010",
+    "#c42b1c",
+    "#8764b8",
+    "#69797e",
+    "#e3008c",
+]
+
+#: Ela / Fluent 分类色板（暗色）
+ELA_PALETTE_DARK = [
+    "#4cc2ff",
+    "#00d5e0",
+    "#6ccb5f",
+    "#fce100",
+    "#ff8c62",
+    "#ff99a4",
+    "#b69df8",
+    "#b0b0b0",
+    "#f472b6",
+]
+
+#: ECharts 5 默认 9 色（``echarts`` 主题使用）
 ECHARTS_PALETTE = [
     "#5470c6",
     "#91cc75",
@@ -171,12 +198,73 @@ def _dark_chrome(
     }
 
 
+def _lift_for_dark(value, bg, minimum: float, force_mix: float = 0.0) -> str:
+    """保持色相向白色提升，直到对深色底达到目标对比度。"""
+    base = parse_color(value)
+    background = parse_color(bg)
+    if not base.isValid():
+        return "#ffffff"
+    if not background.isValid():
+        background = QColor("#1e1e1e")
+    mixed = mixColor(base, QColor("#ffffff"), force_mix, rounding=True)
+    for step in range(0, 17):
+        candidate = mixColor(mixed, QColor("#ffffff"), step / 16.0, rounding=True)
+        if contrastRatio(candidate, background) >= minimum:
+            return candidate.name()
+    return "#ffffff"
+
+
+def _dark_palette(palette, bg) -> list:
+    """内置分类色板的暗色档：保持色相 / 顺序，提升暗底可读性。"""
+    return [_lift_for_dark(c, bg, 3.0, 0.18) for c in palette]
+
+
+def _dark_ramp(ramp, bg) -> list:
+    """色带暗色档：先整体提亮，再按暗底对比度兜底；顺序色带反转明度方向。"""
+    colors = [parse_color(c) for c in ramp]
+    colors = [c for c in colors if c.isValid()]
+    if len(colors) < 2:
+        return [c.name() for c in colors]
+    lums = [relativeLuminance(c) for c in colors]
+    if all(lums[i] >= lums[i + 1] for i in range(len(lums) - 1)):
+        colors.reverse()
+    return [_lift_for_dark(c, bg, 2.0, 0.16) for c in colors]
+
+
+def _complete_dark_variants() -> None:
+    """给内置主题补齐暗色分类色板 / 色带 / 语义色（``ela`` 走 eTheme）。"""
+    for name, spec in _CHART_THEMES.items():
+        if name == "ela":
+            continue
+        dark = dict(spec.get("dark") or {})
+        light = spec.get("light") or {}
+        bg = dark.get("color.bg.base") or "#1e1e1e"
+        if not spec.get("palette_dark"):
+            spec["palette_dark"] = _dark_palette(
+                spec.get("palette") or ECHARTS_PALETTE, bg
+            )
+        ramp = light.get("color.ramp")
+        if isinstance(ramp, list) and len(ramp) >= 2:
+            dark["color.ramp"] = _dark_ramp(ramp, bg)
+        for key in (
+            "color.primary",
+            "color.success",
+            "color.warning",
+            "color.danger",
+        ):
+            value = dark.get(key) or light.get(key)
+            if isinstance(value, str) and value:
+                dark[key] = _lift_for_dark(value, bg, 3.0, 0.12)
+        spec["dark"] = dark
+
+
 # 内置主题
 
 _CHART_THEMES: dict[str, dict] = {
-    # 默认：完全跟随 Ela 明暗主题 + ECharts 色板（保持既有观感）
+    # 默认：Ela / Fluent 色板 + 跟随 eTheme 的表面 / 文字
     "ela": {
-        "palette": list(ECHARTS_PALETTE),
+        "palette": list(ELA_PALETTE_LIGHT),
+        "palette_dark": list(ELA_PALETTE_DARK),
         "light": {},
         "dark": {},
     },
@@ -366,6 +454,8 @@ _CHART_THEMES: dict[str, dict] = {
     },
 }
 
+_complete_dark_variants()
+
 #: 默认主题（``ela`` = 跟随 eTheme）
 _DEFAULT_CHART_THEME = "ela"
 
@@ -399,8 +489,8 @@ def _variant_key(mode) -> str:
 
 
 def chart_theme_key(chart=None) -> tuple:
-    """缓存键里的主题身份：``(主题名, 注册代次)``。"""
-    return (_theme_name(chart), _THEME_EPOCH)
+    """缓存键里的主题身份：``(主题名, 注册代次, 明暗模式)``。"""
+    return (_theme_name(chart), _THEME_EPOCH, eTheme.getThemeMode())
 
 
 def theme_override(chart, mode, key):
@@ -423,25 +513,35 @@ def theme_ramp_override(chart, mode):
     return [parse_color(c) for c in colors]
 
 
-def theme_palette_colors(chart=None) -> list:
-    """主题的分类色板（hex 字符串列表；未写 → ECharts 默认）。"""
+def theme_palette_colors(chart=None, mode=None) -> list:
+    """主题的分类色板（hex 字符串列表；未写 → ECharts 默认）。
+
+    ``palette_dark`` 存在时暗色模式优先用它；没有则两档共用 ``palette``。
+    """
     spec = _theme_spec(chart)
-    palette = spec.get("palette")
+    if mode is None:
+        mode = eTheme.getThemeMode()
+    dark = mode == ElaThemeType.ThemeMode.Dark
+    palette = spec.get("palette_dark") if dark else None
+    if not palette:
+        palette = spec.get("palette")
     if palette:
         return list(palette)
     return list(ECHARTS_PALETTE)
 
 
-def chartThemeSpec(name: str) -> Optional[dict]:
-    """返回主题定义的深拷贝；未知名称返回 ``None``。"""
+def chartThemeSpec(name: str) -> Optional[ChartTheme]:
+    """返回主题 dataclass；未知名称返回 ``None``（兼容 dict 下标）。"""
     spec = _CHART_THEMES.get(str(name))
     if spec is None:
         return None
-    return {
-        "palette": list(spec.get("palette") or ECHARTS_PALETTE),
-        "light": _copy_variant(spec.get("light")),
-        "dark": _copy_variant(spec.get("dark")),
-    }
+    return ChartTheme(
+        name=str(name),
+        palette=list(spec.get("palette") or ECHARTS_PALETTE),
+        palette_dark=list(spec.get("palette_dark") or []),
+        light=_copy_variant(spec.get("light")),
+        dark=_copy_variant(spec.get("dark")),
+    )
 
 
 def _copy_variant(variant) -> dict:
@@ -524,8 +624,9 @@ def _validate_palette(palette) -> list:
 
 
 def registerChartTheme(
-    name: str,
+    name,
     palette=None,
+    palette_dark=None,
     light: Optional[dict] = None,
     dark: Optional[dict] = None,
 ) -> None:
@@ -533,11 +634,23 @@ def registerChartTheme(
 
     :param name: 主题名（不能为空）
     :param palette: 分类系列色板（省略 = 沿用同名主题原色板，新主题用 ECharts 9 色）
+    :param palette_dark: 暗色分类色板（省略 = 沿用原 ``palette_dark``；没有则暗色也用 ``palette``）
     :param light: 浅色槽位（``color.bg.base`` / ``color.text.primary`` /
         ``color.ramp`` …；未写的槽位回退 eTheme）
     :param dark: 深色槽位（同上）
     """
     global _THEME_EPOCH
+    if isinstance(name, ChartTheme):
+        theme = name
+        name = theme.name
+        if palette is None:
+            palette = theme.palette
+        if palette_dark is None and theme.palette_dark:
+            palette_dark = theme.palette_dark
+        if light is None and theme.light:
+            light = theme.light
+        if dark is None and theme.dark:
+            dark = theme.dark
     if not isinstance(name, str) or not name.strip():
         raise ValueError("registerChartTheme: 主题名不能为空")
     key = name.strip()
@@ -547,15 +660,23 @@ def registerChartTheme(
         if palette is not None
         else list(base.get("palette") or ECHARTS_PALETTE)
     )
+    next_dark = (
+        _validate_palette(palette_dark)
+        if palette_dark is not None
+        else list(base.get("palette_dark") or [])
+    )
     light_merged = dict(base.get("light") or {})
     light_merged.update(_validate_variant(light, f"{key}.light"))
     dark_merged = dict(base.get("dark") or {})
     dark_merged.update(_validate_variant(dark, f"{key}.dark"))
-    _CHART_THEMES[key] = {
+    spec = {
         "palette": next_palette,
         "light": light_merged,
         "dark": dark_merged,
     }
+    if next_dark:
+        spec["palette_dark"] = next_dark
+    _CHART_THEMES[key] = spec
     _THEME_EPOCH += 1
 
 

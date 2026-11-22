@@ -15,7 +15,8 @@ from PyQt6.QtGui import (
 from .. import _downsample as _ds
 from .._symbol import drawSymbol
 from .._utils import to_float as _to_float
-from ..axes import formatValue
+from ..axes import _gantt_span_bounds, formatValue
+from ..core._shared import GRID_SERIES_TYPES
 
 
 def _lerp(a, b, t):
@@ -62,9 +63,31 @@ def label_rotated_bounds(rect: QRectF, angle: float) -> QRectF:
 
 
 def paint_label_at(
-    p: QPainter, anchor: QPointF, text: str, fm, angle: float = 0.0
+    p: QPainter,
+    anchor: QPointF,
+    text: str,
+    fm,
+    angle: float = 0.0,
+    *,
+    series=None,
+    index=None,
+    color=None,
+    label_option: dict = None,
+    draw: bool = True,
 ) -> QRectF:
     """在 ``anchor``（文字基线起点）画标签，绕文字中心旋转；返回外接矩形。"""
+    if series is not None:
+        return series.paintLabelAt(
+            p,
+            anchor,
+            text,
+            fm,
+            angle,
+            index=index,
+            color=color,
+            label_option=label_option,
+            draw=draw,
+        )
     width = fm.horizontalAdvance(text)
     center = QPointF(anchor.x() + width / 2.0, anchor.y() - fm.ascent() / 2.0)
     if abs(angle) < 1e-6:
@@ -85,9 +108,31 @@ def paint_label_at(
 
 
 def paint_label_in(
-    p: QPainter, rect: QRectF, text: str, angle: float = 0.0, align=None
+    p: QPainter,
+    rect: QRectF,
+    text: str,
+    angle: float = 0.0,
+    align=None,
+    *,
+    series=None,
+    index=None,
+    color=None,
+    label_option: dict = None,
+    draw: bool = True,
 ) -> QRectF:
     """在 ``rect`` 内画标签（默认居中）；``angle`` 非 0 时绕矩形中心旋转。"""
+    if series is not None:
+        return series.paintLabelIn(
+            p,
+            rect,
+            text,
+            index=index,
+            align=align,
+            angle=angle,
+            color=color,
+            label_option=label_option,
+            draw=draw,
+        )
     align = align or (Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignVCenter)
     if abs(angle) < 1e-6:
         p.drawText(rect, align, text)
@@ -177,8 +222,10 @@ def _monotone_path(points):
         b = m[i + 1] / d[i]
         if a < 0:
             m[i] = 0.0
+            a = 0.0
         if b < 0:
             m[i + 1] = 0.0
+            b = 0.0
         if a * a + b * b > 9.0:
             tau = 3.0 / math.sqrt(a * a + b * b)
             m[i] = tau * a * d[i]
@@ -190,6 +237,37 @@ def _monotone_path(points):
         c2 = QPointF(xs[i + 1] - dx / 3.0, ys[i + 1] - m[i + 1] * dx / 3.0)
         path.cubicTo(c1, c2, points[i + 1])
     return path
+
+
+def _reversed_path(path: QPainterPath) -> QPainterPath:
+    """按几何反序重建路径（``lineTo`` / ``cubicTo``）。
+
+    面积类填充要沿描边曲线的**反方向**回填下边界（堆叠带 / 河流图），
+    直接反序顶点列表会丢平滑与 ``step`` 语义；本函数只反序路径本身。
+    """
+    count = path.elementCount()
+    out = QPainterPath()
+    if count < 2:
+        return out
+    last = path.elementAt(count - 1)
+    out.moveTo(last.x, last.y)
+    i = count - 1
+    while i > 0:
+        if (
+            i >= 3
+            and path.elementAt(i).type == QPainterPath.ElementType.CurveToDataElement
+            and path.elementAt(i - 2).type == QPainterPath.ElementType.CurveToElement
+        ):
+            c1 = path.elementAt(i - 2)
+            c2 = path.elementAt(i - 1)
+            start = path.elementAt(i - 3)
+            out.cubicTo(c2.x, c2.y, c1.x, c1.y, start.x, start.y)
+            i -= 3
+        else:
+            prev = path.elementAt(i - 1)
+            out.lineTo(prev.x, prev.y)
+            i -= 1
+    return out
 
 
 def _draw_symbol(p: QPainter, kind: str, pt: QPointF, size: float, rotate: float = 0.0):
@@ -240,13 +318,17 @@ def _label_placement(point, text, fm, position="top", distance=4.0, marker_r=0.0
     return anchor, rect
 
 
-def _datum_list(item):
-    """取数据项的数值列表：[...] 或 {"value": [...]} → list[float]|None。"""
+def _datum_list(item, count: int = None):
+    """取数据项的数值列表：[...] 或 {"value": [...]} → list[float]|None。
+
+    ``count`` 只取前 N 维（K 线 / 箱线图允许尾部带 volume 等非数值维度）。
+    """
     v = item.get("value") if isinstance(item, dict) else item
     if not isinstance(v, (list, tuple)):
         return None
+    seq = v[:count] if count is not None else v
     out = []
-    for x in v:
+    for x in seq:
         f = _to_float(x, None)
         if f is None:
             return None
@@ -266,6 +348,8 @@ def _grid_series_opts(
         if not isinstance(s, dict):
             continue
         if s.get("coordinateSystem") not in (None, "cartesian2d", "grid"):
+            continue
+        if str(s.get("type") or "line") not in GRID_SERIES_TYPES:
             continue
         if grid_index is not None:
             try:
@@ -353,6 +437,11 @@ def _seq_len(value) -> int:
         return 0
 
 
+def clearGridExtentCache() -> None:
+    """丢弃全局范围缓存（控件销毁 / 大规模 clear 后释放 series 数据引用）。"""
+    _GRID_EXTENT_CACHE.clear()
+
+
 def _grid_value_extent(
     chart, axis_kind: str = "y", axis_index: int = 0, grid_index: int = None
 ):
@@ -362,6 +451,7 @@ def _grid_value_extent(
     """
     opts = _grid_series_opts(chart, axis_kind, axis_index, grid_index)
     key = (
+        getattr(chart, "_opt_version", 0),
         axis_kind,
         axis_index,
         grid_index,
@@ -375,14 +465,14 @@ def _grid_value_extent(
             a is b for a, b in zip(cached_opts, opts)
         ):
             return cached_ext
-    ext = _grid_value_extent_uncached(chart, opts, axis_kind)
+    ext = _grid_value_extent_uncached(opts, axis_kind)
     if len(_GRID_EXTENT_CACHE) >= _GRID_EXTENT_CACHE_LIMIT:
         _GRID_EXTENT_CACHE.clear()
     _GRID_EXTENT_CACHE[key] = (ext, tuple(opts))
     return ext
 
 
-def _grid_value_extent_uncached(chart, opts, axis_kind: str = "y") -> tuple:
+def _grid_value_extent_uncached(opts, axis_kind: str = "y") -> tuple:
     """``_grid_value_extent`` 的实际计算（无缓存）。
     ``axis_kind`` 决定读哪一维：``"x"`` 读 ``[x, y]`` 的第一维 / 横向柱标量，
     ``"y"`` 读第二维 / 标量；堆叠和只在 y 轴累计。
@@ -428,7 +518,16 @@ def _grid_value_extent_uncached(chart, opts, axis_kind: str = "y") -> tuple:
         data = s.get("data")
         if data is None:
             data = []
-        if axis_kind == "y" and stype in ("bar", "line") and s.get("stack"):
+        if stype == "gantt":
+            # 任务条两端都属于 x 范围；y 轴是类目，绝不能把 end 当数值喂进去。
+            if axis_kind == "x":
+                for item in data:
+                    bounds = _gantt_span_bounds(item, s)
+                    if bounds is not None:
+                        feed(bounds[0])
+                        feed(bounds[1])
+            continue
+        if axis_kind in ("x", "y") and stype in ("bar", "line") and s.get("stack"):
             key = str(s.get("stack"))
             strategy = str(s.get("stackStrategy") or "samesign").strip().lower()
             for i, item in enumerate(data):
@@ -441,22 +540,26 @@ def _grid_value_extent_uncached(chart, opts, axis_kind: str = "y") -> tuple:
                 elif strategy == "positive":
                     if y >= 0:
                         stack_pos[sk] = stack_pos.get(sk, 0.0) + y
+                    else:
+                        feed(y)
                 elif strategy == "negative":
                     if y < 0:
                         stack_neg[sk] = stack_neg.get(sk, 0.0) + y
+                    else:
+                        feed(y)
                 elif y >= 0:
                     stack_pos[sk] = stack_pos.get(sk, 0.0) + y
                 else:
                     stack_neg[sk] = stack_neg.get(sk, 0.0) + y
         elif axis_kind == "y" and stype == "candlestick":
             for item in data:
-                nums = _datum_list(item)
+                nums = _datum_list(item, 4)
                 if nums and len(nums) >= 4:
                     feed(min(nums[2], nums[0], nums[1]))
                     feed(max(nums[3], nums[0], nums[1]))
         elif axis_kind == "y" and stype == "boxplot":
             for item in data:
-                nums = _datum_list(item)
+                nums = _datum_list(item, 5)
                 if nums and len(nums) >= 5:
                     feed(nums[0])
                     feed(nums[4])
@@ -483,7 +586,7 @@ def _grid_value_extent_uncached(chart, opts, axis_kind: str = "y") -> tuple:
 def _axis_label(axis, x):
     """类别轴标签（x 为类别名或下标）；数值轴退回 formatValue。"""
     if axis is not None and axis.type == "category" and axis.categories:
-        idx = axis.categoryIndex(x)
+        idx = axis.localIndex(x)
         if 0 <= idx < len(axis.categories):
             return axis.categories[idx]
         all_cats = getattr(axis, "_all_categories", None) or []

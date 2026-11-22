@@ -9,11 +9,10 @@ from PyQt6.QtGui import QColor, QFontMetricsF, QPainter, QPen
 from .._tokens import T
 from .._utils import single_option
 from ._shared import (
-    _iter_data_values,
     _line_pen,
     _margin_px,
     _parse_margin,
-    formatValue,
+    _to_float,
 )
 from .base import AxisModel, Coord
 
@@ -44,7 +43,15 @@ class SingleAxisCoord(Coord):
         for s in series_opts or []:
             if not isinstance(s, dict) or s.get("coordinateSystem") != "singleAxis":
                 continue
-            vs.extend(_iter_data_values(s.get("data")))
+            for item in s.get("data") or []:
+                v = item.get("value") if isinstance(item, dict) else item
+                if isinstance(v, (list, tuple)):
+                    # 单轴系列只映射 y（第二个分量 / 单元素）；第一维是
+                    # 附加信息，不能污染轴范围。
+                    v = v[1] if len(v) >= 2 else (v[0] if v else None)
+                f = _to_float(v, None)
+                if f is not None:
+                    vs.append(f)
         if vs:
             self.axis.setExtent(min(vs), max(vs))
         else:
@@ -109,15 +116,22 @@ class SingleAxisCoord(Coord):
             "bottom": Qt.AlignmentFlag.AlignBottom,
         }[valign_name]
         anchor_y = self.line_y + margin
-        p.setPen(QPen(c_axis, 1))
-        p.drawLine(
-            QPointF(self.plot.left(), self.line_y),
-            QPointF(self.plot.right(), self.line_y),
-        )
-        for tv in self.axis.ticks():
+        line_show = self.axis.axisLineOption().get("show", True) is not False
+        tick_show = self.axis.axisTickOption().get("show", True) is not False
+        label_show = self.axis.axisLabelOption().get("show", True) is not False
+        if line_show:
+            p.setPen(QPen(c_axis, 1))
+            p.drawLine(
+                QPointF(self.plot.left(), self.line_y),
+                QPointF(self.plot.right(), self.line_y),
+            )
+        for index, tv in enumerate(self.axis.ticks()):
             px = self.axis.map(tv, self.plot.left(), self.plot.right())
-            p.setPen(QPen(c_grid, 1))
-            p.drawLine(QPointF(px, self.line_y - 4), QPointF(px, self.line_y + 4))
+            if tick_show:
+                p.setPen(QPen(c_grid, 1))
+                p.drawLine(QPointF(px, self.line_y - 4), QPointF(px, self.line_y + 4))
+            if not label_show or not self.axis.labelShownAt(index, tv):
+                continue
             p.setPen(c_text)
             box_w = 80.0
             left = (
@@ -137,7 +151,7 @@ class SingleAxisCoord(Coord):
             p.drawText(
                 QRectF(left, top, box_w, fm.height()),
                 hflag | vflag,
-                formatValue(tv),
+                self.axis.formatTickLabel(tv, index),
             )
         if self.axis.name:
             p.setPen(QColor(T("color.text.tertiary", self.chart)))
@@ -160,7 +174,9 @@ class SingleAxisCoord(Coord):
             return
         p.save()
         style = line_style if isinstance(line_style, dict) else {}
-        pen = _line_pen({"lineStyle": style}, T("color.border.strong", self.chart))
+        pen = _line_pen(
+            {"lineStyle": style}, T("color.border.strong", self.chart), chart=self.chart
+        )
         if not isinstance(style.get("type"), str):
             pen.setStyle(Qt.PenStyle.DashLine)
         p.setPen(pen)

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 
 import math
+import re
 import time
 import weakref
 from collections import defaultdict
@@ -126,6 +127,7 @@ GRID_SERIES_TYPES = frozenset(
     {
         "bar",
         "pictorialBar",
+        "gantt",
         "line",
         "scatter",
         "effectScatter",
@@ -152,8 +154,10 @@ def _needs_grid_coord(series_opts) -> bool:
 
 def _opt_float(value, default):
     """把 option 里的取值安全转成 float，失败回退 ``default``。
+
     ``default=None`` 表示「转换失败返回 None」而不是回退数值（用于区分「没给
     坐标」与「坐标是 0」）。``OverflowError`` 必须列进 except：它继承
+    ``ArithmeticError``，不属于 ``ValueError``。
     """
     try:
         result = float(value)
@@ -166,7 +170,7 @@ def _opt_float(value, default):
 
 _HOVERABLE_COMPONENTS = frozenset({"markPoint", "markLine"})
 #: 支持双击行内编辑的组件（标注 `annotations` 只编辑、不参与数据命中）
-_EDITABLE_COMPONENTS = frozenset({"markPoint", "markLine", "annotations"})
+_EDITABLE_COMPONENTS = frozenset({"markPoint", "markLine", "markArea", "annotations"})
 _ANIM_EASINGS = {
     "linear": QEasingCurve.Type.Linear,
     "quadraticin": QEasingCurve.Type.InQuad,
@@ -250,13 +254,34 @@ def formatLabelTemplate(template: str, params: dict) -> Optional[str]:
     """ECharts 风格 ``{a}/{b}/{c}/{d}`` 标签模板（缺失键 → 空串；失败 None）。
 
     浮点值按 ``formatValue`` 规则渲染（``100.0`` → ``"100"``），与数值标签一致。
+    ``{style|text}`` 富文本段先保护再格式化，不会被当成缺失键吞掉。
     """
     try:
         safe = {
             key: formatValue(value) if isinstance(value, float) else value
             for key, value in params.items()
         }
-        return template.format_map(defaultdict(str, safe))
+        rich = []
+
+        def _protect(match):
+            style = match.group(1)
+            inner = match.group(2)
+            try:
+                inner = inner.format_map(defaultdict(str, safe))
+            except Exception:
+                pass
+            rich.append(f"{{{style}|{inner}}}")
+            return f"\x00{len(rich) - 1}\x00"
+
+        marked = re.sub(
+            r"\{([^|{}]+)\|((?:[^{}]|\{[^{}]*\})*)\}",
+            _protect,
+            template,
+        )
+        text = marked.format_map(defaultdict(str, safe))
+        for index, token in enumerate(rich):
+            text = text.replace(f"\x00{index}\x00", token)
+        return text
     except Exception:
         return None
 

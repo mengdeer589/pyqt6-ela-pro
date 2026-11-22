@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Optional
+from typing import Optional
 
 
 from PyQt6.QtCore import (
@@ -10,14 +10,13 @@ from PyQt6.QtCore import (
     QRectF,
     Qt,
 )
+
+from ..._internal import safe_connect
+from ..models import event_from_dict
 from ._shared import (
     _EDITABLE_COMPONENTS,
 )
 from .annotation import _AnnotationEditor
-
-
-if TYPE_CHECKING:
-    pass
 
 
 class _ChartAnnotationMixin:
@@ -28,6 +27,7 @@ class _ChartAnnotationMixin:
         关闭后双击只发 ``annotationEditRequested``，宿主可自行弹框并调
         :meth:`setAnnotationText` 提交。
         """
+        self._ensure_alive()
         self._annotation_editable = bool(enabled)
         if not self._annotation_editable:
             self._hide_annotation_editor()
@@ -126,12 +126,15 @@ class _ChartAnnotationMixin:
         if target is None:
             return False
         self.annotationEditRequested.emit(
-            {
-                "seriesName": target["seriesName"],
-                "componentType": target["componentType"],
-                "dataIndex": target["dataIndex"],
-                "text": target["text"],
-            }
+            event_from_dict(
+                "annotationEditRequested",
+                {
+                    "seriesName": target["seriesName"],
+                    "componentType": target["componentType"],
+                    "dataIndex": target["dataIndex"],
+                    "text": target["text"],
+                },
+            )
         )
         if self._annotation_editable:
             self._show_annotation_editor(target)
@@ -144,8 +147,10 @@ class _ChartAnnotationMixin:
         editor.setBorderRadius(4)
         editor.setIsClearButtonEnable(False)
         editor.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
-        editor.editingFinished.connect(self._commit_annotation_edit)
-        editor.cancelled.connect(self._cancel_annotation_edit)
+        # 编辑器信号也走连接侧保护：提交路径会触发 _rebuild，异常不能
+        # 穿过 Qt 回调边界终止进程。
+        safe_connect(editor, "editingFinished", self._commit_annotation_edit)
+        safe_connect(editor, "cancelled", self._cancel_annotation_edit)
         self._annotation_editor = editor
         return editor
 
@@ -157,7 +162,7 @@ class _ChartAnnotationMixin:
         if rect.width() < 40:
             rect.setWidth(min(160.0, max(40.0, self.width() - rect.left() - 4)))
         height = max(22.0, rect.height())
-        # ElaLineEdit 默认最小高 35px；标注行内编辑必须贴住标签高度。
+        # ElaLineEdit 默认 32px；标注行内编辑必须贴住标签高度。
         editor.setFixedHeight(int(height))
         editor.setGeometry(
             int(rect.left()), int(rect.top()), int(rect.width()), int(height)
@@ -220,19 +225,40 @@ class _ChartAnnotationMixin:
                 if str((getattr(renderer, "opt", {}) or {}).get("id") or "") == key:
                     return renderer
             return None
+        name = str(seriesName or "")
+        if name:
+            for renderer in self._series:
+                if renderer.name == name:
+                    return renderer
+            return None
         if seriesIndex is not None:
             try:
                 index = int(seriesIndex)
             except (TypeError, ValueError, OverflowError):
                 return None
             return self._series[index] if 0 <= index < len(self._series) else None
-        name = str(seriesName or "")
         for renderer in self._series:
-            if name and renderer.name != name:
-                continue
-            if name or renderer.visible:
+            if renderer.visible:
                 return renderer
         return None
+
+    def _emit_annotation_edited(
+        self, seriesName, componentType, dataIndex, text
+    ) -> None:
+        try:
+            self.annotationEdited.emit(
+                event_from_dict(
+                    "annotationEdited",
+                    {
+                        "seriesName": str(seriesName or ""),
+                        "componentType": str(componentType or ""),
+                        "dataIndex": int(dataIndex),
+                        "text": str(text),
+                    },
+                )
+            )
+        except Exception:
+            pass
 
     def setAnnotationText(
         self,
@@ -294,14 +320,7 @@ class _ChartAnnotationMixin:
             if rebuild:
                 self._rebuild()
             self.update()
-            self.annotationEdited.emit(
-                {
-                    "seriesName": resolved_name,
-                    "componentType": wanted,
-                    "dataIndex": index,
-                    "text": str(text),
-                }
-            )
+            self._emit_annotation_edited(resolved_name, wanted, index, text)
             return True
 
         explicit = seriesId is not None or seriesIndex is not None or bool(seriesName)
@@ -335,14 +354,7 @@ class _ChartAnnotationMixin:
         if rebuild:
             self._rebuild()
         self.update()
-        self.annotationEdited.emit(
-            {
-                "seriesName": resolved_name,
-                "componentType": wanted,
-                "dataIndex": index,
-                "text": str(text),
-            }
-        )
+        self._emit_annotation_edited(resolved_name, wanted, index, text)
         return True
 
     def setSeriesLabelText(
@@ -374,12 +386,15 @@ class _ChartAnnotationMixin:
             self.invalidateSeriesLayer()
         self.update()
         self.annotationEdited.emit(
-            {
-                "seriesName": renderer.name,
-                "componentType": "seriesLabel",
-                "dataIndex": int(dataIndex),
-                "text": str(text),
-            }
+            event_from_dict(
+                "annotationEdited",
+                {
+                    "seriesName": renderer.name,
+                    "componentType": "seriesLabel",
+                    "dataIndex": int(dataIndex),
+                    "text": str(text),
+                },
+            )
         )
         return True
 

@@ -11,15 +11,16 @@ from PyQt6.QtGui import (
     QColor,
     QFontMetricsF,
     QPainter,
+    QPainterPath,
     QPen,
 )
 
+from .._symbol import drawSymbol
 from .._tokens import T
 from .._utils import clamp as _clamp
 from .._utils import parse_roam as _parse_roam
 from .._utils import to_float as _to_float
 from .._utils import with_alpha
-from .._utils import parse_color
 from ..core import SeriesRenderer
 from ._shared import _dist, _label_font, _series_palette_color, _text_color
 
@@ -30,10 +31,15 @@ class GraphSeriesRenderer(SeriesRenderer):
     ``label`` / ``symbolSize`` / ``draggable`` / ``roam`` / ``zoom``。
     """
 
+    labelVisibleByDefault = True
+
     def __init__(self, chart, opt):
         super().__init__(chart, opt)
         self._nodes = []  # [dict(name,size,pos=QPointF,color)]
         self._edges = []  # [(i, j)]
+        self._edge_styles: dict = {}
+        self._categories = []
+        self._hidden_items: set[str] = set()
         self._drag_index = None
         self._fixed: dict = {}  # 拖拽后的固定位置 {节点下标: QPointF}
         #: 力导布局记忆化：条目 ``(key, positions)``，positions 为归一化坐标。
@@ -76,10 +82,17 @@ class GraphSeriesRenderer(SeriesRenderer):
                     "size": size,
                     "category": category,
                     "itemStyle": item_style,
+                    "symbol": item.get("symbol") if isinstance(item, dict) else None,
+                    "symbolRotate": item.get("symbolRotate")
+                    if isinstance(item, dict)
+                    else None,
+                    "item": item if isinstance(item, dict) else None,
                 }
             )
             name_index.setdefault(name, i)
         edges = []
+        edge_styles = {}
+        self._parsed_edge_styles = edge_styles
 
         def idx(ref):
             if isinstance(ref, bool):
@@ -96,6 +109,9 @@ class GraphSeriesRenderer(SeriesRenderer):
             if s is None or t is None or s == t:
                 continue
             edges.append((s, t))
+            style = item.get("lineStyle")
+            if isinstance(style, dict):
+                edge_styles[(s, t)] = style
         return nodes, edges, categories
 
     def _category_color(self, category, categories):
@@ -118,15 +134,50 @@ class GraphSeriesRenderer(SeriesRenderer):
             item_style = cat.get("itemStyle") or {}
             raw = item_style.get("color")
             if isinstance(raw, str) and raw:
-                color = parse_color(raw)
+                color = self.resolveColor(raw)
                 if color.isValid():
                     return color
         return _series_palette_color(self.chart, index)
+
+    @staticmethod
+    def _category_name(category, categories) -> str:
+        if category is None or isinstance(category, bool):
+            return ""
+        if isinstance(category, (int, float)):
+            index = int(category)
+            if 0 <= index < len(categories):
+                cat = categories[index]
+                return str(cat.get("name") if isinstance(cat, dict) else cat)
+            return ""
+        return str(category)
+
+    def legendItems(self) -> list:
+        categories = self._categories or self.opt.get("categories") or []
+        items = []
+        for index, cat in enumerate(categories):
+            name = self._category_name(index, categories)
+            if not name:
+                continue
+            color = self._category_color(index, categories)
+            if color is not None:
+                items.append((name, color))
+        return items or super().legendItems()
+
+    def setHiddenItems(self, names) -> None:
+        self._hidden_items = {str(name) for name in (names or [])}
+
+    def _category_hidden(self, node) -> bool:
+        if not self._hidden_items:
+            return False
+        name = self._category_name(node.get("category"), self._categories)
+        return name in self._hidden_items
 
     def layout(self, rect: QRectF) -> None:
         self._nodes = []
         self._edges = []
         nodes, edges, categories = self._parse()
+        self._categories = list(categories or [])
+        self._edge_styles = dict(getattr(self, "_parsed_edge_styles", {}) or {})
         if not nodes:
             return
         n = len(nodes)
@@ -166,13 +217,31 @@ class GraphSeriesRenderer(SeriesRenderer):
                         plot.top() + positions[i][1] * plot.height(),
                     )
             category_color = self._category_color(nd["category"], categories)
+            series_color = self.itemStyle().get("color")
+            series_color = (
+                self.resolveColor(series_color)
+                if isinstance(series_color, str) and series_color
+                else None
+            )
             self._nodes.append(
                 {
                     "name": nd["name"],
                     "value": nd.get("value"),
+                    "category": nd["category"],
+                    "item": nd.get("item") or nd,
+                    "symbol": nd.get("symbol"),
+                    "symbolRotate": nd.get("symbolRotate"),
                     "size": _clamp(size, 4.0, 60.0),
                     "pos": pos,
-                    "color": category_color or _series_palette_color(self.chart, i),
+                    "color": (
+                        category_color
+                        or (
+                            series_color
+                            if series_color and series_color.isValid()
+                            else None
+                        )
+                        or _series_palette_color(self.chart, i)
+                    ),
                     "item_style": nd["itemStyle"],
                 }
             )
@@ -205,7 +274,7 @@ class GraphSeriesRenderer(SeriesRenderer):
                 ):
                     self._drag_index = i
                     return True
-        if self._roam[1]:
+        if self._roam[1] and not self._plot.isNull() and self._plot.contains(pos):
             self._pan_start = QPointF(pos)
             self._pan_origin = QPointF(self._pan)
             return True
@@ -241,6 +310,12 @@ class GraphSeriesRenderer(SeriesRenderer):
 
     def onWheel(self, event) -> bool:
         if not self._roam[0]:
+            return False
+        try:
+            pos = event.position()
+        except Exception:
+            pos = QPointF()
+        if self._plot.isNull() or not self._plot.contains(pos):
             return False
         delta = event.angleDelta().y()
         if delta == 0:
@@ -366,21 +441,97 @@ class GraphSeriesRenderer(SeriesRenderer):
             )
         return out
 
+    def _paint_edge_symbols(self, p, p0, p1, fill, stroke) -> None:
+        """画边两端的 ``edgeSymbol`` / ``edgeSymbolSize``。"""
+        raw = self.opt.get("edgeSymbol")
+        if raw is None:
+            return
+        if isinstance(raw, (list, tuple)):
+            kinds = [
+                str(raw[0] or "none"),
+                str(raw[1] if len(raw) > 1 else raw[0] or "none"),
+            ]
+        else:
+            kinds = [str(raw), str(raw)]
+        sizes = self.opt.get("edgeSymbolSize", 4)
+        if isinstance(sizes, (list, tuple)):
+            values = [
+                max(0.0, _to_float(sizes[0], 4.0)),
+                max(0.0, _to_float(sizes[1] if len(sizes) > 1 else sizes[0], 4.0)),
+            ]
+        else:
+            size = max(0.0, _to_float(sizes, 4.0))
+            values = [size, size]
+        if not any(kind not in ("", "none") for kind in kinds):
+            return
+        dx = p1.x() - p0.x()
+        dy = p1.y() - p0.y()
+        angle = math.degrees(math.atan2(dy, dx)) + 90.0
+        p.save()
+        p.setPen(QPen(stroke, 1.0))
+        p.setBrush(fill)
+        for point, kind, size in ((p0, kinds[0], values[0]), (p1, kinds[1], values[1])):
+            if kind in ("", "none") or size <= 0:
+                continue
+            p.save()
+            p.translate(point)
+            p.rotate(angle)
+            drawSymbol(p, kind, QPointF(0.0, 0.0), size)
+            p.restore()
+        p.restore()
+
     def paint(self, p: QPainter, anim_t: float) -> None:
         if not self._nodes:
             return
         p.save()
+        self._label_rects = []
         pts = self._animated_points(anim_t)
+        hidden_indices = {
+            index
+            for index, node in enumerate(self._nodes)
+            if self._category_hidden(node)
+        }
         # 边
-        p.setPen(QPen(with_alpha(_text_color("color.border.strong", self.chart), 160), 1.2))
         p.setBrush(Qt.BrushStyle.NoBrush)
+        line_opt = self.opt.get("lineStyle")
+        line_opt = line_opt if isinstance(line_opt, dict) else {}
+        default_edge = _text_color("color.border.strong", self.chart)
         for s, t in self._edges:
-            if 0 <= s < len(pts) and 0 <= t < len(pts):
-                p.drawLine(pts[s], pts[t])
+            if s in hidden_indices or t in hidden_indices:
+                continue
+            if not (0 <= s < len(pts) and 0 <= t < len(pts)):
+                continue
+            style = dict(line_opt)
+            style.update(self._edge_styles.get((s, t), {}))
+            raw = style.get("color")
+            if raw == "source":
+                color = self.resolveColor(self._nodes[s]["color"])
+            elif raw == "target":
+                color = self.resolveColor(self._nodes[t]["color"])
+            else:
+                color = self.resolveColor(raw, default_edge)
+            width = max(0.5, _to_float(style.get("width"), 1.2))
+            opacity = _clamp(_to_float(style.get("opacity"), 160 / 255.0), 0.0, 1.0)
+            p.setPen(QPen(with_alpha(color, int(255 * opacity)), width))
+            curveness = _to_float(style.get("curveness"), 0.0)
+            if abs(curveness) > 1e-6:
+                p0, p1 = pts[s], pts[t]
+                mx, my = (p0.x() + p1.x()) / 2, (p0.y() + p1.y()) / 2
+                dx, dy = p1.x() - p0.x(), p1.y() - p0.y()
+                path = QPainterPath(p0)
+                path.quadTo(QPointF(mx - dy * curveness, my + dx * curveness), p1)
+                p.drawPath(path)
+            else:
+                p0, p1 = pts[s], pts[t]
+                p.drawLine(p0, p1)
+            self._paint_edge_symbols(
+                p, p0, p1, color, with_alpha(color, int(255 * opacity))
+            )
         # 节点 + 标签
+        legend_hover = self.chart._legend_hover
         label_opt = dict(self.opt.get("label") or {})
         label_show = bool(label_opt.get("show", True))
-        c_label = self.labelColor(_text_color("color.text.primary", self.chart))
+        c_label = self.labelColor()
         font = _label_font(self, label_opt)
         p.setFont(font)
         fm = QFontMetricsF(font)
@@ -391,39 +542,62 @@ class GraphSeriesRenderer(SeriesRenderer):
             else None
         )
         for i, (nd, pt) in enumerate(zip(self._nodes, pts)):
+            if i in hidden_indices:
+                continue
             r = nd["size"] / 2
             style = nd.get("item_style") or {}
             raw = style.get("color")
             color = (
-                parse_color(raw)
+                self.resolveColor(raw)
                 if isinstance(raw, str) and raw
-                else parse_color(nd["color"])
+                else (self.visualColor(i) or self.resolveColor(nd["color"]))
             )
             alpha = self.itemOpacity(i)
-            if hovered is not None:
-                if i == hovered or i == self._drag_index:
-                    if i == hovered:
-                        emphasis = self.emphasisColor(i)
-                        if emphasis is not None:
-                            color = emphasis
-                        else:
-                            color = color.lighter(112)
-                elif i != self._drag_index and self.blursOtherItems():
-                    blur = self.blurOpacity()
-                    alpha *= blur if blur is not None else 0.4
+            border_color, border_w = self.itemBorder(i)
+            if border_color is None or border_w <= 0:
+                border_color = QColor(T("color.bg.elevated", self.chart))
+                border_w = 1.5
+            hover_for_state = i if i == self._drag_index else hovered
+            color, alpha, border_color, border_w = self.stateStyle(
+                i, hover_for_state, color, alpha, border_color, border_w
+            )
+            if (
+                legend_hover is not None
+                and self._category_name(nd.get("category"), self._categories)
+                == legend_hover
+            ):
+                emphasis = self.emphasisColor(i)
+                color = emphasis if emphasis is not None else color.lighter(112)
             if alpha < 1.0:
                 color.setAlphaF(color.alphaF() * alpha)
-            p.setPen(QPen(QColor(T("color.bg.elevated", self.chart)), 1.5))
+            p.setPen(QPen(border_color, border_w))
             p.setBrush(color)
-            p.drawEllipse(pt, r, r)
+            kind = str(nd.get("symbol") or "circle")
+            rotate = _to_float(nd.get("symbolRotate"), 0.0)
+            if kind == "none":
+                pass
+            elif kind == "circle" and not rotate:
+                p.drawEllipse(pt, r, r)
+            else:
+                p.save()
+                p.translate(pt)
+                if rotate:
+                    p.rotate(rotate)
+                drawSymbol(p, kind, QPointF(0.0, 0.0), nd["size"])
+                p.restore()
             if label_show and nd["name"]:
-                p.setPen(c_label)
-                tw = fm.horizontalAdvance(nd["name"])
-                p.drawText(
-                    QRectF(pt.x() - tw / 2, pt.y() + r + 2, tw + 4, fm.height()),
-                    Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignTop,
-                    nd["name"],
+                text = self.hierarchyLabelText(
+                    i, nd["name"], nd.get("value"), nd.get("item")
                 )
+                p.setPen(c_label)
+                tw = fm.horizontalAdvance(text)
+                rect = QRectF(pt.x() - tw / 2, pt.y() + r + 2, tw + 4, fm.height())
+                p.drawText(
+                    rect,
+                    Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignTop,
+                    text,
+                )
+                self._label_rects.append((i, rect, text))
         p.restore()
 
     def hitTest(self, pos: QPointF):
@@ -434,6 +608,8 @@ class GraphSeriesRenderer(SeriesRenderer):
         # 命中必须与 ``paint`` 用同一份动画插值，否则动画期会命中还没到位的节点。
         pts = self._animated_points(self._anim_t)
         for i, nd in enumerate(self._nodes):
+            if self._category_hidden(nd):
+                continue
             d = _dist(pos, pts[i])
             if d <= nd["size"] / 2 + 4 and d < best_d:
                 best_d = d
@@ -445,9 +621,9 @@ class GraphSeriesRenderer(SeriesRenderer):
         style = nd.get("item_style") or {}
         raw = style.get("color")
         color = (
-            parse_color(raw)
+            self.resolveColor(raw)
             if isinstance(raw, str) and raw
-            else parse_color(nd["color"])
+            else (self.visualColor(i) or self.resolveColor(nd["color"]))
         )
         return {
             "name": nd["name"],

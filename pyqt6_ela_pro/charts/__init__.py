@@ -28,7 +28,8 @@ from .axes import (
     SingleAxisCoord,
     chartFont,
 )
-from ._tokens import chartToken, ECHARTS_PALETTE
+from ._tokens import chartToken
+from ._theme import ECHARTS_PALETTE as _ECHARTS_PALETTE
 from ._theme import (
     chartThemeSpec,
     chartThemes,
@@ -38,6 +39,12 @@ from ._theme import (
     unregisterChartTheme,
 )
 from .colormaps import colormapColors, colormapNames, registerColormap
+from .geo import mapNames, projectPoint, registerMap, unregisterMap
+from .geo_coord import GeoCoord
+from .gantt_view import ElaGanttView
+from .models import *  # noqa: F403
+from .models import __all__ as _models_all
+from .stream import DataRing
 from .data import (
     ElaNumericBuffer,
     isBufferLike,
@@ -46,8 +53,12 @@ from .data import (
     unwrapData,
 )
 
+#: 公开色板是副本：宿主 append 不会改全局 fallback。
+ECHARTS_PALETTE = list(_ECHARTS_PALETTE)
+
 __all__ = [
     "ElaChartWidget",
+    "ElaGanttView",
     "ChartAnimation",
     "SeriesRenderer",
     "Coord",
@@ -81,13 +92,19 @@ __all__ = [
     "registerColormap",
     "colormapNames",
     "colormapColors",
+    "registerMap",
+    "unregisterMap",
+    "mapNames",
+    "projectPoint",
+    "GeoCoord",
     "SimpleLineSeriesRenderer",
     "ElaNumericBuffer",
+    "DataRing",
     "toBuffer",
     "isBufferLike",
     "unwrapData",
     "numpyAvailable",
-]
+] + list(_models_all)
 
 #: 系列 / 组件模块导入即完成注册
 from . import series_cartesian as _series_cartesian  # noqa: E402,F401

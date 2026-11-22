@@ -16,10 +16,22 @@ from PyQt6.QtGui import (
     QPainter,
 )
 
+from .._style import (
+    LEGEND_ITEM_GAP,
+    LEGEND_ITEM_RADIUS,
+    LEGEND_ITEM_SIZE,
+)
 from .._tokens import (
     T,
 )
-from .._utils import merged_text_style, parse_color, text_italic, text_weight
+from .._utils import (
+    merged_text_style,
+    resolve_color_option,
+    text_italic,
+    text_weight,
+)
+from ..labels import paint_label, resolve_label_option
+from ..models import OptionModel
 from ..axes import (
     chartFont,
 )
@@ -54,7 +66,12 @@ class Legend:
         self.on_toggle = getattr(chart, "_legendSelectToggle", None)
 
     def setOption(self, opt: dict) -> None:
-        if isinstance(opt, dict):
+        if isinstance(opt, OptionModel):
+            model = type(opt).from_dict(opt)
+            model.setdefault("show", True)
+            model.setdefault("orient", "horizontal")
+            self.opt = model
+        elif isinstance(opt, dict):
             merged = {"show": True, "orient": "horizontal"}
             merged.update(opt)
             self.opt = merged
@@ -65,7 +82,12 @@ class Legend:
         self._all_items = [(str(n), c) for n, c in (items or []) if str(n)]
         data = self.opt.get("data")
         if isinstance(data, list) and data:
-            wanted = [str(n) for n in data]
+            wanted = []
+            for n in data:
+                if isinstance(n, dict):
+                    n = n.get("name")
+                if n is not None and str(n):
+                    wanted.append(str(n))
             by_name = dict(self._all_items)
             self._items = [(n, by_name[n]) for n in wanted if n in by_name]
         else:
@@ -73,21 +95,21 @@ class Legend:
 
     def itemWidth(self) -> float:
         try:
-            return max(2.0, float(self.opt.get("itemWidth", 9)))
+            return max(2.0, float(self.opt.get("itemWidth", LEGEND_ITEM_SIZE)))
         except (TypeError, ValueError, OverflowError):
-            return 9.0
+            return LEGEND_ITEM_SIZE
 
     def itemHeight(self) -> float:
         try:
-            return max(2.0, float(self.opt.get("itemHeight", 9)))
+            return max(2.0, float(self.opt.get("itemHeight", LEGEND_ITEM_SIZE)))
         except (TypeError, ValueError, OverflowError):
-            return 9.0
+            return LEGEND_ITEM_SIZE
 
     def itemGap(self) -> float:
         try:
-            return max(2.0, float(self.opt.get("itemGap", 10)))
+            return max(2.0, float(self.opt.get("itemGap", LEGEND_ITEM_GAP)))
         except (TypeError, ValueError, OverflowError):
-            return 10.0
+            return LEGEND_ITEM_GAP
 
     def textStyle(self) -> dict:
         """图例文字样式（组件级优先，未设置的键回退顶层 ``textStyle``）。"""
@@ -141,6 +163,12 @@ class Legend:
             return max(1, int(self.opt.get("maxRows", 3) or 3))
         except (TypeError, ValueError, OverflowError):
             return 3
+
+    def pageIconSize(self) -> float:
+        try:
+            return max(8.0, float(self.opt.get("pageIconSize", 16.0)))
+        except (TypeError, ValueError, OverflowError):
+            return 16.0
 
     def _scroll_type(self) -> bool:
         return str(self.opt.get("type") or "").strip().lower() == "scroll"
@@ -214,7 +242,8 @@ class Legend:
         page_rows = pages[self._page]
         self._page_items = [item for row in page_rows for item in row]
 
-        usable_w = float(rect.width()) - (42.0 if self._paginate else 8.0)
+        icon = self.pageIconSize()
+        usable_w = float(rect.width()) - (icon * 2.0 + 10.0 if self._paginate else 8.0)
         y = rect.top() + 2.0
         for row in page_rows:
             total = sum(self._entry(item[0])[0] for item in row) - gap
@@ -227,8 +256,18 @@ class Legend:
         if self._paginate:
             cy = rect.center().y()
             self._page_rects = [
-                QRectF(rect.right() - 38.0, cy - 8.0, 16.0, 16.0),
-                QRectF(rect.right() - 18.0, cy - 8.0, 16.0, 16.0),
+                QRectF(
+                    rect.right() - icon * 2.0 - 6.0,
+                    cy - icon / 2.0,
+                    icon,
+                    icon,
+                ),
+                QRectF(
+                    rect.right() - icon - 2.0,
+                    cy - icon / 2.0,
+                    icon,
+                    icon,
+                ),
             ]
 
     def hitTest(self, pos: QPointF):
@@ -270,17 +309,31 @@ class Legend:
         font = self._font()
         p.setFont(font)
         style = self.textStyle()
+        raw_style = self.opt.get("textStyle")
+        raw_style = raw_style if isinstance(raw_style, dict) else {}
+        rich_style = resolve_label_option(raw_style, self.chart)
         iw, ih = self.itemWidth(), self.itemHeight()
         for (name, fallback), r in zip(self._page_items, self._item_rects):
             enabled = self.chart._legendItemVisible(name)
             live = self._item_color(name) if enabled else None
-            swatch = parse_color(live) if live is not None else parse_color(fallback)
+            swatch = (
+                resolve_color_option(live, self.chart)
+                if live is not None
+                else resolve_color_option(fallback, self.chart)
+            )
             if not enabled:
-                swatch = QColor(T("color.text.disabled", self.chart))
-            text_c = parse_color(
-                style.get("color") or T("color.text.primary", self.chart)
-                if enabled
-                else T("color.text.disabled", self.chart)
+                swatch = resolve_color_option(
+                    self.opt.get("inactiveColor"),
+                    self.chart,
+                    T("color.text.disabled", self.chart),
+                )
+            text_c = resolve_color_option(
+                style.get("color") if enabled else self.opt.get("inactiveColor"),
+                self.chart,
+                T(
+                    "color.text.secondary" if enabled else "color.text.disabled",
+                    self.chart,
+                ),
             )
             # 悬停高亮：该条目文字转强调色（对齐 Plotly 图例 hover）
             if enabled and self.chart._legend_hover == name:
@@ -288,13 +341,35 @@ class Legend:
             p.setPen(Qt.PenStyle.NoPen)
             p.setBrush(swatch)
             box = QRectF(r.left(), r.center().y() - ih / 2, iw, ih)
-            p.drawRoundedRect(box, 2, 2)
+            radius = min(LEGEND_ITEM_RADIUS, iw / 2, ih / 2)
+            p.drawRoundedRect(box, radius, radius)
             p.setPen(text_c)
-            p.drawText(
-                QRectF(box.right() + 6, r.top(), r.width() - iw - 6, r.height()),
-                Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
-                name,
-            )
+            if rich_style.get("rich"):
+                paint_label(
+                    p,
+                    QRectF(
+                        box.right() + 6,
+                        r.top(),
+                        r.width() - iw - 6,
+                        r.height(),
+                    ),
+                    name,
+                    font=font,
+                    color=text_c,
+                    option=rich_style,
+                    align=Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
+                )
+            else:
+                p.drawText(
+                    QRectF(
+                        box.right() + 6,
+                        r.top(),
+                        r.width() - iw - 6,
+                        r.height(),
+                    ),
+                    Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
+                    name,
+                )
         if self._paginate and len(self._page_rects) == 2:
             p.setPen(QColor(T("color.text.secondary", self.chart)))
             for rect, glyph in zip(self._page_rects, ("‹", "›")):

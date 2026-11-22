@@ -4,14 +4,15 @@ from __future__ import annotations
 
 
 import math
-from datetime import date, datetime, timedelta
+from datetime import datetime, timedelta
 from typing import TYPE_CHECKING
 
 from PyQt6.QtCore import QPointF, QRectF
 from PyQt6.QtGui import QColor, QFont, QPainter
 
 from .._tokens import T
-from .._utils import merged_text_style, parse_color, text_italic, text_weight
+from .._utils import merged_text_style, resolve_color_option, text_italic, text_weight
+from ..models import AxisOption, OptionModel
 from ._shared import (
     _MAX_DATE_YEAR,
     _MAX_TICKS,
@@ -22,6 +23,7 @@ from ._shared import (
     _ms_to_dt,
     _opt_bound,
     _to_float,
+    _to_timestamp,
     chartFont,
     formatValue,
     niceTicks,
@@ -48,7 +50,7 @@ class Coord:
 
     def __init__(self, chart=None, option: dict = None):
         self.chart = chart
-        self.option = dict(option or {})
+        self.option = option if isinstance(option, OptionModel) else dict(option or {})
         self.rect = QRectF()
 
     def layout(self, rect: QRectF) -> None:
@@ -97,8 +99,11 @@ class AxisModel:
         default_type: str = "value",
         chart: "ElaChartWidget" = None,
     ):
-        opt = dict(opt or {})
-        self.opt = opt
+        if isinstance(opt, OptionModel):
+            self.opt = opt
+        else:
+            self.opt = AxisOption.from_dict(opt or {})
+        opt = self.opt
         #: 图表实例（只为读顶层 ``textStyle`` 兜底；单测可直接构造为 None）
         self.chart = chart
         #: 所属网格下标（``gridIndex``，多网格时决定画在哪块网格上）
@@ -123,8 +128,11 @@ class AxisModel:
             self.log_base = float(opt.get("logBase", 10) or 10)
         except (TypeError, ValueError, OverflowError):
             self.log_base = 10.0
-        if not math.isfinite(self.log_base) or self.log_base <= 1.0:
+        # 底数接近 1 会让数量级枚举膨胀到上千万刻度（1.0000001 + 1..10 ≈ 23M）。
+        if not math.isfinite(self.log_base) or self.log_base <= 1.01:
             self.log_base = 10.0
+        #: 当前可见类别在 ``_all_categories`` 中的起始下标（dataZoom 显式写入）
+        self._window_offset = 0
         #: ``windowOffset()`` 的记忆化缓存（类别一变就作废，见 property setter）
         self._window_offset_cache = None
         self.categories = [str(c) for c in (opt.get("data") or [])]
@@ -162,38 +170,14 @@ class AxisModel:
         if raw is None:
             return True
         if isinstance(raw, (list, tuple)):
-            return True
+            # ECharts 数组写法 [startGap, endGap]；[false, false] 必须按关闭处理。
+            return bool(raw[0]) if raw else True
         return bool(raw)
 
     @staticmethod
     def toNumber(value):
         """日期 / ISO 字符串 / 数字 → 毫秒时间戳（失败 None）；数字按毫秒处理。"""
-        if value is None or isinstance(value, bool):
-            return None
-        if isinstance(value, (int, float)):
-            v = float(value)
-            return v if math.isfinite(v) else None
-        if isinstance(value, datetime):
-            return _dt_to_ms(value)
-        if isinstance(value, date):
-            return _dt_to_ms(datetime(value.year, value.month, value.day))
-        if isinstance(value, (list, tuple)):
-            try:
-                parts = [int(v) for v in value[:6]]
-                while len(parts) < 3:
-                    parts.append(1)
-                return _dt_to_ms(datetime(*parts))
-            except (TypeError, ValueError, OverflowError):
-                return None
-        if isinstance(value, str):
-            text = value.strip()
-            if not text:
-                return None
-            try:
-                return _dt_to_ms(datetime.fromisoformat(text.replace("/", "-")))
-            except (TypeError, ValueError, OverflowError):
-                return None
-        return None
+        return _to_timestamp(value)
 
     @staticmethod
     def _addMonths(dt: datetime, months: int) -> datetime:
@@ -267,7 +251,10 @@ class AxisModel:
                 if end.year + months <= _MAX_DATE_YEAR:
                     end = end.replace(year=end.year + months)
             else:
-                end = end + timedelta(milliseconds=step_ms)
+                try:
+                    end = end + timedelta(milliseconds=step_ms)
+                except OverflowError:
+                    end = datetime.max
         ticks = []
         cursor = start
         limit = 2000
@@ -283,8 +270,17 @@ class AxisModel:
                 cursor = cursor.replace(year=cursor.year + months)
             else:
                 cursor = cursor + timedelta(milliseconds=step_ms)
+        if ticks and ticks[-1] < hi and len(ticks) < limit:
+            # 末刻度不落在数据端点上时再补一格：否则 vmax < 数据最大值，
+            # 末端数据（甘特里程碑 / 折线最后一点）会画到绘图区外。
+            try:
+                next_ms = _dt_to_ms(cursor)
+                if next_ms > ticks[-1]:
+                    ticks.append(next_ms)
+            except (OverflowError, ValueError):
+                pass
         if len(ticks) < 2:
-            ticks = [_dt_to_ms(start), _dt_to_ms(end)]
+            ticks = [_dt_to_ms(start), max(_dt_to_ms(end), hi)]
         return (
             ticks[0],
             ticks[-1],
@@ -304,6 +300,10 @@ class AxisModel:
             lo, hi = 0.0, 86400000.0
         if hi <= lo:
             hi = lo + 86400000.0
+        try:
+            segments = max(1, int(self.opt.get("splitNumber", segments)))
+        except (TypeError, ValueError, OverflowError):
+            segments = 5
         self.vmin, self.vmax, self._ticks, self._time_step_ms, self._time_kind = (
             self._time_ticks(lo, hi, segments)
         )
@@ -413,6 +413,10 @@ class AxisModel:
             self.vmin, self.vmax, self._ticks = niceTicks(
                 self.vmin, self.vmax, segments
             )
+        # 用户 min/max 只覆盖端点，niceTicks 的刻度可能落在区间外；画出去
+        # 会压到相邻网格 / 边距里，必须裁掉。
+        ticks = [t for t in self._ticks if self.vmin <= t <= self.vmax]
+        self._ticks = ticks if len(ticks) >= 2 else [self.vmin, self.vmax]
 
     def setFixedExtent(self, lo: float, hi: float, segments: int = 5) -> None:
         """把 value 轴固定到精确范围（image 系列专用：不向 nice 刻度外扩）。
@@ -502,8 +506,13 @@ class AxisModel:
         if e1 <= e0:
             e1 = e0 + 1
         # 主轴范围扩到整数量级；用户显式 min/max 时保留用户边界。
-        nice_lo = self.log_base**e0
-        nice_hi = self.log_base**e1
+        try:
+            nice_lo = self.log_base**e0
+            nice_hi = self.log_base**e1
+        except OverflowError:
+            nice_lo, nice_hi = lo, hi
+        if not (math.isfinite(nice_lo) and math.isfinite(nice_hi)):
+            nice_lo, nice_hi = lo, hi
         if user_lo is not None and user_lo > 0.0:
             nice_lo = lo
         if user_hi is not None and user_hi > 0.0:
@@ -577,35 +586,18 @@ class AxisModel:
             frac = 1.0 - frac
         return start + (end - start) * frac
 
-    def fraction(self, value) -> float:
-        """数据值 → 0..1 归一化位置（log 轴走对数空间；无效值返回 NaN）。"""
-        if self.is_time:
-            value = self.toNumber(value)
-            if value is None:
-                return float("nan")
-        v = _to_float(value, None)
-        if v is None:
-            return float("nan")
-        if self.type == "log":
-            if v <= 0.0 or self.vmin <= 0.0 or self.vmax <= 0.0:
-                return float("nan")
-            lo, hi = math.log(self.vmin), math.log(self.vmax)
-            if hi == lo:
-                return 0.0
-            return (math.log(v) - lo) / (hi - lo)
-        span = self.vmax - self.vmin
-        if span == 0:
-            return 0.0
-        return (v - self.vmin) / span
-
     def setWindow(
         self, full_min: float, full_max: float, start: float, end: float
     ) -> None:
         """按 dataZoom 的 0-100 窗口重设轴范围与刻度（log 轴在对数空间插值）。"""
         if self.type == "category":
             return
-        lo = _to_float(full_min, self.vmin)
-        hi = _to_float(full_max, self.vmax)
+        fixed = self._fixed_extent
+        if fixed is not None:
+            lo, hi = float(fixed[0]), float(fixed[1])
+        else:
+            lo = _to_float(full_min, self.vmin)
+            hi = _to_float(full_max, self.vmax)
         if lo is None or hi is None or hi <= lo:
             return
         start = max(0.0, min(100.0, float(start)))
@@ -633,8 +625,12 @@ class AxisModel:
             span = hi - lo
             a = lo + span * start / 100.0
             b = lo + span * end / 100.0
+            try:
+                segments = max(1, int(self.opt.get("splitNumber", 5)))
+            except (TypeError, ValueError, OverflowError):
+                segments = 5
             self.vmin, self.vmax, self._ticks, self._time_step_ms, self._time_kind = (
-                self._time_ticks(a, max(a, b), 5)
+                self._time_ticks(a, max(a, b), segments)
             )
             return
         if self.type == "log":
@@ -656,9 +652,9 @@ class AxisModel:
         # 用户 ``min`` / ``max`` 优先；少了这一步柱子基线会被裁掉。
         user_lo = _opt_bound(self.min)
         user_hi = _opt_bound(self.max)
-        if user_lo is None and lo > 0 and not self.scale:
+        if fixed is None and user_lo is None and lo > 0 and not self.scale:
             lo = 0.0
-        if user_hi is None and hi < 0 and not self.scale:
+        if fixed is None and user_hi is None and hi < 0 and not self.scale:
             hi = 0.0
         if user_lo is not None:
             lo = user_lo
@@ -678,7 +674,14 @@ class AxisModel:
         # 只取刻度、不用 niceTicks 的扩展端点：它会向外扩到 step 边界，
         # 窗口就被抹平成全量。
         _, _, self._ticks = niceTicks(self.vmin, self.vmax, segments)
+        req_min, req_max = self.vmin, self.vmax
         self._apply_interval_constraints()
+        if self._windowed:
+            # minInterval 会把窗口扩到 interval 边界；缩放态必须保留用户
+            # 选中的百分比窗口，否则滑块与可视范围对不上。
+            self.vmin, self.vmax = req_min, req_max
+        ticks = [t for t in self._ticks if self.vmin <= t <= self.vmax]
+        self._ticks = ticks if len(ticks) >= 2 else [self.vmin, self.vmax]
 
     def bandWidth(self, start: float, end: float) -> float:
         """category 轴单个 band 的像素宽度（value 轴返回 0）。"""
@@ -713,26 +716,33 @@ class AxisModel:
     @categories.setter
     def categories(self, value) -> None:
         self._categories = value
-        # 可见类别换了，窗口偏移的线性扫描结果作废
+        # 可见类别换了：先按首名回退（手动切片 / 单测），dataZoom 随后用
+        # setWindowOffset() 写入精确下标（重复类目名时以显式值为准）。
+        self._window_offset = 0
         self._window_offset_cache = None
+        all_cats = getattr(self, "_all_categories", None) or []
+        if value and all_cats:
+            try:
+                self._window_offset = all_cats.index(value[0])
+            except ValueError:
+                self._window_offset = 0
+
+    def setWindowOffset(self, offset: int) -> None:
+        """显式设置可见类别在全量类别中的起始下标（dataZoom 窗口用）。
+
+        不能靠 ``categories[0]`` 反查：重复类目名会被 ``list.index`` 吸到第一次
+        出现的位置，整条线 / 柱会左移。
+        """
+        try:
+            value = max(0, int(offset))
+        except (TypeError, ValueError, OverflowError):
+            value = 0
+        self._window_offset = value
+        self._window_offset_cache = value
 
     def windowOffset(self) -> int:
-        """dataZoom 类别窗口在全量类别中的起始下标（无窗口时 0）。
-        必须记忆化：实现是 ``_all_categories.index(categories[0])`` 线性扫描，
-        而它被 ``localIndex`` 逐点调用。缓存随 ``categories`` 赋值作废。
-        """
-        cached = self._window_offset_cache
-        if cached is not None:
-            return cached
-        all_cats = getattr(self, "_all_categories", None) or []
-        offset = 0
-        if self.categories and all_cats:
-            try:
-                offset = all_cats.index(self.categories[0])
-            except ValueError:
-                offset = 0
-        self._window_offset_cache = offset
-        return offset
+        """dataZoom 类别窗口在全量类别中的起始下标（无窗口时 0）。"""
+        return int(self._window_offset)
 
     def invert(self, px: float, start: float, end: float):
         """像素 → 数据值（category 返回窗口内下标，越界收敛到窗口边缘）。"""
@@ -757,6 +767,37 @@ class AxisModel:
     def axisLabelOption(self) -> dict:
         opt = self.opt.get("axisLabel")
         return opt if isinstance(opt, dict) else {}
+
+    def labelPaintOption(self) -> dict:
+        """``axisLabel`` 的 rich / 背景 / 边框（颜色已解析）。"""
+        option = dict(self.axisLabelOption())
+        for key in ("color", "backgroundColor", "borderColor"):
+            value = option.get(key)
+            if isinstance(value, str) and value.strip():
+                color = resolve_color_option(value, self.chart)
+                if color.isValid():
+                    option[key] = color
+        rich = option.get("rich")
+        if isinstance(rich, dict):
+            resolved = {}
+            for name, style in rich.items():
+                if not isinstance(style, dict):
+                    resolved[name] = style
+                    continue
+                local = dict(style)
+                for key in ("color", "backgroundColor", "borderColor"):
+                    value = local.get(key)
+                    if isinstance(value, str) and value.strip():
+                        color = resolve_color_option(value, self.chart)
+                        if color.isValid():
+                            local[key] = color
+                resolved[name] = local
+            option["rich"] = resolved
+        return option
+
+    def labelHasRich(self) -> bool:
+        rich = self.axisLabelOption().get("rich")
+        return isinstance(rich, dict) and bool(rich)
 
     def axisTickOption(self) -> dict:
         opt = self.opt.get("axisTick")
@@ -876,7 +917,7 @@ class AxisModel:
         """axisLabel 文本色（``axisLabel.color`` → 顶层 ``textStyle.color`` → 次级文本色）。"""
         raw = merged_text_style(self.chart, self.axisLabelOption()).get("color")
         if isinstance(raw, str) and raw:
-            color = parse_color(raw)
+            color = resolve_color_option(raw, self.chart)
             if color.isValid():
                 return color
         return QColor(T("color.text.secondary", self.chart))

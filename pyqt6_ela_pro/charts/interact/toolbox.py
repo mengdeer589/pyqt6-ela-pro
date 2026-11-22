@@ -13,6 +13,7 @@ from ..._internal import is_deleted
 from ..._styles import coerceElaIcon
 from ...tooltips import ElaToolTipPositionType, set_tooltip
 from .._utils import warn_key, warn_once
+from ..models import OptionModel
 
 
 class ToolboxComponent:
@@ -40,6 +41,7 @@ class ToolboxComponent:
         "zoomIn",
         "zoomOut",
         "magicType",
+        "dataView",
     )
 
     #: 功能 → Ela 图标（``ElaIconType.IconName``）
@@ -51,6 +53,7 @@ class ToolboxComponent:
         "zoomIn": ElaIconType.IconName.MagnifyingGlassPlus,
         "zoomOut": ElaIconType.IconName.MagnifyingGlassMinus,
         "magicType": ElaIconType.IconName.ChartMixed,
+        "dataView": ElaIconType.IconName.Table,
     }
 
     #: 功能 → 提示文案（``toolTip`` 与 ``accessibleName`` 共用）
@@ -62,20 +65,24 @@ class ToolboxComponent:
         "zoomIn": "放大",
         "zoomOut": "缩小",
         "magicType": "切换图表类型",
+        "dataView": "查看数据",
     }
 
     def __init__(self, chart, opt):
         self.chart = chart
-        self.opt = dict(opt or {})
+        self.opt = opt if isinstance(opt, OptionModel) else dict(opt or {})
         feat = self.opt.get("feature")
-        names = []
-        if isinstance(feat, dict):
-            names = [k for k, v in feat.items() if v]
+        if feat is None:
+            names = [n for n in self._KNOWN if n != "dataView"]
+        elif isinstance(feat, dict):
+            # ECharts 规范写法是 {"saveAsImage": {}}：空 dict 代表启用，
+            # 不能用真值判断，否则会误开全部功能。
+            names = [k for k, v in feat.items() if v is not False]
         elif isinstance(feat, (list, tuple)):
             names = [str(f) for f in feat]
         else:
-            names = list(self._KNOWN)
-        self.features = [n for n in names if n in self._KNOWN] or list(self._KNOWN)
+            names = []
+        self.features = [n for n in names if n in self._KNOWN]
         #: 动作回调（可注入）：fn(feature_name)
         self.on_action = None
         #: 最近一次 saveAsImage / saveAsSvg 的保存路径
@@ -88,6 +95,11 @@ class ToolboxComponent:
     def layout(self, rect: QRectF) -> None:
         """把按钮摆到绘图区右上角（每次布局幂等重放，不重建控件）。"""
         self._buttons = []
+        if self.opt.get("show", True) is False:
+            for button in self._widgets.values():
+                if not is_deleted(button):
+                    button.hide()
+            return
         count = len(self.features)
         if count <= 0:
             return
@@ -167,7 +179,18 @@ class ToolboxComponent:
                 button.setEnabled(enabled)
 
     def trigger(self, name: str) -> None:
-        """执行指定功能（按钮点击或外部调用）。"""
+        """执行指定功能（按钮点击或外部调用；异常不能穿出 Qt 槽）。"""
+        try:
+            self._trigger_impl(name)
+        except Exception as exc:
+            warn_once(
+                warn_key("toolbox-trigger", str(name), type(exc).__name__),
+                f"toolbox 动作失败（{name}）: {exc!r}",
+            )
+
+    def _trigger_impl(self, name: str) -> None:
+        if self.opt.get("show", True) is False:
+            return
         if callable(self.on_action):
             try:
                 self.on_action(name)
@@ -185,6 +208,8 @@ class ToolboxComponent:
             self.chart.zoomStep(1.0 / 0.7)
         elif name == "magicType":
             self.chart.toggleMagicType()
+        elif name == "dataView":
+            self._show_data_view()
         elif name == "dataZoom":
             cur = bool(getattr(self.chart, "_dataZoomEnabled", True))
             self.chart._dataZoomEnabled = not cur
@@ -205,6 +230,41 @@ class ToolboxComponent:
         else:
             path = self.chart.saveImage()
         self.last_saved = path or None
+
+    def _show_data_view(self) -> None:
+        """打开只读数据视图（ECharts toolbox ``dataView``）。"""
+        try:
+            import json
+
+            from PyQt6.QtCore import Qt
+            from PyQt6.QtWidgets import (
+                QDialog,
+                QPlainTextEdit,
+                QVBoxLayout,
+            )
+        except ImportError:
+            return
+        try:
+            dialog = QDialog(self.chart)
+            dialog.setWindowTitle("数据视图")
+            dialog.resize(560, 420)
+            layout = QVBoxLayout(dialog)
+            editor = QPlainTextEdit(dialog)
+            editor.setReadOnly(True)
+            editor.setPlainText(
+                json.dumps(
+                    self.chart.getOptionDict(),
+                    ensure_ascii=False,
+                    indent=2,
+                    default=str,
+                )
+            )
+            layout.addWidget(editor)
+            dialog.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose, True)
+            self._data_view = dialog
+            dialog.show()
+        except Exception:
+            pass
 
     def _restore(self) -> None:
         """恢复初始状态（经 chart._restore_state 统一复位并发出 restore 事件）。"""

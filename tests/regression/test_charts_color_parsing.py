@@ -63,3 +63,21 @@ def test_no_dynamic_single_arg_qcolor():
             problems.append(f"{rel}:{lineno}: QColor({expr}) → 改用 parse_color(...)")
     assert scanned > 30, f"只扫到 {scanned} 个文件，路径守卫可能失效"
     assert not problems, "颜色字符串必须经 parse_color 解析：\n" + "\n".join(problems)
+
+
+def test_option_colors_use_theme_resolver():
+    """``xxx.get("color")`` 走 ``parse_color`` 时 ``color.*`` 令牌会画成黑色。"""
+    problems = []
+    for path in sorted(_CHARTS.rglob("*.py")):
+        if path.name in _EXEMPT_FILES:
+            continue
+        rel = path.relative_to(_CHARTS.parent.parent).as_posix()
+        for lineno, line in enumerate(
+            path.read_text(encoding="utf-8").splitlines(), start=1
+        ):
+            if "parse_color(" in line and '.get("' in line:
+                problems.append(f"{rel}:{lineno}: {line.strip()}")
+    assert not problems, (
+        "option / 主题颜色必须经 resolve_color_option(..., chart) 解析：\n"
+        + "\n".join(problems)
+    )

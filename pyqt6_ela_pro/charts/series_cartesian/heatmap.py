@@ -39,7 +39,7 @@ class HeatmapSeriesRenderer(SeriesRenderer):
     def _parse_items(self):
         """→ [(x, y, value, text, style)]（日历模式 y 为 None，x 为日期）。"""
         out = []
-        for item in self.data():
+        for data_index, item in enumerate(self.data()):
             text = None
             if isinstance(item, dict):
                 v = item.get("value")
@@ -56,13 +56,13 @@ class HeatmapSeriesRenderer(SeriesRenderer):
             if self._calendar:
                 val = _to_float(v[1], None)
                 if val is not None:
-                    out.append((v[0], None, val, text, style))
+                    out.append((data_index, v[0], None, val, text, style))
             else:
                 if len(v) < 3:
                     continue
                 val = _to_float(v[2], None)
                 if val is not None:
-                    out.append((v[0], v[1], val, text, style))
+                    out.append((data_index, v[0], v[1], val, text, style))
         return out
 
     def _colors_and_range(self, items):
@@ -88,7 +88,7 @@ class HeatmapSeriesRenderer(SeriesRenderer):
                     colors = in_range["colors"]
         if colors is None:
             colors = theme_ramp(self.chart)
-        vals = [v for _, _, v, _, _ in items]
+        vals = [v for _, _, _, v, _, _ in items]
         if vmin is None:
             vmin = min(vals) if vals else 0.0
         if vmax is None:
@@ -102,7 +102,7 @@ class HeatmapSeriesRenderer(SeriesRenderer):
         if isinstance(raw_empty, str) and raw_empty.lower() in ("none", "transparent"):
             self._empty_color = None
         elif raw_empty:
-            color = parse_color(raw_empty)
+            color = self.resolveColor(raw_empty)
             self._empty_color = (
                 color if color.isValid() else QColor(T("color.bg.muted", self.chart))
             )
@@ -149,7 +149,7 @@ class HeatmapSeriesRenderer(SeriesRenderer):
             t = 0.5 if span == 0 else (value - vmin) / span
             raw = item_style.get("color")
             color = (
-                parse_color(raw)
+                self.resolveColor(raw)
                 if isinstance(raw, str) and raw
                 else ramp_color(colors, t, self.chart)
             )
@@ -161,7 +161,7 @@ class HeatmapSeriesRenderer(SeriesRenderer):
                 except (TypeError, ValueError, OverflowError):
                     raw_width = 0.0
                 if isinstance(raw_border, str) and raw_border:
-                    border_color = parse_color(raw_border)
+                    border_color = self.resolveColor(raw_border)
                     border_w = max(0.0, raw_width)
             cells.append(
                 {
@@ -176,7 +176,6 @@ class HeatmapSeriesRenderer(SeriesRenderer):
                     "empty": False,
                 }
             )
-            data_index += 1
         return cells
 
     def layout(self, rect: QRectF) -> None:
@@ -191,13 +190,13 @@ class HeatmapSeriesRenderer(SeriesRenderer):
         if self._calendar:
             self._load_calendar_style(coord)
             data_map = {}
-            for data_index, (x, _y, val, text, style) in enumerate(items):
+            for orig, x, _y, val, text, style in items:
                 day = coord._parse_date(x)
                 if day is not None:
-                    data_map[day] = (val, text, style, data_index)
+                    data_map[day] = (val, text, style, orig)
             self._cells = self._calendar_cells(coord, data_map, colors, vmin, vmax)
             return
-        for data_index, (x, y, val, text, _style) in enumerate(items):
+        for orig, x, y, val, text, _style in items:
             if not isinstance(coord, GridCoord):
                 continue
             t = 0.5 if span == 0 else (val - vmin) / span
@@ -208,14 +207,14 @@ class HeatmapSeriesRenderer(SeriesRenderer):
             bh = coord.y_axis.bandWidth(coord.plot.bottom(), coord.plot.top()) or 10.0
             label = f"{_axis_label(coord.x_axis, x)}, {_axis_label(coord.y_axis, y)}"
             cell = QRectF(px - bw / 2 + 1, py - bh / 2 + 1, bw - 2, bh - 2)
-            border_color, border_w = self.itemBorder(data_index)
+            border_color, border_w = self.itemBorder(orig)
             self._cells.append(
                 {
-                    "index": data_index,
+                    "index": orig,
                     "rect": cell,
                     "value": val,
                     "label": label,
-                    "color": self.itemColor(data_index, default=color),
+                    "color": self.itemColor(orig, default=color),
                     "border": (border_color, border_w),
                     "tooltipFormatter": text,
                     "empty": False,
@@ -241,7 +240,6 @@ class HeatmapSeriesRenderer(SeriesRenderer):
             font = self.labelFont()
             p.setFont(font)
             fm = QFontMetricsF(font)
-            label_color = self.labelColor()
             label_rotate_angle = label_rotate(self.labelOption())
         radius = self._cell_radius if self._calendar else 0.0
         for cell in self._cells:
@@ -255,6 +253,11 @@ class HeatmapSeriesRenderer(SeriesRenderer):
                 if border_color is None or border_w <= 0:
                     border_color = c.darker(130)
                     border_w = 1.0
+            c, alpha, border_color, border_w = self.selectedStyle(
+                cell.get("index"), c, 1.0, border_color, border_w
+            )
+            if alpha < 1.0:
+                c.setAlphaF(c.alphaF() * alpha)
             if border_color is not None and border_w > 0:
                 p.setPen(QPen(border_color, border_w))
             else:
@@ -271,14 +274,19 @@ class HeatmapSeriesRenderer(SeriesRenderer):
                     rect.width() >= fm.horizontalAdvance(text) + 4
                     and rect.height() >= fm.height()
                 ):
-                    p.setPen(label_color)
+                    p.setPen(self.contrastLabelColor(c, cell["index"]))
                     hit = paint_label_in(
                         p,
                         rect,
                         text,
                         label_rotate_angle,
                         Qt.AlignmentFlag.AlignCenter,
+                        series=self,
+                        index=cell["index"],
+                        color=self.contrastLabelColor(c, cell["index"]),
                     )
+                    if hit.isNull():
+                        continue
                     self._label_rects.append((cell["index"], hit, text))
         p.restore()
 

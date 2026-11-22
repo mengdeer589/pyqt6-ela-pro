@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from PyQt6.QtGui import QColor
 
-from ._colors import _contrast_ratio
+from ._colors import contrastRatio
 from ._theme import ElaStatusRoleType, statusColor, surfaceRaised, textMuted
 
 __all__ = ["calloutColors", "diffColors"]
@@ -13,14 +13,14 @@ __all__ = ["calloutColors", "diffColors"]
 def _readable(color: QColor, background: QColor, minimum: float = 4.5) -> QColor:
     """把内容前景色沿 HSL 亮度推到与背景 ≥ ``minimum`` 对比度。"""
     out = QColor(color)
-    if _contrast_ratio(out, background) >= minimum:
+    if contrastRatio(out, background) >= minimum:
         return out
     hue, sat, light, alpha = out.getHslF()
     step = 0.04 if background.lightness() < 128 else -0.04
     for _ in range(24):
         light = min(1.0, max(0.0, light + step))
         out.setHslF(hue, sat, light, alpha)
-        if _contrast_ratio(out, background) >= minimum:
+        if contrastRatio(out, background) >= minimum:
             break
     return out
 

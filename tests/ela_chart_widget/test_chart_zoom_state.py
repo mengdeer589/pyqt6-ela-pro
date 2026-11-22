@@ -27,7 +27,10 @@ class TestZoomState:
     def test_set_option_keeps_user_window(self, qapp, make):
         chart = _chart(make)
         chart.dispatchAction({"type": "dataZoom", "start": 20, "end": 60})
-        assert (chart._component("dataZoom").start, chart._component("dataZoom").end) == (
+        assert (
+            chart._component("dataZoom").start,
+            chart._component("dataZoom").end,
+        ) == (
             20.0,
             60.0,
         )
@@ -45,9 +48,7 @@ class TestZoomState:
     def test_explicit_data_zoom_change_wins(self, qapp, make):
         chart = _chart(make)
         chart.dispatchAction({"type": "dataZoom", "start": 20, "end": 60})
-        chart.setOption(
-            {"dataZoom": [{"type": "inside", "start": 5, "end": 25}]}
-        )
+        chart.setOption({"dataZoom": [{"type": "inside", "start": 5, "end": 25}]})
         zoom = chart._component("dataZoom")
         assert (zoom.start, zoom.end) == (5.0, 25.0)
 

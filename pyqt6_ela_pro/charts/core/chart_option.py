@@ -7,14 +7,18 @@ from typing import TYPE_CHECKING, Optional
 
 import copy
 import math
+import time
 
 from ..._internal import is_deleted
 from PyQt6.QtCore import (
+    QRectF,
     QTimer,
 )
 
 from .. import data as _cdata
 from ..data import ElaNumericBuffer
+from ..dataset import expandDataset
+from ..geo_coord import GeoCoord
 from ..option import (
     _animation_enabled,
     _copy_any,
@@ -31,10 +35,12 @@ from .._tokens import (
 from .._utils import component_opt as _component_opt
 from .._utils import component_options as _component_options
 from .._utils import grid_options as _grid_options
-from .._utils import parse_color
+from .._utils import resolve_color_option
 from .._utils import single_option
 from .._utils import text_weight
 from .._utils import warn_key, warn_once
+from ..models import ActionPayload, ChartOption, OptionIssue
+from ..stream import DataRing, ring_points
 from ..axes import (
     AxisModel,
     CalendarCoord,
@@ -70,6 +76,153 @@ _AXIS_OPTION_KEYS = {
 class _ChartOptionMixin:
     """方法组 mixin：状态由 ``ElaChartWidget.__init__`` 建立。"""
 
+    @staticmethod
+    def _realtime_value(item):
+        raw = item.get("value") if isinstance(item, dict) else item
+        if isinstance(raw, (list, tuple)):
+            raw = raw[-1] if raw else None
+        try:
+            return float(raw)
+        except (TypeError, ValueError, OverflowError):
+            return float("-inf")
+
+    def _apply_realtime_sort(self, option) -> None:
+        """``realtimeSort``：按值重排类目轴与 bar 数据（单图内静态排序）。"""
+        series = [s for s in (option.get("series") or []) if isinstance(s, dict)]
+        bar = next(
+            (
+                s
+                for s in series
+                if str(s.get("type") or "") == "bar" and bool(s.get("realtimeSort"))
+            ),
+            None,
+        )
+        if bar is None:
+            return
+        data = bar.get("data")
+        if not isinstance(data, list) or not data:
+            return
+        x_axis = option.get("xAxis")
+        y_axis = option.get("yAxis")
+        horizontal = (
+            isinstance(x_axis, dict)
+            and str(x_axis.get("type") or "") == "value"
+            and isinstance(y_axis, dict)
+            and str(y_axis.get("type") or "category") == "category"
+        )
+        axis = y_axis if horizontal else x_axis
+        if not isinstance(axis, dict):
+            return
+        categories = axis.get("data")
+        if not isinstance(categories, list) or len(categories) != len(data):
+            return
+        order = sorted(
+            range(len(data)),
+            key=lambda index: self._realtime_value(data[index]),
+            reverse=True,
+        )
+        axis["data"] = [categories[index] for index in order]
+        for item in series:
+            content = item.get("data")
+            if (
+                str(item.get("type") or "") == "bar"
+                and isinstance(content, list)
+                and len(content) == len(order)
+            ):
+                item["data"] = [content[index] for index in order]
+
+    @staticmethod
+    def _universal_config(option) -> dict:
+        """``universalTransition`` 配置；未启用返回 None。"""
+        raw = option.get("universalTransition")
+        if raw is None:
+            for series in option.get("series") or []:
+                if isinstance(series, dict):
+                    raw = series.get("universalTransition")
+                    if raw is not None:
+                        break
+        if raw is None or raw is False:
+            return None
+        duration = 300.0
+        if isinstance(raw, dict):
+            if raw.get("enabled") is False:
+                return None
+            value = raw.get("duration")
+            if value is None:
+                value = option.get("animationDurationUpdate")
+            try:
+                duration = max(0.0, float(value))
+            except (TypeError, ValueError, OverflowError):
+                duration = 300.0
+        return {"duration": duration}
+
+    def _begin_universal_transition(
+        self, image, duration: float = 300.0, morph=None
+    ) -> None:
+        """开始旧系列层 → 新系列层的交叉淡出 / 几何形变。"""
+        if self._disposed or image is None or image.isNull():
+            return
+        self._universal_prev = image
+        self._universal_morph = morph
+        self._universal_t = 0.0
+        self._universal_started = time.perf_counter()
+        self._universal_duration = max(0.0, float(duration or 0.0))
+        if self._universal_duration <= 0.0:
+            self._universal_prev = None
+            self._universal_t = 1.0
+            return
+        self._universal_timer.start()
+
+    def _tick_universal(self) -> None:
+        if self._disposed:
+            return
+        try:
+            now = time.perf_counter()
+            if self._universal_prev is not None or self._universal_morph is not None:
+                elapsed = (now - self._universal_started) * 1000.0
+                if self._universal_duration <= 0.0:
+                    self._universal_t = 1.0
+                else:
+                    self._universal_t = min(
+                        1.0, max(0.0, elapsed / self._universal_duration)
+                    )
+                if self._universal_t >= 1.0:
+                    self._universal_prev = None
+                    self._universal_morph = None
+            if self._incoming_morph is not None:
+                elapsed = (now - self._incoming_started) * 1000.0
+                if self._incoming_duration <= 0.0:
+                    self._incoming_t = 1.0
+                else:
+                    self._incoming_t = min(
+                        1.0, max(0.0, elapsed / self._incoming_duration)
+                    )
+                if self._incoming_t >= 1.0:
+                    self._incoming_morph = None
+            if (
+                self._universal_prev is None
+                and self._universal_morph is None
+                and self._incoming_morph is None
+            ):
+                self._universal_timer.stop()
+            self.update()
+        except Exception:
+            self._universal_timer.stop()
+
+    def _capture_morph_snapshot(self):
+        snapshots = []
+        for renderer in self._series:
+            snapshot = getattr(renderer, "morphSnapshot", None)
+            if not callable(snapshot):
+                continue
+            try:
+                value = snapshot()
+            except Exception:
+                value = None
+            if value:
+                snapshots.append((renderer.name, value))
+        return snapshots or None
+
     def setOption(
         self, option: dict, notMerge: bool = False, lazyUpdate: bool = False
     ) -> "ElaChartWidget":
@@ -84,15 +237,49 @@ class _ChartOptionMixin:
         :returns: self（支持链式调用）
         """
         self._ensure_alive()
-        if not isinstance(option, dict):
-            option = {}
-        prev_list, prev_by_name = self._capture_prev_data(option)
+        if isinstance(option, ChartOption):
+            model = option
+        elif isinstance(option, dict):
+            model = ChartOption.from_dict(option)
+        else:
+            model = ChartOption()
+        model = expandDataset(
+            model,
+            base=None if notMerge else self._option,
+        )
+        option = model
+        self._apply_realtime_sort(option)
+        universal = None
+        cross = None
+        if not lazyUpdate:
+            config = self._universal_config(option)
+            if config is None and not notMerge:
+                config = self._universal_config(self._option)
+            if config is not None and self._series:
+                image = self._capture_series_image()
+                morph = self._capture_morph_snapshot()
+                if image is not None:
+                    universal = (image, config["duration"], morph)
+                coord = self.primaryCoord()
+                plot = getattr(coord, "plot", None)
+                cross = {
+                    "image": image,
+                    "size": (self.width(), self.height()),
+                    "plot": QRectF(plot) if isinstance(plot, QRectF) else QRectF(),
+                    "morph": morph,
+                    "duration": config["duration"],
+                }
+        prev_list, prev_by_name = (
+            (None, None) if lazyUpdate else self._capture_prev_data(option)
+        )
         if notMerge:
             # 先包成紧凑存储再存入，否则深拷贝会逐元素复制百万级 list。
-            self._option = _copy_option_shallow_arrays(option)
+            self._option = ChartOption.from_dict(_copy_option_shallow_arrays(option))
             self._series_state = {}
             self._item_state = {}
             self._timeline_base = None
+            self._timeline_index = 0
+            self._timeline_playing = False
             self._zoom_opt_snapshot = None  # 全量替换 = 缩放复位
             self._selection = {}
             self._selection_epoch += 1
@@ -103,6 +290,7 @@ class _ChartOptionMixin:
             self._reset_host_zoom = True
         else:
             _merge_option(self._option, option)
+            self._option = ChartOption.from_dict(self._option)
         # 版本号必须由 ``_rebuild`` 递增：``lazyUpdate`` 会在重建前返回，
         # 提前递增会让旧渲染器把位图存进新键，重建后同键命中旧数据。
         self._update_timeline_base(option)
@@ -111,13 +299,23 @@ class _ChartOptionMixin:
             self._schedule_lazy_option()
         else:
             self._apply_option(prev_list, prev_by_name)
+        if universal is not None:
+            self._begin_universal_transition(*universal)
+        if cross is not None:
+            self._publish_universal(cross)
         return self
+
+    def _publish_universal(self, payload: dict) -> None:
+        """把旧几何 / 截图广播给同组图表（跨图 ``universalTransition``）。"""
+        if self._group:
+            self._broadcastGroup("universalTransition", payload)
 
     def setFontFamily(self, family) -> None:
         """设置全图字体族（单个族名；``None`` / 空串恢复系统默认）。
         只接受单族：多族在 Win7 上走慢 shaping 路径且进程级毒化。只失效布局
         缓存并重绘，不重建组件。
         """
+        self._ensure_alive()
         self._font_family = single_font_family(family)
         self.invalidateLayout()
         self.update()
@@ -213,7 +411,10 @@ class _ChartOptionMixin:
                 return False
             patch["fontWeight"] = weight
         if color is not None:
-            if not isinstance(color, str) or not parse_color(color).isValid():
+            if (
+                not isinstance(color, str)
+                or not resolve_color_option(color, self).isValid()
+            ):
                 return False
             patch["color"] = color.strip()
         if fontFamily is not None:
@@ -413,8 +614,14 @@ class _ChartOptionMixin:
         if self._disposed or is_deleted(self) or not self._lazy_pending:
             return
         self._lazy_pending = False
-        prev_list, prev_by_name = self._capture_prev_data({})
-        self._apply_option(prev_list, prev_by_name)
+        try:
+            prev_list, prev_by_name = self._capture_prev_data({})
+            self._apply_option(prev_list, prev_by_name)
+        except Exception as exc:
+            warn_once(
+                warn_key("lazy-update", type(exc).__name__),
+                f"lazyUpdate 重建失败: {exc!r}",
+            )
 
     def _capture_timeline_base(self) -> None:
         """捕获 timeline 基线：``baseOption``（优先）或除 ``options`` 外的顶层键。
@@ -462,7 +669,7 @@ class _ChartOptionMixin:
             if key in ("options", "baseOption"):
                 continue
             if key in ("series", "dataZoom", "graphic") and isinstance(value, list):
-                self._timeline_base[key] = _copy_any(value)
+                _merge_option(self._timeline_base, {key: value})
                 continue
             if isinstance(value, dict) and isinstance(
                 self._timeline_base.get(key), dict
@@ -496,7 +703,9 @@ class _ChartOptionMixin:
         if not isinstance(frame, dict):
             return
         effective = _copy_any(self._timeline_base)
-        _deep_merge(effective, frame)
+        # 帧必须走 setOption 合并语义：``series`` / ``dataZoom`` / ``graphic``
+        # 逐项合并，不能整表替换（部分帧是 ECharts 的常见写法）。
+        _merge_option(effective, frame)
         effective["options"] = _copy_any(frames)
         if isinstance(self._option.get("baseOption"), dict):
             effective["baseOption"] = _copy_any(self._option["baseOption"])
@@ -510,11 +719,11 @@ class _ChartOptionMixin:
             )
             effective["timeline"] = timeline_eff
         timeline_eff["currentIndex"] = idx
-        self._option = effective
+        self._option = ChartOption.from_dict(effective)
 
     def _refresh(self) -> None:
         """按当前 option 重建并播放过渡动画（timeline 帧切换用）。"""
-        prev_list = [list(r.data()) for r in self._series]
+        prev_list = [_snapshot_series_data(r) for r in self._series]
         prev_by_name = {
             r.name: prev_list[i] for i, r in enumerate(self._series) if r.name
         }
@@ -548,25 +757,92 @@ class _ChartOptionMixin:
                 "animationDurationUpdate", opt.get("animationDuration", ANIM_DURATION)
             )
             easing_name = opt.get("animationEasingUpdate", opt.get("animationEasing"))
+            delay = opt.get("animationDelayUpdate", opt.get("animationDelay", 0))
         else:
             duration = opt.get("animationDuration", ANIM_DURATION)
             easing_name = opt.get("animationEasing")
+            delay = opt.get("animationDelay", 0)
+        try:
+            duration = float(duration)
+        except (TypeError, ValueError, OverflowError):
+            duration = float(ANIM_DURATION)
+        try:
+            delay = max(0.0, float(delay))
+        except (TypeError, ValueError, OverflowError):
+            delay = 0.0
+        self._anim_base_duration = duration
+        total = max(
+            duration + delay,
+            self._max_series_animation_duration(has_prev, duration, delay),
+        )
         if enabled:
+            # 系列可各自声明更长的时长 / 延迟；全局时钟取最大值，线性推进，系列自行映射。
             # 走策略解析：Reduced 压时长、Disabled 同步落终值（都仍会发 finished）。
-            self.anim.startResolved(duration, _easing_from_name(easing_name))
+            self.anim.startResolved(total, _easing_from_name(easing_name))
         else:
-            self.anim.setDuration(duration)
+            self.anim.setDuration(total)
             self.anim.setEasing(_easing_from_name(easing_name))
             self.anim.complete()
 
-    def getOption(self) -> dict:
-        """当前 option 深拷贝（ECharts ``getOption``）。
+    def _max_series_animation_duration(
+        self, has_prev: bool, base_duration: float = 0.0, base_delay: float = 0.0
+    ) -> float:
+        """所有可见系列声明的（延迟 + 时长）最大值（ms）。"""
+        longest = float(base_duration) + float(base_delay)
+        for renderer in self._series:
+            if not renderer.visible:
+                continue
+            value = renderer.animationDuration(has_prev)
+            duration = float(base_duration if value is None else value)
+            delay = renderer.animationDelay(has_prev)
+            if delay <= 0.0 and base_delay > 0.0:
+                delay = float(base_delay)
+            longest = max(longest, duration + delay)
+        return longest
 
-        大数值数组还原为普通 ``list``（缓冲区是内部存储，调用方观察不到）。
-        """
+    def getOption(self) -> ChartOption:
+        """当前 option 深拷贝（dataclass 模型，dict 兼容）。"""
         self._ensure_alive()
         option = _unwrap_option(_copy_any(self._option))
-        return self._overlay_live_state(option)
+        return ChartOption.from_dict(self._overlay_live_state(option))
+
+    def getOptionDict(self) -> dict:
+        """当前 option 的普通 dict 形式（ECharts 互操作 / 序列化）。"""
+        return self.getOption().to_dict()
+
+    def validateOption(self, option) -> list[OptionIssue]:
+        """轻量校验 option；返回 ``OptionIssue`` 列表（不抛异常）。"""
+        issues: list[OptionIssue] = []
+        try:
+            if isinstance(option, ChartOption):
+                model = option
+            elif isinstance(option, dict):
+                model = ChartOption.from_dict(option)
+            else:
+                return [OptionIssue("", "option 必须是 ChartOption 或 dict")]
+        except Exception as exc:
+            return [OptionIssue("", f"option 解析失败：{exc}")]
+        series = model.get("series")
+        if series is not None and not isinstance(series, list):
+            issues.append(OptionIssue("series", "series 必须是列表"))
+            series = []
+        for index, item in enumerate(series or []):
+            path = f"series[{index}]"
+            if not isinstance(item, dict):
+                issues.append(OptionIssue(path, "系列必须是 dict 或 SeriesOption"))
+                continue
+            type_name = str(item.get("type") or "")
+            if not type_name:
+                issues.append(OptionIssue(f"{path}.type", "系列缺少 type"))
+            elif type_name not in SERIES_REGISTRY:
+                issues.append(
+                    OptionIssue(
+                        f"{path}.type",
+                        f"未注册的系列类型 {type_name!r}",
+                        "warning",
+                    )
+                )
+        return issues
 
     def _overlay_live_state(self, option: dict) -> dict:
         """把交互状态（图例选择 / dataZoom 窗口 / 选中态）写回 ``getOption`` 的返回值。
@@ -639,6 +915,160 @@ class _ChartOptionMixin:
         self._layout_all(force=True)
         self.update()
 
+    def pushData(self, series, points, maxPoints: int = None) -> bool:
+        """向系列追加流式数据；``maxPoints`` 只保留窗口内最后 N 点。
+
+        ``series`` 可为系列名 / ``id`` / 下标；点可为单点或点列表。内部用
+        ``DataRing`` 环形缓冲，不清空 / 复制整窗。
+        """
+        self._ensure_alive()
+        index = self._stream_series_index(series)
+        if index is None:
+            return False
+        series_opts = [
+            s for s in (self._option.get("series") or []) if isinstance(s, dict)
+        ]
+        target = series_opts[index]
+        state = getattr(self, "_stream_data", None)
+        if state is None:
+            state = {}
+            self._stream_data = state
+        ring = state.get(index)
+        if ring is not None and target.get("data") is not ring:
+            ring = None
+        if ring is None:
+            current = target.get("data")
+            if isinstance(current, DataRing):
+                ring = current
+            else:
+                values = _cdata.unwrapData(current) if current is not None else []
+                if not isinstance(values, list):
+                    values = []
+                ring = DataRing(values, maxPoints)
+        elif maxPoints is not None and maxPoints != ring.maxPoints:
+            ring = DataRing(ring, maxPoints)
+        ring.push(ring_points(points))
+        state[index] = ring
+        target["data"] = ring
+        renderer = self._renderer_for_series_index(index)
+        if renderer is not None:
+            renderer.opt["data"] = ring
+            renderer.prev_data = None
+        self.anim.stop()
+        self.anim.setProgress(1.0)
+        self._refresh_stream(target)
+        self.update()
+        return True
+
+    def _refresh_stream(self, target) -> None:
+        """流式推送后只刷新坐标系范围 / 轴窗口，不重建组件与渲染器。"""
+        series_opts = [
+            s for s in (self._option.get("series") or []) if isinstance(s, dict)
+        ]
+        try:
+            coords = list(self._coords)
+        except Exception:
+            coords = []
+        if not coords:
+            try:
+                coord = self.coordFor(target)
+            except Exception:
+                coord = None
+            coords = [coord] if coord is not None else []
+        for coord in coords:
+            try:
+                coord.setSeries(series_opts)
+            except Exception:
+                continue
+        for comp in self._components:
+            capture = getattr(comp, "captureExtent", None)
+            if callable(capture):
+                try:
+                    capture()
+                except Exception:
+                    continue
+        for comp in self._components:
+            apply = getattr(comp, "apply", None)
+            if callable(apply):
+                try:
+                    apply()
+                except Exception:
+                    continue
+        self._opt_version += 1
+        self.invalidateLayout()
+        self.invalidateSeriesLayer()
+        try:
+            self._layout_all(force=True)
+        except Exception:
+            pass
+
+    def setDataWindow(self, series, data, maxPoints: int = None) -> bool:
+        """整窗替换流式数据（``data`` 只保留最后 ``maxPoints`` 点）。"""
+        self._ensure_alive()
+        index = self._stream_series_index(series)
+        if index is None:
+            return False
+        series_opts = [
+            s for s in (self._option.get("series") or []) if isinstance(s, dict)
+        ]
+        ring = DataRing(ring_points(data), maxPoints)
+        target = series_opts[index]
+        target["data"] = ring
+        state = getattr(self, "_stream_data", None)
+        if state is None:
+            state = {}
+            self._stream_data = state
+        state[index] = ring
+        renderer = self._renderer_for_series_index(index)
+        if renderer is not None:
+            renderer.opt["data"] = ring
+            renderer.prev_data = None
+        self.anim.stop()
+        self.anim.setProgress(1.0)
+        self._refresh_stream(target)
+        self.update()
+        return True
+
+    def streamLength(self, series) -> int:
+        """流式窗口当前点数（非流式系列返回其数据长度）。"""
+        index = self._stream_series_index(series)
+        if index is None:
+            return 0
+        state = getattr(self, "_stream_data", None) or {}
+        ring = state.get(index)
+        if ring is not None:
+            return len(ring)
+        series_opts = self._option.get("series") or []
+        if 0 <= index < len(series_opts):
+            data = series_opts[index].get("data")
+            try:
+                return len(data) if data is not None else 0
+            except TypeError:
+                return 0
+        return 0
+
+    def _renderer_for_series_index(self, index: int):
+        """option 内 series 下标 → 渲染器（``_series`` 可能跳过未注册类型）。"""
+        for renderer in self._series:
+            if getattr(renderer, "_series_index", -1) == index:
+                return renderer
+        return None
+
+    def _stream_series_index(self, series):
+        series_opts = self._option.get("series") or []
+        if isinstance(series, int) and not isinstance(series, bool):
+            return series if 0 <= series < len(series_opts) else None
+        text = str(series or "")
+        for index, item in enumerate(series_opts):
+            if not isinstance(item, dict):
+                continue
+            if text and text in (
+                str(item.get("name") or ""),
+                str(item.get("id") or ""),
+            ):
+                return index
+        return None
+
     def appendData(self, params: dict) -> bool:
         """向指定系列追加数据（ECharts ``appendData({seriesIndex|seriesName, data})``）。
 
@@ -681,10 +1111,14 @@ class _ChartOptionMixin:
         target = series_opts[index]
         # 缓冲区只读，先物化成 list；避开 setOption 的全量重建，轴窗口与交互状态保留。
         data_list = target.get("data")
-        if isinstance(data_list, ElaNumericBuffer):
+        if isinstance(data_list, (ElaNumericBuffer, DataRing)):
             data_list = data_list.toList()
         elif not isinstance(data_list, list):
-            data_list = []
+            # 短于 toBuffer 阈值时 option 里保留的是裸 ndarray / array.array：
+            # 必须先物化，不能当空数组丢掉已有数据。
+            data_list = _cdata.unwrapData(data_list) if data_list is not None else []
+            if not isinstance(data_list, list):
+                data_list = []
         if isinstance(data, list):
             data_list.extend(
                 _hold_value(data) if _cdata.isBufferLike(data) else copy.deepcopy(data)
@@ -696,8 +1130,8 @@ class _ChartOptionMixin:
         renderer = None
         if name:
             renderer = next((r for r in self._series if r.name == name), None)
-        if renderer is None and 0 <= index < len(self._series):
-            renderer = self._series[index]
+        if renderer is None:
+            renderer = self._renderer_for_series_index(index)
         if renderer is None:
             # 未注册 / 已丢失的系列：退回全量合并，至少保证 option 一致
             patch = [{} for _ in range(index)] + [target]
@@ -735,6 +1169,8 @@ class _ChartOptionMixin:
         :returns: 动作是否被识别并执行
         """
         self._ensure_alive()
+        if isinstance(payload, ActionPayload):
+            payload = payload.to_dict()
         if not isinstance(payload, dict):
             return False
         action = str(payload.get("type") or "")
@@ -865,9 +1301,8 @@ class _ChartOptionMixin:
             "start": max(0.0, new_start),
             "end": new_end,
         }
-        enable_y = getattr(comp, "enableYAxisZoom", None)
-        if callable(enable_y):
-            enable_y()
+        # 只有已经启用 Y 窗口的组件才缩放 Y；显式 dataZoom 未给 yAxisIndex
+        # 时不能因为点一次 zoomStep 就偷偷开始压 Y 轴。
         if getattr(comp, "_y_zoom_enabled", False):
             y_start = float(getattr(comp, "y_start", 0.0))
             y_end = float(getattr(comp, "y_end", 100.0))
@@ -893,6 +1328,8 @@ class _ChartOptionMixin:
             return
         # 重建 = 渲染器换了：版本号必须在这里递增，否则位图缓存会把旧图当新状态。
         self._opt_version += 1
+        self._progressive_step = 1
+        self._progressive_scheduled = False
         self._hide_annotation_editor()
         opt = self._option
         self._layout_key = None
@@ -917,6 +1354,7 @@ class _ChartOptionMixin:
 
         self._rebuild_legend_items(opt, legend_opts)
         self._layout_all(force=True)
+        self._refresh_accessible_description()
 
     def _rebuild_header(self, opt: dict) -> list:
         """重建标题 / 图例 / tooltip，并应用图例初始显隐。"""
@@ -958,6 +1396,16 @@ class _ChartOptionMixin:
             c = self._make_coord(CalendarCoord, "calendar")
             if c is not None:
                 self._coords.append(c)
+        if "geo" in opt:
+            geo_opts = _component_options(opt.get("geo"), "geo")
+            for index in range(max(1, len(geo_opts))):
+                try:
+                    self._coords.append(GeoCoord(self, opt, index))
+                except Exception as exc:
+                    warn_once(
+                        f"coord-ctor:geo:{index}",
+                        f"坐标系构造失败（geo:{index}）: {exc!r}",
+                    )
         if "polar" in opt or "radiusAxis" in opt or "angleAxis" in opt:
             c = self._make_coord(PolarCoord, "polar")
             if c is not None:
@@ -1035,7 +1483,7 @@ class _ChartOptionMixin:
             renderer = next((r for r in self._series if r.name == name), None)
             if renderer is None:
                 continue
-            data_len = len(renderer.data())
+            data_len = renderer.itemCount()
             keep = {i for i in indices if 0 <= i < data_len}
             if keep:
                 pruned[name] = keep
@@ -1049,15 +1497,19 @@ class _ChartOptionMixin:
                         seeds.add(int(value))
                     except (TypeError, ValueError, OverflowError):
                         continue
-            # ``ElaNumericBuffer`` 只承载数值，不可能有 ``data[i].selected``，
-            # 跳过整趟遍历。
-            data_items = r.data()
-            if not _cdata.isBufferLike(data_items):
-                for index, item in enumerate(data_items):
-                    if isinstance(item, dict) and item.get("selected") is True:
-                        seeds.add(index)
+            selected_map = r.opt.get("selectedMap")
+            if isinstance(selected_map, dict):
+                for key, value in selected_map.items():
+                    if not value:
+                        continue
+                    try:
+                        seeds.add(int(key))
+                    except (TypeError, ValueError, OverflowError):
+                        continue
+            # 基类按顶层 data 扫 ``data[i].selected``；层级系列覆写成扁平节点。
+            seeds.update(r.selectedSeedIndices())
             if seeds:
-                data_len = len(r.data())
+                data_len = r.itemCount()
                 self._selection[r.name] = {i for i in seeds if 0 <= i < data_len}
 
     def _rebuild_components(self, opt: dict, series_opts: list) -> None:

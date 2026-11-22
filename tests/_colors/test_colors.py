@@ -9,7 +9,7 @@ from PyQt6ElaWidgetTools import ElaThemeType, eTheme
 from pyqt6_ela_pro._colors import (
     _COLOR_ALIAS,
     _COLOR_PALETTE,
-    _contrast_ratio,
+    contrastRatio,
     _resolve_color,
     get_accent_color,
     get_color_scheme,
@@ -153,7 +153,7 @@ class TestColorsGetColorScheme:
         for name in _COLOR_PALETTE:
             for mode in (ElaThemeType.ThemeMode.Light, ElaThemeType.ThemeMode.Dark):
                 scheme = get_color_scheme(name, mode)
-                ratio = _contrast_ratio(scheme["solid"], scheme["solidText"])
+                ratio = contrastRatio(scheme["solid"], scheme["solidText"])
                 assert ratio >= 4.5, f"{name}/{mode} solid contrast {ratio:.2f}"
 
     def test_get_color_scheme_light_vs_dark_differ(self):

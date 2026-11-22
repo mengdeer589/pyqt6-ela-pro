@@ -5,8 +5,10 @@ from __future__ import annotations
 
 from PyQt6.QtCore import QPointF, QRectF, Qt
 from PyQt6.QtGui import (
+    QFontMetricsF,
     QPainter,
     QPainterPath,
+    QPen,
 )
 
 from .._utils import to_float as _to_float
@@ -21,7 +23,7 @@ class PictorialBarSeriesRenderer(BarSeriesRenderer):
     """
 
     def _stack_bases(self):  # 象形柱不堆叠
-        return {}, {}
+        return {}, {}, {}, "samesign"
 
     def _symbol_size(self):
         ss = self.opt.get("symbolSize", 10)
@@ -58,11 +60,35 @@ class PictorialBarSeriesRenderer(BarSeriesRenderer):
         val_axis = coord.x_axis if self._horizontal else coord.y_axis
         sw, sh = self._symbol_size()
         repeat = self.opt.get("symbolRepeat", False)
+        show_label = self.labelShown()
+        label_font = self.labelFont() if show_label else None
+        label_fm = QFontMetricsF(label_font) if label_font is not None else None
+        hover = self.chart.hoverInfo()
+        hovered = (
+            hover[1].get("dataIndex")
+            if hover is not None and hover[0] is self
+            else None
+        )
         p.save()
+        self._label_rects = []
+        if show_label:
+            p.setFont(label_font)
         p.setClipRect(coord.plot)
-        p.setPen(Qt.PenStyle.NoPen)
-        p.setBrush(self.color())
         for bar in self._bars:
+            # 与 bar 一致：visualMap → 逐项 itemStyle → 系列色，再走状态链。
+            color = self.dataColor(bar["index"])
+            alpha = self.itemOpacity(bar["index"])
+            border_color, border_w = self.itemBorder(bar["index"])
+            color, alpha, border_color, border_w = self.stateStyle(
+                bar["index"], hovered, color, alpha, border_color, border_w
+            )
+            if alpha < 1.0:
+                color.setAlphaF(color.alphaF() * alpha)
+            if border_color is not None and border_w > 0:
+                p.setPen(QPen(border_color, border_w))
+            else:
+                p.setPen(Qt.PenStyle.NoPen)
+            p.setBrush(color)
             y_t = self._animated_value(bar, anim_t)
             v1 = bar["v0"] + y_t
             if self._horizontal:
@@ -92,4 +118,8 @@ class PictorialBarSeriesRenderer(BarSeriesRenderer):
                     self._draw_symbol(p, d, bar["center"], along, cross)
                 else:
                     self._draw_symbol(p, bar["center"], d, cross, along)
+            if label_fm is not None:
+                hit = self._paint_bar_label(p, bar["rect"], bar, label_fm, color)
+                if hit is not None:
+                    self._label_rects.append((bar["index"], hit[0], hit[1]))
         p.restore()

@@ -9,14 +9,14 @@ from PyQt6.QtGui import (
     QLinearGradient,
     QPainter,
     QPainterPath,
+    QPen,
 )
 
 from .._utils import clamp as _clamp
 from .._utils import to_float as _to_float
 from .._utils import with_alpha
-from .._utils import parse_color
 from ..core import SeriesRenderer
-from ._shared import _label_font, _series_palette_color, _text_color
+from ._shared import _label_font
 
 
 class SankeySeriesRenderer(SeriesRenderer):
@@ -25,11 +25,17 @@ class SankeySeriesRenderer(SeriesRenderer):
     ``layoutIterations`` / ``label`` / ``lineStyle``。
     """
 
+    labelVisibleByDefault = True
+
     def __init__(self, chart, opt):
         super().__init__(chart, opt)
         self._nodes = []  # [dict(name,color,rect,value,depth)]
         self._bands = []  # [dict(path=QPainterPath,color,source,target,value)]
         self._name_index = {}
+
+        self._fixed_y: dict[int, float] = {}
+        self._drag_index = None
+        self._drag_offset = 0.0
 
     def _parse(self):
         raw_nodes = self.opt.get("data")
@@ -41,7 +47,13 @@ class SankeySeriesRenderer(SeriesRenderer):
                 name = str(item.get("name") or f"node{i}")
             else:
                 name = str(item)
-            nodes.append({"name": name, "index": i})
+            nodes.append(
+                {
+                    "name": name,
+                    "index": i,
+                    "item": item if isinstance(item, dict) else None,
+                }
+            )
         self._name_index = {}
         for nd in nodes:
             self._name_index.setdefault(nd["name"], nd["index"])
@@ -101,12 +113,14 @@ class SankeySeriesRenderer(SeriesRenderer):
                 if indeg[v] == 0:
                     order.append(v)
                     queue.append(v)
-        # 环 / 不可达节点兜底：按出边递增深度限幅
+        # 环 / 不可达节点兜底：按出边递增深度，但必须限幅。整环每轮都会
+        # 继续加深度，60 节点环能涨到 3500+ 列，节点全挤在右侧。
+        max_layers = max(1, n)
         for _ in range(n):
             changed = False
             for lk in links:
                 if depth[lk["target"]] <= depth[lk["source"]]:
-                    depth[lk["target"]] = depth[lk["source"]] + 1
+                    depth[lk["target"]] = min(depth[lk["source"]] + 1, max_layers - 1)
                     changed = True
             if not changed:
                 break
@@ -164,6 +178,11 @@ class SankeySeriesRenderer(SeriesRenderer):
                 col_x.append(plot.center().x() - node_w / 2)
             else:
                 col_x.append(plot.left() + (plot.width() - node_w) * d / max_depth)
+        align = str(self.opt.get("nodeAlign") or "justify").strip().lower()
+        if align == "left":
+            col_x = [plot.left() for _ in col_x]
+        elif align == "right":
+            col_x = [plot.right() - node_w for _ in col_x]
         node_rect = {}
         for d, col in enumerate(columns):
             total_v = sum(values[i] for i in col)
@@ -174,14 +193,29 @@ class SankeySeriesRenderer(SeriesRenderer):
                 h_i = max(3.0, values[i] * scale) if total_v > 0 else 6.0
                 node_rect[i] = QRectF(col_x[d], y, node_w, h_i)
                 y += h_i + node_gap
+        for i, fixed in self._fixed_y.items():
+            rect_i = node_rect.get(i)
+            if rect_i is None:
+                continue
+            rect_i.moveTop(
+                _clamp(
+                    fixed, plot.top(), max(plot.top(), plot.bottom() - rect_i.height())
+                )
+            )
+        # 节点实际渲染色：流带 source/target 与节点共用，避免两套取色。
+        node_colors = [
+            self.visualColorForValue(values[i]) or self.dataColor(i) for i in range(n)
+        ]
         # 流带偏移（源 / 目标各自的堆叠游标）
         src_off = {i: node_rect[i].top() for i in range(n)}
         tgt_off = {i: node_rect[i].top() for i in range(n)}
         for lk in sorted(links, key=lambda x: -x["value"]):
             s, t = lk["source"], lk["target"]
             rs, rt = node_rect[s], node_rect[t]
-            band_scale = (rs.height() / values[s]) if values[s] > 0 else 0.0
-            bh = max(1.5, lk["value"] * band_scale)
+            scale_s = (rs.height() / values[s]) if values[s] > 0 else 0.0
+            scale_t = (rt.height() / values[t]) if values[t] > 0 else 0.0
+            # 两端都要装得下：只按源节点缩放会让目标端流带越界重叠。
+            bh = max(1.5, lk["value"] * min(scale_s, scale_t))
             y1 = src_off[s]
             y2 = tgt_off[t]
             src_off[s] += bh
@@ -201,9 +235,9 @@ class SankeySeriesRenderer(SeriesRenderer):
                     "source": nodes[s]["name"],
                     "target": nodes[t]["name"],
                     "value": lk["value"],
-                    "source_color": _series_palette_color(self.chart, s),
-                    "target_color": _series_palette_color(self.chart, t),
-                    "color": _series_palette_color(self.chart, s),
+                    "source_color": node_colors[s],
+                    "target_color": node_colors[t],
+                    "color": node_colors[s],
                 }
             )
         for i, nd in enumerate(nodes):
@@ -211,12 +245,11 @@ class SankeySeriesRenderer(SeriesRenderer):
                 {
                     "index": i,
                     "name": nd["name"],
+                    "item": nd.get("item") or nd,
                     "value": values[i],
                     "rect": node_rect[i],
                     "depth": depth[i],
-                    "color": self.itemColor(
-                        i, default=_series_palette_color(self.chart, i)
-                    ),
+                    "color": node_colors[i],
                 }
             )
 
@@ -240,7 +273,7 @@ class SankeySeriesRenderer(SeriesRenderer):
             )
             return grad
         if isinstance(mode, str) and mode not in ("source",):
-            color = parse_color(mode)
+            color = self.resolveColor(mode)
             if color.isValid():
                 return with_alpha(color, int(opacity * anim_t))
         return with_alpha(band["source_color"], int(opacity * anim_t))
@@ -249,6 +282,7 @@ class SankeySeriesRenderer(SeriesRenderer):
         if not self._nodes:
             return
         p.save()
+        self._label_rects = []
         hover = self.chart.hoverInfo()
         hovered = (
             hover[1].get("dataIndex")
@@ -266,49 +300,89 @@ class SankeySeriesRenderer(SeriesRenderer):
         font = _label_font(self, label_opt)
         p.setFont(font)
         fm = QFontMetricsF(font)
-        c_text = self.labelColor(_text_color("color.text.primary", self.chart))
+        c_text = self.labelColor()
         max_depth = max((nd["depth"] for nd in self._nodes), default=0)
         for nd in self._nodes:
             r = nd["rect"]
-            color = parse_color(nd["color"])
+            color = self.visualColorForValue(nd["value"]) or self.dataColor(nd["index"])
             alpha = self.itemOpacity(nd["index"])
-            if hovered is not None:
-                if nd["index"] == hovered:
-                    emphasis = self.emphasisColor(nd["index"])
-                    color = emphasis if emphasis is not None else color.lighter(112)
-                elif self.blursOtherItems():
-                    blur = self.blurOpacity()
-                    alpha *= blur if blur is not None else 0.4
-            p.setPen(Qt.PenStyle.NoPen)
+            border_color, border_w = self.itemBorder(nd["index"])
+            color, alpha, border_color, border_w = self.stateStyle(
+                nd["index"], hovered, color, alpha, border_color, border_w
+            )
+            if border_color is not None and border_w > 0:
+                p.setPen(QPen(border_color, border_w))
+            else:
+                p.setPen(Qt.PenStyle.NoPen)
             p.setBrush(with_alpha(color, int(255 * anim_t * alpha)))
             p.drawRect(r)
             if not label_show:
                 continue
+            text = self.hierarchyLabelText(
+                nd.get("index"),
+                nd["name"],
+                nd.get("value"),
+                nd.get("item"),
+            )
             p.setPen(c_text)
-            tw = fm.horizontalAdvance(nd["name"])
+            tw = fm.horizontalAdvance(text)
             if nd["depth"] >= max_depth:  # 末列标签放左侧
+                rect = QRectF(
+                    r.left() - tw - 6,
+                    r.center().y() - fm.height() / 2,
+                    tw + 4,
+                    fm.height(),
+                )
                 p.drawText(
-                    QRectF(
-                        r.left() - tw - 6,
-                        r.center().y() - fm.height() / 2,
-                        tw + 4,
-                        fm.height(),
-                    ),
+                    rect,
                     Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter,
-                    nd["name"],
+                    text,
                 )
             else:
-                p.drawText(
-                    QRectF(
-                        r.right() + 4,
-                        r.center().y() - fm.height() / 2,
-                        tw + 4,
-                        fm.height(),
-                    ),
-                    Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
-                    nd["name"],
+                rect = QRectF(
+                    r.right() + 4,
+                    r.center().y() - fm.height() / 2,
+                    tw + 4,
+                    fm.height(),
                 )
+                p.drawText(
+                    rect,
+                    Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
+                    text,
+                )
+            self._label_rects.append((nd.get("index"), rect, text))
         p.restore()
+
+    def onMousePress(self, pos: QPointF) -> bool:
+        if not self.opt.get("draggable", False):
+            return False
+        for nd in reversed(self._nodes):
+            if nd["rect"].adjusted(-2, -2, 2, 2).contains(pos):
+                self._drag_index = nd["index"]
+                self._drag_offset = pos.y() - nd["rect"].top()
+                return True
+        return False
+
+    def onMouseMove(self, pos: QPointF) -> bool:
+        if self._drag_index is None:
+            return False
+        self._fixed_y[self._drag_index] = pos.y() - self._drag_offset
+        self.chart.invalidateLayout()
+        self.chart.update()
+        return True
+
+    def onMouseRelease(self, pos: QPointF) -> bool:
+        if self._drag_index is None:
+            return False
+        self._drag_index = None
+        return True
+
+    def resetPositions(self) -> None:
+        """清除拖拽固定位置。"""
+        if self._fixed_y:
+            self._fixed_y.clear()
+            self.chart.invalidateLayout()
+            self.chart.update()
 
     def hitTest(self, pos: QPointF):
         for nd in self._nodes:
@@ -316,7 +390,8 @@ class SankeySeriesRenderer(SeriesRenderer):
                 return {
                     "name": nd["name"],
                     "value": nd["value"],
-                    "color": nd.get("color"),
+                    "color": self.visualColorForValue(nd["value"])
+                    or self.dataColor(nd["index"]),
                     "series": self.name,
                     "depth": nd["depth"],
                     "dataIndex": nd.get("index"),

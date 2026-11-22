@@ -7,20 +7,9 @@ from PyQt6.QtCore import QPointF, QRectF, Qt
 from PyQt6.QtGui import QColor, QFontMetricsF, QPainter, QPen
 
 from .._tokens import T
-from .._utils import parse_color, text_italic
+from .._utils import resolve_color_option, text_italic
 from .._utils import to_float as _to_float, warn_once
 from ..axes import chartFont
-
-
-def lerp_color(c1, c2, t: float) -> QColor:
-    """两种颜色按 t ∈ [0,1] 线性插值（RGB 空间）。"""
-    t = min(max(float(t), 0.0), 1.0)
-    a, b = parse_color(c1), parse_color(c2)
-    return QColor(
-        int(a.red() + (b.red() - a.red()) * t),
-        int(a.green() + (b.green() - a.green()) * t),
-        int(a.blue() + (b.blue() - a.blue()) * t),
-    )
 
 
 class GraphicComponent:
@@ -41,16 +30,6 @@ class GraphicComponent:
     def layout(self, rect: QRectF) -> None:
         self.rect = QRectF(rect)
 
-    def _anchor(self, el: dict) -> QPointF:
-        """元素锚点：``left`` / ``top`` 解析成内容区内的绝对坐标。
-        数值 = 像素偏移，``"center"`` / ``"middle"`` = 该轴居中，``"30%"`` =
-        相对内容区宽 / 高；无法解析的值按 0 处理。
-        """
-        return QPointF(
-            self._anchor_axis(el.get("left", 0), self.rect.left(), self.rect.width()),
-            self._anchor_axis(el.get("top", 0), self.rect.top(), self.rect.height()),
-        )
-
     def _anchor_axis(self, value, origin: float, extent: float) -> float:
         text = str(value).strip().lower()
         if text in ("center", "middle"):
@@ -70,16 +49,69 @@ class GraphicComponent:
         if not self.elements:
             return
         p.save()
-        for el in self.elements:
-            typ = str(el.get("type") or "")
-            shape = el.get("shape") or {}
-            style = el.get("style") or {}
-            base = self._anchor(el)
+        for el in self._sorted(self.elements):
             try:
-                self._paint_element(p, typ, shape, style, base)
+                self._paint_node(p, el, self.rect)
             except Exception:
                 continue  # 单元素异常不影响其他元素
         p.restore()
+
+    @staticmethod
+    def _sorted(elements):
+        return sorted(
+            elements,
+            key=lambda item: _to_float(item.get("z"), 0.0),
+        )
+
+    def _paint_node(self, p: QPainter, el: dict, rect: QRectF) -> None:
+        typ = str(el.get("type") or "")
+        if typ == "group":
+            base = self._anchor(el, rect)
+            p.save()
+            p.translate(base)
+            origin = el.get("origin") or [0, 0]
+            if isinstance(origin, (list, tuple)) and len(origin) >= 2:
+                ox, oy = _to_float(origin[0], 0.0), _to_float(origin[1], 0.0)
+            else:
+                ox = oy = 0.0
+            p.translate(ox, oy)
+            p.rotate(_to_float(el.get("rotation"), 0.0))
+            sx = _to_float(el.get("scaleX", el.get("scale", 1.0)), 1.0)
+            sy = _to_float(el.get("scaleY", el.get("scale", 1.0)), 1.0)
+            p.scale(sx, sy)
+            p.translate(-ox, -oy)
+            children = el.get("children")
+            if isinstance(children, (list, tuple)):
+                # 子元素坐标相对 group；百分比沿用内容区尺寸。
+                child_rect = QRectF(0, 0, self.rect.width(), self.rect.height())
+                for child in self._sorted(
+                    [item for item in children if isinstance(item, dict)]
+                ):
+                    self._paint_node(p, child, child_rect)
+            p.restore()
+            return
+        shape = el.get("shape") or {}
+        style = el.get("style") or {}
+        base = self._anchor(el, rect)
+        self._paint_element(p, typ, shape, style, base)
+
+    def _anchor(self, el: dict, rect: QRectF = None) -> QPointF:
+        """元素锚点：``left`` / ``top``（或 ``right`` / ``bottom``）解析成内容区内的绝对坐标。
+        数值 = 像素偏移，``"center"`` / ``"middle"`` = 该轴居中，``"30%"`` =
+        相对内容区宽 / 高；无法解析的值按 0 处理。
+        """
+        rect = rect if rect is not None else self.rect
+        left = el.get("left")
+        top = el.get("top")
+        if left is None and el.get("right") is not None:
+            x = rect.right() - self._anchor_axis(el.get("right"), 0.0, rect.width())
+        else:
+            x = self._anchor_axis(left, rect.left(), rect.width())
+        if top is None and el.get("bottom") is not None:
+            y = rect.bottom() - self._anchor_axis(el.get("bottom"), 0.0, rect.height())
+        else:
+            y = self._anchor_axis(top, rect.top(), rect.height())
+        return QPointF(x, y)
 
     def _paint_element(
         self, p: QPainter, typ: str, shape: dict, style: dict, base: QPointF
@@ -121,13 +153,20 @@ class GraphicComponent:
             fill = style.get("fill")
             if fill == "none" or fill is False:
                 return
-            color = parse_color(fill) if isinstance(fill, str) and fill else QColor()
+            color = (
+                resolve_color_option(fill, self.chart)
+                if isinstance(fill, str) and fill
+                else QColor()
+            )
             if not color.isValid():
-                warn_once(
-                    "graphic-text-fill", f"graphic text 的 fill 非法，已跳过: {fill!r}"
-                )
-                return
-            p.setPen(color or QColor(T("color.text.primary", self.chart)))
+                # 未写 fill = 用主题文本色；非法值告警后回退，不能整段文字消失。
+                if fill:
+                    warn_once(
+                        "graphic-text-fill",
+                        f"graphic text 的 fill 非法，已回退主题文本色: {fill!r}",
+                    )
+                color = QColor(T("color.text.primary", self.chart))
+            p.setPen(color)
             p.setBrush(Qt.BrushStyle.NoBrush)
             fm = QFontMetricsF(p.font())
             x = base.x() + _to_float(shape.get("x"), 0.0)
@@ -142,24 +181,28 @@ class GraphicComponent:
             y1 = base.y() + _to_float(shape.get("y1"), 0.0)
             x2 = base.x() + _to_float(shape.get("x2"), 40.0)
             y2 = base.y() + _to_float(shape.get("y2"), 0.0)
-            stroke = parse_color(
-                style.get("stroke") or T("color.border.strong", self.chart)
+            stroke = resolve_color_option(
+                style.get("stroke"), self.chart, T("color.border.strong", self.chart)
             )
             width = _to_float(style.get("lineWidth"), 2.0)
             p.setPen(QPen(stroke, width))
             p.setBrush(Qt.BrushStyle.NoBrush)
             p.drawLine(QPointF(x1, y1), QPointF(x2, y2))
 
-    @staticmethod
-    def _apply_brush(p: QPainter, style: dict, default_fill) -> None:
+    def _apply_brush(self, p: QPainter, style: dict, default_fill) -> None:
         fill = style.get("fill")
         stroke = style.get("stroke")
         if fill == "none" or fill is False:
             p.setBrush(Qt.BrushStyle.NoBrush)
         else:
-            p.setBrush(parse_color(fill or default_fill))
+            p.setBrush(resolve_color_option(fill, self.chart, default_fill))
         if stroke:
-            p.setPen(QPen(parse_color(stroke), _to_float(style.get("lineWidth"), 1.0)))
+            p.setPen(
+                QPen(
+                    resolve_color_option(stroke, self.chart),
+                    _to_float(style.get("lineWidth"), 1.0),
+                )
+            )
         else:
             p.setPen(Qt.PenStyle.NoPen)
 

@@ -142,9 +142,7 @@ class TestSelectionActions:
                 "animation": False,
                 "xAxis": {"type": "category", "data": ["a", "b", "c"]},
                 "yAxis": {"type": "value"},
-                "series": [
-                    {"type": "line", "name": "A", "data": [1, 2, 3]}
-                ],
+                "series": [{"type": "line", "name": "A", "data": [1, 2, 3]}],
             },
             notMerge=True,
         )

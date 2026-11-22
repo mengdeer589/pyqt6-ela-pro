@@ -36,11 +36,8 @@ __all__ = [
     "downsample_indices",
     "bucket_minmax_indices",
     "min_out_for",
-    "ALGORITHMS",
     "np",
 ]
-
-ALGORITHMS = _ALGORITHMS
 
 #: 各算法对 ``n_out`` 的下界与整除要求（越界即 Rust panic）：minmax ≥4 偶数；m4 ≥8 且 4 的倍数；lttb / minmaxLTTB ≥3。
 _ALGORITHM_LIMITS = {
@@ -139,7 +136,8 @@ _EMPTY_F64 = None
 def analyze_x(x):
     """一次性分析 x 的时间基：单调性、步长、记录中断位置。
     返回 ``(monotone, strict, step, gap_pos, gap_dur)``：``monotone`` = 非降且
-    全有限；``strict`` = 严格递增；``step`` = 正差中位数；``gap_*`` =
+    全有限；``strict`` = 严格递增；``step`` = 正差中位数；``gap_*`` = 记录
+    中断位置与时长。
     """
     global _EMPTY_I64, _EMPTY_F64
     if np is None:

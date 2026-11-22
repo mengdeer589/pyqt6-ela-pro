@@ -8,6 +8,7 @@ import math
 
 
 from .. import _downsample as _ds
+from .. import data as _cdata
 from ..axes import GridCoord
 from ..core import parseDataPoint
 from ._shared import (
@@ -142,9 +143,14 @@ class _LineSamplingMixin:
         """解析当前 data 到 numpy / Python 双路径，并填充取值缓存。"""
         data = self._stacked_data() or self.dataView()
         self._data_len = len(data)
-        # 身份判据 = ``is``（配 ``_data_ref`` 强引用）+ 长度：只比 is 会漏掉原地
-        # 增长（numpy 视图停在旧长度），只比 (id, len) 会撞 id 复用。
-        if data is not self._data_ref or self._data_len != self._cached_len:
+        # 身份判据 = ``is``（配 ``_data_ref`` 强引用）+ 长度 + 数据版本：环形窗口
+        # 满后原地 push 长度不变，只有版本号能发现内容已换。
+        data_version = _cdata.dataVersion(data)
+        if (
+            data is not self._data_ref
+            or self._data_len != self._cached_len
+            or data_version != self._cached_version
+        ):
             self._np_x = self._np_y = None
             self._y_vals = []
             self._x_vals = []
@@ -211,9 +217,10 @@ class _LineSamplingMixin:
             self._full_sample_key = None
             self._nearest_x_sorted = None
             self._nearest_index_sorted = None
-            self._np_cache_key = (id(data), len(data))
+            self._np_cache_key = (id(data), len(data), data_version)
             self._data_ref = data
             self._cached_len = self._data_len
+            self._cached_version = data_version
         self._sampled = False
         self._prev_pts_map = None
 

@@ -22,15 +22,20 @@ class _LineSymbolMixin:
             return []
         if not self.showMarkers() and not self.labelShown():
             return []
-        length = self._data_len
-        if length <= 0:
+        if self._data_len <= 0:
             return []
+        # 抽稀必须按**当前窗口 / 采样后的点列**算间隔：按全量长度算会让
+        # 放大后的可见窗口只剩 0~1 个预选下标，marker 看起来消失了。
+        source = [i for i in self._point_idx if isinstance(i, int) and i >= 0]
+        if not source:
+            source = list(range(self._data_len))
+        length = len(source)
         desired = max(8.0, float(plot_w) / 10.0)
         interval = max(1, int(length / desired)) if length > desired else 1
         if bool(self.opt.get("showAllSymbol", False)):
             # 显式要求全画：给一个 2 万点上限兜底，避免百万点建 100 万个 dict
             interval = 1 if length <= 20000 else int(math.ceil(length / 20000.0))
-        indices = list(range(0, length, interval))
+        indices = source[::interval]
         if not indices:
             return []
         # 向量化映射（与折线点同一条快路径）：逐点 mapPoint 在 category 轴上
@@ -72,6 +77,8 @@ class _LineSymbolMixin:
             if yi is None:
                 continue
             xi = self._x_at(i)
+            if not isinstance(xi, (int, float)) or isinstance(xi, bool):
+                continue
             if (
                 isinstance(coord, GridCoord)
                 and coord.x_axis.type == "value"
@@ -84,25 +91,3 @@ class _LineSymbolMixin:
                 continue
             items.append((i, pt))
         return items
-
-    def _symbol_points(self, coord, single, interval: int):
-        """按原始数据下标每 ``interval`` 个点取一个并映射到屏幕坐标；
-        数值 x 轴只保留当前绘图窗口（vmin..vmax）内的点。
-        """
-        pts = []
-        lo = hi = None
-        if isinstance(coord, GridCoord) and coord.x_axis.type == "value":
-            lo, hi = coord.x_axis.vmin, coord.x_axis.vmax
-        for i in range(0, self._data_len, interval):
-            yi = self._y_at(i)
-            if yi is None:
-                continue
-            xi = self._x_at(i)
-            if lo is not None:
-                if not isinstance(xi, (int, float)) or not (lo <= xi <= hi):
-                    continue
-            try:
-                pts.append(coord.mapPoint(yi) if single else coord.mapPoint(xi, yi))
-            except Exception:
-                continue
-        return pts

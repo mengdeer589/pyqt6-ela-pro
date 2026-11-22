@@ -13,7 +13,10 @@ def _chart(make, series, *, width=420):
     chart.setOption(
         {
             "animation": False,
-            "xAxis": {"type": "category", "data": [str(i) for i in range(len(series[0]["data"]))]},
+            "xAxis": {
+                "type": "category",
+                "data": [str(i) for i in range(len(series[0]["data"]))],
+            },
             "yAxis": {"type": "value"},
             "series": series,
         }

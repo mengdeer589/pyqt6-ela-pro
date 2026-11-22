@@ -6,8 +6,10 @@ from __future__ import annotations
 from PyQt6.QtCore import QEvent, QPoint, QPointF, Qt
 from PyQt6.QtGui import QMouseEvent, QWheelEvent
 from PyQt6.QtWidgets import QApplication
+from PyQt6ElaWidgetTools import ElaThemeType, eTheme
 
-from pyqt6_ela_pro.charts import ECHARTS_PALETTE, ElaChartWidget
+from pyqt6_ela_pro.charts import ElaChartWidget
+from pyqt6_ela_pro.charts._theme import ELA_PALETTE_DARK, ELA_PALETTE_LIGHT
 
 
 def _make(option, size=(600, 400)):
@@ -67,10 +69,15 @@ def _release(chart, pos):
 
 
 class TestPalette:
-    def test_default_palette_is_echarts(self):
+    def test_default_palette_is_ela(self):
         chart = ElaChartWidget()
-        names = [c.name() for c in chart.palette()[: len(ECHARTS_PALETTE)]]
-        assert names == ECHARTS_PALETTE
+        expected = (
+            ELA_PALETTE_DARK
+            if eTheme.getThemeMode() == ElaThemeType.ThemeMode.Dark
+            else ELA_PALETTE_LIGHT
+        )
+        names = [c.name() for c in chart.palette()[: len(expected)]]
+        assert names == expected
         chart.deleteLater()
 
     def test_first_two_series_colors_distinct(self):
@@ -609,7 +616,85 @@ class TestLayoutKeys:
         renderer = chart.seriesRenderers[0]
         lefts = [layer["left"] for layer in renderer._layers]
         assert abs(lefts[0] - lefts[1]) < 1.0  # 左对齐
-        assert renderer._funnel_label(renderer._layers[0], "60%") == "展现 = 100 (60%)"
+        assert renderer._funnel_label(renderer._layers[0], 60.0, "60%") == (
+            "展现 = 100 (60)"
+        )
+        chart.deleteLater()
+
+    def test_pie_percent_placeholder_has_no_percent_sign(self):
+        chart = _make(
+            {
+                "series": [
+                    {
+                        "type": "pie",
+                        "name": "P",
+                        "label": {"show": True, "formatter": "{b} {d}%"},
+                        "data": [
+                            {"name": "直接访问", "value": 42},
+                            {"name": "外部链接", "value": 9},
+                        ],
+                    }
+                ]
+            }
+        )
+        renderer = chart.seriesRenderers[0]
+        text = renderer._label_text(
+            {"index": 0, "name": "直接访问", "value": 42}, 42.0, "42%"
+        )
+        assert text == "直接访问 42%"
+        chart.deleteLater()
+
+    def test_pie_tooltip_percent_placeholder(self):
+        chart = _make(
+            {
+                "tooltip": {"trigger": "item", "formatter": "{b} {d}%"},
+                "series": [
+                    {
+                        "type": "pie",
+                        "name": "P",
+                        "data": [{"name": "直接访问", "value": 42}],
+                    }
+                ],
+            }
+        )
+        renderer = chart.seriesRenderers[0]
+        hit = {"name": "直接访问", "value": 42, "percent": 42.0, "series": "P"}
+        lines = chart.tooltip.buildLines(hit, renderer.color())
+        assert lines[-1][2] == "直接访问 42%"
+        captured = {}
+        chart.setOption(
+            {
+                "tooltip": {
+                    "formatter": lambda p: (
+                        captured.update(p) or f"{p['b']} {p['percent']}%"
+                    )
+                }
+            }
+        )
+        lines = chart.tooltip.buildLines(hit, renderer.color())
+        assert captured["percent"] == 42.0
+        assert lines[-1][2] == "直接访问 42%"
+        chart.deleteLater()
+
+    def test_funnel_hit_includes_percent(self):
+        chart = _make(
+            {
+                "series": [
+                    {
+                        "type": "funnel",
+                        "name": "F",
+                        "data": [
+                            {"name": "展现", "value": 100},
+                            {"name": "点击", "value": 60},
+                        ],
+                    }
+                ]
+            }
+        )
+        renderer = chart.seriesRenderers[0]
+        hit = renderer.hitTest(renderer._layers[0]["poly"].boundingRect().center())
+        assert hit is not None
+        assert hit["percent"] == 62.5
         chart.deleteLater()
 
     def test_radar_axis_name_toggle(self):

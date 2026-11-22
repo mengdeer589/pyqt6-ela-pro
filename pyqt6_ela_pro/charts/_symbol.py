@@ -97,17 +97,20 @@ def symbolPixmap(
     dpr: float = 1.0,
 ) -> QPixmap:
     """符号的**预渲染位图**（点量大时批量贴图用）。
+
     逐点 ``drawEllipse`` 与合并 ``QPainterPath`` 在大量点上都很慢，位图贴图快
     一个数量级；按 ``dpr`` 以物理像素渲染。**返回副本**：缓存里的活动对象一旦
+    被调用方改动，会污染后续所有绘制。
     """
     fill = parse_color(color)
     stroke = parse_color(border_color) if border_color is not None else None
     width = float(border_width or 0.0)
     dpr = max(0.5, float(dpr or 1.0))
     size = max(1.0, float(size))
+    size = round(size * 2.0) / 2.0
     key = (
         str(kind or "circle"),
-        round(size * 2.0) / 2.0,
+        size,
         fill.rgba(),
         stroke.rgba() if stroke is not None else -1,
         round(width, 2),
@@ -116,7 +119,9 @@ def symbolPixmap(
     cached = _SPRITE_CACHE.get(key)
     if cached is not None:
         return QPixmap(cached)
-    pad = 2
+    # pad / 描边宽都按物理像素给：pixmap 在绘制时还没有 DPR，
+    # 逻辑尺寸 = (size*dpr + 2*dpr) / dpr = size + 2，与调用方 r+1 对齐。
+    pad = max(2, int(round(2 * dpr)))
     physical = max(2, int(round(size * dpr)) + pad)
     pixmap = QPixmap(physical, physical)
     pixmap.fill(Qt.GlobalColor.transparent)
@@ -125,7 +130,7 @@ def symbolPixmap(
         painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
         painter.setBrush(fill)
         painter.setPen(
-            QPen(stroke, width) if stroke is not None else QPen(Qt.PenStyle.NoPen)
+            QPen(stroke, width * dpr) if stroke is not None else QPen(Qt.PenStyle.NoPen)
         )
         center = QPointF(physical / 2.0, physical / 2.0)
         painter.drawPath(symbolPath(key[0], center, size * dpr))

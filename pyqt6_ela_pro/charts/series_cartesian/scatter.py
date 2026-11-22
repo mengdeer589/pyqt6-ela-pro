@@ -15,6 +15,7 @@ from PyQt6.QtGui import (
 
 from .._tokens import T
 from .. import _downsample as _ds
+from .. import data as _cdata
 from .._symbol import symbolPixmap
 from .._utils import to_float as _to_float
 from .._utils import with_alpha
@@ -77,6 +78,9 @@ class ScatterSeriesRenderer(SeriesRenderer):
     def __init__(self, chart, opt):
         super().__init__(chart, opt)
         self._dots = []  # [dict(pt=QPointF, r=float, value, index, x)]
+        self._third_range_key = None
+        self._third_range_ref = None
+        self._third_range = (0.0, 1.0)
 
     def _third_dim(self, item):
         v = item.get("value") if isinstance(item, dict) else item
@@ -138,6 +142,38 @@ class ScatterSeriesRenderer(SeriesRenderer):
             return None
         return super().uniformItemStyle()
 
+    def _third_range_all(self):
+        """全量数据的第三维范围（气泡大小不能随窗口/抽稀变化）。"""
+        data = self.data()
+        key = (id(data), len(data), _cdata.dataVersion(data))
+        if self._third_range_ref is data and self._third_range_key == key:
+            return self._third_range
+        lo = hi = None
+        np_ = _ds.np
+        if np_ is not None and len(data):
+            try:
+                arr = np_.asarray(data, dtype=np_.float64)
+                if arr.ndim == 2 and arr.shape[1] >= 3:
+                    col = arr[:, 2]
+                    col = col[np_.isfinite(col)]
+                    if col.size:
+                        lo, hi = float(col.min()), float(col.max())
+            except (TypeError, ValueError, OverflowError):
+                lo = hi = None
+        if lo is None or hi is None:
+            for index in range(len(data)):
+                value = self._third_dim(data[index])
+                if value is None or not math.isfinite(value):
+                    continue
+                lo = value if lo is None else min(lo, value)
+                hi = value if hi is None else max(hi, value)
+        if lo is None or hi is None:
+            lo, hi = 0.0, 1.0
+        self._third_range_key = key
+        self._third_range_ref = data
+        self._third_range = (lo, hi)
+        return self._third_range
+
     def layout(self, rect: QRectF) -> None:
         self._dots = []
         coord = self.chart.coordFor(self.opt)
@@ -154,11 +190,9 @@ class ScatterSeriesRenderer(SeriesRenderer):
         candidates = self._candidate_indices(coord, plot_w)
         data = self.data()
         indices = range(len(data)) if candidates is None else candidates.tolist()
-        # 第三维只对候选点求值（全量推导在 1M 点上要 300ms+）
+        # 第三维逐候选点求值；范围必须按全量算，否则缩放会改变所有气泡大小。
         thirds = {i: self._third_dim(data[i]) for i in indices}
-        known = [v for v in thirds.values() if v is not None]
-        zmin = min(known) if known else 0.0
-        zmax = max(known) if known else 1.0
+        zmin, zmax = self._third_range_all()
         span = zmax - zmin
         append = self._dots.append
 
@@ -301,6 +335,7 @@ class ScatterSeriesRenderer(SeriesRenderer):
         self._label_rects = []
         if not self._dots:
             return
+        dots = self.progressiveSelect(self._dots)
         p.save()
         coord = self.chart.coordFor(self.opt)
         if isinstance(coord, GridCoord):
@@ -311,19 +346,20 @@ class ScatterSeriesRenderer(SeriesRenderer):
             ls = self.opt.get("lineStyle") or {}
             line_color = self.color()
             if isinstance(ls.get("color"), str) and ls["color"]:
-                line_color = parse_color(ls["color"])
+                line_color = self.resolveColor(ls["color"])
             pen = QPen(line_color, _to_float(ls.get("width"), 1.5))
             pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
             pen.setCapStyle(Qt.PenCapStyle.RoundCap)
             p.setPen(pen)
             p.setBrush(Qt.BrushStyle.NoBrush)
-            points = [d["pt"] for d in self._dots]
+            points = [d["pt"] for d in dots]
             if len(points) >= 2:
                 p.drawPolyline(QPolygonF(points))
         kind = str(self.opt.get("symbol") or "circle")
         symbol_rotate = _to_float(self.opt.get("symbolRotate"), 0.0)
         emphasized = self.chart.emphasizedIndices(self)
         selected = self.chart.selectedIndices(self)
+        hovered = next(iter(emphasized), None) if emphasized else None
         show_label = self.labelShown()
         if show_label:
             font = self.labelFont()
@@ -347,7 +383,7 @@ class ScatterSeriesRenderer(SeriesRenderer):
             and not symbol_rotate
             and not (emphasized and self.blursOtherItems())
         ):
-            radii = {round(d["r"] * scale, 1) for d in self._dots}
+            radii = {round(d["r"] * scale, 1) for d in dots}
             if len(radii) == 1:
                 r = next(iter(radii))
                 if r > 0:
@@ -363,7 +399,7 @@ class ScatterSeriesRenderer(SeriesRenderer):
                         self.chart.getDevicePixelRatio(),
                     )
                     half = r + 1.0
-                    for d in self._dots:
+                    for d in dots:
                         pt = d["pt"]
                         p.drawPixmap(QPointF(pt.x() - half, pt.y() - half), sprite)
                     _draw_emphasis_markers(
@@ -381,7 +417,7 @@ class ScatterSeriesRenderer(SeriesRenderer):
                     p.restore()
                     return
         if draw_markers:
-            for d in self._dots:
+            for d in dots:
                 index = d["index"]
                 r = d["r"] * scale
                 if r <= 0:
@@ -395,26 +431,15 @@ class ScatterSeriesRenderer(SeriesRenderer):
                     alpha = self.itemOpacity(index)
                     border_color, border_w = self.itemBorder(index)
                 if index in selected:
-                    style = self.selectItemStyle(index)
-                    select_color = self.selectColor(index)
-                    if select_color is not None:
-                        color = select_color
-                    if style.get("borderColor"):
-                        border_color = style["borderColor"]
-                    border_w = max(border_w, _to_float(style.get("borderWidth"), 1.4))
                     r = max(r, d["r"] * scale * 1.15)
-                if emphasized:
-                    if index in emphasized:
-                        r *= 1.25
-                        emphasis = self.emphasisColor(index)
-                        if emphasis is not None:
-                            color = emphasis
-                        if border_color is None:
-                            border_color = color.lighter(115)
-                            border_w = max(border_w, 1.4)
-                    elif self.blursOtherItems():
-                        blur = self.blurOpacity()
-                        alpha *= blur if blur is not None else 0.35
+                if emphasized and index in emphasized:
+                    r *= 1.25
+                color, alpha, border_color, border_w = self.stateStyle(
+                    index, hovered, color, alpha, border_color, border_w
+                )
+                if border_color is None and index == hovered:
+                    border_color = color.lighter(115)
+                    border_w = max(border_w, 1.4)
                 p.setBrush(with_alpha(color, int(190 * alpha)))
                 p.setPen(
                     QPen(
@@ -451,7 +476,7 @@ class ScatterSeriesRenderer(SeriesRenderer):
                 else False
             )
             drawn = []
-            for d in self._dots:
+            for d in dots:
                 index = d["index"]
                 text = self.labelText(index, d["value"], formatValue(d["x"]))
                 marker_r = d["r"] * scale if draw_markers else 0.0
@@ -467,7 +492,18 @@ class ScatterSeriesRenderer(SeriesRenderer):
                 if hide_overlap and any(hit.intersects(r) for r in drawn):
                     continue
                 p.setPen(self.labelColorFor(index))
-                paint_label_at(p, anchor, text, fm, rotate)
+                hit = paint_label_at(
+                    p,
+                    anchor,
+                    text,
+                    fm,
+                    rotate,
+                    series=self,
+                    index=index,
+                    color=self.labelColorFor(index),
+                )
+                if hit.isNull():
+                    continue
                 rect = hit
                 if marker_r > 0:
                     rect = rect.united(
@@ -505,8 +541,20 @@ class ScatterSeriesRenderer(SeriesRenderer):
             "x": best["x"],
         }
 
+    def morphSnapshot(self):
+        dots = [
+            {
+                "pt": QPointF(d["pt"]),
+                "r": float(d["r"]),
+                "color": self.itemColor(d["index"]),
+                "key": self.morphKey(d["index"]),
+            }
+            for d in self._dots
+        ]
+        return {"kind": "scatter", "items": dots} if dots else None
+
     def valueAtIndex(self, index: int):
-        idx = self._full_index(index)  # dataZoom 窗口偏移换算
+        idx = index
         best = None
         for d in self._dots:
             if d["index"] == idx:

@@ -4,13 +4,37 @@
 统一 **camelCase** 命名；`ElaChartWidget` 的实例接口与 **ECharts 对齐**，
 配置 / 控制 / 事件三层如下。
 
+覆盖状态与缺口见 [charts-coverage.md](charts-coverage.md)。
+
 **模块分工**：`core/` = 主控件 / option 合并 / 绘制 / 查询 / 事件；`axes/` = 坐标与轴模型；`components/` = 标注 / markPoint 等组件；`interact/` = dataZoom / brush / visualMap / timeline / toolbox；`series_cartesian/` 与 `series_hierarchy/` = 系列渲染器；`layout.py` / `interaction.py` / `exporter.py` = 布局 / 宿主交互 / 导出。
+
+**Option 模型**：`charts/models.py` 只保留薄 `OptionModel`（dict + `snake_case` 属性访问），不再为每个 option 键维护 dataclass 字段：
+
+```python
+from pyqt6_ela_pro.charts import ChartOption, AxisOption, OptionModel, SeriesOption
+
+chart.setOption(ChartOption(
+    animation=False,
+    x_axis=AxisOption(type="category", data=["A", "B"]),
+    y_axis=AxisOption(type="value"),
+    series=[
+        SeriesOption(
+            type="bar",
+            name="营收",
+            data=[120, 180],
+            item_style=OptionModel(color="color.primary"),
+        )
+    ],
+))
+```
+
+`setOption(dict)` 同样可用；`getOption()` 返回 `ChartOption`（`series` / 轴为 `SeriesOption` / `AxisOption`），`getOptionDict()` 返回普通 dict。嵌套样式直接使用 `OptionModel` 或普通 dict。
 
 **配置与查询**
 
 | 方法 | 说明 |
 |---|---|
-| `setOption(option, notMerge=False, lazyUpdate=False)` | **默认合并**（ECharts 语义）：dict 深合并；`series` / `dataZoom` / `graphic` 按 `id` → `name` → 下标逐项合并（未匹配旧项保留、新项追加）；**`xAxis` / `yAxis` / `singleAxis` 按下标逐项合并**（轴名不是身份）；其余 list 整体替换。`notMerge=True` 全量替换、重置图例选择**与 dataZoom 窗口**；`lazyUpdate=True` 延迟到下一事件循环重建（重建时使系列层位图失效，不会贴回旧数据）。返回 self |
+| `setOption(option, notMerge=False, lazyUpdate=False)` | 设置 option；**同时接受 `ChartOption` 与 dict**（dict 在入口转薄模型）。默认合并语义与 ECharts 一致：`series` / `dataZoom` / `graphic` 等按 `id` / `name` / 下标逐项合并，其余 list 整体替换。`notMerge=True` 全量替换、重置图例选择与 dataZoom 窗口；`lazyUpdate=True` 延迟到下一事件循环重建。返回 self |
 | `updateAxis(axis, patch, axisIndex=0)` | 只更新一条轴（深合并；`axis` = `"x"` / `"y"` / `"single"`），其余轴原样保留。多轴场景改轴标签 / 刻度 / 样式用它，别手写整个轴数组。`radar` 不支持（维度在 `series.indicator`，且本库不读顶层 `radar` 组件） |
 | `setAxisLabelStyle(axis, *, fontSize=None, fontWeight=None, bold=None, color=None, fontFamily=None, fontStyle=None, align=None, verticalAlign=None, rotate=None, margin=None, axisIndex=0)` | 轴刻度标签样式（只改传入的键；`axis` = `"x"` / `"y"` / `"single"` / `"both"`）。`bold=True` 是 `fontWeight=700` 的糖；`align="auto"` / `verticalAlign="auto"` 恢复默认。轴不存在 / 参数非法 / 没有任何键时返回 `False` 且不写入（`both` 为原子操作，缺一条轴就不写） |
 | `axisLabelStyle(axis, axisIndex=0)` | 该轴标签的实际样式（含默认值）：`fontSize` / `fontWeight` / `fontFamily` / `fontStyle` / `color` / `align` / `verticalAlign` / `margin` / `rotate` |
@@ -18,17 +42,24 @@
 | `setAxisLabelFormatter(axis, formatter, axisIndex=0)` | 设置轴标签 formatter（字符串模板或 `callable(value, index)`；**index 是刻度下标**） |
 | `setCategoryLabels(labels, axisIndex=0)` | 替换类目轴标签列表，保留该轴其它 option 与缩放窗口 |
 | `setFontFamily(family)` / `fontFamily()` | 全图字体族（**单个族名**；`None` 恢复系统默认）。逗号列表取第一个并告警 —— Win7 上多族列表会走逐字形族匹配的慢 shaping 并毒化后续文本。组件级 `textStyle.fontFamily` / `axisLabel.fontFamily` / `label.fontFamily` 可覆盖 |
-| `getOption()` | 当前 option 深拷贝（`options` 帧保留，当前帧已合并） |
+| `getOption()` / `getOptionDict()` | 当前 option 深拷贝：`getOption()` 返回 `ChartOption`（同时支持 dict 下标；`series` / 轴为薄模型），`getOptionDict()` 返回普通 ECharts dict |
+| `validateOption(option)` | 校验模型 / dict option，返回 `list[OptionIssue]`（未知系列类型等） |
+| `seriesItems(seriesName, *, seriesIndex/seriesId)` | 系列全部数据项 → `list[SeriesItem]` |
+| `itemAt(seriesName, index, *, seriesIndex/seriesId)` | 按统一 dataIndex 取数据项 → `SeriesItem` |
+| `labelRects(seriesName, *, seriesIndex/seriesId)` | 当前数据标签命中框 → `list[LabelHit]` |
+| `hitTestAll(pos)` | 光标下全部命中项 → `list[HitResult]`（组件优先，其次系列） |
 | `seriesRenderers` / `coords` / `components` | 渲染器 / 坐标系 / 组件实例列表（属性） |
 | `palette()` / `colorForSeries(series)` | 当前调色板 / 指定系列主色（默认取图表主题色板，`option["color"]` 优先） |
 | `setChartTheme(name)` / `chartTheme()` | 切换 / 读取图表配色主题（内置或已注册；`None` / `""` 恢复全局默认）。切换会失效布局 / 调色板 / 系列层位图缓存并重绘 |
 | `chartThemes()` / `defaultChartTheme()` / `setDefaultChartTheme(name)` | 主题列表 / 默认主题 / 设置默认主题（只影响之后新建的图表） |
-| `registerChartTheme(name, palette=None, light=None, dark=None)` / `unregisterChartTheme(name)` / `chartThemeSpec(name)` | 注册 / 注销 / 读取主题定义（`ela` 不可注销） |
+| `registerChartTheme(name, palette=None, palette_dark=None, light=None, dark=None)` / `unregisterChartTheme(name)` / `chartThemeSpec(name)` | 注册 / 注销 / 读取主题定义（`ela` 不可注销） |
 | `registerColormap(name, colors)` / `colormapNames()` / `colormapColors(name)` | 注册 / 查询 `image` 系列的色带（内置 viridis / plasma / inferno / magma / cividis / gray / hot / coolwarm / jet） |
+| `registerMap(name, geojson)` / `unregisterMap(name)` / `mapNames()` | 注册 / 注销 / 查询 GeoJSON 地图（FeatureCollection / Feature / Polygon / MultiPolygon；支持孔洞）。`map` 系列用 `"map": name` 引用；投影取 `geo.projection` / `series.projection`（`equirectangular` 默认 / `mercator`） |
 | `primaryCoord()` / `coordFor(seriesOpt)` | 主坐标系 / 按系列解析坐标系 |
 | `hitItem(pos)` / `hoverInfo()` | 坐标 → ECharts click params / 当前悬停命中 |
 | `convertToPixel(finder, value)` / `convertFromPixel(finder, value)` / `containPixel(finder, value)` | 数据 ↔ 像素换算与命中判定（finder：`"grid"` / `{"seriesIndex": 0}` 等） |
 | `getWidth()` / `getHeight()` / `getDevicePixelRatio()` | 尺寸查询 |
+| `preferredHeight(seriesIndex=None, rowHeight=26, padding=88)` | 系列建议高度（甘特按展示行数算；无实现时返回当前高度） |
 
 **控制**
 
@@ -38,23 +69,35 @@
 | `dispatchAction(payload)` | `legendToggleSelect` / `legendSelect` / `legendUnSelect` / `legendAllSelect` / `legendInverseSelect` / `dataZoom`（`start/end` 或 `startValue/endValue`）/ `restore` / `showTip` / `hideTip` / `highlight` / `downplay` / `select` / `unselect` / `toggleSelect`（`seriesIndex`/`seriesName` + `dataIndex`）/ `timelineChange` / `timelinePlayChange`；返回是否识别 |
 | `setInteractive(bool)` / `interactiveEnabled()` | 交互总开关（静态化整图）。**打开 = 全开**：置 `True` 会清空逐项开关的覆盖（之前 `setInteractionEnabled` 关掉的项一并复位）；关闭期间逐项覆盖保留 |
 | `setAnnotationEditingEnabled(bool)` / `annotationEditingEnabled()` | 标注标签双击行内编辑开关（默认开）；关闭后只发 `annotationEditRequested`，宿主自行弹框并可调 `setAnnotationText` 提交 |
-| `setAnnotationText(seriesName, componentType, dataIndex, text)` | 修改 `markPoint` / `markLine` 的 `data[i].name` 或 `annotations[i].text`，重建并发出 `annotationEdited`；`seriesName` 为空时取第一个匹配组件（annotations 按同层数组下标） |
+| `setAnnotationText(seriesName, componentType, dataIndex, text)` | 修改 `markPoint` / `markLine` / `markArea` 的 `data[i].name` 或 `annotations[i].text`，重建并发出 `annotationEdited`；`seriesName` 为空时取第一个匹配组件（annotations 按同层数组下标） |
 | `setSeriesLabelText(seriesName="", dataIndex=0, text="", *, seriesIndex=None, seriesId=None)` | 修改某个数据点的标签文本（写入 `series.labelTexts[str(index)]`），空字符串 = 恢复默认数值文案；系列可按 `seriesId` → `seriesName` → `seriesIndex` 寻址（都为空取首个可见系列）；默认只失效系列层位图并重绘，发出 `annotationEdited`（`componentType="seriesLabel"`） |
 | `seriesLabelTexts(seriesName="", *, seriesIndex=None, seriesId=None)` / `clearSeriesLabelTexts(...)` | 读取 / 清空某系列的全部数据点标签覆盖 |
-| `setInteractionEnabled(feature, bool)` / `isInteractionEnabled(feature)` | 逐项开关：`tooltip` / `legend` / `dataZoom` / `brush` / `timeline` / `toolbox` / `annotations` |
+| `setInteractionEnabled(feature, bool)` / `isInteractionEnabled(feature)` | 逐项开关：`tooltip` / `legend` / `dataZoom` / `brush` / `timeline` / `toolbox` / `annotations` / `gantt` |
 | `showLoading(type="default", opts=None)` / `hideLoading()` / `isLoading` | 加载遮罩（`text` / `color` / `textColor` / `maskColor` / `fontSize` / `showSpinner` / `spinnerRadius` / `lineWidth`） |
 | `appendData({"seriesIndex"|"seriesName"|"seriesId", "data": …})` | 追加数据点（**原地增量**：不重建渲染器 / 组件，保留轴窗口；数值数组仍有一次 O(n) 物化） |
-| `setGroup(name)` / `connectCharts(group)` / `disconnectCharts(group)` | 图表组跨图联动（dataZoom / legend / axis tooltip）；`connectCharts` 从包顶层导入 |
+| `pushData(series, points, maxPoints=None)` / `setDataWindow(series, data, maxPoints=None)` / `streamLength(series)` | 流式数据：`series` 可为名称 / `id` / 下标；内部 `DataRing` 环形窗口，只保留最后 `maxPoints` 点。适合 line / scatter / image 实时波形；`setOption` 替换系列后流窗口自动重新初始化 |
+| `setGroup(name)` / `connectCharts(group)` / `disconnectCharts(group)` | 图表组跨图联动（dataZoom / legend / axis tooltip / universalTransition）；`axisPointer.link: False` 可断开单图的 axis tooltip 联动；`connectCharts` 从包顶层导入 |
 | `toggleMagicType()` | 折线 → 柱状 → 堆叠柱状 → 折线循环（toolbox 的 `magicType` 按钮调用） |
-| `getDataURL(opts=None)` | 导出 `data:image/png;base64,…`（`type` / `pixelRatio` / `backgroundColor`）。底色与 ECharts 同序：`backgroundColor`（导出参数）在最底层 → 图表自身 `backgroundColor` 覆盖其上 → 都没给用主题底；任一层传 `"transparent"` 得透明 PNG（JPEG 自动压到主题底上）。离屏重绘，工具条按钮等子控件不入镜 |
-| `saveImage(path=None)` | 文件版导出 PNG / JPEG / SVG（按 `format` 或扩展名判定；`path=None` 弹保存对话框）。底色规则同上（SVG 同样吃图表 `backgroundColor`；JPEG 自动压到主题底） |
+| `setEmptyText(text)` / `emptyText()` / `setErrorText(text)` / `errorText()` | 空态 / 错误态占位文案（画布中心；空数据时显示空态，错误态优先并带虚线框）。`""` 关闭 |
+| `setHighContrast(bool)` / `highContrast()` | 高对比度辅助模式：空态 / 错误态文字改用主文本色 |
+| `setKeyboardShortcutsEnabled(bool)` / `keyboardShortcutsEnabled()` | 键盘辅助开关。默认开：`Home` / `Ctrl+0` 重置视图，`+` / `-` 缩放，`L` 反选图例，`Esc` 关闭提示 |
+| `saveImage(path=None, *, format=None, quality=None, scale=None, multiPage=False)` | 文件版导出 PNG / JPEG / SVG / **PDF**（按 `format` 或扩展名判定；`path=None` 弹保存对话框）。PNG / JPEG 支持 `scale`（`pixelRatio`）与 JPEG `quality`；PDF 单页 / `multiPage=True` 纵向分页。底色规则同上（JPEG / PDF 自动压到主题底） |
+| `printChart(printer=None, *, multiPage=False)` | 打印当前图表；`printer=None` 时弹系统打印对话框，也可传 `QPrinter` 静默打印。`multiPage=True` 对长图按纵向分页。返回是否完成 |
+| `previewPrint(printer=None)` | 系统打印预览（`QPrintPreviewDialog`）。 |
+| `getDataURL(opts=None)` | 导出 `data:` URL：`type` = `"png"` / `"jpeg"` / `"jpg"` / `"svg"` / `"pdf"`，另有 `pixelRatio` / `scale` / `quality` / `multiPage` / `backgroundColor` |
 | `clear()` | 清空（等价 `setOption({}, notMerge=True)`） |
 | `dispose()` / `isDisposed()` | 销毁（停定时器 / 断主题 / deleteLater）与状态查询。**销毁后再调用 `setOption` / `getOption` / `dispatchAction` / `appendData` / `resize` / 导出等公开 API 会抛 `RuntimeError`**（ECharts 语义） |
 
+**`ElaGanttView`（甘特滚动容器）**：`setOption` / `setRowHeight` / `scrollToRow` /
+`topRow` / `visibleRows` / `refresh` / `chart()` / `setChartTheme`；
+`ganttTaskChanged` 直接转发内嵌图表信号。详见甘特章节。
+
 **事件**
 
+`on(eventName, handler)` 的 handler 接收 **`ChartEvent`（薄 dict 模型）**；它同时实现 dict / `Mapping` 访问，所以旧代码的 `params["dataIndex"]` / `params.get("seriesName")` 仍然可用。Qt 信号 `itemClicked` / `annotation*` / `gantt*` 同样传 `ChartEvent`（信号签名改为 `object`）；`event.as_dict()` 可转普通 dict。
+
 ECharts 事件名经 `on(eventName, handler)` / `off(eventName=None, handler=None)`
-注册（handler 收 ECharts params dict，异常被吞掉并告警，不会终止进程）：
+注册（handler 收 `ChartEvent`，异常被吞掉并告警，不会终止进程）：
 
 | 事件名 | 载荷 | 触发 |
 |---|---|---|
@@ -67,13 +110,15 @@ ECharts 事件名经 `on(eventName, handler)` / `off(eventName=None, handler=Non
 | `brushselected` | `{batch: [{brushId, areas, selected: [...]}], selected}` | 刷选变化 |
 | `restore` / `highlight` / `downplay` | 对应 params | 动作触发 |
 | `finished` | `{}` | 动画播放完毕 |
-| `annotationEditRequested`（Qt 信号） | `{seriesName, componentType, dataIndex, text}` | 双击 `markPoint` / `markLine` 标签，或双击可拖动标注（`componentType="annotations"`） |
+| `annotationEditRequested`（Qt 信号） | `{seriesName, componentType, dataIndex, text}` | 双击 `markPoint` / `markLine` / `markArea` 标签，或双击可拖动标注（`componentType="annotations"`） |
 | `annotationEdited`（Qt 信号） | `{seriesName, componentType, dataIndex, text}` | 标签 / 可拖动标注编辑提交 |
 | `annotationDragged`（Qt 信号） | `{index, id, name, componentType, seriesName, text, x, y, ax, ay}` | 可拖动标注拖动结束（`index` 是同层 `annotations` 数组下标） |
+| `ganttTaskChanged`（Qt 信号） | `{series, seriesIndex, dataIndex, name, mode, start, end, prevStart, prevEnd, startText, endText}` | 甘特任务条拖动结束（`mode`: `move` / `resize-start` / `resize-end`） |
 
 同时保留 Qt 信号（宿主可直接 connect）：`legendToggled(str, bool)` /
-`dataZoomChanged(float, float)` / `timelineChanged(int)` / `itemClicked(dict)` /
-`toolboxTriggered(str)` / `brushChanged(list)` / `annotationDragged(dict)` / `finished()`。
+`dataZoomChanged(float, float)` / `timelineChanged(int)` / `itemClicked(object)` /
+`toolboxTriggered(str)` / `brushChanged(list)` / `annotationDragged(object)` /
+`ganttTaskChanged(object)` / `finished()`。参数为 `ChartEvent`（兼容 dict 访问）。
 
 **扩展（自定义系列 / 组件）**
 
@@ -99,12 +144,128 @@ registerSeries("myType", MySeries)   # 同名覆盖会告警
 
 **数据格式**（与系列 `data` 一致）：`number` / `[x, y]` / `[x, y, value]` /
 `{"value": [...], "tooltip": {"formatter": "自定义文案"}, "itemStyle": {"color": "#..."}, ...}`；
-坐标系由 `coordinateSystem` 声明（缺省 `grid`，可选 `polar` / `singleAxis` / `calendar`）。
+坐标系由 `coordinateSystem` 声明（缺省 `grid`，可选 `polar` / `singleAxis` / `calendar` / `geo`）。
+`series.colorBy: "data"` 时按数据项索引取全局调色板，而不是整条系列同色。`series.selectedMap` / `series.selected` 可作为选中态初值；`series.realtimeSort` 会按值重排单图 bar 的类目轴与数据。
 `image` 系列例外：`data` 是 2D 标量矩阵或 3D RGB(A)，见下文「矩阵图像（imshow）」。
+
+**数据集（`dataset` / `encode` / `transform`）**
+
+`dataset.source` 支持二维数组（首行字符串自动当表头，或用 `sourceHeader` / `dimensions` 显式声明）与对象数组。`series.encode` 用维度名或下标映射 `x` / `y` / `value` / `itemName` / `seriesName`；`seriesName` 会把一份模板拆成多条系列。`seriesLayoutBy: "column"` 按列拆系列（列名作系列名，首列作类目），`"row"` 按行拆系列（行首作系列名，表头作类目）。
+
+```python
+chart.setOption({
+    "dataset": {
+        "source": [
+            ["month", "sales", "cost"],
+            ["Jan", 120, 80], ["Feb", 180, 90],
+        ],
+        "transform": [
+            {"type": "filter", "dimension": "sales", "gt": 100},
+            {"type": "sort", "dimension": "sales", "order": "desc"},
+        ],
+    },
+    "xAxis": {"type": "category"},
+    "yAxis": {"type": "value"},
+    "series": [
+        {"type": "bar", "encode": {"x": "month", "y": "sales"}},
+        {"type": "line", "encode": {"x": 0, "y": 2}},
+    ],
+})
+```
+
+`transform` 只做安全的内置算子：`filter`（`eq` / `ne` / `gt` / `gte` / `lt` / `lte` / `in` / `notIn`）、`sort`（`dimension` / `order`）、`aggregate`（`groupBy` / `dimension` / `method` = `sum` / `avg` / `min` / `max` / `count`）。未知算子告警一次后跳过；不执行任意代码。
+
+**流式数据**
+
+```python
+chart.setOption({
+    "xAxis": {"type": "value", "min": 0, "max": 20},
+    "yAxis": {"type": "value", "min": -1, "max": 1},
+    "series": [{"type": "line", "name": "wave", "data": []}],
+})
+chart.pushData("wave", [[0.0, 0.2], [0.1, 0.5]], maxPoints=2000)
+chart.setDataWindow("wave", points, maxPoints=2000)
+```
+
+`DataRing` 只追加 / 淘汰窗口外的点，`getOption` 会保留窗口对象；`pushData` 只刷新坐标系范围与 dataZoom 窗口，不重建组件 / 渲染器，也不复制整窗数据。10 万点 / 1 万点窗口的本机基准与跑法见 `docs/charts-stream-bench.md`。
+
+**标记区间（`markArea`）**
+
+`markArea.data` 每项是两端点对（`{"xAxis"}` / `{"yAxis"}` / `{"coord"}`）；支持组件级与端点级 `itemStyle`（`color` / `opacity` / `borderColor` / `borderWidth`）和 `label`（`show` / `text` / `position` / 字号颜色）。`silent=True` 关闭背景命中。支持 `grid` / `singleAxis` / `polar`（环形扇区）/ `calendar`（日期区间）；标签可双击编辑。
+
+**富文本标签**
+
+`label` 新增 `backgroundColor` / `borderColor` / `borderWidth` / `borderRadius` / `padding`（数字或 `[t, r, b, l]`），以及 `label.rich` 的 `{style|text}` 分段：
+
+```python
+"label": {
+    "show": True,
+    "formatter": "{name|华东}{value| 320}",
+    "backgroundColor": "#fff4e5",
+    "borderColor": "#f0b35b",
+    "borderWidth": 1,
+    "borderRadius": 4,
+    "padding": [2, 6],
+    "rich": {
+        "name": {"color": "#8a5a00", "fontSize": 11},
+        "value": {"color": "#c0392b", "fontSize": 14, "fontWeight": 700},
+    },
+}
+```
+
+富文本已接入 bar / line / scatter / candlestick / boxplot / heatmap / gantt / pie / funnel / tree / treemap / sunburst / map，以及轴标签、图例、title。每个 rich 分段也支持自己的 `backgroundColor` / `borderColor` / `borderWidth`。`labelLayout.hideOverlap: True` 跳过与已画标签相交的标签；`labelLayout.moveOverlap: "shiftY"` / `"shiftX"` 先尝试避让。pie 外侧标签支持 `labelLine.show` / `length` / `length2` / `lineStyle`。
+
+**GeoJSON 地图**
+
+```python
+from pyqt6_ela_pro.charts import registerMap, unregisterMap
+
+registerMap("my-region", geojson)   # FeatureCollection / MultiPolygon 均可
+chart.setOption({
+    "geo": {"projection": "mercator"},
+    "series": [{"type": "map", "map": "my-region", "data": [{"name": "A", "value": 3}]}],
+})
+```
+
+区域名取 `properties.name` / `NAME` / `Name` / `id`；Polygon 的第一个 ring 为外环，后续 ring 为孔洞，MultiPolygon 的多个岛用奇偶填充规则合并。`geo.regions` 仍可传 `{名称: [[x, y], ...]}` 或 `{名称: [ring, ...]}`。
+
+顶层 `geo` 会创建独立 `GeoCoord`：`scatter` / `effectScatter` / `lines` 用 `coordinateSystem: "geo"` 即可叠加到地图上；`geoIndex` 选择多个 geo 中的某一个，`geo` 数组支持 `left` / `top` / `right` / `bottom` / `width` / `height` 定位。`geo.roam` 支持滚轮缩放与拖拽平移，`geo.label.show` 显示区域名，区域支持 hover、`selectedMode` 选中与跨 180° 经线。
+
+`map` 系列与顶层 `geo` 同图时不重复画底图：显式 `series.geoIndex`，或 `series.map` 与 `geo.map` 同名即自动复用 `GeoCoord` 的路径。此时底图 / 区域 hover / select / roam 都归 `geo`，`map` 系列只叠加有数据区域的着色；`series.label.show` 未显式设置时不再叠一层标签。`geo.label.show` 的标签在系列着色之后绘制，未显式给 `label.color` 时按实际底色自动选深 / 浅字色。
+
+**图形元素**
+
+`graphic` 支持 `circle` / `rect` / `text` / `line` / `group`。`left` / `top`（或 `right` / `bottom`）接受像素、`"center"` / `"middle"`、`"N%"`；`group.children` 的坐标相对 group，`left` / `top` 定位 group 基点，`rotation` / `origin` / `scale` / `scaleX` / `scaleY` 作用于整组，`z` 决定组内与顶层绘制顺序。`silent` 只影响命中（graphic 本身不参与交互）。
+
+**交互细节**
+
+- `tooltip.axisPointer.type = "line" / "shadow" / "cross" / "none"`，跨图轴提示由 `setGroup` + `connectCharts` 联动；`axisPointer.link: False` 可断开单图。`axisPointer.link: "all"` 或 `[{"xAxisIndex": [0, 1]}]` / `[{"yAxisIndex": [0, 1]}]` 在同图内联动多条同类轴：主指针之外再画联动轴的指示线，tooltip 仍合并所有系列。
+- `tooltip.confine`：`True` 时越界翻转 / 收敛到图表内；`False` 时保持鼠标右侧偏移，超出画布由控件裁剪。`tooltip.enterable` 时鼠标可进入浮层，进入后暂停跟随。
+- `dataZoom` 支持 `zoomLock` / `minValueSpan` / `maxValueSpan` / `minSpan` / `maxSpan`；`brushSelect`（默认 `True`）控制 slider 轨道能否拖出新窗口，`False` 时轨道只显示，手柄仍可拖动。
+- graph 支持 `edgeSymbol: ["none", "arrow"]` / `edgeSymbolSize: [4, 8]`，箭头随边方向旋转。
+
+**渐进渲染与形变过渡**
+
+- `progressive` / `progressiveThreshold` / `progressiveChunkMode`：数据量超过阈值后按帧预算补画；line / bar / scatter 逐点分帧，其它系列按系列层补齐。`progressiveChunkMode` 支持 `sequential` / `mod`（mod 跨数据均匀取样）。导出 / 打印会临时关闭渐进，保证一次画完整。
+- `universalTransition`：同一图表内系列形态切换时过渡；bar / line / scatter 做位置、尺寸、颜色插值，其它类型或类型变化时旧系列层交叉淡出。`{enabled, duration}` 可配。
+- 跨图 `universalTransition`：同组图表（`setGroup` + `connectCharts`）都启用 `universalTransition` 时，源图更新前把旧几何按数据项 `id` → `name` → 下标编码广播；目标图把归一化位置映射到自己的绘图区，bar / scatter 按 key 匹配做位置 / 尺寸 / 颜色形变，line 按点序形变，其它类型缩放淡出源图截图。目标图未启用或不同组时不接收。
+
+**键盘与可访问性**
+
+`setAccessibleName` / `setAccessibleDescription` 走 Qt 原生接口；默认名称为“图表”，描述里列出系列与快捷键；键盘焦点时绘制焦点框。`setKeyboardShortcutsEnabled(False)` 可整体关闭。
+
+**主题 × 系列能力矩阵（示例工作台）**
+
+`pyqt6_ela_pro.example.charts_page` 的「主题」工作区新增 23 系列 × 7 主题矩阵：单个自绘控件只画视口内的行，底部五个圆点依次表示数据标签 / visualMap / 选中 / 图例项 / 极坐标支持；点击格子打开对应完整示例。
 
 **文字样式（字号 / 颜色 / 字重）**
 
-每个文字组件都接受 ECharts 标准键，**未设置的键回退顶层 `textStyle`**：
+`title.text` 支持 `title.link`，点击标题文字打开对应 URL。  
+每个文字组件都接受 ECharts 标准键，**未设置的键回退顶层 `textStyle`**。
+填充色上的数据标签（bar inside / heatmap / pie / funnel / treemap / sunburst /
+map / gantt）在没有显式 `label.color` 时：**实色填充按填充色选黑 / 白**，
+**半透明填充跟随主题文字色**（流带 / 半透明色块在暗色主题上不选黑字）。
+显式 `label.color`（数据项 → 系列 → 顶层 `textStyle`）优先。
 
 ```python
 chart.setOption({
@@ -213,18 +374,25 @@ chart.setAxisLabelStyle("both", fontFamily="Microsoft YaHei")  # x + y 一次改
 
 **配色主题（`setChartTheme` / 自定义注册）**
 
-主题 = 分类色板 + 一组语义颜色槽位；每个图表实例可独立切换，默认主题
-`ela` 完全跟随 Ela 明暗主题（保持既有观感）。内置 7 套：
+主题 = 分类色板（浅 / 深两档）+ 一组语义颜色槽位；每个图表实例可独立切换。
+**几何在所有主题间统一为 Ela / Fluent 风格**（默认隐藏轴线与刻度、浅色分割线、
+圆角柱、圆点图例、8px 圆角提示框），主题只决定色板与明暗表面。默认主题 `ela`
+直接跟随 Ela 明暗主题。内置 7 套：
 
 | 主题 | 系列色板 | 明暗外观 | 色带 |
 |---|---|---|---|
-| `ela` | ECharts 9 色 | 跟随 `eTheme` | `primary.subtle → primary` |
-| `echarts` | ECharts 9 色 | 白底 / 官方暗紫底 | ECharts 蓝黄红 |
-| `matlab` | MATLAB 7 色 | 白底 / 深灰底 | parula |
-| `plotly` | Plotly 10 色 | 白底 / `#111` | viridis |
-| `ggplot2` | hue 10 色 | 白底 / 深灰底 | 蓝渐变 |
-| `seaborn` | deep 10 色 | 白底 / 深灰底 | 蓝渐变 |
-| `tableau` | Tableau 10 色 | 白底 / 深灰底 | 蓝渐变 |
+| `ela` | Ela / Fluent 9 色（浅 / 深两档） | 跟随 `eTheme` | `primary.subtle → primary`（随明暗重算） |
+| `echarts` | ECharts 9 色 + 暗色档 | 白底 / 官方暗紫底 | ECharts 蓝黄红 + 暗色档 |
+| `matlab` | MATLAB 7 色 + 暗色档 | 白底 / 深灰底 | parula + 暗色档 |
+| `plotly` | Plotly 10 色 + 暗色档 | 白底 / `#111` | viridis + 暗色档 |
+| `ggplot2` | hue 10 色 + 暗色档 | 白底 / 深灰底 | 蓝渐变 + 暗色档 |
+| `seaborn` | deep 10 色 + 暗色档 | 白底 / 深灰底 | 蓝渐变 + 暗色档 |
+| `tableau` | Tableau 10 色 + 暗色档 | 白底 / 深灰底 | 蓝渐变 + 暗色档 |
+
+所有内置主题都提供暗色数据色：`palette_dark`、`dark.color.ramp` 与
+`success` / `warning` / `danger` 的暗色变体，按暗底对比度提升并固化；
+切换明暗档时分类图、连续色带、K 线涨跌色和语义色都会变化。自定义主题仍可
+只写 `palette`，此时明暗两档共用同一套数据色。
 
 ```python
 from pyqt6_ela_pro.charts import (
@@ -241,6 +409,7 @@ chartThemes()                        # ["ela", "echarts", ...]
 registerChartTheme(
     "brand",
     palette=["#0b6e99", "#e08a1e", "#7a5ea8"],
+    palette_dark=["#4cc2ff", "#ffb86b", "#c4a7e7"],
     light={"color.bg.base": "#ffffff", "color.text.primary": "#1f2328"},
     dark={"color.bg.base": "#15181e", "color.text.primary": "#f0f6fc"},
 )
@@ -253,8 +422,16 @@ chart.setChartTheme("brand")
   `color.primary` / `color.success` / `color.warning` / `color.danger` /
   `color.ramp`（色带，至少 2 色）。未写的槽位回退 `ela`（eTheme），**不跨
   明暗档借用** —— 只写色板也能在明暗两档下保持可读。
-- 优先级：`option` 显式颜色（`color` / `series.color` / `itemStyle.color` /
-  `backgroundColor` / 组件 `textStyle`）> 图表主题 > eTheme。
+- 系列色板：内置主题全部提供 `palette` + `palette_dark`；自定义主题的
+  `palette_dark` 可选，未写则两档共用 `palette`（`ela` 内置两套 Fluent 色板）。
+- 用户颜色入口统一支持 `color.*` 令牌：`option.color` / `series.color` /
+  `backgroundColor` / `itemStyle.*` / `lineStyle.*` / `label.*` / 轴 / 日历 /
+  dataZoom / loading / tooltip / legend / visualMap / timeline。
+- 优先级：`option` 显式颜色 / 宽度 / `show`（`color` / `series.color` /
+  `itemStyle.color` / `backgroundColor` / 组件 `textStyle`）> 图表主题 > eTheme。
+- 几何默认值（轴线 / 刻度 / splitLine / 图例 / 标题 / 提示框 / 柱角 / 折线 /
+  dataZoom / visualMap）由 `charts/_style.py` 统一提供，不属于主题，自定义主题
+  同样复用；显式 option 仍逐项覆盖。
 - 色带作用于 `visualMap` / 直角与日历 `heatmap` / `image` / `map` 的默认
   配色；显式 `visualMap.inRange.colors` / `series.cmap` 仍优先。未写
   `color.ramp` 时按 `color.primary.subtle`（不透明画布底 + 12% 主色）→
@@ -269,22 +446,25 @@ chart.setChartTheme("brand")
 - 工具条按钮是上游 `ElaIconButton`（图标色由 Ela 主题控制），不随图表配色主题变化；
   其余画布内容（背景 / 轴 / 网格 / 图例 / 标题 / tooltip / 组件 / 系列）都跟随主题。
 - 示例工作台顶部「全局主题」下拉框切换**整页**图表（新建工作区继承；主题工作区的
-  6 张对比图固定展示、不参与）；「主题」工作区的「本区主题」只改两张演示图，
+  7 张对比图固定展示、不参与）；「主题」工作区的「本区主题」只改两张演示图，
   演示实例级 `setChartTheme`。
 
 **ECharts 兼容要点**
 
-- **配色**：默认调色板为 ECharts 官方 9 色（`ECHARTS_PALETTE`），可用顶层
-  `"color": [...]` 覆盖；图表主题（`setChartTheme`）提供系列色板与背景 /
-  文字 / 轴 / 网格 / 提示框默认值，系列 `itemStyle.color` / 数据项
-  `itemStyle.color` 逐级优先。所有颜色字符串都接受 `#rgb` / `#rrggbb` /
-  具名色 / `rgb()` / `rgba()`（`QColor` 不认后两者，库内统一过
-  `_colors.parse_color`）。
+- **配色**：默认系列色板为 Ela / Fluent 9 色（浅 / 深两档，暗色自动切
+  `palette_dark`），可用顶层 `"color": [...]` 覆盖；图表主题（`setChartTheme`）
+  提供系列色板与背景 / 文字 / 轴 / 网格 / 提示框默认值，系列
+  `itemStyle.color` / 数据项 `itemStyle.color` 逐级优先。几何由
+  `charts/_style.py` 统一（Ela 风格，不随主题变化）。所有颜色字符串都接受
+  `#rgb` / `#rrggbb` / 具名色 / `rgb()` / `rgba()`（`QColor` 不认后两者，
+  库内统一过 `_colors.parse_color`）。
 - **雷达**：维度定义支持顶层 `radar.indicator`（ECharts 写法）与
-  `series.indicator`（系列优先）；`center` / `radius` 同理（百分比相对内容区）。
+  `series.indicator`（系列优先）；`center` / `radius` 同理（百分比相对内容区
+  短边的一半），`axisName` 只在会顶出内容区时收窄半径。
 - **地图**：`label.show`（默认 **True**，与 ECharts 的默认关闭不同）/
-  `color` / `fontSize` / `fontWeight`；未给 `color` 时按区域底色亮度自动选
-  黑 / 白字。
+  `color` / `fontSize` / `fontWeight`；未给 `color` 时：实色区域按底色亮度选
+  黑 / 白字，半透明区域跟随主题文字色（饼 / 漏斗 / 旭日 / 树图 / 甘特的内嵌
+  标签同一策略）。
 - **提示框指示线**：`tooltip.axisPointer.label`（`show` / `formatter` /
   `backgroundColor` / `borderColor` / `color` / `fontSize`）与
   `axisPointer.lineStyle`（`color` / `width` / `type`）均已接入。
@@ -304,9 +484,10 @@ chart.setChartTheme("brand")
   `pieces` 支持 `min` / `max`（闭区间）、`value`（精确值）、比较谓词
   `gt` / `gte` / `lt` / `lte`（可组合）与 `label` / `color`；不在任何分段的值走
   `outOfRange.color`（缺省中性色）。色带作用于 `map` / 直角与日历 `heatmap` /
-  **`image`（矩阵图像）**，以及 **`scatter`（气泡图按值上色）**：取值维度由
-  `visualMap.dimension` 指定，缺省用数据最后一维（`[x, y, value]` 即 value）；
-  `seriesIndex` / `seriesId` 可把色带绑定到指定系列，数据项自己的
+  **`image`（矩阵图像）**、**`scatter`（气泡图按值上色）**，以及
+  `bar` / `pie` / `funnel` / `boxplot` / `candlestick` / `parallel` 的数据项：
+  取值维度由 `visualMap.dimension` 指定，缺省用数据最后一维（`[x, y, value]`
+  即 value）；`seriesIndex` / `seriesId` 可把色带绑定到指定系列，数据项自己的
   `itemStyle.color` 优先级高于映射。
 - **日历 + visualMap**：横向连续色带贴在日期网格底部（约 10px），纵向连续色带对齐网格顶部，
   分段色块同理；不再钉在画布边缘。全年日历 `cellSize: "auto"` 被宽度限制时不会出现大段空白；
@@ -332,6 +513,13 @@ chart.setChartTheme("brand")
   会重建 QImage，缩放 / 平移不会。本机实测（900×500、float64）：`512×4096`
   约 35 ms/次、`1024×8192` 约 134 ms/次（固定 `vmin/vmax` 约 118 ms），超大矩阵
   建议先在 worker 里降采样。可运行示例：`example/charts_page.py` 的「小波」工作区。
+- **饼图半径与外侧标签**：`radius` 百分比相对内容区短边的一半（ECharts 语义），
+  不再预留固定边距；外侧标签同侧按 y 排开，引线 + 半行文字会顶出内容区时
+  自动收窄半径（最多压到一半，避免遮住图例）。
+- **饼图 / 漏斗百分比模板**：`label.formatter` 与 `tooltip.formatter` 里的
+  `{d}` / `percent` 都是**百分数本身**（不带 `%`），模板写 `"{b} {d}%"`；
+  默认标签 / 默认 tooltip 仍自动带 `%`。回调参数里的 `percent` 同样是数值
+  （如 `42` 或 `42.5`），不是 `"42%"`。
 - **环形饼中心总计**：`totalLabel` 支持 `show` / `text` / `fontSize` / `fontWeight` /
   `fontFamily` / `fontStyle` / `color` / `subtextFontSize` / `subtextFontWeight` /
   `subtextFontStyle` / `subtextColor`；字号默认按内半径自适应（12–22px），
@@ -354,6 +542,15 @@ chart.setChartTheme("brand")
   `emphasis.itemStyle.color`；未命中项只在 `emphasis.focus: "self"` 时按
   `blur.itemStyle.opacity` 淡化，`none`（默认）/ `series` 都不淡化其它项）、
   `silent`（跳过命中）、`animation`（系列级关闭动画）、`id`（合并匹配键）。
+- **平行坐标配色**（`parallel`）：每条数据线按行序号取调色板色（ECharts 语义）；
+  系列 `lineStyle.color` 统一覆盖全部，`data[i].lineStyle.color` 覆盖单行。
+- **逐项颜色与命中同源**：`pictorialBar` / `boxplot` 按数据项 `itemStyle`、
+  `candlestick` 按 `itemStyle.color` / `color0`、`lines` 按 `data[i].lineStyle.color`
+  着色；命中 / tooltip 圆点取的就是绘制时那一份颜色。
+- **层级系列默认配色**（`treemap` / `sunburst` / `tree`）：按「第一个能分出支的
+  层级」取调色板色 —— 单根包装（`根 → A/B/C`）会下潜到 `A/B/C`，不会整图
+  只有一种颜色；多根数据仍按根分行。子级同色相逐级提亮。嵌套节点的
+  `itemStyle`（`color` / `opacity` / `borderColor` / `borderWidth`）逐项覆盖。
 - **坐标轴键**：`type`（`category` / `value` / `log` / **`time`**）、`logBase`、`position`
   （`bottom` / `top` / `left` / `right`）、`offset`、`boundaryGap` / `inverse` /
   `scale` / `nameLocation` / `nameGap` / `interval` / `minInterval` /
@@ -388,7 +585,164 @@ chart.setChartTheme("brand")
 
 ---
 
-**可运行示例**：`example/charts_page.py`（概览 / 系列画廊 / 交互 / 大数据 / 高级 / 主题 / 小波 / 实时八个工作区；小波页为滚动矩阵 + 固定 cmap + 主题外框切换；实时页为 1 kHz / 1M 环形缓冲 + 2000 显示点 / 10 Hz）；`ElaChartWidget` 的能力速览（22 系列 / 交互 / 大数据 / 主题）见 README「核心能力」。
+**可运行示例**：`example/charts_page.py`（概览 / 系列画廊 / 交互 / 大数据 / 高级 / 主题 / 小波 / 实时八个工作区；小波页为滚动矩阵 + 固定 cmap + 主题外框切换；实时页为 1 kHz / 1M 环形缓冲 + 2000 显示点 / 10 Hz）；`ElaChartWidget` 的能力速览（23 系列 / 交互 / 大数据 / 主题）见 README「核心能力」。
+
+---
+
+## 甘特图（`series.type: "gantt"`）
+
+用于工作计划 / 研发排期：任务条、进度覆盖、里程碑、依赖箭头、今天线、基线 / 截止日期、关键路径和拖动改期。
+
+### 坐标系
+
+```python
+{
+    "xAxis": {"type": "time"},          # 或 "value"（数值工期）
+    # 必须；data 省略时按 data[].name 自动生成。
+    # inverse: True 让第一行在顶部（ECharts 类目轴默认 0 在底部）。
+    "yAxis": {"type": "category", "inverse": True},
+    "series": [{
+        "type": "gantt",
+        "name": "研发计划",
+        "data": [
+            {"name": "需求梳理", "start": "2026-11-02", "end": "2026-11-06",
+             "progress": 1.0},
+            {"name": "方案设计", "start": "2026-11-05", "end": "2026-11-09",
+             "progress": 0.9, "dependencies": ["需求梳理"]},
+            {"name": "上线评审", "start": "2026-11-27", "milestone": True},
+        ],
+    }],
+}
+```
+
+- `start` / `end` 支持 `date` / `datetime` / ISO 字符串 / 毫秒时间戳；`end` 缺省 = 里程碑。
+- 区间按半开区间 `[start, end)` 绘制，`end` 与 `start` 相等时画菱形。
+- `data` 支持 `{"name","start","end","progress","milestone","dependencies"}`、
+  `[start, end]` / `[start, end, progress]`、`{"value": [start, end, progress]}`。
+- x 轴范围自动包含任务的 `start` / `end`、`baseline` 两端与 `deadline`，
+  基线 / 截止日期不会被轴范围裁掉。
+- **状态色**：数据项可给 `status: "done"`，系列用 `statusColors` 映射到
+  **主题令牌**（如 `"color.primary"` / `"color.warning"`）或普通颜色字符串；
+  主题切换时按令牌重新解析，不会像写死 `itemStyle.color` 那样停在旧颜色。
+  优先级：项 `itemStyle.color` > `statusColors[status]` > 系列 `itemStyle.color` > 调色板。
+- 图表只按 `data` 顺序画任务行；**分组 / 折叠 / 汇总行由宿主自己决定**
+  （可用 `yAxis.data` 排序、分成多个系列 / 多张图，或在外层列表里折叠）。
+- `yAxis.data` 显式给定时按给定顺序排列；省略时从 `data[].name` 自动生成，
+  但**任一条目缺 `name` 就整轴跳过自动生成**（此时必须显式给 `yAxis.data`）。
+- 类目轴沿用 ECharts 语义：0 在底部。工作计划一般加 `yAxis.inverse: True`
+  让第一行在顶部；此时任务条、轴标签、axis tooltip 会一起翻转。
+- 长任务名需要 `grid.left` 留白（或 `grid.containLabel: true`）；`xAxis.type: "log"` /
+  类目 x 轴不支持，`yAxis` 非 `category` 时整系列跳过并告警。
+
+### 任务选项
+
+| 键 | 说明 |
+|---|---|
+| `barWidth` | 行高占比（0~1）或像素；默认行高的 60% |
+| `progress` | `{"show": True, "editable": False, "step": 0.01, "color": None, "baseColor": None, "baseOpacity": 0.35}`；数据项 `progress` 取 0~1（>1 且 ≤100 按百分比）；`editable` 开启后拖任务条上方圆点改进度；`baseColor=None` 时底轨用条色，设为 `color.border.strong` 等令牌可换成中性底轨 |
+| `baseline` | `{"show": True, "color": None, "height": 3, "opacity": 0.55, "overdueColor": None}`；数据项 `baseline: {start, end}` 或 `[start, end]`，画在任务条下方的细基线，实际结束超出时尾段用 overdueColor |
+| `deadline` | `{"show": True, "color": None, "overdueColor": None}`；数据项 `deadline` 支持日期 / datetime / ISO / 毫秒；未完成且结束晚于截止时旗标标红 |
+| `criticalPath` | `{"show": False, "color": None, "width": 1.5, "arrows": True}`；单系列内按 finish-to-start 依赖找**最长依赖链**（按工期累加，不把日期空隙算浮动），关键任务加描边、关键箭头用危险色 |
+| `milestone` | `{"symbolSize": 12}`；数据项 `milestone: true` 或只给 `start` 时画菱形 |
+| `dependencies` | `{"show": True, "color": None, "width": 1}`；数据项 `dependencies: ["前置任务名"]`，可跨甘特系列按名查找 |
+| `todayLine` | `{"show": False, "date": None, "color": None, "label": "今天"}`；`date` 缺省取当前时间，测试 / 演示建议固定 |
+| `weekend` | `{"show": False, "color": None, "opacity": 0.55}`；时间轴周六 / 周日底纹（默认关） |
+| `rowStripe` | 交替行底纹，默认 `False`；需要密集任务分带时再开 |
+| `label` | 标准标签键：`show` / `position`（`inside` / `left` / `right`）/ `formatter`；`{b}` 是任务名，`{c}` 也是任务名 |
+| `editable` | 默认 `False`；开启后左键拖动任务条整体平移，拖动左右 6px 边缘拉伸 |
+| `snap` | 时间轴默认 `"day"`（吸附本地午夜）；也支持 `"hour"` / 毫秒步长 / `False` |
+| `statusColors` | `{"done": "color.primary", "doing": "color.warning"}`；值支持主题令牌 / 普通颜色；颜色自带 alpha 会与 `itemStyle.opacity` / `progress.baseOpacity` 相乘，不会被覆盖 |
+
+多个甘特系列共用一张图时，`todayLine` 只在一个系列上开（否则同一位置会画多条）。
+
+`criticalPath` v1 只在**单个甘特系列内**、按 **finish-to-start** 依赖计算：把任务工期沿依赖链累加，取最长的一条作为关键链（日期之间的空隙不算浮动）；跨系列依赖忽略并告警，成环时跳过。需要严格 CPM 的日期 slack 时，由宿主在数据层计算后写 `criticalPath` 或自行标注。
+
+### 拖动改期
+
+- **按下优先级**：`annotations` → 可拖动系列（甘特）→ `dataZoom` / `brush` → 其它系列。
+  因此默认 `inside` 缩放开着时，拖任务条不会误触平移；拖空白绘图区仍然平移 / 框选。
+- 拖动范围**钳制在按下时的轴窗口内**，不会一边拖一边改轴范围；松手也不重排全图，
+  视图保持拖动前的位置。
+- 数据写回保持原类型：原来是 `"2026-11-02"` 仍写日期字符串，原来是 `datetime`
+  仍写 `datetime`，原来是毫秒数仍写数字；进度 / 依赖 / 颜色等其它字段不变。
+- 松手发 `ganttTaskChanged(dict)`；`setInteractionEnabled("gantt", False)` 可整体关闭拖动。
+
+```python
+chart.ganttTaskChanged.connect(lambda p: print(p["name"], p["startText"], p["endText"]))
+# {"series","seriesIndex","dataIndex","name","mode":"move|resize-start|resize-end",
+#  "start","end","prevStart","prevEnd","startText","endText"}
+```
+
+`mode` 为 `move` / `resize-start` / `resize-end`；`start` / `end` 是毫秒时间戳
+（或数值轴上的数值），`startText` / `endText` 是格式化文案。
+
+### 任务交互信号
+
+```python
+chart.ganttTaskClicked.connect(lambda p: ...)              # 单击
+chart.ganttTaskDoubleClicked.connect(lambda p: ...)        # 双击；不再触发 resetView
+chart.ganttTaskContextMenuRequested.connect(lambda p: ...) # 右键；带 pos / globalPos
+chart.ganttProgressChanged.connect(lambda p: ...)          # 进度拖动结束
+```
+
+载荷包含 `series / seriesIndex / dataIndex / name / status / start / end /
+progress / startText / endText / progressText / overdue / critical`；
+有 `baseline` / `deadline` 时还会带对应文本。`ElaGanttView` 原样转发这四类信号。
+
+- 进度手柄画在任务条上方，不占用两端拉伸的命中区；拖动按 `step` 吸附。
+- `progress.editable` 与 `editable` 相互独立：只开进度拖动时任务条不能整体平移 / 拉伸。
+- 双击任务会抑制默认的 `resetView()`；双击空白区域仍复位视图。
+
+### 视图工具条 / 缩放
+
+```python
+view.setToolbarVisible(True)      # 默认隐藏；显示 日 / 周 / 月 / 今天 / 适应行高
+view.setScale("day")              # day = 14 天，week = 8 周，month = 6 个月
+view.goToToday()                  # 保持当前窗口跨度，把今天放到中心
+view.fitRows()                    # 按可见高度反推行高（最低 20px）
+view.showFullRange()              # 横向恢复全量范围
+view.scale() / view.toolbarVisible() / view.topRow() / view.visibleRows()
+```
+
+`setScale` / `goToToday` 走 `dataZoom` 的 x 窗口，纵向滚动只改 y 窗口，不会把
+横向缩放重置。只支持 `xAxis.type: "time"` 的甘特图。
+
+### 任务很多时（几十 / 上百行）
+
+- **行高优先**：每行建议 ≥24~28px。40 行约需 **1000~1200px** 高度；
+  600px 高度下 40 行只剩 13px/行，`axisLabel` 会自动隔行
+  （`interval: "auto"`），任务条也会压得很薄。
+- 用 `chart.preferredHeight()` 按当前展示行数算建议高度
+  （默认 `rowHeight=26` / `padding=88`）：
+
+  ```python
+  chart.setFixedHeight(chart.preferredHeight())          # 40 行 ≈ 1128px
+  chart.setFixedHeight(chart.preferredHeight(rowHeight=28, padding=96))
+  ```
+
+- **`ElaGanttView`**：固定 x 轴、右侧纵向滚动条按行切换窗口，滚轮直接滚动任务行：
+
+  ```python
+  from pyqt6_ela_pro.charts import ElaGanttView
+
+  view = ElaGanttView(parent)
+  view.setRowHeight(28)          # 期望行高，默认 26
+  view.setOption(option)         # option 里的 dataZoom 由容器接管
+  view.chart().ganttTaskChanged.connect(...)
+  view.ganttTaskChanged.connect(...)   # 容器也转发信号
+  ```
+
+  容器会把第一条 `dataZoom` 改成隐藏的 `inside` + `yAxisIndex: 0`，
+  关闭滚轮缩放 / 拖拽平移，避免和纵向滚动冲突；横向缩放仍可用
+  `dispatchAction({"type": "dataZoom", "start": ..., "end": ...})`。
+
+- 想在小高度里显示全部行名：把 `yAxis.axisLabel.fontSize` 降到 10 左右，
+  或显式 `axisLabel.interval: 0`（行高不足时会互相压字，不推荐）。
+- `label.show: true` 时，条高不足以放进文字会**自动跳过 inside 标签**，
+  避免压到相邻行；需要更小字号可配 `label.fontSize`。
+- 固定一屏展示几十个任务时，用滚动容器，或由宿主按阶段拆成多张图 / 多个系列。
+- 性能：几十到几百个任务是线性布局 + 线性绘制，不是瓶颈；依赖箭头按
+  任务名 O(1) 查找。
 
 ---
 
@@ -427,7 +781,7 @@ chart.setChartTheme("brand")
 | `tooltip.order: "valueAsc"/"valueDesc"`（兼容 `hoversort` 文案） | `hoversort` | `trigger: "axis"` 的联合提示按值排序 |
 | `series.connectNulls` | `connectgaps` | 断点不切段（默认切开） |
 | `saveImage("x.svg")` / `saveImage(format="svg")` / `getDataURL({"type": "svg"})` | 模式条导出 SVG | 走 `QSvgGenerator` 的同一绘制链（矢量图元 + 位图符号内嵌） |
-| `toolbox.feature` | 模式条按钮 | `saveAsImage` / **`saveAsSvg`** / `dataZoom` / `restore` / **`zoomIn`** / **`zoomOut`** |
+| `toolbox.feature` | 模式条按钮 | `saveAsImage` / **`saveAsSvg`** / `dataZoom` / `restore` / **`zoomIn`** / **`zoomOut`** / `magicType` / `dataView` |
 | 图例悬停 | 悬停图例高亮 trace | 系列名悬停时该系列正常绘制、其余降到 35% 不透明度；**饼 / 漏斗的图例条目是数据项名，只高亮对应扇区 / 层，不压暗整图**；提示框让位 |
 
 ---
@@ -489,7 +843,7 @@ chart.setOption({
 
 ### 标注 / 数据点标签双击编辑
 
-- `markPoint` / `markLine` 的标签，以及系列 `label.show: true` 画出的**数据点标签**，双击都能进入行内编辑：Enter / 失焦提交，Esc 取消。数据点标签目前覆盖折线 / 散点 / 柱状（其它系列可后续按同一 `_label_rects` 协议接入）。
+- `markPoint` / `markLine` 的标签，以及系列 `label.show: true` 画出的**数据点标签**，双击都能进入行内编辑：Enter / 失焦提交，Esc 取消。数据点标签覆盖折线 / 散点 / 柱状 / 饼图 / 漏斗 / 树图 / 矩形树图 / 旭日图 / 关系图 / 桑基图 / 地图等写入 `_label_rects` 的系列。
 - 数据点标签编辑结果写入 `series.labelTexts[str(dataIndex)]`（不改 `data` 形状，百万点系列仍走 numpy / LOD 快路径）；空字符串删除覆盖、恢复默认数值文案。
 - 标注提交回写 `data[i].name` 并重建，发 `annotationEdited` 信号。
 - 可拖动标注（`annotations`）双击文本框同样进入行内编辑，提交回写 `annotations[i].text`；多行文本在未改动时保留换行（内置编辑器是单行，改动后变为单行）。
@@ -557,3 +911,28 @@ chart.setOption({
 | **mark 扩展** | `markLine.data[].coord` 任意两点、`lineStyle`、`symbol`；`markPoint.symbol/symbolSize`；`markArea.data[].coord` |
 | **跨图联动** | `chart.setGroup(name)` + `connectCharts(name)`：dataZoom、图例选择、axis tooltip 同步；`disconnectCharts(name)` 断开 |
 | **工具条** | `magicType`（折线/柱状/堆叠循环）、`saveAsImage` / `saveAsSvg` / `dataZoom` / `restore` / `zoomIn` / `zoomOut` |
+
+---
+
+## 2026-11 统一绘制语义
+
+- **选中态**：`selectedMode` / `select.itemStyle` / `data[i].selected` / `selectedMap` 已统一到 `SeriesRenderer.stateStyle`。支持图元级选中的系列：bar / pictorial / line / scatter / effectScatter / gantt / pie / funnel / map / heatmap / treemap / sunburst / graph / sankey / radar / tree / boxplot / candlestick / parallel / lines。themeRiver / image / gauge 没有离散数据图元，选中态按不适用处理。
+- **hover / emphasis / blur**：命中项统一走 `emphasis.itemStyle`（color / opacity / borderColor / borderWidth）；非命中项统一走 `blur.itemStyle.opacity`。map / treemap / parallel / tree 不再硬编码提亮或淡化值。
+- **itemStyle 通用键**：`color` / `opacity` / `borderColor` / `borderWidth` / `borderRadius` 由基类统一解析；树图 / 地图 / 关系图 / 箱线图 / K 线 / 平行坐标 / 桑基图已接入 opacity 与 border（形状不支持的字段文档标注不适用）。
+- **主题令牌颜色**：`itemStyle.color`、`emphasis.itemStyle.color`、`select.itemStyle.color`、`label.color`、`borderColor`、`axisLabel.color`、`tooltip.backgroundColor` 等用户颜色入口支持 `color.*` 令牌；不再只有 Gantt `statusColors` 支持。
+- **label**：全局默认色统一为 `labelColorFor()`（实色填充内部仍按黑 / 白对比；半透明填充跟随主题文字）。themeRiver / map / tree / treemap / sunburst / graph / sankey 支持 `label.formatter`（callable + 模板）；bar 支持 top / bottom / left / right / inside / insideTop / insideBottom / insideLeft / insideRight。
+- **坐标系**：line = grid / polar；scatter = grid / singleAxis；heatmap = grid / calendar；bar = grid / polar；candlestick / boxplot = grid。非支持组合会 `warn_once` 后跳过，不再静默空白。
+- **查询**：`valueAtIndex` 对没有专用几何的层级 / 关系系列按 data 项兜底返回 `{name, value, color, series, dataIndex}`。
+- **visualMap**：除 map / heatmap / image / scatter 外，bar / pie / funnel / boxplot / candlestick / parallel 也按数据值取色；数据项自己的 `itemStyle.color` 优先。
+- **关系图图例**：`graph.categories` 有名称时图例按分类展示（颜色取分类 `itemStyle.color`，缺省取调色板），隐藏分类会同时跳过节点、关联边与命中。
+- **层级标签编辑**：tree / treemap / sunburst / graph / sankey / map 的标签默认显示，并写入 `_label_rects`；双击编辑与 `setSeriesLabelText(...)` 同样走 `series.labelTexts[str(dataIndex)]`，节点级 `label.text` / `label.formatter` 优先于系列 formatter。
+- **系列动画**：`series.animationDuration` / `animationEasing`（过渡时 `animationDurationUpdate` / `animationEasingUpdate`）按系列独立映射；顶层动画时钟取所有系列最大时长并线性推进，组件仍使用顶层缓动后的进度。
+- **组件令牌**：`visualMap`（色带 / 分段色 / 文本）与 `timeline`（轴线 / 节点 / 播放按钮 / 标签）的用户颜色同样支持 `color.*` 主题令牌。
+- **主题覆盖**：23 种系列默认主数据色全部来自主题 `palette` / `palette_dark` 或 `color.ramp`；7 套内置主题均提供暗色 palette、暗色色带和暗色语义色，切明暗档时分类图、连续色带、K 线涨跌色与语义色都会变化。显式 `option.color` / `series.color` / `itemStyle.color` 等仍优先于主题。
+- **层级索引域**：tree / treemap / sunburst 的 `hitTest`、`valueAtIndex`、`nameAtIndex`、`selectedIndices` 与 `data[i].selected` 统一使用**扁平节点下标**；选中集裁剪与 `dispatchAction(select)` 不再按顶层根数据长度丢弃子节点。
+- **数据标签补齐**：boxplot / candlestick 新增 `label`（含 `formatter` / `position` / 双击编辑）；pictorialBar 继承 bar 的标签链；radar / themeRiver 的标签写入 `_label_rects` 并支持 `labelTexts` 编辑；radar formatter 额外提供 `dimensionIndex`。
+- **状态链补齐**：pictorialBar 接回 `stateStyle`（hover / emphasis / select），gauge / themeRiver 新增 hover 强调；themeRiver 命中返回 `dataIndex`，图例悬停会高亮对应流带。
+- **关系 / 层级交互**：graph 支持系列级与逐边 `lineStyle`（color / width / opacity / curveness）及节点 `symbol`；tree 支持 `roam`、`expandAndCollapse`、`initialTreeDepth`；sankey 支持 `draggable` 与 `nodeAlign`（justify / left / right）；treemap / sunburst 支持 `nodeClick: false` 关闭下钻。
+- **visualMap 扩面**：line / radar / tree / treemap / sunburst / graph / sankey / lines / gauge / themeRiver / pictorialBar 也接入 visualMap；层级节点按 `node.value`、流带按末时刻值、飞线按段值映射。
+- **动画补齐**：`animationDelay` / `animationDelayUpdate` / `animationThreshold` 已支持；全局时钟按「延迟 + 时长」最大值推进，超过阈值的数据量直接呈现终态。
+- **标记与命中**：`markPoint` / `markLine` 支持 polar 与 singleAxis；`markLine` 的极坐标半径圆 / 角度射线与单轴竖线可绘制、可命中；image 的 `valueAtIndex` 与像素 `dataIndex` 对齐。

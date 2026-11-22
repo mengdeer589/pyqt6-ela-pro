@@ -14,7 +14,9 @@ def _chart(make):
             "xAxis": {"type": "value"},
             "yAxis": {"type": "value"},
             "dataZoom": [{"type": "inside", "start": 0, "end": 100}],
-            "series": [{"type": "line", "name": "A", "data": [[i, i] for i in range(50)]}],
+            "series": [
+                {"type": "line", "name": "A", "data": [[i, i] for i in range(50)]}
+            ],
         }
     )
     chart.anim.setProgress(1.0)

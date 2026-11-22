@@ -8,6 +8,7 @@ from PyQt6.QtCore import QPointF, Qt
 from PyQt6.QtWidgets import QWidget
 
 from .axes import GridCoord
+from .models import event_from_dict
 
 
 class ChartInteraction:
@@ -53,6 +54,17 @@ class ChartInteraction:
             track = getattr(zoom, "_track", None)
             if track is not None and track.contains(pos):
                 return Qt.CursorShape.PointingHandCursor
+        if getattr(chart, "_interactive", False):
+            for renderer in chart._interactive_renderers():
+                hook = getattr(renderer, "cursorShapeAt", None)
+                if not callable(hook):
+                    continue
+                try:
+                    shape = hook(pos)
+                except Exception:
+                    shape = None
+                if shape is not None:
+                    return shape
         legend = chart.legendAt(pos)
         if legend is not None and chart.isInteractionEnabled("legend"):
             if legend.hitTest(pos) is not None or legend.pageHitTest(pos):
@@ -78,8 +90,18 @@ class ChartInteraction:
         chart = self._chart
         if chart._loading:
             return
+        if event.button() != Qt.MouseButton.LeftButton:
+            QWidget.mousePressEvent(chart, event)
+            return
         pos = event.position()
         chart._press_button = event.button()
+        for title in getattr(chart, "titles", ()):
+            try:
+                if title.onMousePress(pos):
+                    QWidget.mousePressEvent(chart, event)
+                    return
+            except Exception:
+                continue
         consumed = chart._dispatch_hook("onMousePress", pos)
         # 拖拽类组件会吞掉按下事件；按下→原地松开仍是点击，记下上下文在松开时补发。
         chart._press_ctx = (
@@ -120,8 +142,17 @@ class ChartInteraction:
         if found is not None:
             renderer, hit = found
             chart.itemClicked.emit(
-                chart._make_item_params(renderer, hit, "click", event, pos)
+                event_from_dict(
+                    "click",
+                    chart._make_item_params(renderer, hit, "click", event, pos),
+                )
             )
+            emit_task = getattr(renderer, "emitTaskClicked", None)
+            if callable(emit_task):
+                try:
+                    emit_task(hit)
+                except Exception:
+                    pass
             try:
                 chart._handle_select_click(renderer, hit)
             except Exception:
@@ -132,13 +163,20 @@ class ChartInteraction:
             if empty is not None:
                 empty["type"] = "click"
                 empty["event"] = event
-                chart.itemClicked.emit(empty)
+                chart.itemClicked.emit(event_from_dict("click", empty))
 
     def mouse_move(self, event) -> None:
         chart = self._chart
         if chart._loading:
             return
         pos = event.position()
+        if (
+            chart.tooltip.active
+            and chart.tooltip.enterable()
+            and chart.tooltip._box.contains(pos)
+        ):
+            QWidget.mouseMoveEvent(chart, event)
+            return
         consumed = chart._dispatch_hook("onMouseMove", pos)
         if not consumed:
             legend = chart.legendAt(pos)
@@ -170,6 +208,7 @@ class ChartInteraction:
     def mouse_release(self, event) -> None:
         chart = self._chart
         if chart._loading:
+            chart._press_ctx = None
             return
         pos = event.position()
         chart._dispatch_hook("onMouseRelease", pos)
@@ -223,6 +262,15 @@ class ChartInteraction:
 
     def leave(self, event) -> None:
         chart = self._chart
+        for comp in chart._interactive_components():
+            cancel = getattr(comp, "cancelDrag", None)
+            if callable(cancel):
+                try:
+                    cancel()
+                except Exception:
+                    continue
+        chart._press_ctx = None
+        chart._press_button = Qt.MouseButton.NoButton
         chart.tooltip.hide()
         chart._tooltip_axis_clear()
         chart._broadcastGroup("axisTipHide", {})

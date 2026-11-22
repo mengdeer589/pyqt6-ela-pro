@@ -18,7 +18,7 @@ from .._tokens import T
 from .._utils import clamp as _clamp
 from .._utils import merged_text_style, text_italic, text_weight
 from .._utils import to_float as _to_float
-from .._utils import parse_color
+from .._utils import with_alpha
 from ..axes import chartFont, formatValue
 from ..core import SeriesRenderer
 from ._shared import _dist, _label_font, _parse_named_values, _parse_pct, _text_color
@@ -79,6 +79,8 @@ class GaugeSeriesRenderer(SeriesRenderer):
 
     def _value_angle(self, v):
         f = _clamp((v - self._vmin()) / (self._vmax() - self._vmin()), 0.0, 1.0)
+        if self.opt.get("clockwise", True) is False:
+            f = 1.0 - f
         return self._start_angle() + (self._end_angle() - self._start_angle()) * f
 
     def _arc(self, p, a_hi, a_lo, r, width, color):
@@ -95,6 +97,7 @@ class GaugeSeriesRenderer(SeriesRenderer):
 
     def paint(self, p: QPainter, anim_t: float) -> None:
         p.save()
+        p.setOpacity(max(0.0, min(1.0, self.itemOpacity(None))))
         start, end = self._start_angle(), self._end_angle()
         # 动画：旧值 → 新值（过渡）；首帧从 min 摆起
         prev_v = self._vmin()
@@ -104,6 +107,19 @@ class GaugeSeriesRenderer(SeriesRenderer):
         cur_v = prev_v + (self._value - prev_v) * anim_t
         cur_a = self._value_angle(cur_v)
         r = self._radius
+        hover = self.chart.hoverInfo()
+        hovered = (
+            hover[1].get("dataIndex")
+            if hover is not None and hover[0] is self
+            else None
+        )
+        base_color = self.visualColor(0) or self.color()
+        hover_color, hover_alpha, _hb, _hw = self.hoverState(
+            hovered,
+            0,
+            base_color,
+            self.itemOpacity(0),
+        )
         # 背景分段色弧
         axis_opt = dict(self.opt.get("axisLine") or {})
         line_style = dict(axis_opt.get("lineStyle") or {})
@@ -117,28 +133,45 @@ class GaugeSeriesRenderer(SeriesRenderer):
                     segs.append(
                         (
                             _clamp(_to_float(item[0], 0.0), 0.0, 1.0),
-                            parse_color(str(item[1])),
+                            self.resolveColor(item[1]),
                         )
                     )
             segs.sort(key=lambda s: s[0])
-            prev_frac = 0.0
-            last_color = segs[-1][1]
-            for frac, color in segs:
-                a1 = start + (end - start) * prev_frac
-                a2 = start + (end - start) * frac
-                self._arc(p, a1, a2, r_arc, width, color)
-                prev_frac = frac
-            if prev_frac < 1.0:
-                a1 = start + (end - start) * prev_frac
-                self._arc(p, a1, end, r_arc, width, last_color)
+            if not segs:
+                self._arc(
+                    p,
+                    start,
+                    end,
+                    r_arc,
+                    width,
+                    _text_color("color.border", self.chart),
+                )
+            else:
+                prev_frac = 0.0
+                last_color = segs[-1][1]
+                for frac, color in segs:
+                    a1 = start + (end - start) * prev_frac
+                    a2 = start + (end - start) * frac
+                    self._arc(p, a1, a2, r_arc, width, color)
+                    prev_frac = frac
+                if prev_frac < 1.0:
+                    a1 = start + (end - start) * prev_frac
+                    self._arc(p, a1, end, r_arc, width, last_color)
         else:
-            self._arc(p, start, end, r_arc, width, _text_color("color.border", self.chart))
+            self._arc(
+                p, start, end, r_arc, width, _text_color("color.border", self.chart)
+            )
         # 进度弧
         prog_opt = dict(self.opt.get("progress") or {})
         if bool(prog_opt.get("show", False)):
             pw = _to_float(prog_opt.get("width"), width)
             self._arc(
-                p, max(start, cur_a), min(start, cur_a), r - pw / 2, pw, self.color()
+                p,
+                max(start, cur_a),
+                min(start, cur_a),
+                r - pw / 2,
+                pw,
+                with_alpha(hover_color, 255 * hover_alpha),
             )
         # 指针
         ptr_opt = dict(self.opt.get("pointer") or {})
@@ -158,14 +191,14 @@ class GaugeSeriesRenderer(SeriesRenderer):
                 ]
             )
             p.setPen(Qt.PenStyle.NoPen)
-            p.setBrush(self.color())
+            p.setBrush(with_alpha(hover_color, 255 * hover_alpha))
             p.drawPolygon(poly)
         # 中心小圆
         anchor_opt = dict(self.opt.get("anchor") or {})
         if bool(anchor_opt.get("show", True)):
             size = _to_float(anchor_opt.get("size"), 10.0)
             p.setPen(QPen(QColor(T("color.bg.elevated", self.chart)), 2))
-            p.setBrush(self.color())
+            p.setBrush(with_alpha(hover_color, 255 * hover_alpha))
             p.drawEllipse(self._center, size / 2, size / 2)
         # 中央数值 + 名称
         detail_opt = dict(self.opt.get("detail") or {})
@@ -177,7 +210,7 @@ class GaugeSeriesRenderer(SeriesRenderer):
             fm = QFontMetricsF(font)
             fm_h = fm.height()
             p.setPen(
-                parse_color(detail_style.get("color"))
+                self.resolveColor(detail_style.get("color"))
                 if isinstance(detail_style.get("color"), str)
                 and detail_style.get("color")
                 else _text_color("color.text.primary", self.chart)
@@ -193,14 +226,14 @@ class GaugeSeriesRenderer(SeriesRenderer):
                 self._detail_text(cur_v),
             )
         title_opt = dict(self.opt.get("title") or {})
-        name = self._entries[0][0] if self._entries else self.name
+        name = self._entries[0][1] if self._entries else self.name
         if bool(title_opt.get("show", True)) and name:
             font = _label_font(self, title_opt)
             p.setFont(font)
             fm2 = QFontMetricsF(font)
             title_style = self.titleStyle()
             p.setPen(
-                parse_color(title_style.get("color"))
+                self.resolveColor(title_style.get("color"))
                 if isinstance(title_style.get("color"), str)
                 and title_style.get("color")
                 else _text_color("color.text.secondary", self.chart)
@@ -225,9 +258,7 @@ class GaugeSeriesRenderer(SeriesRenderer):
         """中央数值字体：显式 fontSize 优先，否则随表盘半径自适应。"""
         px = _to_float(detail_style.get("fontSize"), None)
         if px is None:
-            label_px = _to_float(
-                self.labelTextStyle().get("fontSize"), T("font.xs")
-            )
+            label_px = _to_float(self.labelTextStyle().get("fontSize"), T("font.xs"))
             px = _clamp(max(label_px + 2.0, radius * 0.32), 12.0, 22.0)
         return chartFont(
             px,
@@ -267,10 +298,11 @@ class GaugeSeriesRenderer(SeriesRenderer):
             rel = (a - start) % 360.0
             if rel > (end - start) + 1e-6:
                 return None
-        name = self._entries[0][0] if self._entries else self.name
+        name = self._entries[0][1] if self._entries else self.name
         return {
             "name": name,
             "value": self._value,
-            "color": self.color(),
+            "color": self.visualColor(0) or self.color(),
             "series": self.name,
+            "dataIndex": 0,
         }

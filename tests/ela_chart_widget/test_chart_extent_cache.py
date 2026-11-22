@@ -91,7 +91,9 @@ class TestExtentCache:
         """缓存值必须持有数据对象强引用（防 id 复用）。"""
         data = _data(1000)
         coord._extent(data)
-        key = (id(data), len(data))
+        from pyqt6_ela_pro.charts.data import dataVersion
+
+        key = (id(data), len(data), dataVersion(data))
         entry = _axes._EXTENT_CACHE.get(key)
         assert entry is not None, "未写入缓存"
         assert entry[0] is data, "缓存未持有数据对象强引用"
@@ -106,7 +108,11 @@ class TestExtentCache:
 
         old = _data(1000, scale=1.0)
         coord._extent(old)
-        _, _, y0_old, _ = _axes._EXTENT_CACHE[(id(old), len(old))][1]
+        from pyqt6_ela_pro.charts.data import dataVersion
+
+        _, _, y0_old, _ = _axes._EXTENT_CACHE[
+            (id(old), len(old), dataVersion(old))
+        ][1]
         assert y0_old == 0.0
         del old
         gc.collect()

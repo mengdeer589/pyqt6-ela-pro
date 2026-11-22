@@ -20,6 +20,7 @@ from .._utils import to_float as _to_float
 from .._utils import parse_color
 from ..axes import GridCoord
 from ..core._shared import parseDataPoint
+from ..models import OptionModel
 
 
 class BrushComponent(QObject):
@@ -47,7 +48,7 @@ class BrushComponent(QObject):
     def __init__(self, chart, opt):
         super().__init__()
         self.chart = chart
-        self.opt = dict(opt or {})
+        self.opt = opt if isinstance(opt, OptionModel) else dict(opt or {})
         self._rect = None  # 当前选框 QRectF（None 表示无选区）
         self._anchor = None  # 拖拽起点
         #: lasso（套索）轨迹点；``brush.type == "lasso"`` 时使用
@@ -55,6 +56,7 @@ class BrushComponent(QObject):
         #: 是否接管拖拽（``setDragMode`` 用；``False`` 时 onMouse* 一律放行）
         self.enabled = True
         self.selected_items = []
+        self._brush_mode = str(self.opt.get("brushMode") or "single").strip().lower()
         #: 选中集版本 + 屏幕坐标缓存键（``_highlight_points`` 用）
         self._selection_epoch = 0
         self._highlight_key = None
@@ -87,7 +89,8 @@ class BrushComponent(QObject):
         self._anchor = QPointF(pos)
         self._poly = [QPointF(pos)]
         self._rect = QRectF(pos, pos)
-        self.selected_items = []
+        if self._brush_mode != "multiple":
+            self.selected_items = []
         self.chart.update()
         return True
 
@@ -165,6 +168,8 @@ class BrushComponent(QObject):
             return
         frac0 = _clamp((rect.left() - plot.left()) / plot.width(), 0.0, 1.0)
         frac1 = _clamp((rect.right() - plot.left()) / plot.width(), 0.0, 1.0)
+        if getattr(coord.x_axis, "inverse", False):
+            frac0, frac1 = 1.0 - frac0, 1.0 - frac1
         start = float(comp.start) + min(frac0, frac1) * span
         end = float(comp.start) + max(frac0, frac1) * span
         if end - start < 0.5:
@@ -187,12 +192,15 @@ class BrushComponent(QObject):
             if y_span > 0:
                 fy0 = _clamp((plot.bottom() - rect.bottom()) / plot.height(), 0.0, 1.0)
                 fy1 = _clamp((plot.bottom() - rect.top()) / plot.height(), 0.0, 1.0)
+                if getattr(coord.y_axis, "inverse", False):
+                    fy0, fy1 = 1.0 - fy0, 1.0 - fy1
                 payload["yStart"] = float(comp.y_start) + min(fy0, fy1) * y_span
                 payload["yEnd"] = float(comp.y_start) + max(fy0, fy1) * y_span
         self.chart.dispatchAction(payload)
 
     def _collect(self) -> None:
         """统计选框内的数据点（经 parseDataPoint + coord 映射，通用各系列）。"""
+        previous = list(self.selected_items) if self._brush_mode == "multiple" else []
         self.selected_items = []
         coord = self._coord or self.chart.primaryCoord()
         polygon = None
@@ -204,20 +212,39 @@ class BrushComponent(QObject):
             return
         if not isinstance(coord, GridCoord):
             return
+        rect = self._rect
+        if rect is not None and not coord.plot.isNull():
+            rect = rect.intersected(coord.plot)
         for r in self.chart.seriesRenderers:
             if not r.visible:
                 continue
             series_coord = self.chart.coordFor(r.opt)
             if not isinstance(series_coord, GridCoord):
                 continue
-            fast = self._collect_vectorized(r, series_coord, self._rect, polygon)
+            if getattr(series_coord, "grid_index", 0) != getattr(coord, "grid_index", 0):
+                continue
+            fast = self._collect_vectorized(r, series_coord, rect, polygon)
             if fast is not None:
                 self.selected_items.extend(fast)
                 continue
+            stype = str(r.opt.get("type") or "")
+            horizontal = bool(getattr(r, "_horizontal", False))
             for i, item in enumerate(r.data()):
                 x, y = parseDataPoint(item, i)
                 if y is None:
                     continue
+                if stype in ("candlestick", "boxplot"):
+                    # 二维数据首列不是 x：类目轴用下标，值取 close / 中位数。
+                    raw = item.get("value") if isinstance(item, dict) else item
+                    if not isinstance(raw, (list, tuple)) or len(raw) < 3:
+                        continue
+                    x = i
+                    y = _to_float(raw[2] if stype == "boxplot" else raw[1], None)
+                    if y is None:
+                        continue
+                elif horizontal:
+                    # 横向柱：数据下标在 y 轴、数值在 x 轴。
+                    x, y = y, x
                 if series_coord.x_axis.type == "category":
                     idx = series_coord.x_axis.localIndex(x)
                     n = len(series_coord.x_axis.categories)
@@ -230,7 +257,7 @@ class BrushComponent(QObject):
                 inside = (
                     polygon.containsPoint(pt, Qt.FillRule.OddEvenFill)
                     if polygon is not None
-                    else self._rect.contains(pt)
+                    else rect.contains(pt)
                 )
                 if inside:
                     self.selected_items.append(
@@ -243,6 +270,16 @@ class BrushComponent(QObject):
                             "py": pt.y(),
                         }
                     )
+        if previous:
+            seen = {
+                (item.get("series"), item.get("dataIndex"))
+                for item in self.selected_items
+            }
+            self.selected_items.extend(
+                item
+                for item in previous
+                if (item.get("series"), item.get("dataIndex")) not in seen
+            )
         self._selection_epoch += 1
         self._highlight_key = None
         self._highlight_cache = []
@@ -256,6 +293,9 @@ class BrushComponent(QObject):
         np_ = _ds.np
         if np_ is None or rect is None:
             return None
+        stype = str(r.opt.get("type") or "")
+        if stype in ("candlestick", "boxplot") or getattr(r, "_horizontal", False):
+            return None  # 首列不是 x：交给逐点路径按渲染器语义取点
         data = r.data()
         if not data:
             return []

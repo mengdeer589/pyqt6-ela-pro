@@ -5,7 +5,6 @@ from __future__ import annotations
 
 from PyQt6.QtCore import QPointF, QRectF, Qt, QTimer
 from PyQt6.QtGui import (
-    QColor,
     QPainter,
     QPainterPath,
     QPen,
@@ -14,11 +13,10 @@ from PyQt6.QtWidgets import QApplication
 
 from ..._motion import start_idle_loop
 from .._tokens import EFFECT_TICK_MS
-from .._utils import ON_FILL_WHITE
+from .._utils import text_on_fill
 from .._utils import dist_point_segment
 from .._utils import to_float as _to_float
 from .._utils import with_alpha
-from .._utils import parse_color
 from ..core import SeriesRenderer
 
 
@@ -45,41 +43,44 @@ class LinesSeriesRenderer(SeriesRenderer):
         eff = self.opt.get("effect")
         return dict(eff or {})
 
+    def _stop_timer(self) -> None:
+        timer = self._timer
+        self._timer = None
+        if timer is None:
+            return
+        try:
+            timer.stop()
+            timer.deleteLater()
+        except RuntimeError:
+            pass
+
     def _on_tick(self):
         """亮点推进。整个回调包裹：Qt 定时器回调抛异常会终止进程。"""
         timer = self._timer
         if timer is None:
             return
         try:
-            alive = self in self.chart.seriesRenderers
-        except RuntimeError:
-            alive = False  # chart 已销毁
-        if not alive:
-            timer.stop()
-            timer.deleteLater()
-            self._timer = None
-            return
-        if not self.visible:
-            if timer.isActive():
-                timer.stop()
-            return
-        if not timer.isActive():
-            timer.start()
-        try:
+            try:
+                alive = self in self.chart.seriesRenderers
+            except RuntimeError:
+                alive = False  # chart 已销毁
+            if not alive:
+                self._stop_timer()
+                return
+            if not self.visible:
+                if timer.isActive():
+                    timer.stop()
+                return
+            if not timer.isActive():
+                timer.start()
             effect = self._effect_opt()
             period = max(0.5, _to_float(effect.get("period"), 4.0))
             # 步长按实际 tick 间隔算，``period`` 才是用户可见的周期。
             step = max(1, int(timer.interval())) / 1000.0 / period
             self._phase = (self._phase + step) % 1.0
             self.requestSeriesRepaint()
-        except RuntimeError:
-            timer.stop()
-            timer.deleteLater()
-            self._timer = None
         except Exception:
-            timer.stop()
-            timer.deleteLater()
-            self._timer = None
+            self._stop_timer()
 
     def _on_visible_changed(self):
         """显隐变化钩子：显示恢复时重启定时器（必须走 ``start_idle_loop`` 以守动效策略）。"""
@@ -91,7 +92,7 @@ class LinesSeriesRenderer(SeriesRenderer):
         coord = self.chart.coordFor(self.opt)
         if coord is None or not hasattr(coord, "mapPoint"):
             return
-        for item in self.data():
+        for data_index, item in enumerate(self.data()):
             if not isinstance(item, dict):
                 continue
             coords = item.get("coords")
@@ -110,14 +111,31 @@ class LinesSeriesRenderer(SeriesRenderer):
                 p1 = coord.mapPoint(c1[0], c1[1])
             except Exception:
                 continue
+            line_style = item.get("lineStyle")
             self._segments.append(
                 {
                     "p0": p0,
                     "p1": p1,
+                    "index": data_index,
                     "name": str(item.get("name") or ""),
                     "value": item.get("value"),
+                    "color": (line_style or {}).get("color")
+                    if isinstance(line_style, dict)
+                    else None,
                 }
             )
+
+    def _seg_color(self, seg, base):
+        """单条线颜色：``data[i].lineStyle.color`` → 系列色。"""
+        raw = seg.get("color")
+        if isinstance(raw, str) and raw:
+            color = self.resolveColor(raw)
+            if color.isValid():
+                return color
+        visual = self.visualColorForValue(seg.get("value"))
+        if visual is not None:
+            return visual
+        return base
 
     def _curve_path(self, p0, p1, curveness):
         """直线 / 二次贝塞尔曲线路径。"""
@@ -138,18 +156,34 @@ class LinesSeriesRenderer(SeriesRenderer):
         p.save()
         ls = dict(self.opt.get("lineStyle") or {})
         width = _to_float(ls.get("width"), 2.0)
-        color = parse_color(str(ls.get("color"))) if ls.get("color") else self.color()
+        forced = self.resolveColor(ls.get("color")) if ls.get("color") else None
+        base = self.color()
         curveness = _to_float(ls.get("curveness"), 0.0)
-        pen = QPen(with_alpha(color, int(220 * anim_t)), width)
-        pen.setCapStyle(Qt.PenCapStyle.RoundCap)
-        p.setPen(pen)
+        hover = self.chart.hoverInfo()
+        hovered = (
+            hover[1].get("dataIndex")
+            if hover is not None and hover[0] is self
+            else None
+        )
         p.setBrush(Qt.BrushStyle.NoBrush)
         for seg in self._segments:
+            index = seg["index"]
+            color = forced or self._seg_color(seg, base)
+            alpha = self.itemOpacity(index)
+            color, alpha, _bc, _bw = self.stateStyle(index, hovered, color, alpha)
+            width_row = max(width, _bw)
+            pen = QPen(with_alpha(color, int(220 * anim_t * alpha)), width_row)
+            pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+            p.setPen(pen)
             p.drawPath(self._curve_path(seg["p0"], seg["p1"], curveness))
         # 端点
         p.setPen(Qt.PenStyle.NoPen)
-        p.setBrush(with_alpha(color, int(200 * anim_t)))
         for seg in self._segments:
+            index = seg["index"]
+            color = forced or self._seg_color(seg, base)
+            alpha = self.itemOpacity(index)
+            color, alpha, _bc, _bw = self.stateStyle(index, hovered, color, alpha)
+            p.setBrush(with_alpha(color, int(200 * anim_t * alpha)))
             p.drawEllipse(seg["p0"], 2.5, 2.5)
             p.drawEllipse(seg["p1"], 2.5, 2.5)
         # effect 移动亮点
@@ -157,9 +191,9 @@ class LinesSeriesRenderer(SeriesRenderer):
         if bool(effect.get("show", False)) and anim_t > 0.5:
             dot_size = _to_float(effect.get("symbolSize"), 6.0)
             dot_color = (
-                parse_color(str(effect.get("color")))
+                self.resolveColor(effect.get("color"))
                 if effect.get("color")
-                else QColor(ON_FILL_WHITE)
+                else text_on_fill(base, self.chart)
             )
             n = len(self._segments)
             for i, seg in enumerate(self._segments):
@@ -190,14 +224,14 @@ class LinesSeriesRenderer(SeriesRenderer):
                 best = (i, seg)
         if best is None:
             return None
-        i, seg = best
+        _i, seg = best
         line_style = self.opt.get("lineStyle") or {}
         raw = line_style.get("color") if isinstance(line_style, dict) else None
-        color = parse_color(str(raw)) if raw else self.color()
+        color = self.resolveColor(raw) if raw else self._seg_color(seg, self.color())
         return {
             "name": seg["name"] or self.name,
             "value": seg["value"],
             "color": color,
             "series": self.name,
-            "dataIndex": i,
+            "dataIndex": seg["index"],
         }

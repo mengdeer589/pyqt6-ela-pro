@@ -13,12 +13,13 @@ from PyQt6.QtGui import (
     QPen,
 )
 
+from .._style import DATAZOOM_BAND, DATAZOOM_HANDLE, DATAZOOM_TRACK
 from .._tokens import T
 from .._utils import clamp as _clamp
 from .._utils import merged_text_style, text_italic, text_weight
 from .._utils import to_float as _to_float
 from .._utils import warn_once
-from .._utils import parse_color
+from .._utils import resolve_color_option
 from ..axes import GridCoord, chartFont
 from ._shared import _axis_index_list
 
@@ -70,7 +71,7 @@ class DataZoomComponent(QObject):
     optionKey = "dataZoom"
 
     #: 滑块条带高度
-    SLIDER_H = 24.0
+    SLIDER_H = DATAZOOM_BAND
 
     def __init__(self, chart, opt):
         super().__init__()
@@ -101,6 +102,8 @@ class DataZoomComponent(QObject):
         self._y_zoom_allowed = first.get("yZoom", True) is not False
         #: ``zoomLock``：锁定窗口大小（滚轮不缩放，只能平移）
         self.zoom_lock = first.get("zoomLock") is True
+        #: ``brushSelect``：允许在 slider 轨道上拖出新窗口
+        self.brush_select = first.get("brushSelect", True) is not False
         #: ``filterMode``：只影响类目轴取样方式，不删系列数据（``_all_categories``
         #: + ``windowOffset`` 保留全局下标）：
         #: ``filter`` / ``weakFilter`` 按序号严格取样（中心在窗外的类目整项剔除），
@@ -115,7 +118,10 @@ class DataZoomComponent(QObject):
             mode = "filter"
         self.filter_mode = mode
         self.has_inside = any(str(e.get("type")) == "inside" for e in self.entries)
-        self.has_slider = any(str(e.get("type")) == "slider" for e in self.entries)
+        self.has_slider = any(
+            str(e.get("type")) == "slider" and e.get("show", True) is not False
+            for e in self.entries
+        )
         if not self.has_inside and not self.has_slider and self.entries:
             self.has_inside = True  # 未指明类型时按 inside 处理
         # 全量范围缓存：``apply`` 懒捕 / ``captureExtent`` 重捕都写这里；
@@ -132,16 +138,10 @@ class DataZoomComponent(QObject):
             if entry.get("xAxisIndex") is not None:
                 self._x_axis_indices = _axis_index_list(entry.get("xAxisIndex"))
                 break
-        # 完整轴数据缓存（首次布局时捕获）：按轴索引分桶
-        self._full_cats: dict = {}
-        self._full_range: dict = {}
-        self._full_y_cats: dict = {}
-        self._full_y_range: dict = {}
-        #: 上一次写进 category 轴的 (i0, i1) 窗口（apply 幂等跳过用）
-        self._applied_cats_window: dict = {}
-        self._applied_y_cats_window: dict = {}
         # 拖拽状态：("start"|"end"|"move"|"pan", last_x)
         self._drag = None
+        self._pan_plot = None
+        self._brush_anchor = None
         self._track = QRectF()
         self._h_start = QRectF()
         self._h_end = QRectF()
@@ -170,6 +170,10 @@ class DataZoomComponent(QObject):
         self._drag = None
         #: 起手平移所属网格的绘图区（多网格）
         self._pan_plot = None
+
+    def brushSelect(self) -> bool:
+        """``dataZoom.brushSelect``：slider 轨道是否允许拖出新窗口。"""
+        return bool(self.brush_select)
 
     def _axes(self):
         """受本组件控制的 x 轴 ``[(index, AxisModel)]``（``xAxisIndex`` 缺省=全部）。"""
@@ -339,6 +343,7 @@ class DataZoomComponent(QObject):
                 # ``empty``：窗口内没有任何类目 → 轴清空（图表留白）。
                 if axis.categories:
                     axis.categories = []
+                axis.setWindowOffset(0)
                 applied_cats[index] = (0, 0)
                 return
             # 幂等快速路径：窗口没变且轴内容仍是上次写的窗口时跳过 —— 重建
@@ -346,6 +351,7 @@ class DataZoomComponent(QObject):
             if (i0, i1) != applied_cats.get(index) or len(axis.categories) != i1 - i0:
                 axis.categories = full[i0:i1]  # 切片本身就是新 list，别再包一层
                 applied_cats[index] = (i0, i1)
+            axis.setWindowOffset(i0)
         else:
             full = full_range.get(index)
             if full is None:
@@ -436,7 +442,7 @@ class DataZoomComponent(QObject):
             # 底部预留 20px 给百分比标签（reserveBottom 与之匹配）
             y = rect.bottom() - h - 20
             band = QRectF(rect.left() + 16, y, max(40.0, rect.width() - 32), h)
-            track_h = 8.0
+            track_h = DATAZOOM_TRACK
             self._track = QRectF(
                 band.left(), y + (h - track_h) / 2, band.width(), track_h
             )
@@ -447,7 +453,8 @@ class DataZoomComponent(QObject):
         return self._track.left() + _clamp(pct, 0, 100) / 100.0 * self._track.width()
 
     def _update_handles(self) -> None:
-        hw, hh = 10.0, 16.0
+        hw = DATAZOOM_HANDLE
+        hh = DATAZOOM_HANDLE * 1.5
         cy = self._track.center().y()
         self._h_start = QRectF(self._x_of(self.start) - hw / 2, cy - hh / 2, hw, hh)
         self._h_end = QRectF(self._x_of(self.end) - hw / 2, cy - hh / 2, hw, hh)
@@ -458,7 +465,7 @@ class DataZoomComponent(QObject):
         p.save()
         p.setPen(Qt.PenStyle.NoPen)
         p.setBrush(QColor(T("color.bg.muted", self.chart)))
-        p.drawRoundedRect(self._track, 4, 4)
+        p.drawRoundedRect(self._track, 3, 3)
         sel = QRectF(
             self._x_of(self.start),
             self._track.top(),
@@ -468,11 +475,11 @@ class DataZoomComponent(QObject):
         fill = QColor(T("color.primary", self.chart))
         fill.setAlpha(70)
         p.setBrush(fill)
-        p.drawRoundedRect(sel, 4, 4)
+        p.drawRoundedRect(sel, 3, 3)
         for r in (self._h_start, self._h_end):
             p.setPen(QPen(QColor(T("color.border.strong", self.chart)), 1))
             p.setBrush(QColor(T("color.bg.elevated", self.chart)))
-            p.drawRoundedRect(r, 3, 3)
+            p.drawRoundedRect(r, 6, 6)
             p.setPen(QPen(QColor(T("color.text.tertiary", self.chart)), 1))
             cx = r.center().x()
             p.drawLine(QPointF(cx - 2, r.top() + 4), QPointF(cx - 2, r.bottom() - 4))
@@ -490,7 +497,11 @@ class DataZoomComponent(QObject):
             p.setFont(font)
             fm = QFontMetricsF(font)
             p.setPen(
-                parse_color(style.get("color") or T("color.text.tertiary", self.chart))
+                resolve_color_option(
+                    style.get("color"),
+                    self.chart,
+                    T("color.text.tertiary", self.chart),
+                )
             )
             ly = self._track.bottom() + 1
             p.drawText(
@@ -596,8 +607,12 @@ class DataZoomComponent(QObject):
                 max_span = hi if max_span is None else min(max_span, hi)
         return min_span, max_span
 
-    def _clamp_span(self, start: float, end: float):
-        """按 ``minSpan`` / ``maxSpan`` 约束窗口并收敛回 [0, 100]。"""
+    def _clamp_span(self, start: float, end: float, anchor: str = None):
+        """按 ``minSpan`` / ``maxSpan`` 约束窗口并收敛回 [0, 100]。
+
+        ``anchor`` = ``"start"`` / ``"end"`` 时固定拖动反侧的手柄，避免
+        撞到 minSpan 时另一侧跟着跳。
+        """
         min_span, max_span = self._span_limits()
         span = max(0.0, float(end) - float(start))
         if min_span is not None and span < min_span:
@@ -607,8 +622,13 @@ class DataZoomComponent(QObject):
         # ``empty`` 允许零宽窗口（用「窗口内无数据 → 留白」语义），其余模式至少 1%。
         min_allowed = 0.0 if self.filter_mode == "empty" else 1.0
         span = _clamp(span, min_allowed, 100.0)
-        center = (float(start) + float(end)) / 2.0
-        start = _clamp(center - span / 2.0, 0.0, max(0.0, 100.0 - span))
+        if anchor == "start":
+            start = _clamp(float(start), 0.0, max(0.0, 100.0 - span))
+        elif anchor == "end":
+            start = _clamp(float(end) - span, 0.0, max(0.0, 100.0 - span))
+        else:
+            center = (float(start) + float(end)) / 2.0
+            start = _clamp(center - span / 2.0, 0.0, max(0.0, 100.0 - span))
         return start, start + span
 
     def reset_window(self) -> bool:
@@ -663,14 +683,20 @@ class DataZoomComponent(QObject):
                     except ValueError:
                         return None
 
-                i0 = _index_of(sv) if sv is not None else 0
-                i1 = _index_of(ev) if ev is not None else n - 1
-                if i0 is None or i1 is None:
-                    return False
-                if i1 < i0:
-                    i0, i1 = i1, i0
-                start = i0 / n * 100.0
-                end = (i1 + 1) / n * 100.0
+                start = self.start
+                end = self.end
+                if sv is not None:
+                    i0 = _index_of(sv)
+                    if i0 is None:
+                        return False
+                    start = i0 / n * 100.0
+                if ev is not None:
+                    i1 = _index_of(ev)
+                    if i1 is None:
+                        return False
+                    end = (i1 + 1) / n * 100.0
+                if end < start:
+                    start, end = end, start
             else:
                 full = self._full_range.get(axis_index)
                 if full is None:
@@ -685,12 +711,14 @@ class DataZoomComponent(QObject):
                         if lo <= 0.0 or hi <= 0.0 or num <= 0.0:
                             return None
                         l0, l1 = math.log(lo), math.log(hi)
+                        if l1 == l0:
+                            return 0.0
                         return (math.log(num) - l0) / (l1 - l0) * 100.0
                     span = hi - lo or 1.0
                     return (num - lo) / span * 100.0
 
-                start = _pct(sv) if sv is not None else 0.0
-                end = _pct(ev) if ev is not None else 100.0
+                start = _pct(sv) if sv is not None else self.start
+                end = _pct(ev) if ev is not None else self.end
                 if start is None or end is None:
                     return False
         if start is None:
@@ -883,8 +911,12 @@ class DataZoomComponent(QObject):
                 max(0.0, self._h_end.left() - self._h_start.right()),
                 self._track.height() + 8,
             )
-            if mid.contains(pos):
+            if self.brush_select and mid.contains(pos):
                 self._drag = ("move", pos.x())
+                return True
+            if self.brush_select and self._track.adjusted(0, -4, 0, 4).contains(pos):
+                self._brush_anchor = pos.x()
+                self._drag = ("brush", pos.x())
                 return True
         if (
             self._inside_enabled()
@@ -909,7 +941,9 @@ class DataZoomComponent(QObject):
                 self.start = min(pct, self.end - 2.0)
             else:
                 self.end = max(pct, self.start + 2.0)
-            self.start, self.end = self._clamp_span(self.start, self.end)
+            self.start, self.end = self._clamp_span(
+                self.start, self.end, "start" if kind == "start" else "end"
+            )
             self._update_handles()
             self.apply()
             self.chart.invalidateLayout()
@@ -925,6 +959,18 @@ class DataZoomComponent(QObject):
             self.apply()
             self.chart.invalidateLayout()
             self.chart.update()
+        elif kind == "brush":
+            anchor = self._brush_anchor if self._brush_anchor is not None else last_x
+            p1 = (anchor - self._track.left()) / max(1.0, self._track.width()) * 100.0
+            p2 = (pos.x() - self._track.left()) / max(1.0, self._track.width()) * 100.0
+            start, end = sorted((_clamp(p1, 0.0, 100.0), _clamp(p2, 0.0, 100.0)))
+            if end - start < 2.0:
+                end = min(100.0, start + 2.0)
+            self.start, self.end = self._clamp_span(start, end)
+            self._update_handles()
+            self.apply()
+            self.chart.invalidateLayout()
+            self.chart.update()
         elif kind == "pan":
             self._pan(pos.x() - last_x)
         self._drag = (kind, pos.x())
@@ -934,6 +980,7 @@ class DataZoomComponent(QObject):
     def onMouseRelease(self, pos: QPointF) -> bool:
         if self._drag is not None:
             self._drag = None
+            self._brush_anchor = None
             self._pan_plot = None
             return True
         return False

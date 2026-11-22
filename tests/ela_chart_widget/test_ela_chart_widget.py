@@ -372,15 +372,16 @@ class TestLineSampling:
         chart.deleteLater()
 
     def test_big_data_symbols_sparsify(self):
-        """大数据下符号隔点绘制（ECharts 大数据同样退化符号密度）。"""
+        """大数据下符号按绘图宽度抽稀（不按原始点数全画）。"""
         chart = ElaChartWidget()
         chart.resize(800, 500)
         opt = self._big_option(200_000)
+        opt["series"][0]["showSymbol"] = True
         chart.setOption(opt)
         chart.anim.setProgress(1.0)
         r = chart.seriesRenderers[0]
-        sym = r._symbol_points(chart.coords[0], False, 500)
-        assert len(sym) == 200_000 // 500  # 每 500 个原始点一个符号
+        sym = r._build_symbol_items(chart.coords[0], False, 800)
+        assert 0 < len(sym) <= 2000, f"符号未抽稀：{len(sym)}"
         chart.deleteLater()
 
     def test_unsorted_data_falls_back_safe(self):

@@ -16,6 +16,7 @@ from PyQt6.QtGui import (
 )
 from PyQt6.QtWidgets import QFrame, QVBoxLayout, QWidget
 
+from .._colors import contrastRatio
 from .._motion import start_idle_loop
 from ..tooltips import ElaToolTipPositionType, remove_tooltip, set_tooltip
 from ._spinner import SpinnerArc
@@ -114,27 +115,6 @@ def _resolve_color(value, fallback_key: str) -> QColor:
     return _token_color(f"color.{fallback_key}")
 
 
-def _relative_luminance(color: QColor) -> float:
-    """WCAG 相对亮度（sRGB 线性化）。"""
-
-    def _linear(channel: int) -> float:
-        v = channel / 255.0
-        return v / 12.92 if v <= 0.03928 else ((v + 0.055) / 1.055) ** 2.4
-
-    return (
-        0.2126 * _linear(color.red())
-        + 0.7152 * _linear(color.green())
-        + 0.0722 * _linear(color.blue())
-    )
-
-
-def _contrast_ratio(a: QColor, b: QColor) -> float:
-    """两色 WCAG 对比度（1–21）。"""
-    la, lb = _relative_luminance(a), _relative_luminance(b)
-    hi, lo = (la, lb) if la >= lb else (lb, la)
-    return (hi + 0.05) / (lo + 0.05)
-
-
 def _text_on(color: QColor) -> QColor:
     """按**实际对比度**在「正文色 / 强调前景色」之间选更可读的一档。
     两个 token 的语义随主题翻转（亮色主题 ``text.primary``=黑、
@@ -145,7 +125,7 @@ def _text_on(color: QColor) -> QColor:
     key = (color.rgba(), c1.rgba(), c2.rgba())
     chosen = _TEXT_ON_CACHE.get(key)
     if chosen is None:
-        chosen = c1 if _contrast_ratio(color, c1) >= _contrast_ratio(color, c2) else c2
+        chosen = c1 if contrastRatio(color, c1) >= contrastRatio(color, c2) else c2
         if len(_TEXT_ON_CACHE) >= _TEXT_ON_CACHE_MAX:
             _TEXT_ON_CACHE.clear()
         _TEXT_ON_CACHE[key] = chosen

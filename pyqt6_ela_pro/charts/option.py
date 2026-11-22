@@ -30,7 +30,9 @@ def _deep_merge(dst: dict, src: dict) -> dict:
 #: setOption 合并时按组件数组「逐项合并」的顶层键；``visualMap`` 天生是
 #: 数组语义（多个色带各绑一个系列），整体替换会丢掉其余色带；``annotations``
 #: 逐项合并才能保住拖动后的 ``ax`` / ``ay``（按 id → name → 下标匹配）。
-_MERGE_ARRAY_KEYS = frozenset({"series", "dataZoom", "graphic", "visualMap", "annotations"})
+_MERGE_ARRAY_KEYS = frozenset(
+    {"series", "dataZoom", "graphic", "visualMap", "annotations"}
+)
 #: 坐标轴数组：只按下标逐项合并（轴的 ``name`` 是轴名不是身份，
 #: 按 name 匹配会把「给第 2 条轴改名」合并到同名的第 1 条上）。
 _AXIS_ARRAY_KEYS = frozenset({"xAxis", "yAxis", "singleAxis"})
@@ -68,20 +70,26 @@ def _merge_option_array(old_list: list, new_list: list) -> list:
     """
     old_list = list(old_list or [])
     new_list = list(new_list or [])
-    if any(not isinstance(item, dict) for item in new_list):
-        # 标量数组无法逐项合并 → 整体替换（逐项按引用持有，见 ``_hold_value``）。
-        return [_hold_value(i) for i in new_list]
     # 旧项按引用复用、匹配项就地合并：``old_list`` 就是 ``_option`` 的内部
     # 列表（首次写入已深拷贝），而 ``[x, y]`` 结构化数据不走 ElaNumericBuffer，
     # 每拷一次就是百万级对象复制。
     result = list(old_list)
     used = set()
     for i, new_item in enumerate(new_list):
+        if not isinstance(new_item, dict):
+            # 标量 / JSON null 逐项替换，不能因为一个非法项丢掉整个数组。
+            if i < len(result) and i not in used:
+                result[i] = _hold_value(new_item)
+                used.add(i)
+            else:
+                result.append(_hold_value(new_item))
+            continue
         idx = _match_option_index(new_item, old_list, i)
         if idx >= 0 and idx not in used:
             merged = old_list[idx]
-            _deep_merge(merged, new_item)
-            result[idx] = _normalize_series_entry(merged)
+            # 先把新 data 转 buffer，避免 _deep_merge 对百万级 list 深拷贝。
+            _deep_merge(merged, _normalize_series_entry(dict(new_item)))
+            result[idx] = merged
             used.add(idx)
         elif i < len(result) and not isinstance(result[i], dict) and i not in used:
             # 旧项是 ``None`` / 数字（JSON 的 null）：填洞而不是追加，
@@ -116,8 +124,11 @@ def _merge_axis_option(old, new):
             else:
                 result.append(_hold_value(new_item))
             continue
-        if index < len(result) and isinstance(result[index], dict):
-            _deep_merge(result[index], new_item)
+        if index < len(result):
+            if isinstance(result[index], dict):
+                _deep_merge(result[index], new_item)
+            else:
+                result[index] = _hold_value(new_item)
         else:
             result.append(_hold_value(new_item))
     if not old_is_list and len(result) == 1:
@@ -240,10 +251,17 @@ def _copy_option_shallow_arrays(option: dict) -> dict:
 
 
 def _copy_series_entry(s):
-    """单个 series 项的拷贝：大 ``data`` 按引用，其余深拷贝。"""
+    """单个 series 项的拷贝：大 ``data`` 先转紧凑存储，其余深拷贝。"""
     if not isinstance(s, dict):
         return _hold_value(s)
-    return _normalize_series_entry({k: _hold_value(v) for k, v in s.items()})
+    # 必须先 toBuffer：直接 deepcopy 200k list 要 ~31ms，转 buffer 只要 ~3ms，
+    # 而 ``_hold_value`` 对 buffer-like 是按引用持有的。
+    data_buffer = _cdata.toBuffer(s.get("data"))
+    out = {
+        key: (data_buffer if key == "data" and data_buffer is not None else _hold_value(value))
+        for key, value in s.items()
+    }
+    return out
 
 
 def _copy_any(v):

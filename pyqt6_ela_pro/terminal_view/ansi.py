@@ -7,6 +7,7 @@ from typing import NamedTuple, Optional
 
 from PyQt6.QtGui import QColor
 
+from .._colors import mixColor
 from .theme import _BASIC_KEYS, _BRIGHT_KEYS
 
 
@@ -509,12 +510,7 @@ def _clamp_byte(value: int) -> int:
 
 def _blend(a: QColor, b: QColor, ratio: float) -> QColor:
     """按比例混合两种颜色（``ratio`` 为 ``b`` 的占比，0-1）。"""
-    ratio = max(0.0, min(1.0, float(ratio)))
-    return QColor(
-        round(a.red() + (b.red() - a.red()) * ratio),
-        round(a.green() + (b.green() - a.green()) * ratio),
-        round(a.blue() + (b.blue() - a.blue()) * ratio),
-    )
+    return mixColor(a, b, ratio, rounding=True)
 
 
 def _indexed_key(index: int) -> str:

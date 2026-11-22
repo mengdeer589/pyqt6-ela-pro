@@ -76,7 +76,9 @@ class TestWheelModifier:
     def test_shift_required(self, qapp, make):
         chart = _chart(
             make,
-            dataZoom=[{"type": "inside", "zoomOnMouseWheel": "shift", "start": 0, "end": 100}],
+            dataZoom=[
+                {"type": "inside", "zoomOnMouseWheel": "shift", "start": 0, "end": 100}
+            ],
         )
         zoom = chart._component("dataZoom")
         _wheel(chart)

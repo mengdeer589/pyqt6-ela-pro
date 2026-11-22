@@ -14,13 +14,13 @@ from PyQt6.QtGui import (
     QPen,
 )
 
-from ..._colors import text_on_color
 from .._tokens import T
 from .._utils import clamp as _clamp
 from .._utils import to_float as _to_float
-from .._utils import parse_color, text_italic, text_weight
+from .._utils import parse_color, resolve_color_option, text_italic, text_weight
 from ..axes import chartFont, formatValue
 from ..core import SeriesRenderer, formatLabelTemplate
+from ..labels import label_text_size
 from ._shared import (
     _label_font,
     _parse_named_values,
@@ -40,6 +40,7 @@ class PieSeriesRenderer(SeriesRenderer):
         super().__init__(chart, opt)
         self._sectors = []  # [dict(name,value,color,a0,a1,r0,r1)]
         self._center = QPointF()
+        self._layout_rect = QRectF()
         self._total = 0.0
         self._r_in = 0.0
         self._r_out = 1.0
@@ -55,7 +56,9 @@ class PieSeriesRenderer(SeriesRenderer):
         out = []
         for index, item in enumerate(self.data()):
             if isinstance(item, dict):
-                name = str(item.get("name") or "")
+                name = str(item.get("name") or formatValue(item.get("value")))
+            elif isinstance(item, (int, float)) and not isinstance(item, bool):
+                name = formatValue(item)
             else:
                 name = str(item or "")
             if not name:
@@ -63,7 +66,7 @@ class PieSeriesRenderer(SeriesRenderer):
             out.append(
                 (
                     name,
-                    self.itemColor(
+                    self.dataColor(
                         index, default=_series_palette_color(self.chart, index)
                     ),
                 )
@@ -72,10 +75,12 @@ class PieSeriesRenderer(SeriesRenderer):
 
     def layout(self, rect: QRectF) -> None:
         self._sectors = []
+        self._layout_rect = QRectF(rect)
         entries = [
             entry
             for entry in _parse_named_values(self.data())
             if entry[1] not in self._hidden_items
+            and formatValue(entry[2]) not in self._hidden_items
         ]
         label_opt = dict(self.opt.get("label") or {})
         label_show = bool(label_opt.get("show", True))
@@ -96,8 +101,8 @@ class PieSeriesRenderer(SeriesRenderer):
         )
         self._center = QPointF(cx, cy)
         half = min(rect.width(), rect.height()) / 2
-        margin = 56.0 if (label_show and label_pos == "outside") else 14.0
-        base = max(10.0, half - margin)
+        # 半径百分比按 ECharts 语义相对「短边的一半」；再扣固定边距会把小图吃掉一半。
+        base = max(10.0, half)
         radius_opt = self.opt.get("radius", "75%")
         if isinstance(radius_opt, (list, tuple)):
             r_in = _parse_pct(radius_opt[0] if radius_opt else 0, base, 0.0)
@@ -107,6 +112,15 @@ class PieSeriesRenderer(SeriesRenderer):
         else:
             r_in = 0.0
             r_out = _parse_pct(radius_opt, base, base)
+        if label_show and label_pos == "outside":
+            # 外侧标签的引线 + 半行文字不能顶出内容区上下边；最多压缩一半半径，
+            # 再小就让标签溢出（横向本来由画布裁切兜底），不能把饼压成一个点。
+            lead = 16.0 + QFontMetricsF(_label_font(self, label_opt)).height() / 2.0
+            limit = max(10.0, half * 0.5, half - lead)
+            if r_out > limit > 0:
+                ratio = limit / r_out
+                r_in *= ratio
+                r_out = limit
         r_in = _clamp(r_in, 0.0, r_out)
         self._r_in, self._r_out = r_in, r_out
         self._total = sum(max(v, 0.0) for _, _, v in entries)
@@ -126,9 +140,9 @@ class PieSeriesRenderer(SeriesRenderer):
             self._sectors.append(
                 {
                     "index": data_index,
-                    "name": name,
+                    "name": name or formatValue(v),
                     "value": v,
-                    "color": self.itemColor(
+                    "color": self.dataColor(
                         data_index,
                         default=_series_palette_color(self.chart, data_index),
                     ),
@@ -156,7 +170,14 @@ class PieSeriesRenderer(SeriesRenderer):
             else:
                 out.append((acc, span))
             acc += span
+        if not self.clockwise():
+            start = self._start_angle()
+            out = [((2.0 * start - (a0 + span)) % 360.0, span) for a0, span in out]
         return out
+
+    def clockwise(self) -> bool:
+        """ECharts ``clockwise``（默认 True）。"""
+        return self.opt.get("clockwise", True) is not False
 
     def _start_angle(self) -> float:
         """ECharts ``startAngle``（0 = 3 点、逆时针）→ 内部角度（12 点起顺时针）。"""
@@ -245,16 +266,16 @@ class PieSeriesRenderer(SeriesRenderer):
             color = parse_color(sec["color"])
             alpha = self.itemOpacity(sec["index"])
             border_color, border_w = self.itemBorder(sec["index"])
-            if hovered is not None:
-                if sec["index"] == hovered:
-                    emphasis = self.emphasisColor(sec["index"])
-                    color = emphasis if emphasis is not None else color.lighter(112)
-                elif self.blursOtherItems():
-                    blur = self.blurOpacity()
-                    alpha *= blur if blur is not None else 0.35
-            elif legend_hover is not None and sec["name"] == legend_hover:
+            if (
+                hovered is None
+                and legend_hover is not None
+                and sec["name"] == legend_hover
+            ):
                 emphasis = self.emphasisColor(sec["index"])
                 color = emphasis if emphasis is not None else color.lighter(112)
+            color, alpha, border_color, border_w = self.stateStyle(
+                sec["index"], hovered, color, alpha, border_color, border_w
+            )
             if alpha < 1.0:
                 color.setAlphaF(color.alphaF() * alpha)
             if border_color is not None and border_w > 0:
@@ -270,8 +291,12 @@ class PieSeriesRenderer(SeriesRenderer):
         """饼图 ``label.show`` 默认开（ECharts 语义）。"""
         return bool(self.labelOption().get("show", True))
 
-    def _label_text(self, sec, pct: str, default_text: str) -> str:
-        """饼图标签文本：双击编辑覆盖 → ``label.formatter`` → 默认文本。"""
+    def _label_text(self, sec, pct: float, default_text: str) -> str:
+        """饼图标签文本：双击编辑覆盖 → ``label.formatter`` → 默认文本。
+
+        ``d`` / ``percent`` 按 ECharts 语义给**百分数本身**（不带 ``%``），
+        默认文本才带百分号；否则 ``{b} {d}%`` 会渲染成 ``42%%``。
+        """
         overrides = self._source_opt.get("labelTexts")
         if isinstance(overrides, dict):
             key = str(sec["index"])
@@ -305,16 +330,30 @@ class PieSeriesRenderer(SeriesRenderer):
     def _paint_labels(self, p, sectors, anim_t):
         label_opt = dict(self.opt.get("label") or {})
         if not bool(label_opt.get("show", True)):
+            # totalLabel 是独立开关：关数据标签不能连中心总计一起吞掉。
+            if self._r_in > 4 and bool(
+                dict(self.opt.get("totalLabel") or {}).get("show", False)
+            ):
+                font = _label_font(self, label_opt)
+                p.setFont(font)
+                self._paint_center_total(p, font)
             return
         pos = str(label_opt.get("position") or "outside")
+        line_opt = self.opt.get("labelLine")
+        line_opt = dict(line_opt) if isinstance(line_opt, dict) else {}
+        line_show = bool(line_opt.get("show", True))
+        line_length = _to_float(line_opt.get("length"), 12.0)
+        line_length2 = _to_float(line_opt.get("length2"), 14.0)
+        line_style = line_opt.get("lineStyle")
+        line_style = dict(line_style) if isinstance(line_style, dict) else {}
         font = _label_font(self, label_opt)
         p.setFont(font)
         fm = QFontMetricsF(font)
-        total = sum(s["value"] for s in self._sectors) or 1.0
+        total = self._total or 1.0
         c_text = self.labelColor()
         explicit_label = self.labelTextStyle().get("color")
         explicit_label = (
-            parse_color(explicit_label)
+            self.resolveColor(explicit_label)
             if isinstance(explicit_label, str) and explicit_label
             else None
         )
@@ -322,23 +361,32 @@ class PieSeriesRenderer(SeriesRenderer):
         if pos == "center":
             self._paint_center_total(p, font)
             return
+        outside = []
         for sec in sectors:
             span = (sec["a1"] - sec["a0"]) * anim_t
             if span < 4.0:
                 continue  # 扇区过小省略标签
             mid = sec["a0"] + span / 2
             name = sec["name"] or formatValue(sec["value"])
-            pct = formatValue(round(sec["value"] / total * 100, 1)) + "%"
+            pct_value = round(sec["value"] / total * 100, 1)
+            if isinstance(pct_value, float) and pct_value.is_integer():
+                pct_value = int(pct_value)
+            pct_text = formatValue(pct_value) + "%"
             if pos == "inside":
                 r = (sec["r0"] + sec["r1"]) / 2
                 pt = self._pt(mid, r)
-                text = self._label_text(sec, pct, pct)
-                p.setPen(explicit_label or text_on_color(parse_color(sec["color"])))
-                p.drawText(
-                    QRectF(pt.x() - 40, pt.y() - fm.height() / 2, 80, fm.height()),
-                    Qt.AlignmentFlag.AlignCenter,
+                text = self._label_text(sec, pct_value, pct_text)
+                rect = QRectF(pt.x() - 40, pt.y() - fm.height() / 2, 80, fm.height())
+                hit = self.paintLabelIn(
+                    p,
+                    rect,
                     text,
+                    index=sec["index"],
+                    align=Qt.AlignmentFlag.AlignCenter,
+                    color=self.contrastLabelColor(sec["color"], sec["index"]),
                 )
+                if hit.isNull():
+                    continue
                 tw = fm.horizontalAdvance(text)
                 self._label_rects.append(
                     (
@@ -352,47 +400,116 @@ class PieSeriesRenderer(SeriesRenderer):
                         text,
                     )
                 )
-            else:  # outside：引线 + 名称（含百分比）
-                pt1 = self._pt(mid, sec["r1"] + 2)
-                pt2 = self._pt(mid, sec["r1"] + 14)
-                right_side = math.sin(math.radians(mid)) >= 0
-                pt3 = QPointF(pt2.x() + (14 if right_side else -14), pt2.y())
-                p.setPen(QPen(c_line, 1))
-                p.drawLine(pt1, pt2)
-                p.drawLine(pt2, pt3)
-                p.setPen(c_text)
+            else:  # outside：先收集，排开 y 后再画引线 + 名称（含百分比）
                 text = self._label_text(
-                    sec, pct, f"{name} {pct}" if sec["name"] else pct
+                    sec,
+                    pct_value,
+                    f"{name} {pct_text}" if sec["name"] else pct_text,
                 )
-                tw = fm.horizontalAdvance(text)
-                if right_side:
-                    tr = QRectF(
-                        pt3.x() + 3, pt3.y() - fm.height() / 2, tw + 4, fm.height()
-                    )
-                    p.drawText(
-                        tr,
-                        Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
+                outside.append(
+                    (
+                        sec,
+                        self._pt(mid, sec["r1"] + 2),
+                        self._pt(mid, sec["r1"] + 2 + line_length),
                         text,
                     )
-                else:
-                    tr = QRectF(
-                        pt3.x() - tw - 3, pt3.y() - fm.height() / 2, tw + 4, fm.height()
-                    )
-                    p.drawText(
-                        tr,
-                        Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter,
-                        text,
-                    )
-                self._label_rects.append((sec["index"], tr, text))
+                )
+        if outside:
+            self._paint_outside_labels(
+                p,
+                outside,
+                fm,
+                c_line,
+                c_text,
+                line_show,
+                line_length2,
+                line_style,
+            )
         # 环形中心孔总计
         if self._r_in > 4 and bool(
             dict(self.opt.get("totalLabel") or {}).get("show", False)
         ):
             self._paint_center_total(p, font)
 
+    def _paint_outside_labels(
+        self,
+        p,
+        items,
+        fm,
+        c_line,
+        c_text,
+        line_show=True,
+        length2=14.0,
+        line_style=None,
+    ):
+        """外侧标签：同侧按 y 排开，小扇区的标签 / 引线不会叠在一起。"""
+        gap = fm.height() + 2.0
+        top = self._layout_rect.top() + fm.height() / 2.0
+        bottom = max(top, self._layout_rect.bottom() - fm.height() / 2.0)
+        groups = {True: [], False: []}
+        for item in items:
+            groups[item[2].x() >= self._center.x()].append(item)
+        line_style = line_style if isinstance(line_style, dict) else {}
+        line_color = resolve_color_option(line_style.get("color"), self.chart, c_line)
+        try:
+            line_width = max(0.0, float(line_style.get("width", 1.0)))
+        except (TypeError, ValueError, OverflowError):
+            line_width = 1.0
+        p.setPen(QPen(line_color, line_width))
+        for right_side, group in groups.items():
+            if not group:
+                continue
+            group.sort(key=lambda item: item[2].y())
+            ys = self._spread_labels([item[2].y() for item in group], gap, top, bottom)
+            for (sec, pt1, pt2, text), y in zip(group, ys):
+                pt3 = QPointF(pt2.x() + (length2 if right_side else -length2), y)
+                if line_show and line_width > 0:
+                    p.drawLine(pt1, pt2)
+                    p.drawLine(pt2, pt3)
+                option = self.labelVisualOption(sec["index"])
+                font = self._label_font_for(option)
+                size = label_text_size(text, font, option)
+                tw = size.width()
+                th = max(fm.height(), size.height())
+                if right_side:
+                    tr = QRectF(pt3.x() + 3, pt3.y() - th / 2, tw + 4, th)
+                    align = Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
+                else:
+                    tr = QRectF(pt3.x() - tw - 3, pt3.y() - th / 2, tw + 4, th)
+                    align = Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
+                p.setPen(c_text)
+                hit = self.paintLabelIn(
+                    p,
+                    tr,
+                    text,
+                    index=sec["index"],
+                    align=align,
+                    color=c_text,
+                )
+                p.setPen(QPen(c_line, 1))
+                if not hit.isNull():
+                    self._label_rects.append((sec["index"], hit, text))
+
+    @staticmethod
+    def _spread_labels(values, gap, top, bottom):
+        """单调下推 + 整体回收：同侧标签互不重叠，也不越出内容区上下边。"""
+        out = list(values)
+        for i in range(1, len(out)):
+            out[i] = max(out[i], out[i - 1] + gap)
+        if out and out[-1] > bottom:
+            shift = out[-1] - bottom
+            out = [v - shift for v in out]
+        if out and out[0] < top:
+            shift = top - out[0]
+            out = [v + shift for v in out]
+        # 标签数超过可用高度时无法完全不重叠，但绝不能画出内容区。
+        return [min(max(v, top), bottom) for v in out]
+
     def _paint_center_total(self, p, font):
         """环形中心孔显示总计数值（字号随内半径自适应，可被 totalLabel 覆盖）。"""
         total_opt = dict(self.opt.get("totalLabel") or {})
+        if total_opt.get("show", False) is False:
+            return
         title = str(total_opt.get("text") or "")
         label_style = self.labelTextStyle()
         label_px = _to_float(label_style.get("fontSize"), T("font.xs"))
@@ -413,7 +530,7 @@ class PieSeriesRenderer(SeriesRenderer):
         if title:
             cy -= fm.height() / 2
         raw_color = total_opt.get("color")
-        value_color = parse_color(raw_color) if raw_color is not None else None
+        value_color = self.resolveColor(raw_color) if raw_color is not None else None
         p.setPen(
             value_color
             if value_color is not None and value_color.isValid()
@@ -447,7 +564,7 @@ class PieSeriesRenderer(SeriesRenderer):
             p.setFont(font)
             fm2 = QFontMetricsF(font)
             raw_sub = total_opt.get("subtextColor")
-            sub_color = parse_color(raw_sub) if raw_sub is not None else None
+            sub_color = self.resolveColor(raw_sub) if raw_sub is not None else None
             p.setPen(
                 sub_color
                 if sub_color is not None and sub_color.isValid()
@@ -489,13 +606,15 @@ class PieSeriesRenderer(SeriesRenderer):
                 # 跨 0° 边界（如 350° → 10°）
                 in_angle = a >= a0 or a < a1
             if in_angle and sec["r0"] - 1 <= r <= sec["r1"] + 1:
-                pct = sec["value"] / (self._total or 1.0) * 100
+                pct = round(sec["value"] / (self._total or 1.0) * 100, 2)
+                if isinstance(pct, float) and pct.is_integer():
+                    pct = int(pct)
                 return {
                     "name": sec["name"],
                     "value": sec["value"],
                     "series": self.name,
-                    "dataIndex": i,
-                    "percent": round(pct, 2),
+                    "dataIndex": sec["index"],
+                    "percent": pct,
                     # 数据项颜色：tooltip 圆点要跟扇区颜色一致，不能拿系列色
                     "color": sec["color"],
                 }

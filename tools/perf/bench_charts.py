@@ -217,7 +217,17 @@ CASES: list[tuple[str, dict]] = [
         "折线+点 1M（采样）",
         dict(series_type="line", n=1_000_000, extra={"symbol": "circle"}),
     ),
-    ("面积 1M（采样）", dict(series_type="line", n=1_000_000, extra={"areaStyle": {}})),
+    # 面积用低频信号：锯齿数据采样后会变成亚像素尖峰梳状几何，填充成本由
+    # Qt 光栅逐扫描线求交主导（2656 点实测 ~1.5s），测不出面积本身的代价。
+    (
+        "面积 1M（采样）",
+        dict(
+            series_type="line",
+            n=1_000_000,
+            series_data=[np.sin(np.linspace(0, 20 * np.pi, 1_000_000))],
+            extra={"areaStyle": {}},
+        ),
+    ),
     (
         "smooth 1M（采样）",
         dict(series_type="line", n=1_000_000, extra={"smooth": True}),

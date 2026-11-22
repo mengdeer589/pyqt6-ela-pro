@@ -12,13 +12,23 @@ from PyQt6.QtGui import (
     QPainterPath,
     QPen,
 )
+from PyQt6ElaWidgetTools import eTheme
 
+from .._style import VISUALMAP_BAR
+from .._theme import chart_theme_key
 from .._tokens import T, theme_ramp
 from .._utils import clamp as _clamp
-from .._utils import merged_text_style, parse_color, text_italic, text_weight
+from .._utils import (
+    merged_text_style,
+    ramp_color,
+    resolve_color_option,
+    text_italic,
+    text_weight,
+)
 from .._utils import to_float as _to_float
 from ..axes import CalendarCoord, chartFont, formatValue
 from ..colormaps import colormapColors
+from ..models import OptionModel
 
 
 class VisualMapComponent:
@@ -33,7 +43,7 @@ class VisualMapComponent:
 
     def __init__(self, chart, opt):
         self.chart = chart
-        self.opt = dict(opt or {})
+        self.opt = opt if isinstance(opt, OptionModel) else dict(opt or {})
         self.min = _to_float(self.opt.get("min"), 0.0) or 0.0
         self.max = _to_float(self.opt.get("max"), 100.0)
         if self.max is None:
@@ -53,13 +63,27 @@ class VisualMapComponent:
         self._drag = None
         #: 色带代表的全量范围（``calculable`` 把手在此区间滑动；min/max 是当前映射范围）
         self._extent = (self.min, self.max)
+        self._colors_key = None
+        self._colors_value = None
+        self._resolved_colors_key = None
+        self._resolved_colors = []
 
     def bindsTo(self, series_index: int, series_id: str = "") -> bool:
         """本 visualMap 是否服务于给定系列（显式绑定优先，其次通用件）。"""
         idx = self.opt.get("seriesIndex")
         sid = self.opt.get("seriesId")
+        if isinstance(idx, (list, tuple, set)):
+            for value in idx:
+                try:
+                    if int(value) == series_index:
+                        return True
+                except (TypeError, ValueError, OverflowError):
+                    continue
+            return False
         if isinstance(idx, int) and not isinstance(idx, bool):
             return idx == series_index
+        if isinstance(sid, (list, tuple, set)):
+            return any(str(v) == str(series_id) for v in sid if v is not None)
         if sid is not None and str(sid):
             return bool(series_id) and str(sid) == str(series_id)
         return True
@@ -69,20 +93,44 @@ class VisualMapComponent:
         """未绑定任何系列的通用 visualMap。"""
         idx = self.opt.get("seriesIndex")
         sid = self.opt.get("seriesId")
+        if isinstance(idx, (list, tuple, set)):
+            return not bool(idx)
         if isinstance(idx, int) and not isinstance(idx, bool):
             return False
+        if isinstance(sid, (list, tuple, set)):
+            return not bool(sid)
         return not (sid is not None and str(sid))
+
+    def shown(self) -> bool:
+        """``visualMap.show``：false 只隐藏色条，不改变映射。"""
+        return self.opt.get("show", True) is not False
 
     def colors(self) -> list:
         """生效色带（inRange.colors 覆盖；image 的 cmap；缺省用主题色带）。"""
+        key = (id(self.opt), chart_theme_key(self.chart), eTheme.getThemeMode())
+        if self._colors_key == key and self._colors_value is not None:
+            return self._colors_value
         in_range = self.opt.get("inRange") or {}
         cols = in_range.get("colors") if isinstance(in_range, dict) else None
         if isinstance(cols, list) and len(cols) >= 2:
-            return [str(c) for c in cols]
-        image_colors = self._image_colormap()
-        if image_colors:
-            return image_colors
-        return theme_ramp(self.chart)
+            colors = [str(c) for c in cols]
+        else:
+            image_colors = self._image_colormap()
+            colors = image_colors if image_colors else theme_ramp(self.chart)
+        self._colors_key = key
+        self._colors_value = colors
+        return colors
+
+    def _resolved_ramp(self) -> list:
+        """色带字符串 → QColor（逐项 mapColor 的热路径缓存）。"""
+        raw = self.colors()
+        key = self._colors_key
+        if self._resolved_colors_key == key and self._resolved_colors:
+            return self._resolved_colors
+        colors = [resolve_color_option(c, self.chart) for c in raw]
+        self._resolved_colors_key = key
+        self._resolved_colors = colors
+        return colors
 
     def _image_colormap(self):
         """绑定到本组件的 image 系列显式 ``cmap``（让色条与图像自动同色）。"""
@@ -118,11 +166,33 @@ class VisualMapComponent:
 
     def pieces(self) -> list:
         raw = self.opt.get("pieces")
-        return (
+        items = (
             [item for item in raw if isinstance(item, dict)]
             if isinstance(raw, list)
             else []
         )
+        if items or not self.piecewise:
+            return items
+        # 未给 pieces 时按 splitNumber 自动等分（ECharts 语义），否则所有值
+        # 都会落到 outOfRange，整图一个颜色。
+        try:
+            count = max(2, min(20, int(self.opt.get("splitNumber", 5) or 5)))
+        except (TypeError, ValueError, OverflowError):
+            count = 5
+        colors = self.colors()
+        span = (self.max - self.min) / count
+        out = []
+        for i in range(count):
+            lo = self.min + i * span
+            hi = lo + span
+            out.append(
+                {
+                    "min": lo,
+                    "max": hi,
+                    "color": colors[min(i, len(colors) - 1)] if colors else None,
+                }
+            )
+        return out
 
     @staticmethod
     def _piece_contains(piece: dict, value: float) -> bool:
@@ -153,6 +223,8 @@ class VisualMapComponent:
         raw = piece.get("color") or (
             style.get("color") if isinstance(style, dict) else None
         )
+        if isinstance(raw, QColor):
+            return raw
         return (
             str(raw) if isinstance(raw, str) and raw else T("color.primary", self.chart)
         )
@@ -235,11 +307,14 @@ class VisualMapComponent:
         if not self.calculable or self._bar.isNull():
             return False
         lo_pt, hi_pt = self._handle_points()
+        bar = self._bar
         if self.orient == "vertical":
             d_lo, d_hi = abs(pos.y() - lo_pt.y()), abs(pos.y() - hi_pt.y())
+            near_bar = bar.left() - 10.0 <= pos.x() <= bar.right() + 10.0
         else:
             d_lo, d_hi = abs(pos.x() - lo_pt.x()), abs(pos.x() - hi_pt.x())
-        if min(d_lo, d_hi) > 10.0:
+            near_bar = bar.top() - 10.0 <= pos.y() <= bar.bottom() + 10.0
+        if min(d_lo, d_hi) > 10.0 or not near_bar:
             return False
         self._drag = "min" if d_lo <= d_hi else "max"
         return True
@@ -313,12 +388,16 @@ class VisualMapComponent:
 
     def reserveRight(self) -> float:
         """右侧需预留的宽度（竖直色带 / 分段色块 + 标签）；横向为 0。"""
+        if not self.shown():
+            return 0.0
         if self.orient == "vertical":
             return 90.0 if self.piecewise else 50.0
         return 0.0
 
     def reserveBottom(self) -> float:
         """底部需预留的高度（横向色带 / 分段色块 + 标签）；竖直为 0。"""
+        if not self.shown():
+            return 0.0
         if self.orient == "horizontal":
             return 36.0 if self.piecewise else 30.0
         return 0.0
@@ -331,27 +410,16 @@ class VisualMapComponent:
         if self.piecewise:
             for piece in self.pieces():
                 if self._piece_contains(piece, fv):
-                    return parse_color(self._piece_color(piece))
+                    return resolve_color_option(self._piece_color(piece), self.chart)
             out = self.opt.get("outOfRange")
             fallback = out.get("color") if isinstance(out, dict) else None
-            return parse_color(
-                fallback
-                if isinstance(fallback, str) and fallback
-                else T("color.bg.muted", self.chart)
+            return resolve_color_option(
+                fallback if isinstance(fallback, str) and fallback else None,
+                self.chart,
+                T("color.bg.muted", self.chart),
             )
         frac = _clamp((fv - self.min) / (self.max - self.min), 0.0, 1.0)
-        cols = [parse_color(c) for c in self.colors()]
-        if len(cols) == 1:
-            return cols[0]
-        seg = frac * (len(cols) - 1)
-        i = min(int(seg), len(cols) - 2)
-        t = seg - i
-        a, b = cols[i], cols[i + 1]
-        return QColor(
-            int(a.red() + (b.red() - a.red()) * t),
-            int(a.green() + (b.green() - a.green()) * t),
-            int(a.blue() + (b.blue() - a.blue()) * t),
-        )
+        return ramp_color(self._resolved_ramp(), frac, self.chart)
 
     def _layout_pieces(self, rect: QRectF) -> None:
         pieces = self.pieces()
@@ -386,12 +454,14 @@ class VisualMapComponent:
         p.save()
         p.setFont(font)
         fm = QFontMetricsF(font)
-        color = parse_color(
-            self.textStyle().get("color") or T("color.text.secondary", self.chart)
+        color = resolve_color_option(
+            self.textStyle().get("color"),
+            self.chart,
+            T("color.text.secondary", self.chart),
         )
         for box, label, piece_color in self._piece_rects:
             p.setPen(Qt.PenStyle.NoPen)
-            p.setBrush(parse_color(piece_color))
+            p.setBrush(resolve_color_option(piece_color, self.chart))
             p.drawRoundedRect(box, 2, 2)
             p.setPen(color)
             if self.orient == "vertical":
@@ -431,6 +501,10 @@ class VisualMapComponent:
         return grid if not grid.isNull() else None
 
     def layout(self, rect: QRectF) -> None:
+        if not self.shown():
+            self._bar = QRectF()
+            self._piece_rects = []
+            return
         if self.piecewise:
             self._bar = QRectF()
             content = self.chart._content_rect()
@@ -455,15 +529,18 @@ class VisualMapComponent:
             self._layout_pieces(target)
             return
         if self.orient == "vertical":
-            w, h = 12.0, min(120.0, max(40.0, rect.height() * 0.4))
-            # 右侧预留 38px：色带 12 + 右侧数值标签 34（避免标签越界被裁剪）
+            w, h = VISUALMAP_BAR, min(120.0, max(40.0, rect.height() * 0.4))
+            # 右侧预留 38px：色带 + 右侧数值标签 34（避免标签越界被裁剪）
             x = rect.right() - w - 38
             y = rect.bottom() - h - 12
             grid = self._calendar_grid()
             if grid is not None:
                 y = max(rect.top(), min(y, grid.top()))
         else:
-            w, h = min(140.0, max(60.0, rect.width() * 0.35)), 12.0
+            w, h = (
+                min(140.0, max(60.0, rect.width() * 0.35)),
+                VISUALMAP_BAR,
+            )
             x = rect.center().x() - w / 2
             # 底部预留 30px：标签在色带上方，整条落在专属条带内
             y = rect.bottom() - h - 4
@@ -477,6 +554,8 @@ class VisualMapComponent:
         self._bar = QRectF(x, y, w, h)
 
     def paint(self, p: QPainter, anim_t: float = 1.0) -> None:
+        if not self.shown():
+            return
         if self.piecewise:
             self._paint_pieces(p)
             return
@@ -490,9 +569,12 @@ class VisualMapComponent:
             grad = QLinearGradient(self._bar.topLeft(), self._bar.topRight())
         n = len(cols)
         for i, c in enumerate(cols):
-            grad.setColorAt(i / (n - 1) if n > 1 else 0.0, parse_color(c))
+            grad.setColorAt(
+                i / (n - 1) if n > 1 else 0.0, resolve_color_option(c, self.chart)
+            )
         path = QPainterPath()
-        path.addRoundedRect(self._bar, 3, 3)
+        radius = VISUALMAP_BAR / 2
+        path.addRoundedRect(self._bar, radius, radius)
         p.setPen(QPen(QColor(T("color.border", self.chart)), 1))
         p.setBrush(grad)
         p.drawPath(path)
@@ -502,7 +584,11 @@ class VisualMapComponent:
         p.setFont(font)
         fm = QFontMetricsF(font)
         p.setPen(
-            parse_color(style.get("color") or T("color.text.secondary", self.chart))
+            resolve_color_option(
+                style.get("color"),
+                self.chart,
+                T("color.text.secondary", self.chart),
+            )
         )
         hi, lo = self.textPair()
         if self.calculable:

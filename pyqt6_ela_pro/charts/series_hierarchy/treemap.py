@@ -11,17 +11,24 @@ from PyQt6.QtGui import (
     QPen,
 )
 
-from ..._colors import text_on_color
 from .._tokens import T
 from .._utils import clamp as _clamp
 from .._utils import to_float as _to_float
 from .._utils import with_alpha
-from .._utils import parse_color
 from ..core import SeriesRenderer
 from ._shared import (
     _assign_branch_colors,
     _build_hierarchy,
     _label_font,
+    _node_border,
+    _node_color,
+    _node_emphasis_color,
+    _node_label_color,
+    _node_opacity,
+    _hierarchy_item_count,
+    _hierarchy_name_at,
+    _hierarchy_selected_seeds,
+    _hierarchy_value,
     _squarify,
     _text_color,
 )
@@ -33,6 +40,8 @@ class TreemapSeriesRenderer(SeriesRenderer):
     点击空白 / 面包屑返回上级（``resetDrill()`` 回顶层）。
     """
 
+    labelVisibleByDefault = True
+
     def __init__(self, chart, opt):
         super().__init__(chart, opt)
         self._nodes = []  # 所有可见节点（父先子后，绘制时子覆盖父）
@@ -40,6 +49,18 @@ class TreemapSeriesRenderer(SeriesRenderer):
         self._crumb_y = 2.0
         #: 下钻路径（子级下标序列；空 = 顶层）
         self._focus_path = []
+
+    def itemCount(self) -> int:
+        return _hierarchy_item_count(self)
+
+    def valueAtIndex(self, index: int):
+        return _hierarchy_value(self, index)
+
+    def nameAtIndex(self, index: int) -> str:
+        return _hierarchy_name_at(self, index)
+
+    def selectedSeedIndices(self) -> set:
+        return _hierarchy_selected_seeds(self)
 
     def layout(self, rect: QRectF) -> None:
         self._nodes = []
@@ -73,7 +94,6 @@ class TreemapSeriesRenderer(SeriesRenderer):
             max(4.0, rect.width() - 4),
             max(4.0, rect.height() - top_pad - 4),
         )
-        self._crumb = " / ".join(r.name for r in roots if r.name)
         self._crumb_y = rect.top() + 3
         gap = _clamp(_to_float(self.opt.get("gapWidth"), 1.0), 0.0, 8.0)
         order = [0]
@@ -127,6 +147,8 @@ class TreemapSeriesRenderer(SeriesRenderer):
                 self.chart.update()
                 return True
             return False
+        if self.opt.get("nodeClick") is False:
+            return False
         index = hit.get("dataIndex")
         if not isinstance(index, int) or not (0 <= index < len(self._nodes)):
             return False
@@ -149,10 +171,9 @@ class TreemapSeriesRenderer(SeriesRenderer):
         if not self._nodes:
             return
         p.save()
+        self._label_rects = []
         label_opt = dict(self.opt.get("label") or {})
         label_show = bool(label_opt.get("show", True))
-        c_label = self.labelTextStyle().get("color")
-        c_label = parse_color(c_label) if isinstance(c_label, str) and c_label else None
         font = _label_font(self, label_opt)
         p.setFont(font)
         fm = QFontMetricsF(font)
@@ -167,44 +188,75 @@ class TreemapSeriesRenderer(SeriesRenderer):
             r = node.rect
             if r.width() <= 0.5 or r.height() <= 0.5:
                 continue
-            color = parse_color(self.itemColor(node.style_index, default=node.color))
-            alpha = self.itemOpacity(node.style_index)
+            color = _node_color(self, node)
+            alpha = _node_opacity(self, node)
+            border_color, border_w = _node_border(self, node)
             if hovered is not None:
                 if node.style_index == hovered:
-                    color = color.lighter(112)
+                    emphasis = _node_emphasis_color(self, node)
+                    color = emphasis if emphasis is not None else color.lighter(112)
+                    emp_opacity = self.emphasisOpacity(node.style_index)
+                    if emp_opacity is not None:
+                        alpha = emp_opacity
                 elif self.blursOtherItems():
-                    # 只在 emphasis.focus == "self" 时淡化其余项
-                    alpha *= 0.35
+                    blur = self.blurOpacity()
+                    alpha *= blur if blur is not None else 0.35
+            color, alpha, border_color, border_w = self.selectedStyle(
+                node.style_index, color, alpha, border_color, border_w
+            )
             color = with_alpha(color, int((60 + 195 * anim_t) * alpha))
-            border_color, border_w = self.itemBorder(node.style_index)
             p.setPen(QPen(border_color or border, border_w or 1.0))
             p.setBrush(color)
-            p.drawRect(r)
+            radius = self.itemRadius(node.style_index, 0.0)
+            if radius > 0.5:
+                p.drawRoundedRect(r, radius, radius)
+            else:
+                p.drawRect(r)
             if not label_show or not node.name:
                 continue
+            text = self.hierarchyLabelText(
+                node.style_index,
+                node.name,
+                getattr(node, "value", None),
+                getattr(node, "item", None),
+            )
             is_parent = bool(node.children)
             if is_parent:
                 # 父级标签画在 header 区（顶部）
                 if r.height() < 20:
                     continue
-                p.setPen(c_label or text_on_color(color))
-                p.drawText(
-                    QRectF(r.left() + 4, r.top() + 1, r.width() - 8, 15),
-                    Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
-                    node.name,
+                color_text = _node_label_color(self, node, color)
+                p.setPen(color_text)
+                rect = QRectF(r.left() + 4, r.top() + 1, r.width() - 8, 15)
+                hit = self.paintLabelIn(
+                    p,
+                    rect,
+                    text,
+                    index=node.style_index,
+                    align=Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
+                    color=color_text,
                 )
+                if not hit.isNull():
+                    self._label_rects.append((node.style_index, hit, text))
                 continue
             if (
-                r.width() < fm.horizontalAdvance(node.name) * 0.9
+                r.width() < fm.horizontalAdvance(text) * 0.9
                 or r.height() < fm.height() + 2
             ):
                 continue  # 矩形过小省略标签
-            p.setPen(c_label or with_alpha(text_on_color(color), 230))
-            p.drawText(
-                QRectF(r.left() + 3, r.top() + 1, r.width() - 6, fm.height()),
-                Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
-                node.name,
+            color_text = with_alpha(_node_label_color(self, node, color), 230)
+            p.setPen(color_text)
+            rect = QRectF(r.left() + 3, r.top() + 1, r.width() - 6, fm.height())
+            hit = self.paintLabelIn(
+                p,
+                rect,
+                text,
+                index=node.style_index,
+                align=Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
+                color=color_text,
             )
+            if not hit.isNull():
+                self._label_rects.append((node.style_index, hit, text))
         # 顶部面包屑（默认显示，drill 后为当前焦点路径）
         if getattr(self, "_crumb_show", False) and self._crumb:
             p.setFont(font)
@@ -232,8 +284,9 @@ class TreemapSeriesRenderer(SeriesRenderer):
         return {
             "name": best.name,
             "value": best.value,
-            "color": self.itemColor(best.style_index, default=best.color),
+            "color": _node_color(self, best),
             "series": self.name,
             "depth": best.depth,
             "dataIndex": getattr(best, "style_index", None),
+            "data": getattr(best, "item", None),
         }

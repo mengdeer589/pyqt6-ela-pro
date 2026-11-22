@@ -94,7 +94,7 @@ class TestAnnotationEditing:
         editor = chart._annotation_editor
         assert editor is not None and editor.isVisible()
         assert editor.height() <= 26, (
-            "行内编辑器必须压回标签高度（ElaLineEdit 默认最小 35）"
+            "行内编辑器必须压回标签高度（ElaLineEdit 默认 32）"
         )
         assert editor.text() == "peak"
         editor.setText("new peak")
@@ -278,7 +278,7 @@ class TestHierarchyLabelEditing:
             str(index): "funnel override"
         }
         layer = next(item for item in renderer._layers if item["index"] == index)
-        assert renderer._funnel_label(layer, "50%") == "funnel override"
+        assert renderer._funnel_label(layer, 50.0, "50%") == "funnel override"
 
     def test_heatmap_label_edit_writes_override(self, qapp, make):
         chart = make(ElaChartWidget)

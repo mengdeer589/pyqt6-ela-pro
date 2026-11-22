@@ -28,16 +28,17 @@ def layout_all(chart, force: bool = False) -> None:
 
     布局缓存键命中直接返回；动画进行中不缓存（每帧重算）。
     """
-    if force:
-        chart._layout_key = None
     cache_key = None
-    if not force and not chart.anim.isRunning():
+    if not chart.anim.isRunning():
         cache_key = layout_cache_key(chart)
-        if cache_key == chart._layout_key:
+        if not force and cache_key == chart._layout_key:
             return
         # 先清掉旧键：布局中途抛异常时下一帧必须重试，不能把「半套布局」
-        # 当成缓存命中。
+        # 当成缓存命中。强制布局也要提交新键，否则紧接着的 paint 会再排一次。
         chart._layout_key = None
+    elif force:
+        chart._layout_key = None
+    failed = False
     content = chart._content_rect()
     right_reserves = []
     bottom_reserves = []
@@ -47,6 +48,7 @@ def layout_all(chart, force: bool = False) -> None:
             try:
                 size = float(right_fn())
             except Exception:
+                failed = True
                 size = 0.0
             if size > 0:
                 right_reserves.append((component, size))
@@ -55,6 +57,7 @@ def layout_all(chart, force: bool = False) -> None:
             try:
                 size = float(bottom_fn())
             except Exception:
+                failed = True
                 size = 0.0
             if size > 0:
                 bottom_reserves.append((component, size))
@@ -100,6 +103,7 @@ def layout_all(chart, force: bool = False) -> None:
         try:
             apply_window()
         except Exception as exc:
+            failed = True
             warn_once(
                 warn_key(
                     "apply-window",
@@ -109,11 +113,23 @@ def layout_all(chart, force: bool = False) -> None:
                 f"窗口写回坐标轴失败（{component.__class__.__name__}）: {exc!r}",
             )
     for coord in chart._coords:
-        coord.layout(coord_content)
+        try:
+            coord.layout(coord_content)
+        except Exception as exc:
+            failed = True
+            warn_once(
+                warn_key(
+                    "coord-layout",
+                    coord.__class__.__name__,
+                    type(exc).__name__,
+                ),
+                f"坐标布局异常（{coord.__class__.__name__}）: {exc!r}",
+            )
     for renderer in chart._series:
         try:
             renderer.layout(coord_content)
         except Exception as exc:
+            failed = True
             warn_once(
                 warn_key(
                     "series-layout",
@@ -134,6 +150,7 @@ def layout_all(chart, force: bool = False) -> None:
             if refresh():
                 refreshed = True
         except Exception as exc:
+            failed = True
             warn_once(
                 f"refresh-extent:{component.__class__.__name__}",
                 f"全量范围重捕失败（{component.__class__.__name__}）: {exc!r}",
@@ -147,6 +164,7 @@ def layout_all(chart, force: bool = False) -> None:
             try:
                 apply_window()
             except Exception as exc:
+                failed = True
                 warn_once(
                     f"reapply-window:{component.__class__.__name__}",
                     f"窗口重放失败（{component.__class__.__name__}）: {exc!r}",
@@ -159,11 +177,12 @@ def layout_all(chart, force: bool = False) -> None:
             try:
                 layout(band_rects.get(id(component), content))
             except Exception as exc:
+                failed = True
                 warn_once(
                     f"component-layout:{component.__class__.__name__}",
                     f"组件布局异常（{component.__class__.__name__}）: {exc!r}",
                 )
-    if refreshed:
+    if refreshed or failed:
         chart._layout_key = None
     elif cache_key is not None:
         # 只有完整跑完布局才提交缓存键；中途异常时保持旧键 / None，

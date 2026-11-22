@@ -11,13 +11,15 @@ from PyQt6.QtCore import (
     Qt,
     pyqtSignal,
 )
+from PyQt6.QtGui import QPainter
 from PyQt6.QtWidgets import QWidget
 
-from ..._internal import connect_theme_signal, disconnect_theme
+from ..._internal import connect_theme_signal, disconnect_theme, safe_connect
 from .._theme import defaultChartTheme, theme_exists
 from .._utils import warn_key, warn_once
 from ..exporter import ChartExporter
 from ..interaction import ChartInteraction
+from ..models import ChartOption, event_from_dict
 from ..axes import (
     GridCoord,
 )
@@ -57,17 +59,25 @@ class ElaChartWidget(
     #: timeline 帧切换：帧下标
     timelineChanged = pyqtSignal(int)
     #: 数据项点击（ECharts click params）：见 ``_make_item_params``
-    itemClicked = pyqtSignal(dict)
+    itemClicked = pyqtSignal(object)
     #: toolbox 动作触发：动作名（saveAsImage / restore / dataZoom）
     toolboxTriggered = pyqtSignal(str)
     #: brush 选区变化：选中数据点列表（空列表 = 清除选区）
     brushChanged = pyqtSignal(list)
     #: 双击标注标签：宿主可自行弹出编辑框（内置编辑器开启时也会发）
-    annotationEditRequested = pyqtSignal(dict)
+    annotationEditRequested = pyqtSignal(object)
     #: 标注标签提交：{seriesName, componentType, dataIndex, text}
-    annotationEdited = pyqtSignal(dict)
+    annotationEdited = pyqtSignal(object)
     #: 拖动可拖动标注（``annotations``）结束：{index, id, name, componentType, seriesName, text, x, y, ax, ay}
-    annotationDragged = pyqtSignal(dict)
+    annotationDragged = pyqtSignal(object)
+    #: 拖动甘特任务条结束：{series, seriesIndex, dataIndex, name, mode, start, end, prevStart, prevEnd}
+    ganttTaskChanged = pyqtSignal(object)
+    #: 甘特任务点击 / 双击 / 右键：任务载荷
+    ganttTaskClicked = pyqtSignal(object)
+    ganttTaskDoubleClicked = pyqtSignal(object)
+    ganttTaskContextMenuRequested = pyqtSignal(object)
+    #: 拖动甘特进度手柄结束：{series, seriesIndex, dataIndex, name, progress, prevProgress}
+    ganttProgressChanged = pyqtSignal(object)
     #: 动画播放完毕（ECharts ``finished`` 事件）
     finished = pyqtSignal()
 
@@ -93,7 +103,38 @@ class ElaChartWidget(
         super().__init__(parent)
         self.setMouseTracking(True)
         self.setMinimumSize(200, 150)
-        self._option = {}
+        self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+        self.setAccessibleName("图表")
+        self._default_accessible_description = (
+            "图表。Home 重置视图，+/- 缩放，L 反选图例，Esc 关闭提示。"
+        )
+        self.setAccessibleDescription(self._default_accessible_description)
+        self._empty_text = ""
+        self._error_text = ""
+        self._high_contrast = False
+        self._keyboard_shortcuts = True
+        self._progressive_step = 1
+        self._progressive_disabled = False
+        self._progressive_scheduled = False
+        self._universal_prev = None
+        self._universal_morph = None
+        self._universal_t = 1.0
+        self._universal_started = 0.0
+        self._universal_duration = 0.0
+        self._universal_disabled = False
+        self._incoming_morph = None
+        self._incoming_t = 1.0
+        self._incoming_started = 0.0
+        self._incoming_duration = 0.0
+        self._universal_timer = QTimer(self)
+        self._universal_timer.setInterval(16)
+        safe_connect(
+            self._universal_timer,
+            "timeout",
+            self._tick_universal,
+            "universal-transition",
+        )
+        self._option = ChartOption()
         #: 图表配色主题名（``setChartTheme``；默认取 ``defaultChartTheme()``）
         self._chart_theme = defaultChartTheme()
         #: 全图字体族（``setFontFamily``；**单个族名**，空 = 系统默认）
@@ -104,8 +145,6 @@ class ElaChartWidget(
         self._series_state = {}  # name -> bool（legend selected 状态）
         #: 调色板缓存 (key, list[QColor])，key = (主题模式, 自定义色板 id, 长度)
         self._palette_cache = None
-        #: itemStyle 均匀性缓存 (key, {} | None)，见 ``uniformItemStyle``
-        self._uniform_style_cache = None
         #: 系列层位图缓存 (key, QImage)，见 ``_paint_series_cached``
         self._series_pixmap_cache = None
         self._series_pixmap_key = None
@@ -203,8 +242,10 @@ class ElaChartWidget(
 
     def setChartTheme(self, name) -> bool:
         """切换图表配色主题（内置 / 已注册），立即失效缓存并重绘。
+
         ``None`` / ``""`` 恢复全局默认主题；未知名称返回 ``False`` 且不改动。
         主题只提供默认色：option 里的显式颜色（``color`` / ``series.color`` /
+        ``itemStyle.color`` 等）始终优先。
         """
         self._ensure_alive()
         if name is None or name == "":
@@ -220,6 +261,49 @@ class ElaChartWidget(
         """当前图表主题名（默认取 :func:`defaultChartTheme`）。"""
         return self._chart_theme
 
+    def _refresh_accessible_description(self) -> None:
+        """未自定义描述时，把系列名同步给屏幕阅读器。"""
+        try:
+            if self.accessibleDescription() != self._default_accessible_description:
+                return
+            names = [r.name for r in self._series if r.name]
+            prefix = f"图表：{'、'.join(names)}。" if names else "图表（无数据）。"
+            self.setAccessibleDescription(
+                prefix + "Home 重置视图，+/- 缩放，L 反选图例，Esc 关闭提示。"
+            )
+        except Exception:
+            pass
+
+    def setEmptyText(self, text) -> None:
+        """无数据时画布中心占位文案；空字符串关闭。"""
+        self._empty_text = str(text or "")
+        self.update()
+
+    def emptyText(self) -> str:
+        return self._empty_text
+
+    def setErrorText(self, text) -> None:
+        """渲染失败 / 宿主错误时显示的文案；空字符串关闭。"""
+        self._error_text = str(text or "")
+        self.update()
+
+    def errorText(self) -> str:
+        return self._error_text
+
+    def setHighContrast(self, enabled: bool) -> None:
+        """高对比度辅助模式（空态 / 错误态与状态文字使用主文本色）。"""
+        self._high_contrast = bool(enabled)
+        self.update()
+
+    def highContrast(self) -> bool:
+        return self._high_contrast
+
+    def setKeyboardShortcutsEnabled(self, enabled: bool) -> None:
+        self._keyboard_shortcuts = bool(enabled)
+
+    def keyboardShortcutsEnabled(self) -> bool:
+        return self._keyboard_shortcuts
+
     def _invalidate_theme_caches(self) -> None:
         """主题 / 明暗模式变化：布局、调色板与系列层位图都必须重算。"""
         self._layout_key = None
@@ -229,7 +313,7 @@ class ElaChartWidget(
         self.update()
 
     #: ECharts 事件名 → Qt 信号（``on``/``off`` 的转发源）
-    _chartEvent = pyqtSignal(str, dict)
+    _chartEvent = pyqtSignal(str, object)
 
     def _dispatch_legend(self, action: str, payload: dict) -> bool:
         names = payload.get("name")
@@ -254,23 +338,23 @@ class ElaChartWidget(
                 if is_series:
                     self._setSeriesVisible(name, True)
                 else:
-                    self._setDataItemVisible(name, True)
+                    self._setDataItemVisible(name, True, emit=False)
             elif action == "legendUnSelect":
                 if is_series:
                     self._setSeriesVisible(name, False)
                 else:
-                    self._setDataItemVisible(name, False)
+                    self._setDataItemVisible(name, False, emit=False)
             elif action == "legendAllSelect":
                 if is_series:
                     self._setSeriesVisible(name, True)
                 else:
-                    self._setDataItemVisible(name, True)
+                    self._setDataItemVisible(name, True, emit=False)
             elif action == "legendInverseSelect":
                 if is_series:
                     self._setSeriesVisible(name, not self._seriesVisible(name))
                 else:
                     self._setDataItemVisible(
-                        name, not bool(self._item_state.get(name, True))
+                        name, not bool(self._item_state.get(name, True)), emit=False
                     )
             else:  # legendToggleSelect
                 self._legendSelectToggle(name)
@@ -333,9 +417,15 @@ class ElaChartWidget(
             coord = self.coordFor(renderer.opt)
             if coord is not None and hit is not None:
                 try:
-                    px, py = parseDataPoint((renderer.data() or [None])[0], 0)
-                    pt = coord.mapPoint(px, py)
-                    pos = QPointF(pt)
+                    data = renderer.data() or []
+                    try:
+                        idx = int(hit.get("dataIndex") or 0)
+                    except (TypeError, ValueError, OverflowError):
+                        idx = 0
+                    if not 0 <= idx < len(data):
+                        idx = 0
+                    px, py = parseDataPoint(data[idx], idx)
+                    pos = QPointF(coord.mapPoint(px, py))
                 except Exception:
                     pass
         if hit is None:
@@ -400,6 +490,25 @@ class ElaChartWidget(
                     pass
         for name in list(self._series_state.keys()):
             self._setSeriesVisible(name, True)
+        self._item_state.clear()
+        self._selection.clear()
+        self._selection_epoch += 1
+        self._legend_hover = None
+        for r in self._series:
+            setter = getattr(r, "setHiddenItems", None)
+            if callable(setter):
+                try:
+                    setter(set())
+                except Exception:
+                    pass
+        for comp in self._components:
+            if str(getattr(comp, "optionKey", "")) == "brush":
+                clear = getattr(comp, "clear", None)
+                if callable(clear):
+                    try:
+                        clear()
+                    except Exception:
+                        pass
         for r in self._series:
             for method in ("resetDrill", "resetPositions", "resetRoam"):
                 fn = getattr(r, method, None)
@@ -419,6 +528,7 @@ class ElaChartWidget(
             for r in self._series:
                 if r.id == str(series_id):
                     return r
+            return None
         name = payload.get("seriesName")
         if (
             name is None
@@ -431,6 +541,7 @@ class ElaChartWidget(
             for r in self._series:
                 if r.name == str(name):
                     return r
+            return None
         index = payload.get("seriesIndex")
         if index is not None:
             try:
@@ -457,20 +568,123 @@ class ElaChartWidget(
         opts = dict(opts or {})
         return self._exporter.data_url(opts)
 
-    def saveImage(self, path: str = None, *, format: str = None) -> str:
-        """保存当前图表（``path=None`` 弹保存对话框；``svg`` 走矢量导出）。
+    def saveImage(
+        self,
+        path: str = None,
+        *,
+        format: str = None,
+        quality: int = None,
+        scale: float = None,
+        multiPage: bool = False,
+    ) -> str:
+        """保存当前图表（``path=None`` 弹保存对话框；``svg`` / ``pdf`` 走矢量）。
 
+        :param quality: JPEG 质量 0–100（缺省 90）
+        :param scale: 位图缩放倍数（SVG / PDF 忽略）
+        :param multiPage: PDF 长图按纵向分页
         :returns: 实际保存路径，未保存返回 ``""``。
         """
         self._ensure_alive()
         target = path
-        return self._exporter.save_image(target, format=format)
+        return self._exporter.save_image(
+            target,
+            format=format,
+            quality=quality,
+            scale=scale,
+            multiPage=multiPage,
+        )
+
+    def printChart(self, printer=None, *, multiPage: bool = False) -> bool:
+        """打印当前图表；``printer=None`` 时弹系统打印对话框。
+
+        :param printer: 可选 ``QPrinter``（测试 / 静默打印）。
+        :param multiPage: 图表高于一页时按纵向分页打印（适合长图）。
+        :returns: 是否完成打印。
+        """
+        self._ensure_alive()
+        try:
+            from PyQt6.QtPrintSupport import QPrintDialog, QPrinter
+            from PyQt6.QtWidgets import QDialog
+        except ImportError:
+            return False
+        if printer is None:
+            printer = QPrinter(QPrinter.PrinterMode.HighResolution)
+            dialog = QPrintDialog(printer, self)
+            if dialog.exec() != QDialog.DialogCode.Accepted:
+                return False
+        return self._paint_printer(printer, multiPage=multiPage)
+
+    def previewPrint(self, printer=None) -> bool:
+        """系统打印预览；取消 / 无打印支持返回 False。"""
+        self._ensure_alive()
+        try:
+            from PyQt6.QtPrintSupport import QPrintPreviewDialog, QPrinter
+        except ImportError:
+            return False
+        if printer is None:
+            printer = QPrinter(QPrinter.PrinterMode.HighResolution)
+        dialog = QPrintPreviewDialog(printer, self)
+        dialog.setWindowTitle("打印预览")
+        dialog.paintRequested.connect(
+            lambda target: self._paint_printer(target, multiPage=True)
+        )
+        return bool(dialog.exec())
+
+    def _paint_printer(self, printer, *, multiPage: bool = False) -> bool:
+        painter = QPainter(printer)
+        try:
+            page = printer.pageRect(printer.Unit.DevicePixel)
+            width = max(1, self.width())
+            height = max(1, self.height())
+            page_w = max(1, page.width())
+            page_h = max(1, page.height())
+            scale = page_w / width
+            if not multiPage:
+                scale = min(scale, page_h / height)
+            logical_h = page_h / scale
+            if multiPage:
+                pages = max(1, int(math.ceil(height / logical_h)))
+                offsets = [index * logical_h for index in range(min(pages, 200))]
+            else:
+                offsets = [0]
+            self._layout_all()
+            previous = self._progressive_disabled
+            previous_universal = self._universal_disabled
+            self._progressive_disabled = True
+            self._universal_disabled = True
+            try:
+                first = True
+                for offset in offsets:
+                    if not first:
+                        printer.newPage()
+                    first = False
+                    painter.save()
+                    painter.scale(scale, scale)
+                    painter.translate(0, -offset)
+                    self._exporter._paint_backgrounds(painter, width, height, {})
+                    self._paint_content(painter, use_series_cache=False)
+                    painter.restore()
+            finally:
+                self._progressive_disabled = previous
+                self._universal_disabled = previous_universal
+        except Exception:
+            return False
+        finally:
+            painter.end()
+        return True
 
     def dispose(self) -> None:
         """销毁实例（ECharts ``dispose``；停定时器 / 断主题 / deleteLater）。"""
         if self._disposed:
             return
         self._disposed = True
+        try:
+            self._universal_timer.stop()
+        except Exception:
+            pass
+        self._universal_prev = None
+        self._universal_morph = None
+        self._incoming_morph = None
         try:
             self._spinner_timer.stop()
         except Exception:
@@ -493,6 +707,15 @@ class ElaChartWidget(
         self._dispose_components(include_host=True)
         self._host_components.clear()
         self._components = []
+        try:
+            # 全局范围缓存会强引用 series（可能含百万点），销毁时释放。
+            from ..axes import clearExtentCache
+            from ..series_cartesian._shared import clearGridExtentCache
+
+            clearGridExtentCache()
+            clearExtentCache()
+        except Exception:
+            pass
         self._disconnect_theme()
         self.deleteLater()
 
@@ -568,8 +791,10 @@ class ElaChartWidget(
         name = str(name)
         self._setDataItemVisible(name, not bool(self._item_state.get(name, True)))
 
-    def _setDataItemVisible(self, name: str, visible: bool) -> None:
-        """设置饼 / 漏斗数据项显隐（不切换）。"""
+    def _setDataItemVisible(
+        self, name: str, visible: bool, *, emit: bool = True
+    ) -> None:
+        """设置饼 / 漏斗数据项显隐（不切换；``emit=False`` 由调用方统一发信号）。"""
         name = str(name)
         self._item_state[name] = bool(visible)
         self._write_legend_selected(name, visible)
@@ -584,7 +809,8 @@ class ElaChartWidget(
                 pass
         self.invalidateLayout()
         self.update()
-        self.legendToggled.emit(name, bool(visible))
+        if emit:
+            self.legendToggled.emit(name, bool(visible))
 
     def _write_legend_selected(self, name: str, visible: bool) -> None:
         """把单项显隐写回 ``legend.selected``（dict / 数组两种写法）。"""
@@ -607,6 +833,7 @@ class ElaChartWidget(
         "timeline",
         "toolbox",
         "annotations",
+        "gantt",
     )
 
     def setInteractive(self, enabled: bool) -> None:
@@ -635,7 +862,7 @@ class ElaChartWidget(
     def setInteractionEnabled(self, feature: str, enabled: bool) -> None:
         """逐功能开关（与总开关取与）；``feature`` 取 ``"tooltip"`` / ``"legend"``
         / ``"dataZoom"`` / ``"brush"`` / ``"timeline"`` / ``"toolbox"`` /
-        ``"annotations"``。
+        ``"annotations"`` / ``"gantt"``。
         """
         self._ensure_alive()
         key = str(feature)
@@ -730,15 +957,12 @@ class ElaChartWidget(
         self.invalidateLayout()
         self.update()
 
-    def _ensure_zoom_component(self):
-        """确保存在一个 dataZoom 组件（框选缩放用；滚轮开关关掉时也能工作）。"""
-        comp = self._component("dataZoom")
-        if comp is not None:
-            return comp
-        if not any(isinstance(coord, GridCoord) for coord in self._coords):
-            return None
+    def _create_inside_zoom(
+        self, *, wheel: bool, move: bool, brush: bool, tag: str
+    ):
+        """构造跨 ``setOption`` 存活的 inside dataZoom（失败返回 None）。"""
         cls = COMPONENT_REGISTRY.get("dataZoom")
-        if cls is None:  # pragma: no cover
+        if cls is None:  # pragma: no cover - 注册表恒有 dataZoom
             return None
         try:
             comp = cls(
@@ -746,23 +970,38 @@ class ElaChartWidget(
                 [
                     {
                         "type": "inside",
-                        "zoomOnMouseWheel": False,
-                        "moveOnMouseMove": False,
+                        "zoomOnMouseWheel": wheel,
+                        "moveOnMouseMove": move,
                     }
                 ],
             )
         except Exception as exc:
             warn_once(
-                warn_key("brush-zoom-ctor", type(exc).__name__),
-                f"框选缩放组件构造失败: {exc!r}",
+                warn_key(tag, type(exc).__name__),
+                f"dataZoom 组件构造失败（{tag}）: {exc!r}",
             )
             return None
-        comp._brush_zoom_auto = True
+        if brush:
+            comp._brush_zoom_auto = True
+        else:
+            comp._wheel_zoom_auto = True
         comp._y_zoom_enabled = True
         comp._y_axis_indices = None
+        # 走 ``_host_components``：跨 setOption 存活，且不会被 _rebuild 重复创建
         self._host_components.append(comp)
         self._components.append(comp)
         return comp
+
+    def _ensure_zoom_component(self):
+        """确保存在一个 dataZoom 组件（框选缩放用；滚轮开关关掉时也能工作）。"""
+        comp = self._component("dataZoom")
+        if comp is not None:
+            return comp
+        if not any(isinstance(coord, GridCoord) for coord in self._coords):
+            return None
+        return self._create_inside_zoom(
+            wheel=False, move=False, brush=True, tag="brush-zoom-ctor"
+        )
 
     def _ensure_wheel_zoom(self) -> None:
         """无 ``dataZoom`` 的直角坐标图自动挂 ``inside`` 组件（滚轮缩放 + 拖拽平移）。"""
@@ -772,32 +1011,12 @@ class ElaChartWidget(
             return
         if not any(isinstance(coord, GridCoord) for coord in self._coords):
             return
-        cls = COMPONENT_REGISTRY.get("dataZoom")
-        if cls is None:  # pragma: no cover - 注册表恒有 dataZoom
-            return
-        try:
-            comp = cls(
-                self,
-                [
-                    {
-                        "type": "inside",
-                        "zoomOnMouseWheel": True,
-                        "moveOnMouseMove": self.dragMode() == "pan",
-                    }
-                ],
-            )
-        except Exception as exc:
-            warn_once(
-                warn_key("wheel-zoom-ctor", type(exc).__name__),
-                f"默认滚轮缩放组件构造失败: {exc!r}",
-            )
-            return
-        comp._wheel_zoom_auto = True
-        comp._y_zoom_enabled = True
-        comp._y_axis_indices = None
-        # 走 ``_host_components``：跨 setOption 存活，且不会被 _rebuild 重复创建
-        self._host_components.append(comp)
-        self._components.append(comp)
+        self._create_inside_zoom(
+            wheel=True,
+            move=self.dragMode() == "pan",
+            brush=False,
+            tag="wheel-zoom-ctor",
+        )
 
     def setDragMode(self, mode: str) -> None:
         """切换拖拽模式（Plotly ``dragmode`` 语义）。
@@ -883,12 +1102,15 @@ class ElaChartWidget(
                 except Exception:
                     continue
         for renderer in self._series:
-            hook = getattr(renderer, "resetView", None)
-            if callable(hook):
-                try:
-                    hook()
-                except Exception:
-                    continue
+            # map/graph 只有 resetRoam、treemap/sunburst 只有 resetDrill；
+            # 双击复位必须把这些视图状态一起收掉。
+            for hook_name in ("resetView", "resetDrill", "resetPositions", "resetRoam"):
+                hook = getattr(renderer, hook_name, None)
+                if callable(hook):
+                    try:
+                        hook()
+                    except Exception:
+                        continue
         self.tooltip.hide()
         self._hover = None
         self._legend_hover = None
@@ -975,25 +1197,91 @@ class ElaChartWidget(
 
     def _onBrushSelected(self, items) -> None:
         """brush 组件选区变化 → ``brushChanged`` 信号。"""
-        self.brushChanged.emit(list(items or []))
+        self.brushChanged.emit(
+            [
+                event_from_dict("brushselected", item)
+                for item in (items or [])
+                if isinstance(item, dict)
+            ]
+        )
+
+    def _run_interaction(self, name: str, event) -> None:
+        """鼠标回调统一异常边界（Qt 回调中的异常会终止进程）。"""
+        try:
+            getattr(self._interaction, name)(event)
+        except Exception as exc:
+            warn_once(
+                warn_key("interaction", name, type(exc).__name__),
+                f"鼠标交互异常（{name}）: {exc!r}",
+            )
 
     def mousePressEvent(self, event) -> None:
-        self._interaction.mouse_press(event)
+        self._run_interaction("mouse_press", event)
 
     def mouseMoveEvent(self, event) -> None:
-        self._interaction.mouse_move(event)
+        self._run_interaction("mouse_move", event)
 
     def mouseReleaseEvent(self, event) -> None:
-        self._interaction.mouse_release(event)
+        self._run_interaction("mouse_release", event)
 
     def mouseDoubleClickEvent(self, event) -> None:
-        self._interaction.mouse_double_click(event)
+        self._run_interaction("mouse_double_click", event)
+
+    def contextMenuEvent(self, event) -> None:
+        try:
+            if self._dispatch_hook("onContextMenu", QPointF(event.pos()), event):
+                event.accept()
+                return
+        except Exception as exc:
+            warn_once(
+                warn_key("context-menu", type(exc).__name__),
+                f"右键菜单异常: {exc!r}",
+            )
+        super().contextMenuEvent(event)
 
     def wheelEvent(self, event) -> None:
-        self._interaction.wheel(event)
+        self._run_interaction("wheel", event)
 
     def leaveEvent(self, event) -> None:
-        self._interaction.leave(event)
+        self._run_interaction("leave", event)
+
+    def keyPressEvent(self, event) -> None:
+        """键盘辅助：Home 重置、+/- 缩放、L 反选图例、Esc 关提示。"""
+        if not self._keyboard_shortcuts:
+            super().keyPressEvent(event)
+            return
+        try:
+            key = event.key()
+            ctrl = bool(event.modifiers() & Qt.KeyboardModifier.ControlModifier)
+            handled = True
+            if key == Qt.Key.Key_Home or (ctrl and key == Qt.Key.Key_0):
+                self.resetView()
+            elif key in (Qt.Key.Key_Plus, Qt.Key.Key_Equal):
+                self.zoomStep(0.8)
+            elif key == Qt.Key.Key_Minus:
+                self.zoomStep(1.25)
+            elif key == Qt.Key.Key_L:
+                self.dispatchAction({"type": "legendInverseSelect"})
+            elif key == Qt.Key.Key_Escape:
+                self.dispatchAction({"type": "hideTip"})
+                for comp in self._interactive_components():
+                    cancel = getattr(comp, "cancelDrag", None)
+                    if callable(cancel):
+                        try:
+                            cancel()
+                        except Exception:
+                            continue
+            else:
+                handled = False
+            if handled:
+                event.accept()
+            else:
+                super().keyPressEvent(event)
+        except Exception:
+            try:
+                super().keyPressEvent(event)
+            except Exception:
+                pass
 
     def _on_theme_changed(self, _mode) -> None:
         # 配色经 T() 实时取；主题可能影响字体度量，保守失效布局缓存。
@@ -1029,19 +1317,42 @@ class ElaChartWidget(
             return False
 
     def _dispatch_hook(self, hook_name: str, *args) -> bool:
-        """按「组件优先、系列其次」的顺序分发钩子，任一消费则返回 True。
-        消费者记在 ``_last_hook_owner``：``consumesClick=True`` 的组件（标注）
-        在按下→原地松开时不能被当成数据点击。
+        """分发鼠标钩子，任一消费则返回 True。
+
+        按下顺序为「标注 → ``pressPriority`` 系列（甘特）→ 其它组件 →
+        其它系列」，其余钩子仍是组件优先。消费者记在 ``_last_hook_owner``：
+        ``consumesClick=True`` 的组件（标注）在按下→原地松开时不能被当成数据点击。
         """
         self._last_hook_owner = None
-        for comp in self._interactive_components():
-            if self._call_hook(comp, hook_name, *args):
-                self._last_hook_owner = comp
-                return True
-        if not self._interactive:
-            return False
-        for renderer in self._interactive_renderers():
-            if self._call_hook(renderer, hook_name, *args):
-                self._last_hook_owner = renderer
+        components = self._interactive_components()
+        renderers = self._interactive_renderers() if self._interactive else []
+        coords = list(self._coords) if self._interactive else []
+        if hook_name == "onMousePress":
+            # 标注（最上层）→ 可拖动系列（甘特）→ dataZoom / brush → 其它系列。
+            # 少了第二段，默认 inside dataZoom 会吞掉按下，任务条永远拖不动。
+            annotations = [
+                comp
+                for comp in components
+                if str(getattr(comp, "optionKey", "")) == "annotations"
+            ]
+            priority = [
+                renderer
+                for renderer in renderers
+                if getattr(renderer, "pressPriority", False)
+            ]
+            rest = [
+                comp for comp in components if all(comp is not a for a in annotations)
+            ]
+            others = [
+                renderer
+                for renderer in renderers
+                if all(renderer is not p for p in priority)
+            ]
+            order = annotations + priority + rest + others + coords
+        else:
+            order = components + coords + renderers
+        for owner in order:
+            if self._call_hook(owner, hook_name, *args):
+                self._last_hook_owner = owner
                 return True
         return False

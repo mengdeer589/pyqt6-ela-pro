@@ -2,11 +2,9 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
-
-
-from ..._internal import is_deleted
+from ..._internal import is_deleted, single_shot_on
 from PyQt6.QtCore import (
+    QPointF,
     QRectF,
     Qt,
 )
@@ -16,9 +14,11 @@ from PyQt6.QtGui import (
     QImage,
     QPainter,
     QPen,
+    QPolygonF,
 )
 from PyQt6ElaWidgetTools import eTheme
 
+from ..._colors import mixColor
 from ..._motion import start_idle_loop
 from .._theme import chart_theme_key
 from ..option import (
@@ -30,7 +30,7 @@ from .._tokens import (
     SPINNER_TICK_MS,
     T,
 )
-from .._utils import parse_color, text_italic, warn_key, warn_once
+from .._utils import parse_color, resolve_color_option, text_italic, warn_key, warn_once
 from ..layout import layout_all
 from ..axes import (
     chartFont,
@@ -41,8 +41,17 @@ from ._shared import (
 )
 
 
-if TYPE_CHECKING:
-    pass
+def _lerp_float(a, b, t: float) -> float:
+    return float(a) + (float(b) - float(a)) * t
+
+
+def _lerp_rect(a: QRectF, b: QRectF, t: float) -> QRectF:
+    return QRectF(
+        _lerp_float(a.left(), b.left(), t),
+        _lerp_float(a.top(), b.top(), t),
+        _lerp_float(a.width(), b.width(), t),
+        _lerp_float(a.height(), b.height(), t),
+    )
 
 
 class _ChartPaintMixin:
@@ -61,6 +70,8 @@ class _ChartPaintMixin:
         if self._loading_opts.get("showSpinner", True):
             # 持续动效：Reduced/Disabled 下不转，遮罩与文字照常画。
             start_idle_loop(self._spinner_timer, SPINNER_TICK_MS)
+        else:
+            self._spinner_timer.stop()
         self.update()
 
     def hideLoading(self) -> None:
@@ -84,7 +95,9 @@ class _ChartPaintMixin:
 
     def _paint_loading(self, p: QPainter) -> None:
         opts = self._loading_opts
-        mask = parse_color(opts.get("maskColor") or QColor(T("color.bg.base", self)))
+        mask = resolve_color_option(
+            opts.get("maskColor"), self, T("color.bg.base", self)
+        )
         if not opts.get("maskColor"):
             mask.setAlpha(204)
         p.fillRect(self.rect(), mask)
@@ -102,7 +115,9 @@ class _ChartPaintMixin:
         if opts.get("showSpinner", True) and self._loading_type != "none":
             radius = max(6.0, float(opts.get("spinnerRadius", 14)))
             line_w = max(1.0, float(opts.get("lineWidth", 3)))
-            color = parse_color(opts.get("color") or T("color.primary", self))
+            color = resolve_color_option(
+                opts.get("color"), self, T("color.primary", self)
+            )
             pen = QPen(color, line_w)
             pen.setCapStyle(Qt.PenCapStyle.RoundCap)
             p.setPen(pen)
@@ -116,7 +131,9 @@ class _ChartPaintMixin:
             )
         if text:
             p.setPen(
-                parse_color(opts.get("textColor") or T("color.text.secondary", self))
+                resolve_color_option(
+                    opts.get("textColor"), self, T("color.text.secondary", self)
+                )
             )
             p.drawText(
                 QRectF(
@@ -171,7 +188,7 @@ class _ChartPaintMixin:
             self.anim.stop()
             self.anim.setProgress(1.0)
             t0 = _now()
-            self.setOption(self._option, notMerge=True)
+            self.setOption(self.getOptionDict(), notMerge=True)
             ingest_ms = _elapsed_ms(t0)
             self.anim.stop()
             self.anim.setProgress(1.0)
@@ -336,9 +353,13 @@ class _ChartPaintMixin:
             if band.isNull():
                 continue
             if title.atBottom:
-                content.setBottom(max(content.top() + 1.0, band.top()))
+                content.setBottom(
+                    max(content.top() + 1.0, min(content.bottom(), band.top()))
+                )
             else:
-                content.setTop(min(content.bottom() - 1.0, band.bottom()))
+                content.setTop(
+                    min(content.bottom() - 1.0, max(content.top(), band.bottom()))
+                )
         # 图例：同侧多个依次向外堆叠条带
         top_legends = []
         bottom_legends = []
@@ -431,7 +452,7 @@ class _ChartPaintMixin:
         if isinstance(bg, QColor):
             return parse_color(bg)
         if isinstance(bg, str) and bg.strip():
-            color = parse_color(bg)
+            color = resolve_color_option(bg, self)
             if color.isValid():
                 return color
             warn_once(
@@ -464,6 +485,7 @@ class _ChartPaintMixin:
         return (
             self._opt_version,
             self._geometry_epoch,
+            round(float(self.anim.t), 6),
             self.width(),
             self.height(),
             round(self.getDevicePixelRatio(), 4),
@@ -546,7 +568,8 @@ class _ChartPaintMixin:
                 continue
             try:
                 # 记下本次进度：命中分发可能发生在下一帧 paint 前
-                r._anim_t = r.animProgress(t)
+                raw = self.anim.raw if self.anim.isRunning() else None
+                r._anim_t = r.animProgress(t, raw)
                 if highlight is not None and not item_highlight:
                     p.setOpacity(1.0 if r.name == highlight else 0.35)
                 elif (
@@ -594,19 +617,45 @@ class _ChartPaintMixin:
             self._paint_series_cached(p, t)
         else:
             self._paint_series(p, t)
+        for coord in self._coords:
+            paint_labels = getattr(coord, "paintLabels", None)
+            if not callable(paint_labels):
+                continue
+            try:
+                paint_labels(p)
+            except Exception as exc:
+                warn_once(
+                    f"coord-labels:{coord.__class__.__name__}",
+                    f"坐标标签绘制异常（{coord.__class__.__name__}）: {exc!r}",
+                )
+        if (
+            self._incoming_morph is not None
+            and not self._universal_disabled
+            and self._incoming_t < 1.0
+        ):
+            try:
+                self._paint_incoming_morph(p)
+            except Exception as exc:
+                warn_once(
+                    "incoming-universal-paint",
+                    f"跨图形变绘制异常（已跳过）: {exc!r}",
+                )
+        if (
+            self._universal_prev is not None
+            and not self._universal_disabled
+            and self._universal_t < 1.0
+        ):
+            morphed = self._paint_universal_morph(p)
+            if not morphed:
+                p.save()
+                p.setOpacity(max(0.0, 1.0 - self._universal_t))
+                p.drawImage(0, 0, self._universal_prev)
+                p.restore()
         for comp in self._components:
             paint = getattr(comp, "paint", None)
             if callable(paint):
                 try:
                     paint(p, t)
-                except TypeError:
-                    try:
-                        paint(p)
-                    except Exception as exc:
-                        warn_once(
-                            f"component-paint:{comp.__class__.__name__}",
-                            f"组件绘制异常（{comp.__class__.__name__}）: {exc!r}",
-                        )
                 except Exception as exc:
                     warn_once(
                         f"component-paint:{comp.__class__.__name__}",
@@ -631,3 +680,434 @@ class _ChartPaintMixin:
                 self._paint_loading(p)
             except Exception as exc:
                 warn_once("loading-paint", f"加载遮罩绘制异常: {exc!r}")
+        elif self._error_text or (self._empty_text and not self._chart_has_data()):
+            try:
+                self._paint_state_text(p)
+            except Exception as exc:
+                warn_once("state-paint", f"空态 / 错误态绘制异常: {exc!r}")
+        if (
+            self.hasFocus()
+            and self._keyboard_shortcuts
+            and not self._progressive_disabled
+        ):
+            try:
+                p.save()
+                p.setBrush(Qt.BrushStyle.NoBrush)
+                p.setPen(QPen(parse_color(T("color.primary", self)), 2.0))
+                p.drawRoundedRect(self.rect().adjusted(1, 1, -1, -1), 4.0, 4.0)
+                p.restore()
+            except Exception:
+                pass
+        self._schedule_progressive()
+
+    def _incoming_plot(self) -> QRectF:
+        coord = self.primaryCoord()
+        plot = getattr(coord, "plot", None)
+        if isinstance(plot, QRectF) and plot.width() > 1.0 and plot.height() > 1.0:
+            return QRectF(plot)
+        return QRectF(self._content_rect())
+
+    @staticmethod
+    def _map_incoming_point(pt, src: QRectF, plot: QRectF, sx: float, sy: float):
+        return QPointF(
+            plot.left() + (pt.x() - src.left()) * sx,
+            plot.top() + (pt.y() - src.top()) * sy,
+        )
+
+    @classmethod
+    def _map_incoming_rect(cls, rect, src, plot, sx, sy) -> QRectF:
+        top_left = cls._map_incoming_point(rect.topLeft(), src, plot, sx, sy)
+        return QRectF(
+            top_left,
+            QPointF(
+                top_left.x() + rect.width() * sx,
+                top_left.y() + rect.height() * sy,
+            ),
+        )
+
+    def _paint_incoming_morph(self, p: QPainter) -> bool:
+        """把源图旧几何按归一化位置映射到本图，过渡到本地终态 / 淡出。"""
+        state = self._incoming_morph
+        if not state:
+            return False
+        src = state.get("plot")
+        if not isinstance(src, QRectF) or src.width() <= 0 or src.height() <= 0:
+            return False
+        plot = self._incoming_plot()
+        if plot.width() <= 0 or plot.height() <= 0:
+            return False
+        sx = plot.width() / src.width()
+        sy = plot.height() / src.height()
+        t = max(0.0, min(1.0, float(self._incoming_t)))
+        alpha = 1.0 - t
+        if alpha <= 0.0:
+            return False
+        current = {r.name: r for r in self._series}
+        unsupported = False
+        for name, old in state.get("morph") or []:
+            kind = str(old.get("kind") or "")
+            renderer = current.get(name)
+            if kind == "bar":
+                self._paint_incoming_bar(p, old, renderer, src, plot, sx, sy, t, alpha)
+            elif kind == "scatter":
+                self._paint_incoming_scatter(
+                    p, old, renderer, src, plot, sx, sy, t, alpha
+                )
+            elif kind == "line":
+                self._paint_incoming_line(p, old, renderer, src, plot, sx, sy, t, alpha)
+            else:
+                unsupported = True
+        if unsupported:
+            image = state.get("image")
+            if image is not None and not image.isNull():
+                p.save()
+                p.setOpacity(alpha)
+                scaled = image.scaled(
+                    self.size(),
+                    Qt.AspectRatioMode.KeepAspectRatio,
+                    Qt.TransformationMode.SmoothTransformation,
+                )
+                p.drawImage(
+                    QPointF(
+                        (self.width() - scaled.width()) / 2.0,
+                        (self.height() - scaled.height()) / 2.0,
+                    ),
+                    scaled,
+                )
+                p.restore()
+        return True
+
+    def _paint_incoming_bar(
+        self, p, old, renderer, src, plot, sx, sy, t, alpha
+    ) -> None:
+        items = [it for it in (old.get("items") or []) if isinstance(it, dict)]
+        by_key = {it.get("key"): it for it in items if it.get("key") is not None}
+        new_items = []
+        if renderer is not None:
+            try:
+                snap = renderer.morphSnapshot()
+            except Exception:
+                snap = None
+            if isinstance(snap, dict) and snap.get("kind") == "bar":
+                new_items = [
+                    it for it in (snap.get("items") or []) if isinstance(it, dict)
+                ]
+        matched = set()
+        p.save()
+        p.setPen(Qt.PenStyle.NoPen)
+        for item in new_items:
+            key = item.get("key")
+            source = by_key.get(key)
+            if source is None:
+                continue
+            matched.add(key)
+            rect = _lerp_rect(
+                self._map_incoming_rect(source["rect"], src, plot, sx, sy),
+                item["rect"],
+                t,
+            )
+            color = mixColor(source["color"], item["color"], t)
+            color.setAlphaF(color.alphaF() * alpha)
+            p.setBrush(color)
+            radius = _lerp_float(
+                float(source.get("radius") or 0.0) * min(sx, sy),
+                float(item.get("radius") or 0.0),
+                t,
+            )
+            if radius > 0:
+                p.drawRoundedRect(rect, radius, radius)
+            else:
+                p.drawRect(rect)
+        for key, source in by_key.items():
+            if key in matched:
+                continue
+            color = parse_color(source["color"]).copy()
+            color.setAlphaF(color.alphaF() * alpha)
+            p.setBrush(color)
+            p.drawRect(self._map_incoming_rect(source["rect"], src, plot, sx, sy))
+        p.restore()
+
+    def _paint_incoming_scatter(
+        self, p, old, renderer, src, plot, sx, sy, t, alpha
+    ) -> None:
+        items = [it for it in (old.get("items") or []) if isinstance(it, dict)]
+        by_key = {it.get("key"): it for it in items if it.get("key") is not None}
+        new_items = []
+        if renderer is not None:
+            try:
+                snap = renderer.morphSnapshot()
+            except Exception:
+                snap = None
+            if isinstance(snap, dict) and snap.get("kind") == "scatter":
+                new_items = [
+                    it for it in (snap.get("items") or []) if isinstance(it, dict)
+                ]
+        matched = set()
+        scale = min(sx, sy)
+        p.save()
+        p.setPen(Qt.PenStyle.NoPen)
+        for item in new_items:
+            key = item.get("key")
+            source = by_key.get(key)
+            if source is None:
+                continue
+            matched.add(key)
+            target = source.get("pt")
+            if not isinstance(target, QPointF):
+                continue
+            origin = self._map_incoming_point(target, src, plot, sx, sy)
+            end = item.get("pt")
+            color = mixColor(source["color"], item["color"], t)
+            color.setAlphaF(color.alphaF() * alpha)
+            p.setBrush(color)
+            radius = _lerp_float(
+                float(source.get("r") or 0.0) * scale, float(item.get("r") or 0.0), t
+            )
+            p.drawEllipse(
+                QPointF(
+                    _lerp_float(origin.x(), end.x(), t),
+                    _lerp_float(origin.y(), end.y(), t),
+                ),
+                radius,
+                radius,
+            )
+        for key, source in by_key.items():
+            if key in matched:
+                continue
+            target = source.get("pt")
+            if not isinstance(target, QPointF):
+                continue
+            color = parse_color(source["color"]).copy()
+            color.setAlphaF(color.alphaF() * alpha)
+            p.setBrush(color)
+            radius = float(source.get("r") or 0.0) * scale
+            p.drawEllipse(
+                self._map_incoming_point(target, src, plot, sx, sy), radius, radius
+            )
+        p.restore()
+
+    def _paint_incoming_line(
+        self, p, old, renderer, src, plot, sx, sy, t, alpha
+    ) -> None:
+        old_pts = old.get("points") or []
+        mapped = [
+            self._map_incoming_point(pt, src, plot, sx, sy)
+            if isinstance(pt, QPointF)
+            else None
+            for pt in old_pts
+        ]
+        new_pts = None
+        snap = None
+        if renderer is not None:
+            try:
+                snap = renderer.morphSnapshot()
+            except Exception:
+                snap = None
+            if isinstance(snap, dict) and snap.get("kind") == "line":
+                new_pts = snap.get("points") or []
+        p.save()
+        p.setBrush(Qt.BrushStyle.NoBrush)
+        if new_pts is not None:
+            points = QPolygonF()
+            for a, b in zip(mapped, new_pts):
+                if a is None or not isinstance(b, QPointF):
+                    continue
+                points.append(
+                    QPointF(_lerp_float(a.x(), b.x(), t), _lerp_float(a.y(), b.y(), t))
+                )
+            color = mixColor(old["color"], snap["color"], t)
+            width = _lerp_float(
+                float(old.get("width") or 2.0) * min(sx, sy),
+                float(snap.get("width") or 2.0),
+                t,
+            )
+        else:
+            points = QPolygonF([pt for pt in mapped if pt is not None])
+            color = parse_color(old["color"]).copy()
+            width = float(old.get("width") or 2.0) * min(sx, sy)
+        if len(points) >= 2:
+            color.setAlphaF(color.alphaF() * alpha)
+            p.setPen(QPen(color, max(0.5, width)))
+            p.drawPolyline(points)
+        p.restore()
+
+    def _paint_universal_morph(self, p: QPainter) -> bool:
+        """同类型系列的位置 / 尺寸 / 颜色插值；返回是否画了形变。"""
+        old_items = self._universal_morph
+        if not old_items or self._universal_disabled:
+            return False
+        current = {r.name: r for r in self._series}
+        t = max(0.0, min(1.0, float(self._universal_t)))
+        alpha = 1.0 - t
+        drawn = False
+        for name, old in old_items:
+            renderer = current.get(name)
+            if renderer is None:
+                continue
+            snapshot = getattr(renderer, "morphSnapshot", None)
+            if not callable(snapshot):
+                continue
+            try:
+                new = snapshot()
+            except Exception:
+                new = None
+            if not new or new.get("kind") != old.get("kind"):
+                continue
+            kind = old["kind"]
+            p.save()
+            if kind == "bar":
+                for a, b in zip(old.get("items") or [], new.get("items") or []):
+                    rect = _lerp_rect(a["rect"], b["rect"], t)
+                    color = mixColor(a["color"], b["color"], t)
+                    color.setAlphaF(color.alphaF() * alpha)
+                    p.setPen(Qt.PenStyle.NoPen)
+                    p.setBrush(color)
+                    radius = _lerp_float(a.get("radius", 0.0), b.get("radius", 0.0), t)
+                    if radius > 0:
+                        p.drawRoundedRect(rect, radius, radius)
+                    else:
+                        p.drawRect(rect)
+                    drawn = True
+            elif kind == "line":
+                old_pts = old.get("points") or []
+                new_pts = new.get("points") or []
+                points = QPolygonF()
+                for a, b in zip(old_pts, new_pts):
+                    if a is None or b is None:
+                        continue
+                    points.append(
+                        QPointF(
+                            _lerp_float(a.x(), b.x(), t),
+                            _lerp_float(a.y(), b.y(), t),
+                        )
+                    )
+                if len(points) >= 2:
+                    color = mixColor(old["color"], new["color"], t)
+                    color.setAlphaF(color.alphaF() * alpha)
+                    p.setPen(QPen(color, old.get("width", 2.0)))
+                    p.setBrush(Qt.BrushStyle.NoBrush)
+                    p.drawPolyline(points)
+                    drawn = True
+            elif kind == "scatter":
+                for a, b in zip(old.get("items") or [], new.get("items") or []):
+                    color = mixColor(a["color"], b["color"], t)
+                    color.setAlphaF(color.alphaF() * alpha)
+                    p.setPen(Qt.PenStyle.NoPen)
+                    p.setBrush(color)
+                    p.drawEllipse(
+                        QPointF(
+                            _lerp_float(a["pt"].x(), b["pt"].x(), t),
+                            _lerp_float(a["pt"].y(), b["pt"].y(), t),
+                        ),
+                        _lerp_float(a["r"], b["r"], t),
+                        _lerp_float(a["r"], b["r"], t),
+                    )
+                    drawn = True
+            p.restore()
+        return drawn
+
+    def _capture_series_image(self):
+        """把当前系列层渲染成透明底图像（``universalTransition`` 用）。"""
+        try:
+            cached = self._series_pixmap_cache
+            if (
+                cached is not None
+                and self._series_pixmap_key == self._series_layer_key()
+            ):
+                return cached.copy()
+            w, h = max(1, self.width()), max(1, self.height())
+            dpr = max(1.0, float(self.getDevicePixelRatio() or 1.0))
+            image = QImage(
+                max(1, int(round(w * dpr))),
+                max(1, int(round(h * dpr))),
+                QImage.Format.Format_ARGB32_Premultiplied,
+            )
+            image.setDevicePixelRatio(dpr)
+            image.fill(Qt.GlobalColor.transparent)
+            previous = self._universal_disabled
+            previous_progressive = self._progressive_disabled
+            self._universal_disabled = True
+            self._progressive_disabled = True
+            painter = QPainter(image)
+            try:
+                painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+                painter.setRenderHint(QPainter.RenderHint.TextAntialiasing)
+                self._paint_series(painter, 1.0)
+            finally:
+                painter.end()
+                self._universal_disabled = previous
+                self._progressive_disabled = previous_progressive
+            return image
+        except Exception:
+            return None
+
+    def _schedule_progressive(self) -> None:
+        """有系列本帧只画了前缀 → 下一帧继续补画。"""
+        if self._progressive_disabled or self._progressive_scheduled:
+            return
+        if not any(
+            getattr(renderer, "_progressive_partial", False)
+            for renderer in self._series
+        ):
+            return
+        self._progressive_scheduled = True
+        try:
+            single_shot_on(self, 0, self._advance_progressive)
+        except Exception:
+            self._progressive_scheduled = False
+
+    def _advance_progressive(self) -> None:
+        if self._disposed or is_deleted(self):
+            return
+        self._progressive_scheduled = False
+        self._progressive_step += 1
+        self.invalidateSeriesLayer()
+        self.update()
+
+    def _chart_has_data(self) -> bool:
+        """是否至少有一个系列带数据（空态判定）。"""
+        for renderer in self.seriesRenderers:
+            try:
+                if len(renderer.data()):
+                    return True
+            except Exception:
+                continue
+        return False
+
+    def _paint_state_text(self, p: QPainter) -> None:
+        """画布中心的空态 / 错误态占位文案。"""
+        error = bool(self._error_text)
+        text = self._error_text if error else self._empty_text
+        if not text:
+            return
+        color = resolve_color_option(
+            "color.danger" if error else "color.text.secondary",
+            self,
+        )
+        if self._high_contrast:
+            color = resolve_color_option("color.text.primary", self)
+        font = chartFont(
+            T("font.sm") + 2,
+            None,
+            self.fontFamily(),
+            False,
+        )
+        p.save()
+        p.setFont(font)
+        p.setPen(color)
+        flags = Qt.AlignmentFlag.AlignCenter | Qt.TextFlag.TextWordWrap
+        rect = QRectF(
+            self.width() * 0.12,
+            self.height() * 0.2,
+            self.width() * 0.76,
+            self.height() * 0.6,
+        )
+        p.drawText(rect, flags, str(text))
+        if error:
+            # 错误态加一圈细边框，和普通空态区分。
+            pen = QPen(color, 1.0)
+            pen.setStyle(Qt.PenStyle.DashLine)
+            p.setPen(pen)
+            p.setBrush(Qt.BrushStyle.NoBrush)
+            p.drawRoundedRect(rect.adjusted(-8, -8, 8, 8), 6.0, 6.0)
+        p.restore()

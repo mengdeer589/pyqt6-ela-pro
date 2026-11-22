@@ -1,7 +1,7 @@
 """图表工作台：工作区懒构建 / 切换 / 全局控制。
 
 页面从「一条 2400 行的长滚动」改成「概览 / 系列画廊 / 交互 / 大数据 / 高级 / 主题 / 小波 / 实时」
-八个工作区：首屏只建概览，其余首次切换时才建（27 张画廊图 + 大数据图一起
+八个工作区：首屏只建概览，其余首次切换时才建（28 张画廊图 + 大数据图一起
 eager 构建会把首次显示拖慢）。
 """
 
@@ -64,7 +64,7 @@ class TestWorkspaceShell:
             charts = page._active_charts()
             assert charts, f"{workspace['name']} 没有图表"
             counts.append(len(charts))
-        assert counts[1] >= 20  # 画廊：21 种系列 + 变体
+        assert counts[1] >= 20  # 画廊：23 种系列 + 变体
         assert counts[2] >= 3
         assert counts[3] >= 1
         assert counts[4] >= 5
@@ -106,6 +106,15 @@ class TestWorkspaceControls:
         assert page._anim_enabled is True
         assert page._anim_btn.text() == "动效: 开"
 
+    def test_gallery_builds_gantt(self, make):
+        page = _page(make)
+        page._activate_workspace(1)
+        chart = page._gantt_chart
+        assert chart.getOption()["series"][0]["type"] == "gantt"
+        assert chart.seriesRenderers[0]._items
+        assert chart.seriesRenderers[0]._editable is True
+        assert page._gantt_view.chart() is chart
+
     def test_random_workspace_keeps_charts_alive(self, make):
         page = _page(make)
         page._activate_workspace(1)
@@ -115,13 +124,43 @@ class TestWorkspaceControls:
         assert all(chart.getOption().get("series") for chart in charts)
 
 
+class TestCapabilityDemos:
+    def test_demos_cover_new_features(self, make):
+        page = _page(make)
+        page._activate_workspace(4)
+        charts = page._data_capability_charts
+        assert len(charts) == 6
+        options = [chart.getOptionDict() for chart in charts]
+        assert any(
+            (option.get("series") or [{}])[0].get("type") == "map" for option in options
+        )
+        assert any(
+            (option.get("graphic") or [{}])[0].get("type") == "group"
+            for option in options
+        )
+        zooms = [
+            zoom
+            for option in options
+            for zoom in (option.get("dataZoom") or [])
+            if zoom.get("brushSelect")
+        ]
+        assert zooms
+
+        source, target = page._cross_universal_charts
+        assert source.getOptionDict()["universalTransition"]["enabled"] is True
+        page._onCrossChartUniversalDemo()
+        assert target._incoming_morph is not None
+        assert target._incoming_morph["morph"][0][1]["kind"] == "bar"
+
+
 class TestThemeWorkspace:
     def test_gallery_uses_distinct_themes(self, make):
         page = _page(make)
         page._activate_workspace(5)
         gallery = page._theme_gallery_charts
-        assert len(gallery) == 6
+        assert len(gallery) == 7
         assert [chart.chartTheme() for chart in gallery] == [
+            "ela",
             "echarts",
             "matlab",
             "plotly",
@@ -129,7 +168,7 @@ class TestThemeWorkspace:
             "seaborn",
             "tableau",
         ]
-        assert len({chart.palette()[0].name() for chart in gallery}) == 6
+        assert len({chart.palette()[0].name() for chart in gallery}) == 7
 
     def test_combo_switches_all_demo_charts(self, make):
         page = _page(make)
@@ -173,6 +212,7 @@ class TestGlobalTheme:
         page._activate_workspace(5)  # 主题工作区：演示图继承，画廊固定
         assert all(chart.chartTheme() == "matlab" for chart in page._theme_demo_charts)
         assert [chart.chartTheme() for chart in page._theme_gallery_charts] == [
+            "ela",
             "echarts",
             "matlab",
             "plotly",

@@ -244,7 +244,10 @@ class TestMergeAndState:
     def test_legend_hidden_without_option(self, make):
         chart = _ready(
             make,
-            {"animation": False, "series": [{"type": "pie", "data": [{"name": "a", "value": 1}]}]},
+            {
+                "animation": False,
+                "series": [{"type": "pie", "data": [{"name": "a", "value": 1}]}],
+            },
         )
         assert chart.legend.shown is False
 
@@ -270,7 +273,11 @@ class TestMergeAndState:
         chart.dispatchAction({"type": "legendUnSelect", "name": "b"})
         QApplication.processEvents()
         assert [s["name"] for s in chart.seriesRenderers[0]._sectors] == ["a", "c"]
-        assert chart.getOption()["legend"]["selected"] == {"a": True, "b": False, "c": True}
+        assert chart.getOption()["legend"]["selected"] == {
+            "a": True,
+            "b": False,
+            "c": True,
+        }
         # 普通 setOption 合并后仍保持隐藏
         chart.setOption(
             {
@@ -352,7 +359,9 @@ class TestAxisInteractions:
             },
         )
         coord = chart.coords[0]
-        pos = QPointF(coord.plot.center().x(), coord.plot.top() + coord.plot.height() * 0.1)
+        pos = QPointF(
+            coord.plot.center().x(), coord.plot.top() + coord.plot.height() * 0.1
+        )
         before = chart.convertFromPixel({"seriesIndex": 0}, [pos.x(), pos.y()])
         event = QWheelEvent(
             pos,
@@ -375,7 +384,12 @@ class TestAxisInteractions:
             {
                 "animation": False,
                 "xAxis": {"type": "category", "data": ["a"]},
-                "yAxis": {"type": "value", "min": 1, "max": 5, "axisLabel": {"interval": 1}},
+                "yAxis": {
+                    "type": "value",
+                    "min": 1,
+                    "max": 5,
+                    "axisLabel": {"interval": 1},
+                },
                 "series": [{"type": "line", "data": [1]}],
             },
         )
@@ -405,7 +419,9 @@ class TestSemantics:
                         {"name": "b", "min": 0, "max": 100},
                     ]
                 },
-                "series": [{"type": "radar", "data": [{"name": "s", "value": [50, 100]}]}],
+                "series": [
+                    {"type": "radar", "data": [{"name": "s", "value": [50, 100]}]}
+                ],
             },
         )
         renderer = chart.seriesRenderers[0]
@@ -419,7 +435,12 @@ class TestSemantics:
             {
                 "animation": False,
                 "series": [
-                    {"type": "gauge", "min": -100, "max": 100, "data": [{"name": "v", "value": -30}]}
+                    {
+                        "type": "gauge",
+                        "min": -100,
+                        "max": 100,
+                        "data": [{"name": "v", "value": -30}],
+                    }
                 ],
             },
         )
@@ -435,7 +456,11 @@ class TestSemantics:
                         "type": "pie",
                         "data": [
                             {"name": "a", "value": -5},
-                            {"name": "b", "value": 10, "itemStyle": {"color": "#ff0000"}},
+                            {
+                                "name": "b",
+                                "value": 10,
+                                "itemStyle": {"color": "#ff0000"},
+                            },
                             {"name": "c", "value": 30},
                         ],
                     }
@@ -492,7 +517,9 @@ class TestSemantics:
             make,
             {
                 "animation": False,
-                "series": [{"type": "graph", "data": [{"name": "a", "value": 42}], "links": []}],
+                "series": [
+                    {"type": "graph", "data": [{"name": "a", "value": 42}], "links": []}
+                ],
             },
             width=400,
             height=300,
@@ -528,7 +555,9 @@ class TestSemantics:
                 "animation": False,
                 "xAxis": {"type": "value"},
                 "yAxis": {},
-                "series": [{"type": "line", "data": [math.sin(i / 20) for i in range(20_000)]}],
+                "series": [
+                    {"type": "line", "data": [math.sin(i / 20) for i in range(20_000)]}
+                ],
             },
         )
         stats = chart.seriesRenderers[0].samplingStats()
@@ -584,7 +613,10 @@ class TestPaintAndExport:
     def test_save_image_jpeg(self, make, tmp_path):
         chart = _ready(
             make,
-            {"animation": False, "series": [{"type": "pie", "data": [{"name": "a", "value": 1}]}]},
+            {
+                "animation": False,
+                "series": [{"type": "pie", "data": [{"name": "a", "value": 1}]}],
+            },
         )
         target = tmp_path / "chart.jpg"
         assert chart.saveImage(str(target))

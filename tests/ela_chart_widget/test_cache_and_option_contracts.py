@@ -472,7 +472,12 @@ def test_short_2d_ndarray_getoption_returns_detached_list(make):
     chart = make(ElaChartWidget)
     data = np.array([[1.0, 2.0], [3.0, 4.0]])
     chart.setOption(
-        {"animation": False, "xAxis": {}, "yAxis": {}, "series": [{"type": "line", "data": data}]}
+        {
+            "animation": False,
+            "xAxis": {},
+            "yAxis": {},
+            "series": [{"type": "line", "data": data}],
+        }
     )
     out = chart.getOption()["series"][0]["data"]
     assert isinstance(out, list)

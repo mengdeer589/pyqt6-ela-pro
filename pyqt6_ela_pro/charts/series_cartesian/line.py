@@ -9,14 +9,17 @@ from collections import OrderedDict
 
 from PyQt6.QtCore import QLineF, QPointF, QRectF, Qt
 from PyQt6.QtGui import (
+    QBrush,
     QColor,
     QFontMetricsF,
     QLinearGradient,
     QPainter,
+    QPainterPath,
     QPen,
     QPolygonF,
 )
 
+from .._style import AREA_OPACITY, LINE_WIDTH
 from .._tokens import T
 from .. import _downsample as _ds
 from .._symbol import symbolPixmap
@@ -35,6 +38,7 @@ from ._shared import (
     _label_placement,
     _lerp,
     _monotone_path,
+    _reversed_path,
     _smooth_path,
     _win_span,
     label_align,
@@ -81,6 +85,7 @@ class LineSeriesRenderer(_LineSamplingMixin, _LineSymbolMixin, SeriesRenderer):
         # 持引用才能用 ``data is self._data_ref`` 精确判身份。
         self._data_ref = None
         self._cached_len = -1  # ``_data_ref`` 生效时的长度（检测原地增长）
+        self._cached_version = -1  # 原地 push 的版本（环形窗口满后长度不变）
         # 采样结果 LRU（键 = 数据身份 + 窗口 + 预算 + 算法）+ 全景常驻槽
         # （全景最贵且是缩放往返的必经点，淘汰时跳过）。
         self._sample_lru: OrderedDict = OrderedDict()
@@ -162,15 +167,19 @@ class LineSeriesRenderer(_LineSamplingMixin, _LineSymbolMixin, SeriesRenderer):
                 # 缓存键必须含两项身份信息：① 数据身份（否则换成等长的另一份
                 # 数据会命中旧采样下标）；② 窗口范围（缩放后窗口内点数可能不变，
                 # 但采样点集必须按新窗口重算）。
+                axis_key = (first, last, n_win)
+                if isinstance(coord, GridCoord) and coord.x_axis.type in ("value", "log"):
+                    axis_key = (
+                        round(float(coord.x_axis.vmin), 12),
+                        round(float(coord.x_axis.vmax), 12),
+                    )
                 cache_key = (
                     self._np_cache_key,
                     self._data_len,
                     n_out,
                     algo,
                     threshold,
-                    first,
-                    last,
-                    n_win,
+                    axis_key,
                 )
                 sampled = self._sample_cache_get(cache_key)
                 if sampled is None:
@@ -386,8 +395,9 @@ class LineSeriesRenderer(_LineSamplingMixin, _LineSymbolMixin, SeriesRenderer):
 
     def _line_path(self, seg):
         """按 smooth / step 构建一段折线几何。
-        返回 ``(path, pts)``：``path is None`` 表示纯折线（直线段 / step），
-        调用方批量 ``drawPolyline(QPolygonF(pts))``；非空只在 ``smooth``
+
+        返回 ``(path, pts)``：``path is None`` 表示纯折线（直线段 / step，``pts``
+        已含踏步拐点）；非空时 ``path`` 是贝塞尔曲线，``pts`` 仍是原始顶点。
         """
         step = self.opt.get("step") or ""
         if isinstance(step, (list, tuple)):
@@ -427,6 +437,42 @@ class LineSeriesRenderer(_LineSamplingMixin, _LineSymbolMixin, SeriesRenderer):
             return _smooth_path(seg, k), seg
         return None, seg
 
+    def _line_path_reversed(self, seg):
+        """``_line_path`` 的几何反序（面积填充的下边界）。"""
+        path, pts = self._line_path(seg)
+        if path is not None:
+            return _reversed_path(path)
+        out = QPainterPath()
+        if not pts:
+            return out
+        out.moveTo(pts[-1])
+        for pt in reversed(pts[:-1]):
+            out.lineTo(pt)
+        return out
+
+    def _area_fill_path(self, seg_bases, base_y, curve, geom_pts, coord):
+        """面积填充的闭合几何：上边界与描边共用同一份 ``curve``。
+
+        :returns: 闭合路径；无可回填的基线（非 grid / polar）时 ``None``。
+        """
+        fill = QPainterPath(curve) if curve is not None else QPainterPath()
+        if curve is None:
+            fill.moveTo(geom_pts[0])
+            for pt in geom_pts[1:]:
+                fill.lineTo(pt)
+        if getattr(coord, "kind", "") == "polar":
+            fill.lineTo(QPointF(coord.center))
+        elif seg_bases and all(b is not None for b in seg_bases):
+            # stack：沿下一条带的描边几何（同样的 smooth / step）回填
+            fill.connectPath(self._line_path_reversed(seg_bases))
+        elif base_y is not None:
+            fill.lineTo(QPointF(geom_pts[-1].x(), base_y))
+            fill.lineTo(QPointF(geom_pts[0].x(), base_y))
+        else:
+            return None
+        fill.closeSubpath()
+        return fill
+
     def _baseline_y(self, coord, area=None):
         """面积填充基线（``areaStyle.origin``：auto / start / end / 数值）。"""
         if isinstance(coord, GridCoord):
@@ -434,6 +480,8 @@ class LineSeriesRenderer(_LineSamplingMixin, _LineSymbolMixin, SeriesRenderer):
             if ax.type == "log":
                 return coord.plot.bottom()
             origin = (area or {}).get("origin") if isinstance(area, dict) else None
+            if origin is None:
+                origin = self.opt.get("areaOrigin")
             if origin == "start":
                 value = ax.vmin
             elif origin == "end":
@@ -446,32 +494,42 @@ class LineSeriesRenderer(_LineSamplingMixin, _LineSymbolMixin, SeriesRenderer):
         return None
 
     def paint(self, p: QPainter, anim_t: float) -> None:
+        self._label_rects = []
+        self._end_label = None
         pts = self._animated_points(anim_t)
+        indices = self.progressiveIndices(len(pts))
+        if len(indices) < len(pts):
+            pts = [pts[index] for index in indices]
         valid = [pt for pt in pts if pt is not None]
         if not valid:
             return
-        self._label_rects = []
-        self._end_label = None
         mode = self.plotMode()
         draw_line = mode != "markers"
         draw_markers = mode != "lines"
         coord = self.chart.coordFor(self.opt)
         color = self.color()
         ls = self.opt.get("lineStyle") or {}
-        width = _to_float(ls.get("width"), 2.0)
+        width = _to_float(ls.get("width"), LINE_WIDTH)
         if isinstance(ls.get("color"), str) and ls["color"]:
-            color = parse_color(ls["color"])
+            color = self.resolveColor(ls["color"])
         polar = getattr(coord, "kind", "") == "polar"
         # 大数据（超采样阈值）：陡峭线段序列的光栅化会让 polyline / path 退化到
         # 每段 ~1ms；smooth / step 在 heavy 时退化为直线（ECharts 大数据同策略）。
         _, heavy_threshold, _, _ = self._sampling_params()
         heavy = self._data_len > heavy_threshold
 
-        # 分段（None 断点切开）；stack 模式同时准备逐点基线
+        # 分段（None 断点切开）；stack 模式同时准备逐点基线（采样后点数已经很小，
+        # 只有 ``sampling: false`` 的百万点才跳过）
         base_pts = None
-        if getattr(self, "_stack_base", None) and not polar and not heavy:
+        if (
+            getattr(self, "_stack_base", None)
+            and not polar
+            # 缩放后的窗口 / sampling:false 的中等数据量必须补基线；只跳过
+            # 真正百万级的全量未采样路径，否则所有堆叠带都填到 0 基线。
+            and (not heavy or self._sampled or len(self._point_idx) <= 100_000)
+        ):
             base_pts = []
-            for orig in self._point_idx:
+            for orig in (self._point_idx[index] for index in indices):
                 try:
                     base_pts.append(
                         coord.mapPoint(
@@ -500,43 +558,42 @@ class LineSeriesRenderer(_LineSamplingMixin, _LineSymbolMixin, SeriesRenderer):
         if not draw_line:
             segs = []
 
+        # 逐段几何只算一次：面积填充的上边界必须与描边同为一条曲线；
+        # 宽笔 + 稠密点会把描边退化成直线段，填充同步退化（否则填充露出曲线）。
+        wide_pen = float(width) > 1.0 + 1e-6
+        seg_geoms = []
+        for seg_pts, seg_bases in segs:
+            path, geom_pts = self._line_path(seg_pts)
+            if wide_pen and len(geom_pts) > 2000:
+                path = None
+            seg_geoms.append((seg_pts, seg_bases, path, geom_pts))
+        segs = seg_geoms
+
         p.save()
         if isinstance(coord, GridCoord):
             p.setClipRect(coord.plot)
 
-        # 面积填充（先填充后描线）
+        # 面积填充（先填充后描线）；``areaStyle: {}`` 与 ECharts 一样视为「显示」
         area = self.opt.get("areaStyle") if draw_line else None
-        if area:
-            opacity = 0.22
+        if area is not None and area is not False:
+            opacity = AREA_OPACITY
             if isinstance(area, dict):
-                opacity = _to_float(area.get("opacity"), 0.22)
+                opacity = _to_float(area.get("opacity"), AREA_OPACITY)
             base_y = self._baseline_y(coord, area)
-            for seg_pts, seg_bases in segs:
-                if len(seg_pts) < 2:
+            for seg_pts, seg_bases, curve, geom_pts in segs:
+                if len(geom_pts) < 2:
                     continue
-                # 几何点直接来自 ``_line_path``：填充走 QPolygonF + drawPolygon
-                # （单次 C++ 调用）。
-                _path, geom_pts = self._line_path(seg_pts)
-                fill = QPolygonF(list(geom_pts))
+                fill = self._area_fill_path(seg_bases, base_y, curve, geom_pts, coord)
+                if fill is None:
+                    continue
                 if polar:
-                    fill.append(QPointF(coord.center))
                     p.setPen(Qt.PenStyle.NoPen)
                     p.setBrush(with_alpha(color, 255 * opacity))
-                    p.drawPolygon(fill)
+                    p.drawPath(fill)
                     continue
-                if seg_bases and all(b is not None for b in seg_bases):
-                    # stack：沿基线曲线回填（ECharts 堆叠面积语义）
-                    fill.append(QPointF(seg_bases[-1]))
-                    for base_pt in reversed(seg_bases[:-1]):
-                        fill.append(QPointF(base_pt))
-                    bottom = max(pt.y() for pt in seg_bases)
-                elif base_y is not None:
-                    fill.append(QPointF(seg_pts[-1].x(), base_y))
-                    fill.append(QPointF(seg_pts[0].x(), base_y))
-                    bottom = base_y
-                else:
-                    continue
-                top = min(pt.y() for pt in seg_pts)
+                rect = fill.boundingRect()
+                top = rect.top()
+                bottom = max(rect.bottom(), top + 1.0)
                 raw_area_color = area.get("color") if isinstance(area, dict) else None
                 if isinstance(raw_area_color, dict):
                     grad = QLinearGradient(QPointF(0, top), QPointF(0, bottom))
@@ -544,13 +601,13 @@ class LineSeriesRenderer(_LineSamplingMixin, _LineSymbolMixin, SeriesRenderer):
                         try:
                             grad.setColorAt(
                                 _clamp(_to_float(stop.get("offset"), 0.0), 0.0, 1.0),
-                                parse_color(stop.get("color")),
+                                self.resolveColor(stop.get("color")),
                             )
                         except Exception:
                             continue
                     brush = grad
                 elif isinstance(raw_area_color, str) and raw_area_color:
-                    brush = with_alpha(parse_color(raw_area_color), 255 * opacity)
+                    brush = with_alpha(self.resolveColor(raw_area_color), 255 * opacity)
                 else:
                     grad = QLinearGradient(QPointF(0, top), QPointF(0, bottom))
                     grad.setColorAt(0.0, with_alpha(color, 255 * opacity))
@@ -558,7 +615,7 @@ class LineSeriesRenderer(_LineSamplingMixin, _LineSymbolMixin, SeriesRenderer):
                     brush = grad
                 p.setPen(Qt.PenStyle.NoPen)
                 p.setBrush(brush)
-                p.drawPolygon(fill)
+                p.drawPath(fill)
 
         # 折线本体
         line_opacity = _to_float(ls.get("opacity"), 1.0)
@@ -591,24 +648,36 @@ class LineSeriesRenderer(_LineSamplingMixin, _LineSymbolMixin, SeriesRenderer):
         # 宽笔（>1px）在**自重叠折线**上会踩 Qt stroker 的爆炸路径：
         # ``drawPolyline`` / ``QPainterPath`` 单帧可达数秒，``drawLines`` 批量只要
         # 20ms；细笔（≤1px）三者都在 10ms 量级，用更省的 drawPolyline。
-        wide_pen = float(pen.widthF()) > 1.0 + 1e-6
         lt = str(ls.get("type") or "solid")
         if lt in ("dashed", "dash"):
             pen.setStyle(Qt.PenStyle.DashLine)
         elif lt in ("dotted", "dot"):
             pen.setStyle(Qt.PenStyle.DotLine)
+        if self.visualMapComponent() is not None and not polar and self._points:
+            xs = [pt.x() for pt in self._points if pt is not None]
+            if len(xs) >= 2 and max(xs) > min(xs):
+                grad = QLinearGradient(min(xs), 0.0, max(xs), 0.0)
+                span = max(xs) - min(xs)
+                for point, orig in zip(self._points, self._point_idx):
+                    if point is None:
+                        continue
+                    grad.setColorAt(
+                        _clamp((point.x() - min(xs)) / span, 0.0, 1.0),
+                        self.dataColor(orig),
+                    )
+                pen.setBrush(QBrush(grad))
         p.setPen(pen)
         p.setBrush(Qt.BrushStyle.NoBrush)
-        for seg_pts, _seg_bases in segs:
-            if len(seg_pts) < 2:
+        for seg_pts, _seg_bases, curve, geom_pts in segs:
+            if len(geom_pts) < 2:
                 continue
-            path, geom_pts = self._line_path(seg_pts)
             # smooth 的贝塞尔同样是「宽笔 + 稠密自重叠」高危几何，点太多时
-            # 退化成直线段（ECharts 大数据下 smooth 同样退化）。
-            if path is not None and not (wide_pen and len(geom_pts) > 2000):
+            # 已在 ``seg_geoms`` 里退化成直线段（与面积填充保持一致）。
+            if curve is not None:
                 if polar:
-                    path.closeSubpath()
-                p.drawPath(path)
+                    curve = QPainterPath(curve)
+                    curve.closeSubpath()
+                p.drawPath(curve)
                 continue
             points = list(geom_pts)
             if polar:
@@ -633,11 +702,16 @@ class LineSeriesRenderer(_LineSamplingMixin, _LineSymbolMixin, SeriesRenderer):
         r *= max(0.2, anim_t)
         emphasized = self.chart.emphasizedIndices(self)
         if heavy:
-            sym_items = self._symbol_items
+            sym_items = [
+                self._symbol_items[index]
+                for index in indices
+                if index < len(self._symbol_items)
+            ]
         else:
             sym_items = [
-                (orig, pt)
-                for pt, orig in zip(self._points, self._point_idx)
+                (self._point_idx[index], pt)
+                for index in indices
+                for pt in (self._points[index],)
                 if pt is not None
             ]
         if draw_markers and symbol_name != "none":
@@ -655,6 +729,7 @@ class LineSeriesRenderer(_LineSamplingMixin, _LineSymbolMixin, SeriesRenderer):
                 and not emphasized
                 and not selected
                 and not show_label
+                and not show_end_label
                 and r > 0
                 and not symbol_rotate
             ):
@@ -691,7 +766,7 @@ class LineSeriesRenderer(_LineSamplingMixin, _LineSymbolMixin, SeriesRenderer):
                     alpha = uni["opacity"]
                     border_color, border_w = uni["borderColor"], uni["borderWidth"]
                 else:
-                    item_color = parse_color(self.itemColor(orig))
+                    item_color = self.dataColor(orig)
                     alpha = self.itemOpacity(orig)
                     border_color, border_w = self.itemBorder(orig)
                 rr = r
@@ -717,6 +792,9 @@ class LineSeriesRenderer(_LineSamplingMixin, _LineSymbolMixin, SeriesRenderer):
                     elif self.blursOtherItems():
                         blur = self.blurOpacity()
                         alpha *= blur if blur is not None else 0.35
+                item_color, alpha, border_color, border_w = self.selectedStyle(
+                    orig, item_color, alpha, border_color, border_w
+                )
                 if hollow:
                     p.setPen(
                         QPen(
@@ -782,7 +860,18 @@ class LineSeriesRenderer(_LineSamplingMixin, _LineSymbolMixin, SeriesRenderer):
                 if hide_overlap and any(hit.intersects(r) for r in drawn):
                     continue
                 p.setPen(self.labelColorFor(orig))
-                paint_label_at(p, anchor, text, fm, rotate)
+                hit = paint_label_at(
+                    p,
+                    anchor,
+                    text,
+                    fm,
+                    rotate,
+                    series=self,
+                    index=orig,
+                    color=self.labelColorFor(orig),
+                )
+                if hit.isNull():
+                    continue
                 rect = hit
                 if marker_r > 0:
                     rect = rect.united(
@@ -845,7 +934,9 @@ class LineSeriesRenderer(_LineSamplingMixin, _LineSymbolMixin, SeriesRenderer):
         fm = QFontMetricsF(font)
         color = style.get("color")
         p.setPen(
-            parse_color(color) if isinstance(color, str) and color else self.color()
+            self.resolveColor(color)
+            if isinstance(color, str) and color
+            else self.color()
         )
         distance = _to_float(cfg.get("distance"), 6.0)
         tw = fm.horizontalAdvance(text)
@@ -863,6 +954,9 @@ class LineSeriesRenderer(_LineSamplingMixin, _LineSymbolMixin, SeriesRenderer):
     def hitTest(self, pos: QPointF):
         best = None
         best_d = self.chart.hitRadius()  # 命中半径 px（tooltip.hitRadius）
+        if self.plotMode() != "lines" and str(self.opt.get("symbol") or "") != "none":
+            # 可见 marker 的外半圈也必须能点到。
+            best_d = max(best_d, _to_float(self.opt.get("symbolSize"), 6.0) / 2.0 + 3.0)
         # 动画期用画出来的那份折线点，否则会命中动画终点位置上的点。
         pts = (
             self._points if self._anim_t >= 1.0 else self._animated_points(self._anim_t)
@@ -880,7 +974,7 @@ class LineSeriesRenderer(_LineSamplingMixin, _LineSymbolMixin, SeriesRenderer):
         return {
             "name": self.name,
             "value": self._raw_value(orig),
-            "color": self.itemColor(orig),
+            "color": self.dataColor(orig),
             "series": self.name,
             "dataIndex": orig,
             "x": self._x_at(orig),
@@ -894,8 +988,25 @@ class LineSeriesRenderer(_LineSamplingMixin, _LineSymbolMixin, SeriesRenderer):
             "sampled": bool(self._sampled),
         }
 
+    def morphSnapshot(self):
+        points = [QPointF(pt) if pt is not None else None for pt in self._points]
+        if not any(pt is not None for pt in points):
+            return None
+        style = self.opt.get("lineStyle")
+        style = style if isinstance(style, dict) else {}
+        try:
+            width = max(0.5, float(style.get("width", 2.0)))
+        except (TypeError, ValueError, OverflowError):
+            width = 2.0
+        return {
+            "kind": "line",
+            "points": points,
+            "color": self.color(),
+            "width": width,
+        }
+
     def valueAtIndex(self, index: int):
-        idx = self._full_index(index)  # dataZoom 窗口偏移换算
+        idx = index
         if not isinstance(idx, int) or not (0 <= idx < self._data_len):
             return None
         y = self._raw_value(idx)
@@ -924,7 +1035,7 @@ class LineSeriesRenderer(_LineSamplingMixin, _LineSymbolMixin, SeriesRenderer):
         return {
             "name": self.name,
             "value": y,
-            "color": self.itemColor(idx),
+            "color": self.dataColor(idx),
             "series": self.name,
             "dataIndex": idx,
             "pos": pos,

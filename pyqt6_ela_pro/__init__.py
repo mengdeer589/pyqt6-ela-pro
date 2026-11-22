@@ -239,6 +239,7 @@ _LAZY_MODULES = {
     ),
     "charts": (
         "ElaChartWidget",
+        "ElaGanttView",
         "chartThemeSpec",
         "chartThemes",
         "defaultChartTheme",
@@ -434,6 +435,7 @@ __all__ = [
     "DEFAULT_TIMELINE_DETAIL",
     "ElaButton",
     "ElaChartWidget",
+    "ElaGanttView",
     "ElaChatAsyncWorker",
     "ElaChatAttachment",
     "ElaChatBubble",

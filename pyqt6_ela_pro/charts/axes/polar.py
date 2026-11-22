@@ -94,9 +94,11 @@ class PolarCoord(Coord):
         ax = self.angle_axis
         if ax.type == "category":
             n = max(1, len(ax.categories))
-            return (ax.categoryIndex(angle) % n) / n
-        span = ax.vmax - ax.vmin
-        return 0.0 if span == 0 else (_to_float(angle) - ax.vmin) / span
+            frac = (ax.categoryIndex(angle) % n) / n
+        else:
+            span = ax.vmax - ax.vmin
+            frac = 0.0 if span == 0 else (_to_float(angle) - ax.vmin) / span
+        return 1.0 - frac if ax.inverse else frac
 
     def mapPoint(self, x, y=None) -> QPointF:
         """(angle, radius) → 像素。angle 类别/数值；radius 数值。"""
@@ -104,6 +106,8 @@ class PolarCoord(Coord):
         theta = -math.pi / 2 + frac * 2 * math.pi  # 正上方起顺时针
         r_span = self.radius_axis.vmax - self.radius_axis.vmin
         r_frac = 0.0 if r_span == 0 else (_to_float(y) - self.radius_axis.vmin) / r_span
+        if self.radius_axis.inverse:
+            r_frac = 1.0 - r_frac
         r_frac = min(max(r_frac, 0.0), 1.0)
         r = self.radius * r_frac
         return QPointF(
@@ -117,8 +121,13 @@ class PolarCoord(Coord):
         r = math.hypot(dx, dy)
         r_span = self.radius_axis.vmax - self.radius_axis.vmin
         r_frac = (r / self.radius) if self.radius else 0.0
-        radius_val = self.radius_axis.vmin + min(max(r_frac, 0.0), 1.0) * r_span
+        r_frac = min(max(r_frac, 0.0), 1.0)
+        if self.radius_axis.inverse:
+            r_frac = 1.0 - r_frac
+        radius_val = self.radius_axis.vmin + r_frac * r_span
         frac = ((math.atan2(dy, dx) + math.pi / 2) % (2 * math.pi)) / (2 * math.pi)
+        if self.angle_axis.inverse:
+            frac = (1.0 - frac) % 1.0
         if self.angle_axis.type == "category":
             n = max(1, len(self.angle_axis.categories))
             angle = min(int(frac * n), n - 1)
@@ -132,6 +141,36 @@ class PolarCoord(Coord):
             math.hypot(pos.x() - self.center.x(), pos.y() - self.center.y())
             <= self.radius + 1e-6
         )
+
+    def sector_path(self, f0: float, f1: float, r0: float, r1: float) -> QPainterPath:
+        """扇环路径：角度/半径都用 0..1 比例。"""
+        path = QPainterPath()
+        outer = self.radius * max(0.0, r1)
+        inner = self.radius * max(0.0, r0)
+        if outer <= 0.0:
+            return path
+        rect_out = QRectF(
+            self.center.x() - outer,
+            self.center.y() - outer,
+            2.0 * outer,
+            2.0 * outer,
+        )
+        start_deg = 90.0 - f0 * 360.0
+        span_deg = -(f1 - f0) * 360.0
+        path.arcMoveTo(rect_out, start_deg)
+        path.arcTo(rect_out, start_deg, span_deg)
+        if inner > 0.0:
+            rect_in = QRectF(
+                self.center.x() - inner,
+                self.center.y() - inner,
+                2.0 * inner,
+                2.0 * inner,
+            )
+            path.arcTo(rect_in, start_deg + span_deg, -span_deg)
+        else:
+            path.lineTo(self.center)
+        path.closeSubpath()
+        return path
 
     def _ring_path(self, frac: float) -> QPainterPath:
         r = self.radius * frac
@@ -151,13 +190,14 @@ class PolarCoord(Coord):
         # 环形网格
         for tv in ticks[1:]:
             frac = 1.0 if span == 0 else (tv - self.radius_axis.vmin) / span
+            if self.radius_axis.inverse:
+                frac = 1.0 - frac
             p.setPen(QPen(c_grid, 1))
             p.drawPath(self._ring_path(frac))
         # 角轴辐条 + 外圈类别标签
         if self.angle_axis.type == "category" and self.angle_axis.categories:
-            n = len(self.angle_axis.categories)
-            for i, cat in enumerate(self.angle_axis.categories):
-                theta = -math.pi / 2 + i / n * 2 * math.pi
+            for cat in self.angle_axis.categories:
+                theta = -math.pi / 2 + self._angle_frac(cat) * 2 * math.pi
                 outer = QPointF(
                     self.center.x() + self.radius * math.cos(theta),
                     self.center.y() + self.radius * math.sin(theta),
@@ -175,6 +215,8 @@ class PolarCoord(Coord):
         # 半径刻度标签（沿正上方辐条）
         for tv in ticks[1:]:
             frac = 1.0 if span == 0 else (tv - self.radius_axis.vmin) / span
+            if self.radius_axis.inverse:
+                frac = 1.0 - frac
             p.setPen(c_text)
             p.drawText(
                 QRectF(
@@ -195,7 +237,9 @@ class PolarCoord(Coord):
             return
         p.save()
         style = line_style if isinstance(line_style, dict) else {}
-        pen = _line_pen({"lineStyle": style}, T("color.border.strong", self.chart))
+        pen = _line_pen(
+            {"lineStyle": style}, T("color.border.strong", self.chart), chart=self.chart
+        )
         if not isinstance(style.get("type"), str):
             pen.setStyle(Qt.PenStyle.DashLine)
         p.setPen(pen)

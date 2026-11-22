@@ -8,8 +8,9 @@ from PyQt6.QtCore import QEasingCurve
 from PyQt6.QtGui import QColor
 from PyQt6ElaWidgetTools import eTheme, ElaThemeType
 
-from .._colors import parse_color
+from .._colors import mixColor, parse_color
 from .._theme import surfaceRaised
+from ._style import TITLE_SIZE
 from ._theme import (
     ECHARTS_PALETTE,
     theme_override,
@@ -31,7 +32,7 @@ FONT_FAMILIES = [
 #: 字号 / 字重 / 圆角（px）
 FONT_XS = 11
 FONT_SM = 12
-FONT_TITLE_MD = 17
+FONT_TITLE_MD = int(TITLE_SIZE)
 FONT_WEIGHT_SEMIBOLD = 600
 RADIUS_MD = 6.0
 
@@ -82,15 +83,6 @@ def _ela_color(mode, member_name: str) -> QColor:
     )
 
 
-def _mix(a: QColor, b: QColor, t: float) -> QColor:
-    return QColor(
-        int(a.red() * (1 - t) + b.red() * t),
-        int(a.green() * (1 - t) + b.green() * t),
-        int(a.blue() * (1 - t) + b.blue() * t),
-        int(a.alpha() * (1 - t) + b.alpha() * t),
-    )
-
-
 def _subtle_primary(mode, chart=None) -> QColor:
     """color.primary.subtle：主色与不透明画布底的 12% 混合色（主题感知）。"""
     bg = theme_override(chart, mode, "color.bg.base")
@@ -100,7 +92,7 @@ def _subtle_primary(mode, chart=None) -> QColor:
     primary = theme_override(chart, mode, "color.primary")
     if primary is None:
         primary = _ela_color(mode, "PrimaryNormal")
-    return _mix(bg, primary, 0.12)
+    return mixColor(bg, primary, 0.12)
 
 
 def _derived_accent(mode, key: str, chart=None) -> Optional[QColor]:
@@ -111,7 +103,7 @@ def _derived_accent(mode, key: str, chart=None) -> Optional[QColor]:
     if primary is None:
         return None
     target = QColor("#ffffff") if key == "color.primary.hover" else QColor("#000000")
-    return _mix(primary, target, 0.12)
+    return mixColor(primary, target, 0.12)
 
 
 def _derived_status_hover(mode, key: str, chart=None) -> Optional[QColor]:
@@ -123,7 +115,7 @@ def _derived_status_hover(mode, key: str, chart=None) -> Optional[QColor]:
     target = (
         QColor("#000000") if mode == ElaThemeType.ThemeMode.Light else QColor("#ffffff")
     )
-    return _mix(base, target, 0.12)
+    return mixColor(base, target, 0.12)
 
 
 def chart_token(mode, key, chart=None):
@@ -190,7 +182,7 @@ def palette_for_mode(mode, chart=None) -> list:
     必须每次新建 list：调用方会就地 ``setAlphaF`` 改元素，共享实例会让一次
     绘制污染全局调色板。
     """
-    return [parse_color(c) for c in theme_palette_colors(chart)]
+    return [parse_color(c) for c in theme_palette_colors(chart, mode)]
 
 
 def theme_ramp(chart=None) -> list:
@@ -198,13 +190,13 @@ def theme_ramp(chart=None) -> list:
     mode = eTheme.getThemeMode()
     colors = theme_ramp_override(chart, mode)
     if colors:
-        return colors
-    ramp = [
-        QColor(chart_token(mode, "color.primary.subtle", chart)),
-        QColor(chart_token(mode, "color.primary", chart)),
-    ]
-    # V3.0 的 PrimaryHover/PrimaryPress 带 alpha：渐变/热力图要的是实色，
-    # 否则渲染出的图像整体半透明
+        ramp = [QColor(c) for c in colors]
+    else:
+        ramp = [
+            QColor(chart_token(mode, "color.primary.subtle", chart)),
+            QColor(chart_token(mode, "color.primary", chart)),
+        ]
+    # 渐变 / 热力图要的是实色；主题色板和 fallback 的 alpha 都必须压掉。
     for color in ramp:
         color.setAlpha(255)
     return ramp

@@ -2,9 +2,6 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
-
-
 import math
 from typing import Optional
 
@@ -23,6 +20,8 @@ from .._tokens import (
 )
 from .._utils import warn_key, warn_once
 from .._utils import parse_color
+from .._utils import resolve_color_option
+from ..models import HitResult, LabelHit, SeriesItem
 from ..axes import (
     GridCoord,
     formatValue,
@@ -30,13 +29,8 @@ from ..axes import (
 from ._shared import (
     _HOVERABLE_COMPONENTS,
     _sort_value,
-    parseDataPoint,
 )
 from .renderer import SeriesRenderer
-
-
-if TYPE_CHECKING:
-    pass
 
 
 class _ChartQueryMixin:
@@ -51,6 +45,7 @@ class _ChartQueryMixin:
             "singleaxis": "singleAxis",
             "singleAxis": "singleAxis",
             "calendar": "calendar",
+            "geo": "geo",
         }
         if isinstance(finder, str):
             kind = alias.get(finder, alias.get(finder.lower(), finder))
@@ -71,6 +66,11 @@ class _ChartQueryMixin:
                 return grid.axis_view_for_indices(
                     finder.get("xAxisIndex", 0), finder.get("yAxisIndex", 0)
                 )
+            if finder.get("geoIndex") is not None:
+                try:
+                    return self.geoCoord(int(finder["geoIndex"]))
+                except (TypeError, ValueError, OverflowError):
+                    return None
             for key, kind in (
                 ("gridIndex", "grid"),
                 ("polarIndex", "polar"),
@@ -131,9 +131,15 @@ class _ChartQueryMixin:
         if isinstance(value, QPointF):
             pos = QPointF(value)
         elif isinstance(value, dict):
-            pos = QPointF(float(value.get("x", 0)), float(value.get("y", 0)))
+            try:
+                pos = QPointF(float(value.get("x", 0)), float(value.get("y", 0)))
+            except (TypeError, ValueError, OverflowError):
+                return None
         elif isinstance(value, (list, tuple)) and len(value) >= 2:
-            pos = QPointF(float(value[0]), float(value[1]))
+            try:
+                pos = QPointF(float(value[0]), float(value[1]))
+            except (TypeError, ValueError, OverflowError):
+                return None
         else:
             return None
         invert = getattr(coord, "invertPoint", None)
@@ -157,9 +163,15 @@ class _ChartQueryMixin:
         if isinstance(value, QPointF):
             pos = QPointF(value)
         elif isinstance(value, dict):
-            pos = QPointF(float(value.get("x", 0)), float(value.get("y", 0)))
+            try:
+                pos = QPointF(float(value.get("x", 0)), float(value.get("y", 0)))
+            except (TypeError, ValueError, OverflowError):
+                return False
         elif isinstance(value, (list, tuple)) and len(value) >= 2:
-            pos = QPointF(float(value[0]), float(value[1]))
+            try:
+                pos = QPointF(float(value[0]), float(value[1]))
+            except (TypeError, ValueError, OverflowError):
+                return False
         else:
             return False
         contain = getattr(coord, "containPoint", None)
@@ -218,7 +230,13 @@ class _ChartQueryMixin:
         if hit is not None and hit[0] == key and hit[1] is custom:
             return [parse_color(c) for c in hit[2]]
         if has_custom:
-            pal = [parse_color(c) for c in custom]
+            pal = [
+                c
+                for c in (resolve_color_option(v, self) for v in custom)
+                if c.isValid()
+            ]
+            if not pal:
+                pal = palette_for_mode(eTheme.getThemeMode(), self)
         else:
             pal = palette_for_mode(eTheme.getThemeMode(), self)
         self._palette_cache = (key, custom, pal)
@@ -238,9 +256,161 @@ class _ChartQueryMixin:
             idx = int(series)
             own = None
         if isinstance(own, str) and own:
-            return parse_color(own)
+            color = resolve_color_option(own, self)
+            if color.isValid():
+                return color
         pal = self.palette()
+        if not pal:
+            return resolve_color_option(T("color.primary", self), self)
         return parse_color(pal[idx % len(pal)])
+
+    def seriesItems(
+        self,
+        seriesName: str = "",
+        *,
+        seriesIndex: int = None,
+        seriesId: str = None,
+    ) -> list:
+        """某个系列的全部数据项（``SeriesItem`` dataclass）。"""
+        renderer = self._renderer_for(
+            {
+                "seriesName": seriesName or None,
+                "seriesIndex": seriesIndex,
+                "seriesId": seriesId,
+            }
+        )
+        if renderer is None:
+            return []
+        index = self._series.index(renderer) if renderer in self._series else -1
+        items = []
+        for data_index in range(renderer.itemCount()):
+            try:
+                info = renderer.valueAtIndex(data_index)
+            except Exception:
+                info = None
+            if info is None:
+                continue
+            items.append(
+                SeriesItem(
+                    series_name=renderer.name,
+                    series_index=index,
+                    data_index=data_index,
+                    name=str(info.get("name") or ""),
+                    value=info.get("value"),
+                    color=info.get("color"),
+                    pos=info.get("pos"),
+                    rect=info.get("rect"),
+                )
+            )
+        return items
+
+    def itemAt(
+        self,
+        seriesName: str = "",
+        index: int = 0,
+        *,
+        seriesIndex: int = None,
+        seriesId: str = None,
+    ) -> Optional[SeriesItem]:
+        """某个系列指定下标的数据项；不存在返回 ``None``。"""
+        try:
+            wanted = int(index)
+        except (TypeError, ValueError, OverflowError):
+            return None
+        renderer = self._renderer_for(
+            {
+                "seriesName": seriesName or None,
+                "seriesIndex": seriesIndex,
+                "seriesId": seriesId,
+            }
+        )
+        if renderer is None:
+            return None
+        try:
+            info = renderer.valueAtIndex(wanted)
+        except Exception:
+            return None
+        if info is None:
+            return None
+        index_in_series = (
+            self._series.index(renderer) if renderer in self._series else -1
+        )
+        return SeriesItem(
+            series_name=renderer.name,
+            series_index=index_in_series,
+            data_index=wanted,
+            name=str(info.get("name") or ""),
+            value=info.get("value"),
+            color=info.get("color"),
+            pos=info.get("pos"),
+            rect=info.get("rect"),
+        )
+
+    def labelRects(
+        self,
+        seriesName: str = "",
+        *,
+        seriesIndex: int = None,
+        seriesId: str = None,
+    ) -> list:
+        """某个系列当前的数据标签命中框（``LabelHit`` dataclass）。"""
+        renderer = self._renderer_for(
+            {
+                "seriesName": seriesName or None,
+                "seriesIndex": seriesIndex,
+                "seriesId": seriesId,
+            }
+        )
+        if renderer is None:
+            return []
+        return [
+            LabelHit(data_index=int(index), rect=rect, text=str(text))
+            for index, rect, text in getattr(renderer, "_label_rects", ())
+            if isinstance(index, int)
+        ]
+
+    def hitTestAll(self, pos: QPointF) -> list:
+        """光标下的全部命中项（组件优先，其次系列）。"""
+        out = []
+        for comp in reversed(self._components):
+            if str(getattr(comp, "optionKey", "")) not in _HOVERABLE_COMPONENTS:
+                continue
+            try:
+                hit = comp.hitTest(pos)
+            except Exception:
+                hit = None
+            if hit:
+                renderer = comp._renderer() if hasattr(comp, "_renderer") else None
+                if renderer is not None:
+                    index = (
+                        self._series.index(renderer) if renderer in self._series else -1
+                    )
+                    out.append(
+                        HitResult(
+                            series_name=renderer.name,
+                            series_index=index,
+                            data_index=hit.get("dataIndex"),
+                            item=hit,
+                        )
+                    )
+        for renderer in reversed(self._series):
+            if not renderer.visible or renderer.silent:
+                continue
+            try:
+                hit = renderer.hitTest(pos)
+            except Exception:
+                hit = None
+            if hit:
+                index = self._series.index(renderer) if renderer in self._series else -1
+                out.append(
+                    HitResult(
+                        series_name=renderer.name,
+                        series_index=index,
+                        data_index=hit.get("dataIndex"),
+                        item=hit,
+                    )
+                )
+        return out
 
     def coordAt(self, pos: QPointF):
         """像素所在坐标系：优先包含该点的网格，其次 ``containPoint``，否则主坐标系。"""
@@ -269,6 +439,21 @@ class _ChartQueryMixin:
         """主坐标系（coords[0]，无则 None）。"""
         return self._coords[0] if self._coords else None
 
+    def geoCoords(self) -> list:
+        """全部顶层 ``geo`` 坐标系。"""
+        return [c for c in self._coords if getattr(c, "kind", "") == "geo"]
+
+    def geoCoord(self, index: int = 0):
+        """按 ``geoIndex`` 取顶层 geo；越界回退第一个。"""
+        geos = self.geoCoords()
+        if not geos:
+            return None
+        try:
+            index = max(0, int(index))
+        except (TypeError, ValueError, OverflowError):
+            index = 0
+        return geos[index] if index < len(geos) else geos[0]
+
     def coordFor(self, series_opt: dict = None):
         """按 series 的 ``coordinateSystem`` / ``xAxisIndex`` / ``yAxisIndex`` 取坐标系。"""
         want = None
@@ -280,9 +465,21 @@ class _ChartQueryMixin:
             "polar": "polar",
             "singleAxis": "singleAxis",
             "calendar": "calendar",
+            "geo": "geo",
             None: None,
         }
         want = alias.get(want, want)
+        if want == "geo":
+            geos = [c for c in self._coords if getattr(c, "kind", "") == "geo"]
+            index = 0
+            if isinstance(series_opt, dict):
+                try:
+                    index = max(0, int(series_opt.get("geoIndex", 0) or 0))
+                except (TypeError, ValueError, OverflowError):
+                    index = 0
+            if geos:
+                return geos[index] if index < len(geos) else geos[0]
+            return None
         if want in (None, "grid"):
             grids = [c for c in self._coords if isinstance(c, GridCoord)]
             if grids:
@@ -320,14 +517,17 @@ class _ChartQueryMixin:
     ) -> dict:
         """命中 → ECharts 事件 params（click / highlight 等共用）。"""
         data_index = hit.get("dataIndex")
-        data = None
-        raw_data = renderer.data()
-        if isinstance(data_index, int) and 0 <= data_index < len(raw_data):
-            data = raw_data[data_index]
+        data = hit.get("data")
+        if data is None:
+            raw_data = renderer.data()
+            if isinstance(data_index, int) and 0 <= data_index < len(raw_data):
+                data = raw_data[data_index]
         # params.color 是数据项颜色（雷达 colorBy='data'、饼图逐扇区），命中方给了就用它。
         raw_color = hit.get("color")
         item_color = (
-            parse_color(raw_color) if raw_color is not None else renderer.color()
+            resolve_color_option(raw_color, self)
+            if raw_color is not None
+            else renderer.color()
         )
         if not item_color.isValid():
             item_color = renderer.color()
@@ -365,6 +565,26 @@ class _ChartQueryMixin:
         """
         style = self._option.get("textStyle")
         return style if isinstance(style, dict) else {}
+
+    def preferredHeight(
+        self,
+        seriesIndex: int = None,
+        *,
+        rowHeight: float = 26.0,
+        padding: float = 88.0,
+    ) -> int:
+        """系列建议高度（甘特按展示行数 × 行高）；无实现时返回当前高度。"""
+        for index, renderer in enumerate(self._series):
+            if seriesIndex is not None and index != seriesIndex:
+                continue
+            hook = getattr(renderer, "preferredHeight", None)
+            if not callable(hook):
+                continue
+            try:
+                return int(hook(rowHeight=rowHeight, padding=padding))
+            except Exception:
+                break
+        return int(self.height())
 
     def hitItem(self, pos: QPointF):
         """坐标命中数据项 → ECharts click params（无命中 None）。"""
@@ -449,7 +669,7 @@ class _ChartQueryMixin:
             wanted = {int(i) for i in indices}
         except (TypeError, ValueError, OverflowError):
             return False
-        data_len = len(renderer.data())
+        data_len = renderer.itemCount()
         wanted = {i for i in wanted if 0 <= i < data_len}
         current = self._selection.setdefault(renderer.name, set())
         before = set(current)
@@ -485,6 +705,20 @@ class _ChartQueryMixin:
                 self._selectionChanged()
                 self._emitSelectChanged("select", renderer)
             return
+        if mode == "series":
+            total = renderer.itemCount()
+            if total <= 0:
+                return
+            all_indices = set(range(total))
+            current = set(self._selection.get(renderer.name, ()))
+            if current == all_indices:
+                if self._setSelection(renderer, all_indices, action="unselect"):
+                    self._emitSelectChanged("unselect", renderer)
+            else:
+                self._selection[renderer.name] = all_indices
+                self._selectionChanged()
+                self._emitSelectChanged("select", renderer)
+            return
         if self._setSelection(renderer, [index], action="toggleSelect"):
             self._emitSelectChanged("toggleSelect", renderer)
 
@@ -513,18 +747,7 @@ class _ChartQueryMixin:
 
     def _dataNameAt(self, renderer, index) -> str:
         try:
-            data = renderer.data()
-            if not (0 <= index < len(data)):
-                return ""
-            x, _y = parseDataPoint(data[index], index)
-            coord = self.coordFor(renderer.opt)
-            axis = getattr(coord, "x_axis", None)
-            if axis is not None and axis.type == "category":
-                cats = axis.categories
-                local = axis.localIndex(x)
-                if isinstance(local, int) and 0 <= local < len(cats):
-                    return str(cats[local])
-            return str(x)
+            return renderer.nameAtIndex(index)
         except Exception:
             return ""
 
@@ -549,7 +772,8 @@ class _ChartQueryMixin:
         # 动画进度可能在最后一次 paint 之后又推进了（鼠标事件先到），这里
         # 按当前进度刷新一遍，保证 hitTest 看到的动画阶段是「现在」。
         t = self.anim.t
-        for comp in self._components:
+        raw = self.anim.raw if self.anim.isRunning() else None
+        for comp in reversed(self._components):
             if str(getattr(comp, "optionKey", "")) not in _HOVERABLE_COMPONENTS:
                 continue
             hit = None
@@ -573,7 +797,7 @@ class _ChartQueryMixin:
                 continue
             hit = None
             try:
-                r._anim_t = r.animProgress(t)
+                r._anim_t = r.animProgress(t, raw)
                 hit = r.hitTest(pos)
             except Exception:
                 hit = None
@@ -648,6 +872,8 @@ class _ChartQueryMixin:
         tooltip_opt = self._option.get("tooltip")
         if key == "hoveranywhere" and isinstance(tooltip_opt, dict):
             return bool(tooltip_opt.get("hoverAnywhere", False))
+        if key == "clickanywhere" and isinstance(tooltip_opt, dict):
+            return bool(tooltip_opt.get("clickAnywhere", False))
         return False
 
     def _tooltip_item(self, pos: QPointF) -> None:
@@ -658,7 +884,9 @@ class _ChartQueryMixin:
             self._set_hover(found)
             raw_color = hit.get("color")
             color = (
-                parse_color(raw_color) if raw_color is not None else renderer.color()
+                resolve_color_option(raw_color, self)
+                if raw_color is not None
+                else renderer.color()
             )
             if not color.isValid():
                 color = renderer.color()
@@ -676,6 +904,39 @@ class _ChartQueryMixin:
         if self.tooltip.active:
             self._broadcastGroup("axisTipHide", {})
         self.tooltip.hide()
+
+    def _axis_pointer_link(self):
+        return self.tooltip._axisPointer().get("link")
+
+    def _linked_axes(self, coord, own_index: int, kind: str = "x") -> list:
+        """``axisPointer.link`` 中与当前轴同组、除自身外的轴下标。"""
+        link = self._axis_pointer_link()
+        if link is None or link is False:
+            return []
+        axes = coord.x_axes if kind == "x" else coord.y_axes
+        keys = ("xAxisIndex", "xAxis") if kind == "x" else ("yAxisIndex", "yAxis")
+        indices = []
+        if str(link).strip().lower() == "all":
+            indices = list(range(len(axes)))
+        elif isinstance(link, (list, tuple)):
+            for item in link:
+                if not isinstance(item, dict):
+                    continue
+                group = item.get(keys[0], item.get(keys[1]))
+                if isinstance(group, (list, tuple)):
+                    group = [
+                        int(value)
+                        for value in group
+                        if isinstance(value, int) and not isinstance(value, bool)
+                    ]
+                elif isinstance(group, int) and not isinstance(group, bool):
+                    group = [group]
+                else:
+                    continue
+                if own_index in group:
+                    indices = group
+                    break
+        return [index for index in indices if index != own_index]
 
     def _tooltip_axis(self, pos: QPointF) -> None:
         coord = self.coordAt(pos)
@@ -714,8 +975,9 @@ class _ChartQueryMixin:
         markers = []
         axis_hover = []
         primary_index = None
+        axis_title = None
         for r in self._series:
-            if not r.visible:
+            if not r.visible or r.silent:
                 continue
             info = None
             try:
@@ -732,20 +994,33 @@ class _ChartQueryMixin:
                     )
                     if isinstance(local, (int, float)) and math.isfinite(local):
                         index = int(local)
-                        info = r.valueAtIndex(index)
+                        info = r.valueAtIndex(
+                            index + series_coord.x_axis.windowOffset()
+                        )
                         if primary_index is None:
                             primary_index = index
                 elif y_category:
                     # 横向柱：类目在 y 轴，按光标所在行取数据项，不能按 x 值找最近柱。
-                    # 类目 0 在顶部：invert 的 start/end 要按 top→bottom 传（与 value 轴相反）。
-                    local = series_coord.y_axis.invert(
-                        pos.y(), series_coord.plot.top(), series_coord.plot.bottom()
-                    )
-                    if isinstance(local, (int, float)) and math.isfinite(local):
-                        index = int(local)
-                        info = r.valueAtIndex(index)
-                        if primary_index is None:
-                            primary_index = index
+                    hook = getattr(r, "valueAtPosition", None)
+                    if callable(hook):
+                        # 行序由系列自己决定（甘特支持 yAxis.inverse）：直接按像素命中。
+                        info = hook(pos)
+                        if info is not None and primary_index is None:
+                            row = info.get("rowIndex")
+                            if isinstance(row, int):
+                                primary_index = row
+                    else:
+                        # 类目 0 在顶部：invert 的 start/end 要按 top→bottom 传。
+                        local = series_coord.y_axis.invert(
+                            pos.y(), series_coord.plot.top(), series_coord.plot.bottom()
+                        )
+                        if isinstance(local, (int, float)) and math.isfinite(local):
+                            index = int(local)
+                            info = r.valueAtIndex(
+                                index + series_coord.y_axis.windowOffset()
+                            )
+                            if primary_index is None:
+                                primary_index = index
                 else:
                     # value / log / time：按 x 值找最近的数据点（不能把 invertX 结果当下标）。
                     index = r.nearestIndexAt(anchor)
@@ -757,21 +1032,35 @@ class _ChartQueryMixin:
                 info = None
             if not info:
                 continue
-            axis_hover.append((r, info))
-            raw_color = info.get("color")
-            color = parse_color(raw_color) if raw_color is not None else r.color()
-            if not color.isValid():
-                color = r.color()
-            rows.append(
-                (
-                    color,
-                    str(info.get("series") or r.name),
-                    formatValue(info.get("value")),
-                    info.get("value"),
+            try:
+                if axis_title is None:
+                    axis_title = info.get("axisTitle")
+                axis_hover.append((r, info))
+                raw_color = info.get("color")
+                color = (
+                    resolve_color_option(raw_color, self)
+                    if raw_color is not None
+                    else r.color()
                 )
-            )
-            if info.get("pos") is not None:
-                markers.append((QPointF(info["pos"]), parse_color(color)))
+                if not color.isValid():
+                    color = r.color()
+                axis_text = info.get("axisText")
+                rows.append(
+                    (
+                        color,
+                        str(info.get("series") or r.name),
+                        str(axis_text)
+                        if axis_text is not None
+                        else formatValue(info.get("value")),
+                        info.get("value"),
+                    )
+                )
+                if info.get("pos") is not None:
+                    markers.append((QPointF(info["pos"]), parse_color(color)))
+            except Exception:
+                if axis_hover and axis_hover[-1][0] is r:
+                    axis_hover.pop()
+                continue
 
         self._axis_hover = axis_hover
         self._set_hover(axis_hover[0] if axis_hover else None)
@@ -793,23 +1082,38 @@ class _ChartQueryMixin:
             rows.sort(key=lambda row: _sort_value(row[3]))
         elif order in ("valuedesc", "value descending", "descending"):
             rows.sort(key=lambda row: _sort_value(row[3]), reverse=True)
-        title = None
-        if x_category:
-            cats = coord.x_axis.categories
-            if isinstance(primary_index, int) and 0 <= primary_index < len(cats):
-                title = cats[primary_index]
-        elif y_category:
-            cats = coord.y_axis.categories
-            if isinstance(primary_index, int) and 0 <= primary_index < len(cats):
-                title = cats[primary_index]
-        else:
-            title = coord.x_axis.formatTooltipValue(anchor)
+        title = axis_title
+        if title is None:
+            if x_category:
+                cats = coord.x_axis.categories
+                if isinstance(primary_index, int) and 0 <= primary_index < len(cats):
+                    title = cats[primary_index]
+            elif y_category:
+                cats = coord.y_axis.categories
+                if isinstance(primary_index, int) and 0 <= primary_index < len(cats):
+                    title = cats[primary_index]
+            else:
+                title = coord.x_axis.formatTooltipValue(anchor)
         # 交给 tooltip 的行统一为 (color, name, value_str)（第 4 项仅供排序）
         lines = [(color, name, value) for color, name, value, *_rest in rows]
         if title:
             lines.insert(0, (None, "", title))
         marker = markers[0][0] if markers else pos
         pointer = marker if self.tooltip.axisPointerSnap(category_axis) else pos
+        axis_kind = "y" if y_category else "x"
+        axis_anchor = anchor
+        if y_category:
+            try:
+                axis_anchor = coord.invertPoint(pos, x_axis_index, _y_axis_index)[1]
+            except Exception:
+                axis_anchor = None
+        own_axis_index = _y_axis_index if y_category else x_axis_index
+        linked_axes = []
+        if axis_anchor is not None:
+            linked_axes = [
+                (axis_kind, index, axis_anchor)
+                for index in self._linked_axes(coord, own_axis_index, axis_kind)
+            ]
         self.tooltip.showAt(
             pos,
             lines,
@@ -820,11 +1124,25 @@ class _ChartQueryMixin:
             pointer_axis="y" if y_category else "x",
             coord=coord,
             x_axis_index=x_axis_index,
+            y_axis_index=_y_axis_index,
+            linked_axes=linked_axes,
         )
         plot = coord.plot
-        if plot.width() > 0:
-            percent = (pos.x() - plot.left()) / plot.width()
-            self._broadcastGroup("axisTip", {"percent": percent})
+        if plot.width() > 0 and plot.height() > 0:
+            percent = (
+                (pos.y() - plot.top()) / plot.height()
+                if y_category
+                else (pos.x() - plot.left()) / plot.width()
+            )
+            self._broadcastGroup(
+                "axisTip",
+                {
+                    "percent": percent,
+                    "value": axis_anchor,
+                    "axisKind": axis_kind,
+                    "axisIndex": own_axis_index,
+                },
+            )
 
     def _tooltip_axis_clear(self) -> None:
         """清掉 axis 触发的多系列命中（item / 离开路径共用）。"""

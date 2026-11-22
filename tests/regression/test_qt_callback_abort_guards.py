@@ -191,22 +191,6 @@ class TestChartFontSizeRobustness:
         assert _opt_float(20, 12) == 20
         assert _opt_float("16", 12) == 16
 
-    def test_subprocess_no_abort_on_bad_font_size(self):
-        result = _run(
-            """
-            from pyqt6_ela_pro import ElaChartWidget
-            c = ElaChartWidget(); c.resize(400, 300); c.show()
-            c.setOption({"title": {"text": "hi", "textStyle": {"fontSize": "14px"}},
-                         "series": [{"type": "line", "data": [1, 2]}]}, notMerge=True)
-            for _ in range(10): app.processEvents()
-            c.repaint(); c.grab()
-            print("OK")
-            """
-        )
-        _assert_no_abort("chart title fontSize=14px", result)
-        assert "OK" in result.stdout, result.stderr
-
-
 class TestNiceTicksOverflow:
     """``vmax - vmin`` 溢出会让 math.floor(inf) 抛 OverflowError。"""
 

@@ -45,9 +45,7 @@ class TestAxisTooltipCategoryY:
             (("A", "10"), ("B", "20"), ("C", "30"))
         ):
             _move(chart, renderer._bars[index]["rect"].center())
-            rows = [
-                (name, text) for _color, name, text in chart.tooltip._lines if name
-            ]
+            rows = [(name, text) for _color, name, text in chart.tooltip._lines if name]
             assert rows == [("值", value)]
             assert chart.tooltip._lines[0][2] == category
             assert chart.tooltip._axis_label == category
@@ -88,8 +86,16 @@ class TestAxisTooltipValueAxis:
             xAxis={"type": "value"},
             yAxis={"type": "value"},
             series=[
-                {"type": "line", "name": "A", "data": [[1000, 5], [2000, 9], [3000, 4]]},
-                {"type": "line", "name": "B", "data": [[1000, 7], [2000, 3], [3000, 8]]},
+                {
+                    "type": "line",
+                    "name": "A",
+                    "data": [[1000, 5], [2000, 9], [3000, 4]],
+                },
+                {
+                    "type": "line",
+                    "name": "B",
+                    "data": [[1000, 7], [2000, 3], [3000, 8]],
+                },
             ],
         )
         coord = chart.primaryCoord()

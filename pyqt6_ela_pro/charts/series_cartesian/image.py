@@ -54,6 +54,9 @@ class ImageSeriesRenderer(SeriesRenderer):
         self._image_ref = None
         self._image_rect = QRectF()
         self._origin = "upper"
+        self._flip_x = False
+        self._flip_y = False
+        self._sample_step = 1
         self._interpolation = "nearest"
         self._legend_color = None
 
@@ -72,7 +75,7 @@ class ImageSeriesRenderer(SeriesRenderer):
     def _prepare_matrix(self) -> bool:
         raw = self.data()
         source = raw.raw if isinstance(raw, _cdata.ElaNumericBuffer) else raw
-        key = (id(source), self._data_epoch)
+        key = (id(source), self._data_epoch, _cdata.dataVersion(source))
         if (
             self._source_ref is source
             and self._source_key == key
@@ -228,9 +231,7 @@ class ImageSeriesRenderer(SeriesRenderer):
                     f"[charts] 未知色带 {cmap!r}，已回退主题色带",
                 )
         elif colors is None and isinstance(cmap, (list, tuple)) and len(cmap) >= 2:
-            colors = [
-                c for c in cmap if isinstance(c, str) and parse_color(c).isValid()
-            ]
+            colors = [c for c in (self.resolveColor(v) for v in cmap) if c.isValid()]
             if len(colors) < 2:
                 colors = None
         if not colors:
@@ -251,10 +252,12 @@ class ImageSeriesRenderer(SeriesRenderer):
         self._lut_np = np_.array(lut, dtype=np_.uint8) if np_ is not None else None
 
     def _sample_for_image(self):
+        self._sample_step = 1
         cells = self._rows * self._cols
         if cells <= _MAX_IMAGE_CELLS:
             return self._matrix, self._rows, self._cols
         step = max(1, int(math.ceil(math.sqrt(cells / _MAX_IMAGE_CELLS))))
+        self._sample_step = step
         warn_once(
             warn_key("image-downsample", self._rows, self._cols, step),
             f"[charts] 矩阵 {self._rows}×{self._cols} 超过 {_MAX_IMAGE_CELLS} 格，"
@@ -271,12 +274,13 @@ class ImageSeriesRenderer(SeriesRenderer):
             cols = len(self._matrix[0][::step])
             return arr, rows, cols
         data = self._matrix[::step]
+        cols = len(data[0][::step]) if data and data[0] else 0
         if self._mode == "scalar":
-            return [row[::step] for row in data], len(data), len(data[0])
+            return [row[::step] for row in data], len(data), cols
         return (
             [[list(cell) for cell in row[::step]] for row in data],
             len(data),
-            len(data[0]),
+            cols,
         )
 
     def _build_image(self) -> None:
@@ -291,6 +295,7 @@ class ImageSeriesRenderer(SeriesRenderer):
         key = (
             id(self._source_ref),
             self._data_epoch,
+            _cdata.dataVersion(self._source_ref),
             self._mode,
             round(vmin, 12),
             round(vmax, 12),
@@ -458,6 +463,10 @@ class ImageSeriesRenderer(SeriesRenderer):
         top, height = min(py0, py1), abs(py1 - py0)
         if width <= 0.0 or height <= 0.0:
             return
+        # 反轴：图像列 0 对应 x0、行 0 对应 y1（_build_image 已按 origin 归一），
+        # 映射方向翻转时必须镜像绘制，否则渲染与 hitTest 各说各话。
+        self._flip_x = px0 > px1
+        self._flip_y = py1 > py0
         self._image_rect = QRectF(left, top, width, height)
 
     def paint(self, p: QPainter, anim_t: float) -> None:
@@ -472,6 +481,11 @@ class ImageSeriesRenderer(SeriesRenderer):
         smooth = self._interpolation == "bilinear"
         previous = p.testRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
         p.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform, smooth)
+        if self._flip_x or self._flip_y:
+            center = self._image_rect.center()
+            p.translate(center)
+            p.scale(-1.0 if self._flip_x else 1.0, -1.0 if self._flip_y else 1.0)
+            p.translate(-center)
         p.drawImage(self._image_rect, self._image)
         p.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform, previous)
         p.restore()
@@ -529,6 +543,24 @@ class ImageSeriesRenderer(SeriesRenderer):
             "title": f"{row}, {col}",
         }
 
+    def valueAtIndex(self, index: int):
+        """线性像素下标 → ``{name, value, color, series, dataIndex}``。"""
+        try:
+            idx = int(index)
+        except (TypeError, ValueError, OverflowError):
+            return None
+        cols = max(1, self._cols)
+        if not 0 <= idx < self._rows * cols:
+            return None
+        row, col = divmod(idx, cols)
+        return {
+            "name": f"[{row}, {col}]",
+            "value": self._pixel_value(row, col),
+            "color": self._pixel_color(row, col),
+            "series": self.name,
+            "dataIndex": idx,
+        }
+
     def _pixel_color(self, row: int, col: int):
         """命中点的实际渲染色（与图像 LUT / RGB 一致；取不到返回 ``None``）。"""
         value = self._pixel_value(row, col)
@@ -549,6 +581,11 @@ class ImageSeriesRenderer(SeriesRenderer):
         return None
 
     def _pixel_value(self, row: int, col: int):
+        # 超过采样阈值的矩阵画的是降采样格；命中必须读同一格，否则显示色
+        # 与 tooltip / click 的 color 对不上。
+        step = max(1, int(getattr(self, "_sample_step", 1) or 1))
+        row = min(self._rows - 1, max(0, row)) // step
+        col = min(self._cols - 1, max(0, col)) // step
         np_ = _ds.np
         if self._mode == "scalar":
             if np_ is not None and isinstance(self._matrix, np_.ndarray):
@@ -562,8 +599,8 @@ class ImageSeriesRenderer(SeriesRenderer):
             pixel = self._matrix[row][col]
         values = []
         for value in pixel:
-            v = float(value)
-            if not math.isfinite(v):
+            v = _to_float(value, None)
+            if v is None:
                 return None
             values.append(v)
         scale = 255.0 if self._rgb_float else 1.0

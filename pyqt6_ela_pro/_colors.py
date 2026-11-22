@@ -361,8 +361,9 @@ def _accent_for(resolved: str, mode: ElaThemeType.ThemeMode) -> QColor:
     return QColor(_COLOR_PALETTE[resolved][_mode_key(mode)]["accent"])
 
 
-def _relative_luminance(color: QColor) -> float:
-    """WCAG 相对亮度。"""
+def relativeLuminance(color: QColor) -> float:
+    """WCAG 相对亮度（0–1）。"""
+    color = parse_color(color)
 
     def channel(value: int) -> float:
         v = value / 255.0
@@ -375,18 +376,27 @@ def _relative_luminance(color: QColor) -> float:
     )
 
 
-def _contrast_ratio(a: QColor, b: QColor) -> float:
+def contrastRatio(a: QColor, b: QColor) -> float:
     """WCAG 对比度（1~21）。"""
-    la, lb = _relative_luminance(a), _relative_luminance(b)
+    la, lb = relativeLuminance(a), relativeLuminance(b)
     high, low = max(la, lb), min(la, lb)
     return (high + 0.05) / (low + 0.05)
 
 
-def _mix(a: QColor, b: QColor, t: float) -> QColor:
+def mixColor(a: QColor, b: QColor, t: float, *, rounding: bool = False) -> QColor:
+    """按 ``t`` 线性混合两种颜色（alpha 一起插值）。
+
+    ``rounding=False`` 截断到 8 位（调色板 / 图表默认），``rounding=True``
+    四舍五入（``_theme.blend`` 的公开语义）。
+    """
+    a, b = parse_color(a), parse_color(b)
+    t = max(0.0, min(1.0, float(t)))
+    convert = round if rounding else int
     return QColor(
-        int(a.red() * (1 - t) + b.red() * t),
-        int(a.green() * (1 - t) + b.green() * t),
-        int(a.blue() * (1 - t) + b.blue() * t),
+        convert(a.red() + (b.red() - a.red()) * t),
+        convert(a.green() + (b.green() - a.green()) * t),
+        convert(a.blue() + (b.blue() - a.blue()) * t),
+        convert(a.alpha() + (b.alpha() - a.alpha()) * t),
     )
 
 
@@ -405,13 +415,13 @@ def _solid_palette(accent: QColor, color_name: str) -> dict[str, QColor]:
     else:
         text, solid = white, QColor(accent)
         for _ in range(32):
-            if _contrast_ratio(solid, text) >= 4.5:
+            if contrastRatio(solid, text) >= 4.5:
                 break
-            solid = _mix(solid, black, 0.06)
-    hover = _mix(solid, white, 0.08)
-    if _contrast_ratio(hover, text) < 4.0:
-        hover = _mix(solid, black, 0.08)
-    active = _mix(solid, black, 0.12)
+            solid = mixColor(solid, black, 0.06)
+    hover = mixColor(solid, white, 0.08)
+    if contrastRatio(hover, text) < 4.0:
+        hover = mixColor(solid, black, 0.08)
+    active = mixColor(solid, black, 0.12)
     return {
         "solid": solid,
         "solidHover": hover,
@@ -432,7 +442,7 @@ def _readable_accent(
     toward = (
         QColor("#ffffff") if mode != ElaThemeType.ThemeMode.Light else QColor("#000000")
     )
-    if _contrast_ratio(accent, bg) >= target:
+    if contrastRatio(accent, bg) >= target:
         return accent
     # 二分找「刚好达标」的最小混合量。**不能按固定步长循环有限次** ——
     # 6% × 40 步只到 #efefe3（离白还差 8%），低对比底色（暗色 yellow）永远
@@ -440,11 +450,11 @@ def _readable_accent(
     low, high = 0.0, 1.0
     for _ in range(12):
         mid = (low + high) / 2.0
-        if _contrast_ratio(_mix(accent, toward, mid), bg) >= target:
+        if contrastRatio(mixColor(accent, toward, mid), bg) >= target:
             high = mid
         else:
             low = mid
-    return _mix(accent, toward, high)
+    return mixColor(accent, toward, high)
 
 
 def _live_accent_scheme(mode: ElaThemeType.ThemeMode) -> dict[str, QColor]:
@@ -468,8 +478,8 @@ def _live_accent_scheme(mode: ElaThemeType.ThemeMode) -> dict[str, QColor]:
             "accent": accent,
             "accentHover": hover,
             "accentActive": press,
-            "accentBg": _mix(base, accent, bg_tint),
-            "accentBgHover": _mix(base, accent, bg_hover_tint),
+            "accentBg": mixColor(base, accent, bg_tint),
+            "accentBgHover": mixColor(base, accent, bg_hover_tint),
             "textColor": QColor("#ffffff"),
         }
         scheme["accentText"] = _readable_accent(accent, mode, scheme["accentBg"])
@@ -551,7 +561,7 @@ def text_on_color(background: QColor) -> QColor:
         return QColor("#000000")
     white = QColor("#ffffff")
     black = QColor("#000000")
-    return white if _contrast_ratio(white, bg) >= _contrast_ratio(black, bg) else black
+    return white if contrastRatio(white, bg) >= contrastRatio(black, bg) else black
 
 
 # ── 状态层（透明底控件的悬浮 / 按下反馈）───────────────────────

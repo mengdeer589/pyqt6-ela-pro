@@ -3,14 +3,14 @@
 from __future__ import annotations
 
 
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 
 from PyQt6.QtCore import QPointF, QRectF, Qt
 from PyQt6.QtGui import QFontMetricsF, QPainter
 
 from .._tokens import T
 from .._utils import merged_text_style, single_option, text_italic, text_weight
-from .._utils import parse_color
+from .._utils import resolve_color_option
 from ._shared import _MAX_DATE_YEAR, _MONTH_LABELS, _line_pen, _to_float, chartFont
 from .base import Coord
 
@@ -145,6 +145,8 @@ class CalendarCoord(Coord):
     @staticmethod
     def _parse_date(v):
         """ "YYYY-MM-DD" / date / (y, m, d) → datetime.date（失败 None）。"""
+        if isinstance(v, datetime):
+            return v.date()
         if isinstance(v, date):
             return v
         if isinstance(v, (list, tuple)) and len(v) >= 3:
@@ -162,9 +164,13 @@ class CalendarCoord(Coord):
 
     def _first_column_start(self) -> date:
         """首格对应的日期（按 ``dayLabel.firstDay`` 对齐）。"""
-        return self.start - timedelta(
-            days=(self.start.weekday() - self._row_offset) % 7
-        )
+        try:
+            return self.start - timedelta(
+                days=(self.start.weekday() - self._row_offset) % 7
+            )
+        except OverflowError:
+            # range 从 0001-01-01 开始时向前对齐会越过 date.min。
+            return self.start
 
     def _row_of(self, day: date) -> int:
         """日期 → 星期行号（0 = 首行，按 firstDay）。"""
@@ -176,8 +182,8 @@ class CalendarCoord(Coord):
         d = date(self.start.year, self.start.month, 1)
         while d <= self.end:
             out.append(d)
-            # 9999 年再加一月抛 ValueError，而这里跑在 paintAxes 链上 → 整图静默空白。
-            if d.year >= _MAX_DATE_YEAR:
+            # 9999 年再加一月抛 ValueError；但 9999 年本身要完整遍历 12 个月。
+            if d.year >= _MAX_DATE_YEAR and d.month == 12:
                 break
             if d.month == 12:
                 d = date(d.year + 1, 1, 1)
@@ -264,7 +270,7 @@ class CalendarCoord(Coord):
         while d <= self.end:
             yield d
             # 9999-12-31 再加一天抛 OverflowError（跑在 heatmap layout 里 → 整图静默空白）。
-            if d.year >= _MAX_DATE_YEAR:
+            if d == date.max:
                 break
             d += timedelta(days=1)
 
@@ -289,11 +295,12 @@ class CalendarCoord(Coord):
         if isinstance(raw, (list, tuple)) and len(raw) >= 12:
             return str(raw[month - 1])
         if isinstance(raw, dict):
-            if month in raw:
-                return str(raw[month])
-            # 0 基 dict 只在存在键 0 时启用，否则 ``{2: "Feb"}`` 在 3 月会错显示成 2 月
+            # 0 基 dict（{0:"Jan",...,11:"Dec"}）必须先按 month-1 取；否则
+            # month 命中会把 1 月显示成 2 月。
             if 0 in raw and (month - 1) in raw:
                 return str(raw[month - 1])
+            if month in raw:
+                return str(raw[month])
         return _MONTH_LABELS[month - 1]
 
     def itemStyle(self) -> dict:
@@ -322,7 +329,13 @@ class CalendarCoord(Coord):
         day_style = self._label_style("day")
         day_font = self._label_font(day_style)
         p.setFont(day_font)
-        p.setPen(parse_color(day_style.get("color") or T("color.text.tertiary", self.chart)))
+        p.setPen(
+            resolve_color_option(
+                day_style.get("color"),
+                self.chart,
+                T("color.text.tertiary", self.chart),
+            )
+        )
         # 星期标签（行号按 firstDay 换算）
         if self.show_week_labels:
             for local_row, label in self._weekday_label_rows().items():
@@ -352,7 +365,13 @@ class CalendarCoord(Coord):
         month_fm = QFontMetricsF(month_font)
         if self.show_month_labels:
             p.setFont(month_font)
-            p.setPen(parse_color(month_style.get("color") or T("color.text.tertiary", self.chart)))
+            p.setPen(
+                resolve_color_option(
+                    month_style.get("color"),
+                    self.chart,
+                    T("color.text.tertiary", self.chart),
+                )
+            )
             first = self._first_column_start()
             last_idx = -1
             for d in self._month_dates():
@@ -386,7 +405,13 @@ class CalendarCoord(Coord):
         year_fm = QFontMetricsF(year_font)
         if self.show_year_label and str(self.start.year) == str(self.end.year):
             p.setFont(year_font)
-            p.setPen(parse_color(year_style.get("color") or T("color.text.tertiary", self.chart)))
+            p.setPen(
+                resolve_color_option(
+                    year_style.get("color"),
+                    self.chart,
+                    T("color.text.tertiary", self.chart),
+                )
+            )
             p.drawText(
                 QRectF(self.rect.left(), self.rect.top(), 60, year_fm.height()),
                 Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
@@ -394,7 +419,13 @@ class CalendarCoord(Coord):
             )
         # splitLine：单元格网格线
         if bool(self._split_line.get("show", False)):
-            p.setPen(_line_pen(self._split_line, T("color.border", self.chart)))
+            p.setPen(
+                _line_pen(
+                    self._split_line,
+                    T("color.border", self.chart),
+                    chart=self.chart,
+                )
+            )
             grid_w = self._cell * (7 if self._vertical else self._weeks)
             grid_h = self._cell * (self._weeks if self._vertical else 7)
             cols = 7 if self._vertical else self._weeks
@@ -421,7 +452,12 @@ class CalendarCoord(Coord):
         if d is not None:
             r = self.cellRect(d)
             style = line_style if isinstance(line_style, dict) else {}
-            pen = _line_pen({"lineStyle": style}, T("color.primary", self.chart), 1.4)
+            pen = _line_pen(
+                {"lineStyle": style},
+                T("color.primary", self.chart),
+                1.4,
+                chart=self.chart,
+            )
             p.setPen(pen)
             p.setBrush(Qt.BrushStyle.NoBrush)
             p.drawRect(r.adjusted(0.5, 0.5, -0.5, -0.5))

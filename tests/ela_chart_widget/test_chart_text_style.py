@@ -130,9 +130,7 @@ class TestGlobalTextStyleFallback:
         chart.setOption(
             {"textStyle": {"fontSize": 16, "fontWeight": 600, "color": "#123456"}}
         )
-        chart.setOption(
-            {"legend": {"textStyle": {"fontSize": 10, "color": "#abcdef"}}}
-        )
+        chart.setOption({"legend": {"textStyle": {"fontSize": 10, "color": "#abcdef"}}})
         legend = chart.legend
         assert legend._font().pixelSize() == 10
         # 只覆盖了字号 / 颜色，字重仍走全局
@@ -279,9 +277,7 @@ class TestFontFamily:
             r for r in chart.seriesRenderers if type(r).__name__ == "MapSeriesRenderer"
         )
         assert map_renderer.labelStyle()["fontFamily"] == "Consolas"
-        assert (
-            chart._component("timeline").labelStyle()["fontFamily"] == "Consolas"
-        )
+        assert chart._component("timeline").labelStyle()["fontFamily"] == "Consolas"
         calendar = next(c for c in chart.coords if type(c).__name__ == "CalendarCoord")
         assert calendar._label_style("day")["fontFamily"] == "Consolas"
 

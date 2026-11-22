@@ -7,7 +7,13 @@ from datetime import date, timedelta
 
 from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtGui import QFont
-from PyQt6.QtWidgets import QGridLayout, QHBoxLayout, QStackedWidget, QVBoxLayout
+from PyQt6.QtWidgets import (
+    QDialog,
+    QGridLayout,
+    QHBoxLayout,
+    QStackedWidget,
+    QVBoxLayout,
+)
 from PyQt6ElaWidgetTools import (
     ElaCheckBox,
     ElaComboBox,
@@ -26,14 +32,17 @@ from pyqt6_ela_pro import (
 )
 from pyqt6_ela_pro.tooltips import ElaToolTipPositionType, set_tooltip
 from pyqt6_ela_pro.charts import (
+    ElaGanttView,
     chartThemes,
     colormapColors,
     colormapNames,
     connectCharts,
     defaultChartTheme,
     registerChartTheme,
+    registerMap,
 )
 from .base_page import ExamplePage
+from .theme_matrix import ThemeMatrixWidget, sample_option
 
 try:
     import numpy as np
@@ -290,6 +299,61 @@ def _token_activity_series(rows: list, mode: str) -> list:
     ]
 
 
+def _gantt_tasks() -> list:
+    """示例研发计划：状态色由图表主题令牌解析（跟随主题切换）。"""
+    rows = [
+        ("环境准备", "2026-10-29", "2026-11-02", 1.0, None, "done"),
+        ("需求梳理", "2026-11-02", "2026-11-06", 1.0, ["环境准备"], "done"),
+        ("方案设计", "2026-11-05", "2026-11-09", 0.9, ["需求梳理"], "done"),
+        ("接口开发", "2026-11-09", "2026-11-16", 0.55, ["方案设计"], "doing"),
+        ("界面开发", "2026-11-09", "2026-11-17", 0.4, ["方案设计"], "doing"),
+        ("联调", "2026-11-16", "2026-11-20", 0.2, ["接口开发", "界面开发"], "doing"),
+        ("回归测试", "2026-11-20", "2026-11-24", 0.0, ["联调"], "todo"),
+        ("测试", "2026-11-24", "2026-11-28", 0.0, ["回归测试"], "todo"),
+        ("文档整理", "2026-11-16", "2026-11-27", 0.3, None, "doing"),
+        ("上线评审", "2026-11-30", None, None, ["测试"], "milestone"),
+        ("发布", "2026-12-02", None, None, ["上线评审"], "milestone"),
+        ("复盘", "2026-12-04", None, None, ["发布"], "milestone"),
+    ]
+    out = []
+    for name, start, end, progress, deps, status in rows:
+        item = {
+            "name": name,
+            "start": start,
+            "status": status,
+        }
+        if end:
+            item["end"] = end
+        else:
+            item["milestone"] = True
+        if progress is not None:
+            item["progress"] = progress
+        if deps:
+            item["dependencies"] = deps
+        if end and status in ("done", "doing"):
+            start_day = date.fromisoformat(start)
+            end_day = date.fromisoformat(end)
+            if status == "doing":
+                baseline_end = end_day - timedelta(days=2)
+                item["baseline"] = {
+                    "start": start_day.isoformat(),
+                    "end": baseline_end.isoformat(),
+                }
+                deadline = (
+                    end_day - timedelta(days=1)
+                    if name == "联调"
+                    else end_day + timedelta(days=1)
+                )
+                item["deadline"] = deadline.isoformat()
+            else:
+                item["baseline"] = {
+                    "start": start_day.isoformat(),
+                    "end": end_day.isoformat(),
+                }
+        out.append(item)
+    return out
+
+
 class ChartsPage(ExamplePage):
     """ElaChartWidget 图表工作台：概览 / 系列画廊 / 交互 / 大数据 / 高级 / 主题 / 小波 / 实时。"""
 
@@ -298,12 +362,12 @@ class ChartsPage(ExamplePage):
     WORKSPACES = (
         (
             "概览",
-            "旗舰图表 + 能力速览：22 种系列、多轴 / 多网格、交互、大数据与导出。",
+            "旗舰图表 + 能力速览：23 种系列、多轴 / 多网格、交互、大数据与导出。",
             "_buildWorkspaceOverview",
         ),
         (
             "系列画廊",
-            "全部 22 种系列按能力分组（3 列紧凑网格）；每节可随机数据 / 开关交互。",
+            "全部 23 种系列按能力分组（3 列紧凑网格）；每节可随机数据 / 开关交互。",
             "_buildWorkspaceGallery",
         ),
         (
@@ -373,6 +437,9 @@ class ChartsPage(ExamplePage):
             for index, (name, _desc, _builder) in enumerate(self.WORKSPACES)
             if name == "实时"
         )
+        self._cross_universal_charts = []
+        self._cross_universal_status = None
+        self._cross_universal_flip = False
         super().__init__(parent)
 
     def _setupUI(self):
@@ -551,6 +618,8 @@ class ChartsPage(ExamplePage):
             if getattr(chart, "_theme_pinned", False):
                 continue
             chart.setChartTheme(self._global_chart_theme)
+        for matrix in page.findChildren(ThemeMatrixWidget):
+            matrix.update()
 
     def _sync_theme_workspace(self, name: str):
         """全局主题变化后同步「主题」工作区的本区下拉与状态文案。"""
@@ -609,6 +678,8 @@ class ChartsPage(ExamplePage):
         layout.addSpacing(24)
         self._demoGalleryCoordinates(layout)
         layout.addSpacing(24)
+        self._demoGalleryGantt(layout)
+        layout.addSpacing(24)
         self._demoGalleryMatrix(layout)
 
     def _buildWorkspaceInteraction(self, layout):
@@ -636,12 +707,16 @@ class ChartsPage(ExamplePage):
         self._demoLineModes(layout)
         layout.addSpacing(24)
         self._demoLineDetails(layout)
+        layout.addSpacing(24)
+        self._demoNewCapabilities(layout)
 
     def _buildWorkspaceThemes(self, layout):
         self._createSectionHeader("=== 主题 ===").hide()
         self._demoThemeSwitch(layout)
         layout.addSpacing(24)
         self._demoThemeGallery(layout)
+        layout.addSpacing(24)
+        self._demoThemeMatrix(layout)
 
     def _buildWorkspaceWavelet(self, layout):
         self._createSectionHeader("=== 小波 ===").hide()
@@ -701,19 +776,7 @@ class ChartsPage(ExamplePage):
                         "name": "营收",
                         "data": revenue,
                         "smooth": True,
-                        "areaStyle": {
-                            "color": {
-                                "type": "linear",
-                                "x": 0,
-                                "y": 0,
-                                "x2": 0,
-                                "y2": 1,
-                                "colorStops": [
-                                    {"offset": 0, "color": "rgba(84,112,198,0.38)"},
-                                    {"offset": 1, "color": "rgba(84,112,198,0.02)"},
-                                ],
-                            }
-                        },
+                        "areaStyle": {"opacity": 0.18},
                     }
                 ],
             }
@@ -840,7 +903,7 @@ class ChartsPage(ExamplePage):
         chips = QHBoxLayout()
         chips.setSpacing(8)
         for text in (
-            "22 种系列",
+            "23 种系列",
             "多轴 · 多网格",
             "多标题 · 多图例",
             "单族字体 · 字重 / 斜体",
@@ -1266,12 +1329,354 @@ class ChartsPage(ExamplePage):
         chart.setFontFamily("Microsoft YaHei")
         parent_layout.addWidget(chart)
 
+    def _demoNewCapabilities(self, parent_layout):
+        parent_layout.addLayout(
+            self._createHeaderRow(
+                "06. 数据能力 / 标注 / 地理叠加",
+                self._demoNewCapabilities,
+            )
+        )
+        self._addInfoText(
+            "dataset + filter/sort 自动展开；markArea + 富文本标签；顶层 geo 叠加 scatter / lines；"
+            "map 系列与顶层 geo 去重；graphic group 旋转 / 缩放；axisPointer.link 双轴联动；"
+            "dataZoom.brushSelect 轨道拖拽；两张图同组时 universalTransition 可跨图传递旧几何。"
+            "所有示例都直接写 ECharts option，不经过额外配置层。",
+            parent_layout,
+        )
+        tiles = []
+
+        dataset_chart = self._galleryChart()
+        dataset_chart.setOption(
+            {
+                "animation": False,
+                "dataset": {
+                    "source": [
+                        ["month", "sales", "cost"],
+                        ["Jan", 120, 80],
+                        ["Feb", 180, 90],
+                        ["Mar", 150, 70],
+                        ["Apr", 210, 110],
+                    ],
+                    "transform": [{"type": "filter", "dimension": "sales", "gt": 130}],
+                },
+                "xAxis": {"type": "category"},
+                "yAxis": {"type": "value"},
+                "series": [
+                    {
+                        "type": "bar",
+                        "name": "sales",
+                        "encode": {"x": "month", "y": "sales"},
+                    }
+                ],
+            }
+        )
+        tiles.append(("dataset", dataset_chart))
+
+        marks_chart = self._galleryChart()
+        marks_chart.setOption(
+            {
+                "animation": False,
+                "xAxis": {"type": "category", "data": ["A", "B", "C", "D"]},
+                "yAxis": {"type": "value"},
+                "series": [
+                    {
+                        "type": "line",
+                        "name": "S",
+                        "data": [18, 42, 31, 56],
+                        "label": {
+                            "show": True,
+                            "formatter": "{v|{c}}",
+                            "rich": {
+                                "v": {
+                                    "color": "#c0392b",
+                                    "fontSize": 12,
+                                    "fontWeight": 700,
+                                    "backgroundColor": "#fff4e5",
+                                }
+                            },
+                        },
+                        "labelLayout": {"hideOverlap": True},
+                        "markArea": {
+                            "data": [
+                                [
+                                    {
+                                        "xAxis": "B",
+                                        "name": "窗口",
+                                        "itemStyle": {
+                                            "color": "#4e79a7",
+                                            "opacity": 0.12,
+                                        },
+                                        "label": {"show": True},
+                                    },
+                                    {"xAxis": "C"},
+                                ]
+                            ]
+                        },
+                    }
+                ],
+            }
+        )
+        tiles.append(("markArea + rich", marks_chart))
+
+        geojson = {
+            "type": "FeatureCollection",
+            "features": [
+                {
+                    "type": "Feature",
+                    "properties": {"name": "西区"},
+                    "geometry": {
+                        "type": "Polygon",
+                        "coordinates": [
+                            [[100, 20], [112, 20], [112, 34], [100, 34], [100, 20]]
+                        ],
+                    },
+                },
+                {
+                    "type": "Feature",
+                    "properties": {"name": "东区"},
+                    "geometry": {
+                        "type": "Polygon",
+                        "coordinates": [
+                            [[114, 22], [126, 22], [126, 38], [114, 38], [114, 22]]
+                        ],
+                    },
+                },
+            ],
+        }
+        registerMap("example-capabilities", geojson)
+        geo_chart = self._galleryChart()
+        geo_chart.setOption(
+            {
+                "animation": False,
+                "geo": {
+                    "map": "example-capabilities",
+                    "roam": True,
+                    "label": {"show": True},
+                },
+                "series": [
+                    {
+                        "type": "scatter",
+                        "name": "站点",
+                        "coordinateSystem": "geo",
+                        "symbolSize": 14,
+                        "data": [[106, 27], [120, 30]],
+                    },
+                    {
+                        "type": "lines",
+                        "coordinateSystem": "geo",
+                        "data": [{"coords": [[106, 27], [120, 30]]}],
+                    },
+                ],
+            }
+        )
+        tiles.append(("geo + scatter", geo_chart))
+        self._data_capability_charts = self._addGallery(parent_layout, tiles, columns=3)
+
+        more_tiles = []
+
+        dedup_chart = self._galleryChart()
+        dedup_chart.setOption(
+            {
+                "animation": False,
+                "geo": {
+                    "map": "example-capabilities",
+                    "label": {"show": True},
+                    "itemStyle": {"areaColor": "#e8eef7", "borderColor": "#5b6b82"},
+                },
+                "series": [
+                    {
+                        "type": "map",
+                        "map": "example-capabilities",
+                        "data": [
+                            {"name": "西区", "value": 30},
+                            {"name": "东区", "value": 70},
+                        ],
+                    }
+                ],
+            }
+        )
+        more_tiles.append(("map + geo 去重", dedup_chart))
+
+        group_chart = self._galleryChart()
+        group_chart.setOption(
+            {
+                "animation": False,
+                "xAxis": {"type": "category", "data": ["A", "B", "C", "D"]},
+                "yAxis": {"type": "value"},
+                "series": [
+                    {
+                        "type": "bar",
+                        "data": [12, 20, 15, 26],
+                        "itemStyle": {"borderRadius": [4, 4, 0, 0]},
+                    }
+                ],
+                "graphic": [
+                    {
+                        "type": "group",
+                        "left": 18,
+                        "top": 18,
+                        "rotation": -12,
+                        "children": [
+                            {
+                                "type": "rect",
+                                "shape": {
+                                    "x": 0,
+                                    "y": 0,
+                                    "width": 108,
+                                    "height": 32,
+                                    "r": 6,
+                                },
+                                "style": {
+                                    "fill": "#f6c344",
+                                    "stroke": "#8a6d1f",
+                                    "lineWidth": 1,
+                                },
+                            },
+                            {
+                                "type": "text",
+                                "shape": {"x": 10, "y": 8},
+                                "style": {
+                                    "text": "group · 旋转",
+                                    "fill": "#3b2f0b",
+                                    "fontSize": 12,
+                                },
+                            },
+                        ],
+                    }
+                ],
+            }
+        )
+        more_tiles.append(("graphic group 变换", group_chart))
+
+        brush_chart = self._galleryChart()
+        brush_values = [
+            18,
+            22,
+            19,
+            27,
+            24,
+            32,
+            28,
+            36,
+            31,
+            40,
+            35,
+            44,
+            38,
+            47,
+            42,
+            50,
+            45,
+            53,
+            48,
+            56,
+        ]
+        brush_chart.setOption(
+            {
+                "animation": False,
+                "xAxis": {
+                    "type": "category",
+                    "data": [f"D{index + 1}" for index in range(len(brush_values))],
+                },
+                "yAxis": {"type": "value"},
+                "dataZoom": [
+                    {"type": "slider", "start": 15, "end": 60, "brushSelect": True}
+                ],
+                "series": [
+                    {
+                        "type": "line",
+                        "name": "窗口",
+                        "data": brush_values,
+                        "smooth": True,
+                        "areaStyle": {"opacity": 0.15},
+                    }
+                ],
+            }
+        )
+        more_tiles.append(("dataZoom brushSelect", brush_chart))
+
+        self._data_capability_charts += self._addGallery(
+            parent_layout, more_tiles, columns=3
+        )
+
+        header = QHBoxLayout()
+        header.setSpacing(8)
+        cross_title = ElaText("跨图 universalTransition", self)
+        cross_title.setTextPixelSize(13)
+        header.addWidget(cross_title)
+        header.addSpacing(4)
+        update_btn = ElaPushButton("更新左图数据", self)
+        update_btn.setFixedWidth(120)
+        update_btn.clicked.connect(self._onCrossChartUniversalDemo)
+        header.addWidget(update_btn)
+        self._cross_universal_status = ElaText(
+            "两张图同组；点击后右图接收左图旧柱并过渡到自己的终态。", self
+        )
+        self._cross_universal_status.setTextPixelSize(13)
+        header.addWidget(self._cross_universal_status, 1)
+        parent_layout.addLayout(header)
+
+        cross_row = QHBoxLayout()
+        cross_row.setSpacing(12)
+        universal_group = f"charts-universal-{id(self)}"
+        self._cross_universal_charts = []
+        for title, values in (
+            ("左图（源）", [12, 26, 16, 28]),
+            ("右图（目标）", [16, 24, 12, 28]),
+        ):
+            chart = ElaChartWidget(self)
+            chart.setMinimumHeight(240)
+            chart.setOption(
+                {
+                    "animation": False,
+                    "universalTransition": {"enabled": True, "duration": 700},
+                    "title": {
+                        "text": title,
+                        "left": "center",
+                        "top": 2,
+                        "textStyle": {"fontSize": 12},
+                    },
+                    "xAxis": {"type": "category", "data": ["A", "B", "C", "D"]},
+                    "yAxis": {"type": "value", "max": 34},
+                    "series": [
+                        {
+                            "type": "bar",
+                            "name": "指标",
+                            "data": values,
+                            "barWidth": "46%",
+                            "itemStyle": {"borderRadius": [4, 4, 0, 0]},
+                        }
+                    ],
+                }
+            )
+            chart.setGroup(universal_group)
+            cross_row.addWidget(chart)
+            self._cross_universal_charts.append(chart)
+        connectCharts(universal_group)
+        parent_layout.addLayout(cross_row)
+
+    def _onCrossChartUniversalDemo(self):
+        """跨图过渡示例：只改左图数据，右图通过图表组接收旧几何。"""
+        if not self._cross_universal_charts:
+            return
+        self._cross_universal_flip = not self._cross_universal_flip
+        values = [28, 12, 24, 16] if self._cross_universal_flip else [12, 26, 16, 28]
+        self._cross_universal_charts[0].setOption(
+            {"series": [{"type": "bar", "name": "指标", "data": values}]}
+        )
+        if self._cross_universal_status is not None:
+            self._cross_universal_status.setText(
+                "左图已更新：右图按数据下标匹配旧柱并做位置 / 颜色形变"
+            )
+
     def _demoThemeSwitch(self, parent_layout):
         parent_layout.addLayout(
             self._createHeaderRow("01. 内置主题实时切换", self._demoThemeSwitch)
         )
         self._addInfoText(
             "主题 = 分类色板 + 背景 / 文字 / 轴 / 网格 / 图例 / 提示框 / 色带；"
+            "几何（轴线与刻度、网格线、图例、柱角、提示框、dataZoom）在所有主题间"
+            "统一为 Ela 风格，只有色板与明暗表面不同。"
             "顶部「全局主题」切换整个工作台，本区下拉只改下面两张图（实例级 API）。"
             "option 里显式写的颜色仍然优先（「固定色」系列写死了粉色，切主题不变）。"
             "自定义主题用 registerChartTheme 注册后即可按名称切换。",
@@ -1401,15 +1806,23 @@ class ChartsPage(ExamplePage):
 
     def _demoThemeGallery(self, parent_layout):
         parent_layout.addLayout(
-            self._createHeaderRow("02. 同一份数据的六种外观", self._demoThemeGallery)
+            self._createHeaderRow("02. 同一份数据的七种外观", self._demoThemeGallery)
         )
         self._addInfoText(
-            "六套内置主题渲染同一份柱状数据：色板、背景、轴与网格、图例文字一起变；"
-            "明暗档位跟随应用主题（右上角「切换主题」可看深色变体）。"
-            "这六张图固定展示，不跟随顶部「全局主题」。",
+            "七套内置主题渲染同一份柱状数据：几何完全一致（隐藏轴线与刻度、浅色分割线、"
+            "圆角柱、圆点图例），只有色板和明暗表面随主题变化；ela 直接跟随 Ela 明暗主题。"
+            "这七张图固定展示，不跟随顶部「全局主题」。",
             parent_layout,
         )
-        names = ["echarts", "matlab", "plotly", "ggplot2", "seaborn", "tableau"]
+        names = [
+            "ela",
+            "echarts",
+            "matlab",
+            "plotly",
+            "ggplot2",
+            "seaborn",
+            "tableau",
+        ]
         tiles = []
         for name in names:
             chart = ElaChartWidget(self)
@@ -1430,25 +1843,58 @@ class ChartsPage(ExamplePage):
                             "type": "bar",
                             "name": "本期",
                             "data": [320, 240, 180, 150],
-                            "itemStyle": {"borderRadius": [3, 3, 0, 0]},
                         },
                         {
                             "type": "bar",
                             "name": "上期",
                             "data": [280, 260, 160, 130],
-                            "itemStyle": {"borderRadius": [3, 3, 0, 0]},
                         },
                         {
                             "type": "bar",
                             "name": "目标",
                             "data": [300, 300, 200, 180],
-                            "itemStyle": {"borderRadius": [3, 3, 0, 0]},
                         },
                     ],
                 }
             )
             tiles.append((name, chart))
         self._theme_gallery_charts = self._addGallery(parent_layout, tiles, columns=3)
+
+    def _demoThemeMatrix(self, parent_layout):
+        parent_layout.addLayout(
+            self._createHeaderRow(
+                "03. 主题 × 系列能力矩阵",
+                self._demoThemeMatrix,
+            )
+        )
+        self._addInfoText(
+            "23 种系列 × 主题：每格是当前主题下的缩略预览，只绘制视口内的行，"
+            "滚动不会创建额外控件。格子底部五个圆点 / 行首字母依次表示 L=数据标签、"
+            "V=visualMap、S=选中、G=图例项、P=极坐标；悬停看明细，点击打开完整示例。",
+            parent_layout,
+        )
+        matrix = ThemeMatrixWidget(self)
+        matrix.cellActivated.connect(self._openThemeMatrixDemo)
+        parent_layout.addWidget(matrix)
+        self._theme_matrix = matrix
+
+    def _openThemeMatrixDemo(self, series_type: str, theme: str):
+        """矩阵格子点击 → 非模态完整示例。"""
+        try:
+            dialog = QDialog(self)
+            dialog.setWindowTitle(f"{series_type} × {theme}")
+            dialog.resize(760, 520)
+            layout = QVBoxLayout(dialog)
+            layout.setContentsMargins(10, 10, 10, 10)
+            chart = ElaChartWidget(dialog)
+            chart.setChartTheme(theme)
+            chart.setOption(sample_option(series_type))
+            layout.addWidget(chart)
+            dialog.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose, True)
+            self._theme_matrix_dialog = dialog
+            dialog.show()
+        except Exception:
+            pass
 
     def _demoWaveletScalogram(self, parent_layout):
         parent_layout.addLayout(
@@ -2214,6 +2660,12 @@ class ChartsPage(ExamplePage):
         t = str(s.get("type") or "line")
         data = s.get("data")
         if not isinstance(data, list) or not data:
+            return
+        if t == "gantt":
+            # 排期保持不变，只随机进度；不能把 [start, end] 换成数字。
+            for it in data:
+                if isinstance(it, dict) and "progress" in it:
+                    it["progress"] = round(random.random(), 2)
             return
         if t == "image":
             if data and isinstance(data[0], list):
@@ -3338,10 +3790,120 @@ class ChartsPage(ExamplePage):
         self._calendar_green = bool(checked)
         self._applyCalendarOption()
 
+    def _demoGalleryGantt(self, parent_layout):
+        parent_layout.addLayout(
+            self._createHeaderRow(
+                "07. 系列画廊 · 计划与进度（甘特）",
+                self._demoGalleryGantt,
+            )
+        )
+        self._addInfoText(
+            "series.type='gantt'：data[].start / end / progress / milestone / dependencies "
+            "描述任务；分组由宿主自己决定（yAxis.data 排序、分多张图 / 多系列），"
+            "图表只画任务行。ElaGanttView 固定 x 轴、右侧滚动条按行切换窗口，"
+            "滚轮可直接滚动任务行；工具条可切日 / 周 / 月与今天；editable=True 后"
+            "可拖动任务条、拖两端拉伸，拖任务条上方的圆点改进度；baseline / deadline "
+            "展示计划偏差与截止，criticalPath 标出关键路径",
+            parent_layout,
+        )
+        view = ElaGanttView(self)
+        view.setFixedHeight(360)
+        view.setRowHeight(28)
+        view.setToolbarVisible(True)
+        view.setOption(
+            {
+                "animation": False,
+                "tooltip": {"trigger": "item"},
+                "grid": {"left": 132, "right": 28, "top": 24, "bottom": 42},
+                "xAxis": {
+                    "type": "time",
+                    "splitNumber": 6,
+                    "axisLabel": {"formatter": "{MM}-{dd}"},
+                },
+                "yAxis": {"type": "category", "inverse": True},
+                "series": [
+                    {
+                        "type": "gantt",
+                        "name": "研发计划",
+                        "data": _gantt_tasks(),
+                        "statusColors": {
+                            "done": "#4aa3df",
+                            "doing": "#d9a441",
+                            "todo": "#7f8792",
+                            "milestone": "#6fae72",
+                        },
+                        "editable": True,
+                        "snap": "day",
+                        "barWidth": 0.6,
+                        "itemStyle": {"borderRadius": 6},
+                        "progress": {
+                            "show": True,
+                            "editable": True,
+                            "baseColor": "color.border.strong",
+                        },
+                        "baseline": {
+                            "show": True,
+                            "color": "color.text.disabled",
+                            "overdueColor": "#b96b5e",
+                        },
+                        "deadline": {"show": True},
+                        "criticalPath": {"show": True},
+                        "label": {
+                            "show": True,
+                            "position": "inside",
+                            "fontSize": 11,
+                            "formatter": lambda p: (
+                                f"{round(p['progress'] * 100)}%"
+                                if p.get("progress") is not None
+                                else ""
+                            ),
+                        },
+                        "dependencies": {"show": True, "width": 1.2},
+                        "todayLine": {"show": True, "date": "2026-11-18"},
+                    }
+                ],
+            }
+        )
+        self._addGallery(
+            parent_layout,
+            [("甘特 · gantt（纵向滚动 + 拖动改期）", view)],
+            columns=1,
+        )
+        self._gantt_view = view
+        self._gantt_chart = view.chart()
+        self._gantt_status = ElaText(
+            "滚轮滚动任务行；拖动任务条改期，拖两端拉伸，拖上方圆点改进度。",
+            self,
+        )
+        self._gantt_status.setTextPixelSize(12)
+        row = QHBoxLayout()
+        row.setSpacing(8)
+        row.addWidget(self._gantt_status, 1)
+        reset_btn = ElaPushButton("重置计划", self)
+        reset_btn.setFixedWidth(90)
+        reset_btn.clicked.connect(self._resetGanttPlan)
+        row.addWidget(reset_btn)
+        parent_layout.addLayout(row)
+        view.ganttTaskChanged.connect(self._onGanttTaskChanged)
+
+    def _onGanttTaskChanged(self, payload: dict) -> None:
+        self._gantt_status.setText(
+            f"{payload.get('name', '')}：{payload.get('startText', '')} → "
+            f"{payload.get('endText', '')}（{payload.get('mode', '')}）"
+        )
+
+    def _resetGanttPlan(self) -> None:
+        self._gantt_chart.updateSeries({"data": _gantt_tasks()}, seriesIndex=0)
+        if getattr(self, "_gantt_view", None) is not None:
+            self._gantt_view.refresh()
+        self._gantt_status.setText(
+            "滚轮滚动任务行；拖动任务条改期，拖两端拉伸，拖上方圆点改进度。"
+        )
+
     def _demoGalleryMatrix(self, parent_layout):
         parent_layout.addLayout(
             self._createHeaderRow(
-                "07. 系列画廊 · 矩阵图像（imshow：标量色带 / RGB 原图 / 平移缩放）",
+                "08. 系列画廊 · 矩阵图像（imshow：标量色带 / RGB 原图 / 平移缩放）",
                 self._demoGalleryMatrix,
             )
         )

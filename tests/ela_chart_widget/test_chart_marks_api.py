@@ -102,9 +102,7 @@ class TestMarkArea:
                     "type": "line",
                     "name": "A",
                     "data": [1, 5, 9],
-                    "markArea": {
-                        "data": [[{"coord": [0, 1]}, {"coord": [2, 5]}]]
-                    },
+                    "markArea": {"data": [[{"coord": [0, 1]}, {"coord": [2, 5]}]]},
                 }
             ],
         )

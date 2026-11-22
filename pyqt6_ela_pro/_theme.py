@@ -11,7 +11,7 @@ from PyQt6.QtGui import QColor
 
 from PyQt6ElaWidgetTools import eTheme, ElaThemeType
 
-from ._colors import parse_color
+from ._colors import mixColor, parse_color
 
 __all__ = [
     "ElaSeverity",
@@ -59,13 +59,7 @@ def blend(base: QColor, other: QColor, t: float) -> QColor:
     **参数序易搞反**：``blend(白底, 黑, 0.075)`` 才是「浅底叠 7.5% 黑」，
     反过来会算成近黑。alpha 一起插值，半透明叠色才与两次绘制等价（否则边界出硬环）。
     """
-    t = max(0.0, min(1.0, float(t)))
-    return QColor(
-        round(base.red() + (other.red() - base.red()) * t),
-        round(base.green() + (other.green() - base.green()) * t),
-        round(base.blue() + (other.blue() - base.blue()) * t),
-        round(base.alpha() + (other.alpha() - base.alpha()) * t),
-    )
+    return mixColor(base, other, t, rounding=True)
 
 
 def relativeLuminance(color: QColor) -> float:  # noqa: N802 (与数学名一致)

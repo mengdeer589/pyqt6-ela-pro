@@ -17,8 +17,8 @@ from .._utils import dist_point_segment
 from .._utils import merged_text_style, text_italic, text_weight
 from .._utils import to_float as _to_float
 from .._utils import with_alpha
-from .._utils import parse_color
 from ..axes import chartFont, formatValue
+from .._utils import _series_palette_color
 from ..core import SeriesRenderer
 from ._shared import _datum_list, _lerp
 
@@ -32,15 +32,16 @@ class ParallelSeriesRenderer(SeriesRenderer):
     def __init__(self, chart, opt):
         super().__init__(chart, opt)
         self._axes = []  # [dict(name, x, vmin, vmax)]（vmin/vmax 数据范围）
-        self._rows = []  # [dict(pts=[QPointF], values=[float], index)]
+        self._rows = []  # [dict(pts=[QPointF], values=[float], index, color)]
         self._area = QRectF()
 
     def _raw_rows(self):
+        """数据行 ``(values, item)``；``item`` 保留用于逐行 ``lineStyle.color``。"""
         rows = []
-        for item in self.data():
+        for data_index, item in enumerate(self.data()):
             nums = _datum_list(item)
             if nums is not None:
-                rows.append(nums)
+                rows.append((nums, item, data_index))
                 continue
             v = item.get("value") if isinstance(item, dict) else item
             if (
@@ -48,11 +49,13 @@ class ParallelSeriesRenderer(SeriesRenderer):
                 and v
                 and all(isinstance(x, str) for x in v)
             ):
-                rows.append(list(v))  # 字符串行：候选维度名
+                rows.append((list(v), item, data_index))  # 字符串行：候选维度名
         return rows
 
     def _dims(self, rows):
         pa = self.chart._option_ref().get("parallelAxis")
+        if isinstance(pa, dict):
+            pa = [pa]
         dims = []
         if isinstance(pa, list) and pa:
             for d in pa:
@@ -77,8 +80,8 @@ class ParallelSeriesRenderer(SeriesRenderer):
                         }
                     )
             return dims, rows
-        if rows and all(isinstance(x, str) for x in rows[0]):
-            names = rows[0]
+        if rows and all(isinstance(x, str) for x in rows[0][0]):
+            names = rows[0][0]
             return [
                 {
                     "name": n,
@@ -89,7 +92,7 @@ class ParallelSeriesRenderer(SeriesRenderer):
                 }
                 for n in names
             ], rows[1:]
-        n = max((len(r) for r in rows), default=0)
+        n = max((len(r) for r, _item, _index in rows), default=0)
         return [
             {
                 "name": f"dim{i}",
@@ -106,7 +109,19 @@ class ParallelSeriesRenderer(SeriesRenderer):
         self._rows = []
         rows = self._raw_rows()
         dims, rows = self._dims(rows)
-        rows = [r for r in rows if all(_to_float(x, None) is not None for x in r)]
+        # 显式 parallelAxis 时 _dims 不会剔除表头；首行全字符串且维度数一致即表头。
+        if (
+            rows
+            and all(isinstance(x, str) for x in rows[0][0])
+            and len(rows[0][0]) == len(dims)
+        ):
+            rows = rows[1:]
+        clean = []
+        for r, item, data_index in rows:
+            vals = [_to_float(x, None) for x in r]
+            if all(v is not None for v in vals):
+                clean.append((vals, item, data_index))
+        rows = clean
         if not dims or not rows:
             return
         n = len(dims)
@@ -120,7 +135,7 @@ class ParallelSeriesRenderer(SeriesRenderer):
             x = self._area.left() + (
                 self._area.width() * j / (n - 1) if n > 1 else self._area.width() / 2
             )
-            col = [r[j] for r in rows if j < len(r)]
+            col = [r[j] for r, _item, _index in rows if j < len(r)]
             lo = dim["min"] if dim["min"] is not None else (min(col) if col else 0.0)
             hi = dim["max"] if dim["max"] is not None else (max(col) if col else 1.0)
             if lo == hi:
@@ -135,7 +150,7 @@ class ParallelSeriesRenderer(SeriesRenderer):
                     "labelStyle": dim.get("labelStyle"),
                 }
             )
-        for i, r in enumerate(rows):
+        for i, (r, item, data_index) in enumerate(rows):
             pts = []
             for j, ax in enumerate(self._axes):
                 v = r[j] if j < len(r) else ax["vmin"]
@@ -144,7 +159,25 @@ class ParallelSeriesRenderer(SeriesRenderer):
                 pts.append(
                     QPointF(ax["x"], self._area.bottom() - f * self._area.height())
                 )
-            self._rows.append({"pts": pts, "values": list(r), "index": i})
+            self._rows.append(
+                {
+                    "pts": pts,
+                    "values": list(r),
+                    "index": data_index,
+                    "color": self._row_color(data_index, item),
+                }
+            )
+
+    def _row_color(self, index, item):
+        """单行颜色：``data[i].lineStyle.color`` → 调色板按行序号。"""
+        style = item.get("lineStyle") if isinstance(item, dict) else None
+        if isinstance(style, dict):
+            raw = style.get("color")
+            if isinstance(raw, str) and raw:
+                color = self.resolveColor(raw)
+                if color.isValid():
+                    return color
+        return _series_palette_color(self.chart, index)
 
     @staticmethod
     def _axis_label_shown(ax: dict) -> bool:
@@ -167,11 +200,13 @@ class ParallelSeriesRenderer(SeriesRenderer):
                 self._area.height() + 60,
             )
         )
-        color = self.color()
-        # lineStyle：{"color", "width", "opacity"}
-        line_style = self.opt.get("lineStyle") or {}
+        # lineStyle：{"color", "width", "opacity"}；color 缺省时逐行取调色板
+        line_style = self.opt.get("lineStyle")
+        if not isinstance(line_style, dict):
+            line_style = {}
+        forced_color = None
         if isinstance(line_style.get("color"), str) and line_style["color"]:
-            color = parse_color(line_style["color"])
+            forced_color = self.resolveColor(line_style["color"])
         try:
             width = max(0.5, float(line_style.get("width", 1.6)))
         except (TypeError, ValueError, OverflowError):
@@ -187,21 +222,27 @@ class ParallelSeriesRenderer(SeriesRenderer):
             else None
         )
         # 数据线（半透明，多条重叠可见；hover 高亮当前行、淡化其他）
-        pen = QPen(with_alpha(color, int(255 * opacity)), width)
-        pen.setCapStyle(Qt.PenCapStyle.RoundCap)
-        pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
-        p.setPen(pen)
         p.setBrush(Qt.BrushStyle.NoBrush)
         reveal = max(0.0, min(1.0, anim_t))
         for row in self._rows:
             pts = row["pts"]
             if len(pts) < 2:
                 continue
-            if hovered is not None:
-                if row["index"] == hovered:
-                    p.setPen(QPen(color.lighter(112), width + 0.6))
-                elif row["index"] != hovered:
-                    p.setPen(QPen(with_alpha(color, int(255 * opacity * 0.25)), width))
+            color = forced_color or row["color"]
+            visual = self.visualColor(row["index"])
+            if visual is not None:
+                color = visual
+            alpha = opacity * self.itemOpacity(row["index"])
+            color, alpha, _bc, _bw = self.stateStyle(
+                row["index"], hovered, color, alpha
+            )
+            width_row = width
+            if _bw > 0:
+                width_row = max(width, _bw)
+            pen = QPen(with_alpha(color, int(255 * alpha)), width_row)
+            pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+            pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
+            p.setPen(pen)
             if reveal < 1.0:
                 # 入场：按进度自左向右揭示
                 total = len(pts) - 1
@@ -249,7 +290,11 @@ class ParallelSeriesRenderer(SeriesRenderer):
                 QPointF(ax["x"], self._area.bottom()),
             )
             p.setFont(name_font)
-            p.setPen(parse_color(name_style.get("color") or T("color.text.secondary", self.chart)))
+            p.setPen(
+                self.resolveColor(
+                    name_style.get("color") or T("color.text.secondary", self.chart)
+                )
+            )
             p.drawText(
                 QRectF(
                     ax["x"] - 50,
@@ -263,7 +308,11 @@ class ParallelSeriesRenderer(SeriesRenderer):
             if not self._axis_label_shown(ax):
                 continue
             p.setFont(label_font)
-            p.setPen(parse_color(label_style.get("color") or T("color.text.secondary", self.chart)))
+            p.setPen(
+                self.resolveColor(
+                    label_style.get("color") or T("color.text.secondary", self.chart)
+                )
+            )
             p.drawText(
                 QRectF(ax["x"] - 50, self._area.top() + 2, 100, label_fm.height()),
                 Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignTop,
@@ -295,7 +344,13 @@ class ParallelSeriesRenderer(SeriesRenderer):
             return None
         line_style = self.opt.get("lineStyle") or {}
         raw = line_style.get("color") if isinstance(line_style, dict) else None
-        color = parse_color(raw) if isinstance(raw, str) and raw else self.color()
+        color = (
+            self.resolveColor(raw)
+            if isinstance(raw, str) and raw
+            else self.visualColor(best["index"])
+            or best.get("color")
+            or self.color()
+        )
         return {
             "name": f"{self.name} #{best['index']}",
             "value": best["values"],

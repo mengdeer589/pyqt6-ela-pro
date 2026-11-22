@@ -14,13 +14,25 @@ from PyQt6.QtGui import (
     QPen,
 )
 
-from ..._colors import text_on_color
 from .._tokens import T
 from .._utils import clamp as _clamp
 from .._utils import to_float as _to_float
-from .._utils import parse_color
 from ..core import SeriesRenderer
-from ._shared import _assign_branch_colors, _build_hierarchy, _label_font, _parse_pct
+from ._shared import (
+    _assign_branch_colors,
+    _build_hierarchy,
+    _label_font,
+    _node_border,
+    _node_color,
+    _node_emphasis_color,
+    _node_label_color,
+    _node_opacity,
+    _hierarchy_item_count,
+    _hierarchy_name_at,
+    _hierarchy_selected_seeds,
+    _hierarchy_value,
+    _parse_pct,
+)
 
 
 class SunburstSeriesRenderer(SeriesRenderer):
@@ -28,6 +40,8 @@ class SunburstSeriesRenderer(SeriesRenderer):
     支持 ``data``（层级，value 缺省累计子级）/ ``radius`` / ``label``；
     ``anim_t`` 控制角扫掠展开，点击可下钻。
     """
+
+    labelVisibleByDefault = True
 
     def __init__(self, chart, opt):
         super().__init__(chart, opt)
@@ -39,6 +53,18 @@ class SunburstSeriesRenderer(SeriesRenderer):
         self._r0 = 0.0
         self._r1 = 1.0
         self._max_depth = 1
+
+    def itemCount(self) -> int:
+        return _hierarchy_item_count(self)
+
+    def valueAtIndex(self, index: int):
+        return _hierarchy_value(self, index)
+
+    def nameAtIndex(self, index: int) -> str:
+        return _hierarchy_name_at(self, index)
+
+    def selectedSeedIndices(self) -> set:
+        return _hierarchy_selected_seeds(self)
 
     def layout(self, rect: QRectF) -> None:
         self._nodes = []
@@ -66,7 +92,10 @@ class SunburstSeriesRenderer(SeriesRenderer):
         self._max_depth = max((self._depth_of(r) - r.depth for r in display), default=1)
         self._center = rect.center()
         half = min(rect.width(), rect.height()) / 2 - 8
-        radius_opt = self.opt.get("radius") or ["15%", "90%"]
+        radius_opt = self.opt.get("radius")
+        if not isinstance(radius_opt, (list, tuple)):
+            # ECharts 允许标量 radius（外半径，内半径 0）；字符串不能按下标取字符。
+            radius_opt = [0, radius_opt] if radius_opt is not None else ["15%", "90%"]
         self._r0 = _clamp(
             _parse_pct(
                 radius_opt[0] if len(radius_opt) > 0 else "15%", half, half * 0.15
@@ -129,6 +158,7 @@ class SunburstSeriesRenderer(SeriesRenderer):
         if not self._nodes:
             return
         p.save()
+        self._label_rects = []
         border = QColor(T("color.bg.base", self.chart))
         hover = self.chart.hoverInfo()
         hovered = (
@@ -157,16 +187,22 @@ class SunburstSeriesRenderer(SeriesRenderer):
             else:
                 path.lineTo(self._center)
             path.closeSubpath()
-            color = parse_color(self.itemColor(node.style_index, default=node.color))
-            alpha = self.itemOpacity(node.style_index)
-            border_color, border_w = self.itemBorder(node.style_index)
+            color = _node_color(self, node)
+            alpha = _node_opacity(self, node)
+            border_color, border_w = _node_border(self, node)
             if hovered is not None:
                 if node.style_index == hovered:
-                    emphasis = self.emphasisColor(node.style_index)
+                    emphasis = _node_emphasis_color(self, node)
                     color = emphasis if emphasis is not None else color.lighter(112)
+                    emp_opacity = self.emphasisOpacity(node.style_index)
+                    if emp_opacity is not None:
+                        alpha = emp_opacity
                 elif self.blursOtherItems():
                     blur = self.blurOpacity()
                     alpha *= blur if blur is not None else 0.35
+            color, alpha, border_color, border_w = self.selectedStyle(
+                node.style_index, color, alpha, border_color, border_w
+            )
             if alpha < 1.0:
                 color.setAlphaF(color.alphaF() * alpha)
             p.setPen(QPen(border_color or border, border_w if border_w > 0 else 1.0))
@@ -185,6 +221,8 @@ class SunburstSeriesRenderer(SeriesRenderer):
             return True
         hit = self.hitTest(pos)
         if hit is None:
+            return False
+        if self.opt.get("nodeClick") is False:
             return False
         index = hit.get("dataIndex")
         if not isinstance(index, int) or not (0 <= index < len(self._nodes)):
@@ -209,12 +247,6 @@ class SunburstSeriesRenderer(SeriesRenderer):
         if not bool(label_opt.get("show", True)):
             return
         min_angle = _to_float(label_opt.get("minAngle"), 8.0)
-        explicit_label = self.labelTextStyle().get("color")
-        explicit_label = (
-            parse_color(explicit_label)
-            if isinstance(explicit_label, str) and explicit_label
-            else None
-        )
         font = _label_font(self, label_opt)
         p.setFont(font)
         fm = QFontMetricsF(font)
@@ -234,16 +266,29 @@ class SunburstSeriesRenderer(SeriesRenderer):
             p.save()
             p.translate(pt)
             p.rotate(deg + (180.0 if flip else 0.0))
-            p.setPen(explicit_label or text_on_color(parse_color(node.color)))
+            p.setPen(_node_label_color(self, node, _node_color(self, node)))
             band_w = math.radians(span) * rm
-            text = node.name
+            text = self.hierarchyLabelText(
+                node.style_index,
+                node.name,
+                getattr(node, "value", None),
+                getattr(node, "item", None),
+            )
             tw = fm.horizontalAdvance(text)
             if tw <= max(band_w - 4, 12) or span >= 30:
-                p.drawText(
-                    QRectF(-tw / 2, -fm.height() / 2, tw + 2, fm.height()),
-                    Qt.AlignmentFlag.AlignCenter,
+                rect = QRectF(-tw / 2, -fm.height() / 2, tw + 2, fm.height())
+                hit = self.paintLabelIn(
+                    p,
+                    rect,
                     text,
+                    index=node.style_index,
+                    align=Qt.AlignmentFlag.AlignCenter,
+                    color=_node_label_color(self, node, _node_color(self, node)),
                 )
+                if not hit.isNull():
+                    self._label_rects.append(
+                        (node.style_index, p.worldTransform().mapRect(hit), text)
+                    )
             p.restore()
 
     def hitTest(self, pos: QPointF):
@@ -278,8 +323,9 @@ class SunburstSeriesRenderer(SeriesRenderer):
         return {
             "name": best.name,
             "value": best.value,
-            "color": self.itemColor(best.style_index, default=best.color),
+            "color": _node_color(self, best),
             "series": self.name,
             "depth": best.level,
             "dataIndex": getattr(best, "style_index", None),
+            "data": getattr(best, "item", None),
         }

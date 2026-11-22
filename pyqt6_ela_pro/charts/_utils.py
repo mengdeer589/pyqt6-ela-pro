@@ -11,19 +11,24 @@ import sys
 
 from PyQt6.QtGui import QColor
 
-from .._colors import parse_color
+from .._colors import mixColor, parse_color, text_on_color
+from .._theme import _composite
 from ._tokens import T
 
 __all__ = [
     "to_float",
     "clamp",
     "with_alpha",
+    "resolve_color_option",
+    "flatten_on_canvas",
+    "text_on_fill",
     "dist_point_segment",
     "warn_once",
     "ON_FILL_WHITE",
     "merged_text_style",
     "parse_color",
     "ramp_color",
+    "single_font_family",
     "text_weight",
     "text_italic",
 ]
@@ -54,6 +59,67 @@ def with_alpha(color, a):
     c = QColor(parse_color(color))
     c.setAlpha(int(clamp(a, 0, 255)))
     return c
+
+
+def resolve_color_option(value, chart=None, default=None) -> QColor:
+    """用户 option 颜色：QColor / CSS 颜色 / ``color.*`` 主题令牌。"""
+    if isinstance(value, QColor):
+        return parse_color(value)
+    if isinstance(value, str):
+        text = value.strip()
+        if text.startswith("color."):
+            try:
+                resolved = T(text, chart)
+            except Exception:
+                resolved = None
+            if resolved is not None:
+                color = parse_color(resolved)
+                if color.isValid():
+                    return color
+        color = parse_color(text)
+        if color.isValid():
+            return color
+    if default is not None:
+        if isinstance(default, QColor):
+            return parse_color(default)
+        return resolve_color_option(default, chart, None)
+    return QColor()
+
+
+def _series_palette_color(chart, index) -> QColor:
+    """按序号取全局调色板颜色（越界循环）。"""
+    pal = chart.palette()
+    if not pal:
+        return parse_color(T("color.primary", chart))
+    return parse_color(pal[index % len(pal)])
+
+
+def _canvas_color(chart) -> QColor:
+    """不透明画布底色（``backgroundColor`` 选项优先，回退主题底）。"""
+    getter = getattr(chart, "_background_color", None)
+    if callable(getter):
+        try:
+            color = parse_color(getter())
+        except Exception:
+            color = QColor()
+        if color.isValid():
+            if color.alpha() < 255:
+                return _composite(parse_color(T("color.bg.base", chart)), color)
+            return color
+    return parse_color(T("color.bg.base", chart))
+
+
+def flatten_on_canvas(color, chart=None) -> QColor:
+    """半透明色按画布底压平；对比色 / 命中色要的是实际观感，不是令牌原始 RGB。"""
+    color = parse_color(color)
+    if not color.isValid() or color.alpha() >= 255:
+        return color
+    return _composite(_canvas_color(chart), color)
+
+
+def text_on_fill(fill, chart=None) -> QColor:
+    """填充色上的可读文字色（半透明填充先压平，再选黑 / 白）。"""
+    return text_on_color(flatten_on_canvas(fill, chart))
 
 
 def dist_point_segment(p, a, b):
@@ -128,6 +194,25 @@ _ITALIC_STYLES = frozenset({"italic", "oblique"})
 def text_italic(value) -> bool:
     """ECharts ``fontStyle`` → 是否斜体（``normal`` / 其它一律 False）。"""
     return isinstance(value, str) and value.strip().lower() in _ITALIC_STYLES
+
+
+def single_font_family(value) -> str:
+    """用户给的字体族 → 单个族名（多族在 Win7 上是慢 shaping 且进程级毒化，取首个并告警）。"""
+    if not isinstance(value, str):
+        return ""
+    text = value.strip().strip("'\"").strip()
+    if not text:
+        return ""
+    parts = [p.strip().strip("'\"") for p in text.split(",")]
+    parts = [p for p in parts if p]
+    if not parts:
+        return ""
+    if len(parts) > 1:
+        warn_once(
+            "font-family:multiple",
+            f"图表只支持单个字体族，已取 {parts[0]!r}（忽略 {len(parts) - 1} 个回退族）",
+        )
+    return parts[0]
 
 
 def text_weight(value, default=None):
@@ -250,23 +335,18 @@ def parse_roam(value) -> tuple:
 
 
 def ramp_color(colors, t, chart=None) -> QColor:
-    """多色带插值：``colors`` 为颜色列表，``t∈[0,1]`` → ``QColor``。"""
-    cols = [parse_color(c) for c in (colors or []) if c]
+    """多色带插值：``colors`` 为颜色列表（支持 ``color.*`` 令牌），``t∈[0,1]`` → ``QColor``。"""
+    cols = [resolve_color_option(c, chart) for c in (colors or []) if c]
+    cols = [c for c in cols if c.isValid()]
     if not cols:
         return QColor(T("color.primary", chart))
     if len(cols) == 1:
         return cols[0]
-    t = max(0.0, min(1.0, float(t)))
+    t = clamp(to_float(t, 0.0), 0.0, 1.0)
     pos = t * (len(cols) - 1)
     index = min(int(pos), len(cols) - 2)
     frac = pos - index
-    a, b = cols[index], cols[index + 1]
-    return QColor(
-        int(a.red() * (1 - frac) + b.red() * frac),
-        int(a.green() * (1 - frac) + b.green() * frac),
-        int(a.blue() * (1 - frac) + b.blue() * frac),
-        int(a.alpha() * (1 - frac) + b.alpha() * frac),
-    )
+    return mixColor(cols[index], cols[index + 1], frac)
 
 
 # 硬编码颜色豁免常量
