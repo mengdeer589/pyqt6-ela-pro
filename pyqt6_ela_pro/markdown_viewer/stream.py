@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import re
 
 from PyQt6.QtCore import QElapsedTimer, QRectF
@@ -24,6 +25,10 @@ from .syntax import (
     _fence_open,
     _stable_cut,
 )
+
+
+logger = logging.getLogger(__name__)
+
 
 _SCROLL_MARGIN = 4
 
@@ -345,6 +350,23 @@ class _MarkdownStreamMixin:
             return
         if not self._large_render_chunks:
             return
+        try:
+            self._render_large_step_chunks()
+        except Exception:  # noqa: BLE001 —— 定时器槽异常不能穿出 Qt
+            logger.exception("分块渲染失败，回退全量渲染")
+            self._cancel_large_render()
+            try:
+                self._render()
+            except Exception:  # noqa: BLE001
+                logger.exception("分块失败后的全量渲染也失败")
+            finally:
+                try:
+                    self.renderingFinished.emit()
+                except RuntimeError:  # 控件在渲染途中被销毁
+                    pass
+
+    def _render_large_step_chunks(self) -> None:
+        """单个时间片的块插入（异常由 :meth:`_render_large_step` 兜底）。"""
         timer = QElapsedTimer()
         timer.start()
         document = self._text_browser.document()
@@ -397,12 +419,16 @@ class _MarkdownStreamMixin:
             return
         try:
             self._flush_stream()
-        except Exception:
+        except Exception:  # noqa: BLE001 —— 定时器槽异常不能穿出 Qt
             if is_deleted(self) or is_deleted(self._text_browser):
                 return
+            logger.exception("增量渲染失败，回退全量渲染")
             # 增量状态异常：退回全量渲染，保证内容正确
             self._stop_stream()
-            self._render()
+            try:
+                self._render()
+            except Exception:  # noqa: BLE001
+                logger.exception("增量失败后的全量渲染也失败")
 
     def _flush_stream(self) -> None:
         browser = self._text_browser

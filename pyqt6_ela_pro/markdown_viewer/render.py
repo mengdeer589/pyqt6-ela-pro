@@ -86,12 +86,16 @@ class _MarkdownRenderMixin:
         """可见时补齐被懒掉的重建（主题 / 配色族在隐藏时只标记，见 _applyThemeStyle）。"""
         if is_deleted(self) or is_deleted(self._text_browser):
             return
-        if self._needs_render and self._source:
-            self._needs_render = False
+        if not (self._needs_render and self._source):
+            return
+        self._needs_render = False
+        try:
             if len(self._source) > _THEME_CHUNK_CHARS and not self._stream_active:
                 self._begin_large_render()
             else:
                 self._render()
+        except Exception:  # noqa: BLE001 —— 定时器 / showEvent 槽异常不能穿出 Qt
+            logger.exception("懒渲染失败")
 
     def showEvent(self, event: QShowEvent) -> None:
         super().showEvent(event)
@@ -421,22 +425,28 @@ class _MarkdownRenderMixin:
         """引用块正文：muted 正文色（链接 / 行内代码保持自身颜色）。"""
         edit = cursor if cursor is not None else QTextCursor(document)
         italic = self._md_layout["quote"]["italic"]
+        # 先收集再改写：mergeCharFormat 会让片段迭代器失效。
+        spans = []
         iterator = block.begin()
         while not iterator.atEnd():
             fragment = iterator.fragment()
             if fragment.isValid() and (
                 fragment.charFormat().foreground().style() == Qt.BrushStyle.NoBrush
             ):
-                edit.setPosition(fragment.position())
-                edit.setPosition(
-                    _clamp_pos(document, fragment.position() + fragment.length()),
-                    QTextCursor.MoveMode.KeepAnchor,
-                )
-                fmt = QTextCharFormat()
-                fmt.setForeground(self._quote_text_color)
-                fmt.setFontItalic(italic)
-                edit.mergeCharFormat(fmt)
+                spans.append((fragment.position(), fragment.length()))
             iterator += 1
+        if not spans:
+            return
+        fmt = QTextCharFormat()
+        fmt.setForeground(self._quote_text_color)
+        fmt.setFontItalic(italic)
+        for position, length in spans:
+            edit.setPosition(position)
+            edit.setPosition(
+                _clamp_pos(document, position + length),
+                QTextCursor.MoveMode.KeepAnchor,
+            )
+            edit.mergeCharFormat(fmt)
 
     def _style_task_markers(self, document: QTextDocument) -> None:
         """任务复选框跟随主题 list 色（仍可点击，避免显示成整段链接色）。
@@ -718,6 +728,8 @@ class _MarkdownRenderMixin:
         keep_anchor = QTextCursor.MoveMode.KeepAnchor
         strong_weight = int(QFont.Weight.DemiBold)
         foreground_property = QTextFormat.Property.ForegroundBrush
+        # 先收集再改写：mergeCharFormat 会让片段迭代器失效。
+        spans = []
         block = document.begin()
         while block.isValid():
             iterator = block.begin()
@@ -746,13 +758,13 @@ class _MarkdownRenderMixin:
                         elif fmt.fontItalic():
                             target = emphasis_format
                     if target is not None:
-                        position = fragment.position()
-                        edit_cursor.setPosition(position)
-                        edit_cursor.setPosition(
-                            min(position + fragment.length(), doc_length), keep_anchor
-                        )
-                        edit_cursor.mergeCharFormat(target)
+                        spans.append((fragment.position(), fragment.length(), target))
                 iterator += 1
             block = block.next()
+
+        for position, length, target in spans:
+            edit_cursor.setPosition(position)
+            edit_cursor.setPosition(min(position + length, doc_length), keep_anchor)
+            edit_cursor.mergeCharFormat(target)
 
         edit_cursor.endEditBlock()

@@ -19,7 +19,7 @@ from PyQt6.QtGui import (
 )
 from PyQt6.QtWidgets import QAbstractScrollArea, QApplication
 
-from .._internal import is_deleted
+from .._internal import is_deleted, safe_connect
 from ..tooltips import ElaToolTipPositionType, set_tooltip
 from .syntax import _clamp_pos
 from .themes import _QUOTE_LEFT_MARGIN
@@ -142,7 +142,11 @@ class _MarkdownPaintMixin:
             f"复制代码 · {lang}" if lang else "复制代码",
             ElaToolTipPositionType.Top,
         )
-        button.clicked.connect(lambda _checked=False, i=index: self._copy_code_block(i))
+        safe_connect(
+            button,
+            "clicked",
+            lambda _checked=False, i=index: self._copy_code_block(i),
+        )
         button.installEventFilter(self)
         button.hide()
         self._apply_code_button_style(button)

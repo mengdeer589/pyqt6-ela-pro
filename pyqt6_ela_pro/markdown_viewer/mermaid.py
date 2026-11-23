@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import logging
 from typing import Optional
 
 from PyQt6.QtCore import Qt, QUrl
@@ -27,6 +28,9 @@ from .tokens import (
     _MERMAID_TIP_PREFIX,
     _MERMAID_TOKEN_PREFIX,
 )
+
+
+logger = logging.getLogger(__name__)
 
 
 _MERMAID_PRIORITY_INTERVAL_MS = 80
@@ -248,11 +252,14 @@ class _MarkdownMermaidMixin:
         """重算待渲染任务与视口中心的距离（滚动/文档变化后调用）。"""
         if is_deleted(self) or not self._mermaid_jobs:
             return
-        center = max(1, self._text_browser.viewport().height()) / 2.0
-        positions = self._mermaid_anchor_positions()
-        for job in self._mermaid_jobs:
-            y = positions.get(job.get("anchor"))
-            job["distance"] = float("inf") if y is None else abs(y - center)
+        try:
+            center = max(1, self._text_browser.viewport().height()) / 2.0
+            positions = self._mermaid_anchor_positions()
+            for job in self._mermaid_jobs:
+                y = positions.get(job.get("anchor"))
+                job["distance"] = float("inf") if y is None else abs(y - center)
+        except Exception:  # noqa: BLE001 —— 定时器槽异常不能穿出 Qt
+            logger.exception("Mermaid 优先级刷新失败")
 
     def _schedule_mermaid_pump(self, delay: int = 0) -> None:
         """延后提交下一个任务（让贴底/滚动逻辑先更新视口位置）。"""
@@ -261,29 +268,44 @@ class _MarkdownMermaidMixin:
 
     def _pump_mermaid(self) -> None:
         """提交下一个待渲染任务（引擎串行，同一时刻只保留一个在途请求）。"""
-        if is_deleted(self):
+        if is_deleted(self) or self._mermaid_disabled:
             return
-        if self._mermaid_disabled or not self._mermaid_jobs or self._mermaid_active:
-            return
-        renderer = self._ensure_mermaid_renderer()
-        if renderer is None:
+        if not self._mermaid_jobs or self._mermaid_active:
             return
         theme = self._theme_key()
-        self._refresh_mermaid_priorities()
-        renderer.setMaxImageWidth(self._mermaid_view_max_width())
-        while self._mermaid_jobs:
-            job = min(self._mermaid_jobs, key=lambda item: item["distance"])
-            self._mermaid_jobs.remove(job)
-            job_theme = job.get("theme", theme)
-            if job_theme != theme:
-                continue  # 旧主题任务：主题已切换，丢弃
-            known, image = renderer.lookup(job["code"], theme)
-            if known:
-                self._replace_mermaid_pending(job["code"], theme, image)
-                continue
-            self._mermaid_active += 1
-            renderer.request(job["code"], theme)
-            return
+        job = None
+        try:
+            renderer = self._ensure_mermaid_renderer()
+            if renderer is None:
+                return
+            self._refresh_mermaid_priorities()
+            renderer.setMaxImageWidth(self._mermaid_view_max_width())
+            while self._mermaid_jobs:
+                job = min(self._mermaid_jobs, key=lambda item: item["distance"])
+                self._mermaid_jobs.remove(job)
+                job_theme = job.get("theme", theme)
+                if job_theme != theme:
+                    # 旧主题任务：主题已切换，丢弃
+                    job = None
+                    continue
+                known, image = renderer.lookup(job["code"], theme)
+                if known:
+                    self._replace_mermaid_pending(job["code"], theme, image)
+                    job = None
+                    continue
+                self._mermaid_active += 1
+                renderer.request(job["code"], theme)
+                job = None
+                return
+        except Exception:  # noqa: BLE001 —— 定时器槽异常不能穿出 Qt
+            logger.exception("Mermaid 任务调度失败")
+            self._mermaid_active = 0
+            if job is not None:
+                # 占位符不能永远停在「渲染中…」：降级为代码卡并记账
+                try:
+                    self._replace_mermaid_pending(job["code"], theme, None)
+                except Exception:  # noqa: BLE001
+                    logger.exception("Mermaid 失败降级也失败")
 
     def _replace_mermaid_pending(self, code: str, theme: str, image) -> None:
         """把文档中该源码的 pending 锚点（占位文本/旧主题图）替换为最终结果。"""
@@ -402,9 +424,12 @@ class _MarkdownMermaidMixin:
         try:
             if theme == self._theme_key():
                 self._replace_mermaid_pending(code, theme, image)
+        except Exception:  # noqa: BLE001 —— 渲染器信号槽异常不能穿出 Qt
+            logger.exception("Mermaid 结果替换失败")
         finally:
             # 延后一拍：替换图片可能引起滚动/贴底，下一个任务按最新视口选择
-            self._schedule_mermaid_pump()
+            if not is_deleted(self):
+                self._schedule_mermaid_pump()
 
     def _mermaid_source_at_cursor(self) -> str:
         return self._image_source_at_cursor(_MERMAID_IMAGE_PREFIX, _MERMAID_TIP_PREFIX)

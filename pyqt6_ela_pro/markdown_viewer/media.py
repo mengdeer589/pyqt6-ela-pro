@@ -325,15 +325,27 @@ class _MarkdownMediaMixin:
         """处理图片片段：本地加载注册、超宽缩放、远程按开关拦截。
         ``start_block`` 起（含）的块才参与处理 —— 宽度未变的增量重排只需扫
         新增块；宽度变化时调用方传 0 全量重扫。
+
+        遍历期间只读：任何 cursor 改写都会让片段迭代器失效（0xC0000005），
+        所以先收集动作，迭代结束后再统一应用。
         """
+        actions = self._collect_image_actions(document, resource_doc, start_block)
+        self._apply_image_actions(document, actions)
+        self._center_standalone_images(document, start_block)
+
+    def _collect_image_actions(
+        self, document: QTextDocument, resource_doc=None, start_block: int = 0
+    ) -> list:
+        """只读扫描图片片段，返回 ``(类型, 位置, 长度, 格式)`` 动作列表。"""
         base = document.baseUrl()
         target_doc = resource_doc or document
         max_width = max(self._content_text_width() - 24, 120)
         placeholder_fmt = QTextCharFormat()
         placeholder_fmt.setForeground(self._muted_color)
+        actions: list = []
         block = document.findBlockByNumber(start_block)
         if not block.isValid():
-            return
+            return actions
         while block.isValid():
             iterator = block.begin()
             while not iterator.atEnd():
@@ -343,18 +355,43 @@ class _MarkdownMediaMixin:
                     if fmt.isImageFormat():
                         image_fmt = fmt.toImageFormat()
                         if not image_fmt.name().startswith("elamath://"):
-                            self._apply_image_fragment(
-                                document,
+                            action = self._plan_image_fragment(
                                 target_doc,
-                                fragment,
+                                fragment.position(),
+                                fragment.length(),
+                                fmt,
                                 image_fmt,
                                 base,
                                 max_width,
                                 placeholder_fmt,
                             )
+                            if action is not None:
+                                actions.append(action)
                 iterator += 1
             block = block.next()
-        self._center_standalone_images(document, start_block)
+        return actions
+
+    @staticmethod
+    def _apply_image_actions(document: QTextDocument, actions: list) -> None:
+        """倒序应用图片动作：占位替换会增长文本，倒序保证前面位置不被挤偏。"""
+        if not actions:
+            return
+        cursor = QTextCursor(document)
+        cursor.beginEditBlock()
+        try:
+            for kind, position, length, fmt in reversed(actions):
+                cursor.setPosition(_clamp_pos(document, position))
+                cursor.setPosition(
+                    _clamp_pos(document, position + length),
+                    QTextCursor.MoveMode.KeepAnchor,
+                )
+                if kind == "scale":
+                    cursor.mergeCharFormat(fmt)
+                else:
+                    cursor.removeSelectedText()
+                    cursor.insertText("[图片]", fmt)
+        finally:
+            cursor.endEditBlock()
 
     def _center_standalone_images(
         self, document: QTextDocument, start_block: int = 0
@@ -387,31 +424,31 @@ class _MarkdownMediaMixin:
                     self._apply_block_format(document, block, block_format)
             block = block.next()
 
-    def _apply_image_fragment(
+    def _plan_image_fragment(
         self,
-        document: QTextDocument,
         target_doc: QTextDocument,
-        fragment,
+        position: int,
+        length: int,
+        original_fmt: QTextCharFormat,
         image_fmt: QTextImageFormat,
         base: QUrl,
         max_width: int,
         placeholder_fmt: QTextCharFormat,
-    ) -> None:
-        """单个图片片段：解析 URL、加载资源、必要时缩放或替换占位。"""
+    ) -> Optional[tuple]:
+        """单个图片片段：解析 URL、加载资源，返回待应用动作（不改文档）。"""
         source = self._resolve_image_url(image_fmt.name(), base)
         if source.scheme() in ("http", "https"):
             if not self._remote_images_enabled:
-                self._replace_image_with_placeholder(
-                    document, fragment, placeholder_fmt, source.toString()
+                return self._placeholder_action(
+                    position, length, original_fmt, placeholder_fmt, source.toString()
                 )
-            return
+            return None
 
         image = self._load_image_resource(target_doc, source)
         if image is None:
-            self._replace_image_with_placeholder(
-                document, fragment, placeholder_fmt, source.toString()
+            return self._placeholder_action(
+                position, length, original_fmt, placeholder_fmt, source.toString()
             )
-            return
 
         width = image.width()
         height = image.height()
@@ -426,17 +463,11 @@ class _MarkdownMediaMixin:
         if width > max_width > 0:
             height = height * max_width / float(width)
             width = max_width
-        cursor = QTextCursor(document)
-        cursor.setPosition(fragment.position())
-        cursor.setPosition(
-            _clamp_pos(document, fragment.position() + fragment.length()),
-            QTextCursor.MoveMode.KeepAnchor,
-        )
         scaled = QTextImageFormat()
         scaled.setName(source.toString())
         scaled.setWidth(width)
         scaled.setHeight(height)
-        cursor.mergeCharFormat(scaled)
+        return ("scale", position, length, scaled)
 
     @staticmethod
     def _resolve_image_url(name: str, base: QUrl) -> QUrl:
@@ -448,29 +479,22 @@ class _MarkdownMediaMixin:
             source = base.resolved(source)
         return source
 
-    def _replace_image_with_placeholder(
+    def _placeholder_action(
         self,
-        document: QTextDocument,
-        fragment,
+        position: int,
+        length: int,
+        original_fmt: QTextCharFormat,
         placeholder_fmt: QTextCharFormat,
         detail: str = "",
-    ) -> None:
-        """把无法加载的图片替换为灰字占位（记录到渲染问题）。"""
+    ) -> tuple:
+        """构造占位替换动作（记录渲染问题；保留链接锚点）。"""
         if detail:
             self._record_issue("image", detail)
-        original = fragment.charFormat()
         insert_fmt = placeholder_fmt
-        if original.isAnchor():
+        if original_fmt.isAnchor():
             insert_fmt = QTextCharFormat(placeholder_fmt)
-            merge_anchor_format(insert_fmt, original)
-        cursor = QTextCursor(document)
-        cursor.setPosition(fragment.position())
-        cursor.setPosition(
-            _clamp_pos(document, fragment.position() + fragment.length()),
-            QTextCursor.MoveMode.KeepAnchor,
-        )
-        cursor.removeSelectedText()
-        cursor.insertText("[图片]", insert_fmt)
+            merge_anchor_format(insert_fmt, original_fmt)
+        return ("placeholder", position, length, insert_fmt)
 
     def _record_issue(self, kind: str, detail: str) -> None:
         """记录一次渲染降级（去重）。"""

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 
 from PyQt6ElaWidgetTools import ElaIconType, ElaMenu
 from PyQt6.QtCore import QEvent, QPointF, Qt, QUrl
@@ -14,8 +15,11 @@ from PyQt6.QtGui import (
 )
 from PyQt6.QtWidgets import QApplication, QTextEdit
 
-from .._internal import execElaMenu, is_deleted, single_shot_on
+from .._internal import execElaMenu, is_deleted, safe_connect, single_shot_on
 from .preprocess import _TASK_LIST_RE
+
+
+logger = logging.getLogger(__name__)
 
 
 _CONTEXT_MENU_ITEM_HEIGHT = 28
@@ -275,6 +279,7 @@ class _MarkdownInteractionMixin:
 
         copy = menu.addElaIconAction(ElaIconType.IconName.Copy, "复制")
         copy.setEnabled(cursor.hasSelection())
+        # 内建 C++ 槽不会抛 Python 异常；safe_connect 无法推断其参数个数，会传错 bool
         copy.triggered.connect(browser.copy)
         select_all = menu.addElaIconAction(ElaIconType.IconName.BorderAll, "全选")
         select_all.triggered.connect(browser.selectAll)
@@ -282,31 +287,35 @@ class _MarkdownInteractionMixin:
         menu.addSeparator()
         copy_code = menu.addElaIconAction(ElaIconType.IconName.Code, "复制代码块")
         copy_code.setEnabled(self._in_code_table(cursor))
-        copy_code.triggered.connect(self._copy_code_at_cursor)
+        safe_connect(copy_code, "triggered", self._copy_code_at_cursor, receiver=menu)
         copy_formula = menu.addElaIconAction(
             ElaIconType.IconName.SquareRootVariable, "复制 LaTeX 公式"
         )
         copy_formula.setEnabled(bool(self._formula_latex_at_cursor()))
-        copy_formula.triggered.connect(self._copy_formula_at_cursor)
+        safe_connect(
+            copy_formula, "triggered", self._copy_formula_at_cursor, receiver=menu
+        )
         copy_mermaid = menu.addElaIconAction(
             ElaIconType.IconName.DiagramProject, "复制 Mermaid 源码"
         )
         copy_mermaid.setEnabled(bool(self._mermaid_source_at_cursor()))
-        copy_mermaid.triggered.connect(self._copy_mermaid_at_cursor)
+        safe_connect(
+            copy_mermaid, "triggered", self._copy_mermaid_at_cursor, receiver=menu
+        )
         save_image = menu.addElaIconAction(
             ElaIconType.IconName.FloppyDisk, "图片另存为…"
         )
         save_image.setEnabled(bool(self._image_local_path_at_cursor()))
-        save_image.triggered.connect(self._save_image_at_cursor)
+        safe_connect(save_image, "triggered", self._save_image_at_cursor, receiver=menu)
 
         menu.addSeparator()
         quote = menu.addElaIconAction(
             ElaIconType.IconName.FileCode, "复制选中为 Markdown"
         )
         quote.setEnabled(cursor.hasSelection())
-        quote.triggered.connect(self._copy_selection_markdown)
+        safe_connect(quote, "triggered", self._copy_selection_markdown, receiver=menu)
         copy_all = menu.addElaIconAction(ElaIconType.IconName.ClipboardList, "复制全文")
-        copy_all.triggered.connect(self._copy_all)
+        safe_connect(copy_all, "triggered", self._copy_all, receiver=menu)
         return menu
 
     def _formula_latex_at_cursor(self) -> str:
@@ -341,23 +350,28 @@ class _MarkdownInteractionMixin:
         """尺寸变化后重排：图片宽度与代码复制按钮位置。"""
         if is_deleted(self) or is_deleted(self._text_browser):
             return
-        self._apply_content_width()
-        if self._source and self._image_candidates:
-            # 宽度未变只扫上次水位之后的新增块；宽度变了才全量重新缩放。
-            # 无图片候选时整趟跳过（块 × 片段遍历，235KB 文档约 16ms）。
-            width = self._content_text_width()
-            start = 0 if width != self._image_scan_width else self._image_scan_watermark
-            self._apply_images(self.document(), start_block=start)
-            self._mark_images_scanned()
-        if self._mermaid_jobs:
-            self._schedule_mermaid_pump()
-        if self._large_render_chunks:
-            # 分块渲染期间不同步按钮：每次布局刷新都是一趟全表树遍历 + 全量定位，
-            # 几千个代码块时是 O(n²)（524KB / 4282 表约 1.9s）；统一在收尾建一次。
+        try:
+            self._apply_content_width()
+            if self._source and self._image_candidates:
+                # 宽度未变只扫上次水位之后的新增块；宽度变了才全量重新缩放。
+                # 无图片候选时整趟跳过（块 × 片段遍历，235KB 文档约 16ms）。
+                width = self._content_text_width()
+                start = (
+                    0 if width != self._image_scan_width else self._image_scan_watermark
+                )
+                self._apply_images(self.document(), start_block=start)
+                self._mark_images_scanned()
+            if self._mermaid_jobs:
+                self._schedule_mermaid_pump()
+            if self._large_render_chunks:
+                # 分块渲染期间不同步按钮：每次布局刷新都是一趟全表树遍历 + 全量定位，
+                # 几千个代码块时是 O(n²)（524KB / 4282 表约 1.9s）；统一在收尾建一次。
+                self._sync_embedded_height()
+                return
+            self._sync_code_buttons()
             self._sync_embedded_height()
-            return
-        self._sync_code_buttons()
-        self._sync_embedded_height()
+        except Exception:  # noqa: BLE001 —— 定时器槽异常不能穿出 Qt
+            logger.exception("布局刷新失败")
 
     def _on_view_scrolled(self, _value: int) -> None:
         # 滚动不改变文档结构：只需重摆按钮位置，不必重扫表格列表

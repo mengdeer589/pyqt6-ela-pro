@@ -1212,22 +1212,28 @@ class _MarkdownPreprocessMixin:
         cursor = QTextCursor(document)
         cursor.setPosition(block.position())
         cursor.setBlockFormat(block_format)
+        # 先收集再改写：mergeCharFormat 会让片段迭代器失效。
+        spans = []
         iterator = block.begin()
         while not iterator.atEnd():
             fragment = iterator.fragment()
             if fragment.isValid() and (
                 fragment.charFormat().foreground().style() == Qt.BrushStyle.NoBrush
             ):
-                edit = QTextCursor(document)
-                edit.setPosition(fragment.position())
-                edit.setPosition(
-                    _clamp_pos(document, fragment.position() + fragment.length()),
-                    QTextCursor.MoveMode.KeepAnchor,
-                )
-                fmt = QTextCharFormat()
-                fmt.setForeground(self._muted_color)
-                edit.mergeCharFormat(fmt)
+                spans.append((fragment.position(), fragment.length()))
             iterator += 1
+        if not spans:
+            return
+        fmt = QTextCharFormat()
+        fmt.setForeground(self._muted_color)
+        edit = QTextCursor(document)
+        for position, length in spans:
+            edit.setPosition(position)
+            edit.setPosition(
+                _clamp_pos(document, position + length),
+                QTextCursor.MoveMode.KeepAnchor,
+            )
+            edit.mergeCharFormat(fmt)
 
     def _style_callouts(self, document: QTextDocument) -> None:
         """Callout：标记行替换为标签，整段引用块加中性淡底。"""

@@ -30,6 +30,7 @@ from PyQt6ElaWidgetTools import (
 )
 
 from .._internal import (
+    safe_connect,
     system_cjk_font_family,
 )
 from ..math_lite import (
@@ -153,12 +154,14 @@ class ElaMarkdownViewer(
         self._mermaid_priority_timer = QTimer(self)
         self._mermaid_priority_timer.setSingleShot(True)
         self._mermaid_priority_timer.setInterval(_MERMAID_PRIORITY_INTERVAL_MS)
-        self._mermaid_priority_timer.timeout.connect(self._refresh_mermaid_priorities)
+        safe_connect(
+            self._mermaid_priority_timer, "timeout", self._refresh_mermaid_priorities
+        )
         #: 任务提交计时器（延后一拍，先让文档滚动/贴底逻辑生效再选下一个任务）
         self._mermaid_pump_timer = QTimer(self)
         self._mermaid_pump_timer.setSingleShot(True)
         self._mermaid_pump_timer.setInterval(0)
-        self._mermaid_pump_timer.timeout.connect(self._pump_mermaid)
+        safe_connect(self._mermaid_pump_timer, "timeout", self._pump_mermaid)
         #: 行内高亮文本（``==text==``，解析后按顺序套用背景色）
         self._mark_texts: list[str] = []
         #: 脚注定义（预处理时抽取到文末）：[(id, text)]
@@ -311,12 +314,12 @@ class ElaMarkdownViewer(
         self._stick_to_bottom = True
         self._stream_timer = QTimer(self)
         self._stream_timer.setSingleShot(True)
-        self._stream_timer.timeout.connect(self._stream_flush)
+        safe_connect(self._stream_timer, "timeout", self._stream_flush)
 
         # 流式末尾打字光标
         self._caret_visible = False
         self._caret_timer = QTimer(self)
-        self._caret_timer.timeout.connect(self._toggle_stream_caret)
+        safe_connect(self._caret_timer, "timeout", self._toggle_stream_caret)
 
         # 大文档分块渲染状态
         self._large_render_chunks: list[str] = []
@@ -327,7 +330,7 @@ class ElaMarkdownViewer(
         self._large_render_scroll = (0, 0)
         self._large_render_timer = QTimer(self)
         self._large_render_timer.setSingleShot(True)
-        self._large_render_timer.timeout.connect(self._render_large_step)
+        safe_connect(self._large_render_timer, "timeout", self._render_large_step)
 
         self._text_browser = _ElaTextBrowser(self)
         self._text_browser.setFrameShape(QFrame.Shape.NoFrame)
@@ -348,16 +351,20 @@ class ElaMarkdownViewer(
         self._text_browser.setHorizontalScrollBar(
             ElaScrollBar(Qt.Orientation.Horizontal, self._text_browser)
         )
-        self._text_browser.anchorClicked.connect(self._on_anchor_clicked)
-        self._text_browser.imageClicked.connect(self._on_image_clicked)
+        safe_connect(self._text_browser, "anchorClicked", self._on_anchor_clicked)
+        safe_connect(self._text_browser, "imageClicked", self._on_image_clicked)
         self._text_browser.installEventFilter(self)
         self._text_browser.viewport().installEventFilter(self)
         self._document_tooltip_adapter = install_document_tooltips(self._text_browser)
-        self._text_browser.verticalScrollBar().valueChanged.connect(
-            self._on_view_scrolled
+        safe_connect(
+            self._text_browser.verticalScrollBar(),
+            "valueChanged",
+            self._on_view_scrolled,
         )
-        self._text_browser.document().documentLayout().documentSizeChanged.connect(
-            self._on_document_size_changed
+        safe_connect(
+            self._text_browser.document().documentLayout(),
+            "documentSizeChanged",
+            self._on_document_size_changed,
         )
 
         base_font = self._text_browser.document().defaultFont()
@@ -373,11 +380,11 @@ class ElaMarkdownViewer(
         # 布局刷新（滚动/尺寸变化后重排代码复制按钮与图片宽度）
         self._layout_timer = QTimer(self)
         self._layout_timer.setSingleShot(True)
-        self._layout_timer.timeout.connect(self._on_layout_refresh)
+        safe_connect(self._layout_timer, "timeout", self._on_layout_refresh)
         # 被绘制时补齐懒掉的主题重渲染（不在 paintEvent 里改文档）
         self._pending_render_timer = QTimer(self)
         self._pending_render_timer.setSingleShot(True)
-        self._pending_render_timer.timeout.connect(self._ensure_rendered)
+        safe_connect(self._pending_render_timer, "timeout", self._ensure_rendered)
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
