@@ -60,6 +60,14 @@ def _merge_image_extent(current, new):
     return min(current[0], lo), max(current[1], hi)
 
 
+def _elide_to_width(fm: QFontMetricsF, text: str, width: float) -> str:
+    """标签放不进 ``width`` 时右侧省略（否则 `drawText` 会把最后一个字硬切一半）。"""
+    advance = fm.horizontalAdvance(text)
+    if width <= 4.0 or advance <= width + 1.0:
+        return text
+    return fm.elidedText(text, Qt.TextElideMode.ElideRight, int(width))
+
+
 class GridCoord(Coord):
     """直角坐标系：grid 边距 + 多 x/y 轴 + 网格 / 区域 / 刻度 / 标签。
     ``grid`` 边距默认 left/right/top/bottom = 48/24/40/36（数值 px 或
@@ -942,10 +950,10 @@ class GridCoord(Coord):
             text_w = max(fm.horizontalAdvance(label) for _py, label in positions)
             if axis.position == "right":
                 left = line + margin
-                right = max(left + text_w, self.rect.right())
+                right = min(left + text_w, self.rect.right())
             else:
                 right = line - margin
-                left = min(right - text_w, self.rect.left())
+                left = max(right - text_w, self.rect.left())
             width = max(8.0, right - left)
             height = fm.height()
             p.setPen(color)
@@ -968,7 +976,11 @@ class GridCoord(Coord):
                         align=align,
                     )
                 else:
-                    p.drawText(QRectF(left, top, width, height), align, label)
+                    p.drawText(
+                        QRectF(left, top, width, height),
+                        align,
+                        _elide_to_width(fm, label, width),
+                    )
         # x 轴标签：沿刻度居中（默认），可按 axisLabel.align / verticalAlign 调锚点，
         # 并支持 axisLabel.rotate 旋转。
         for axis in self.x_axes:

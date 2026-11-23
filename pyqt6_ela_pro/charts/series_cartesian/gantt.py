@@ -55,6 +55,8 @@ class GanttSeriesRenderer(SeriesRenderer):
         self._deps_cfg = {}
         self._today_cfg = {}
         self._weekend_cfg = {}
+        self._month_cfg = {}
+        self._nonwork_dates = frozenset()
         self._baseline_cfg = {}
         self._deadline_cfg = {}
         self._critical_cfg = {}
@@ -283,6 +285,13 @@ class GanttSeriesRenderer(SeriesRenderer):
             dict(raw_weekend)
             if isinstance(raw_weekend, dict)
             else {"show": raw_weekend is True}
+        )
+        self._nonwork_dates = _nonwork_dates(self._weekend_cfg.get("dates"))
+        raw_month = self.opt.get("monthLine")
+        self._month_cfg = (
+            dict(raw_month)
+            if isinstance(raw_month, dict)
+            else {"show": raw_month is not False}
         )
         self._row_stripe = self.opt.get("rowStripe", False) is not False
         self._today_ms = None
@@ -637,7 +646,7 @@ class GanttSeriesRenderer(SeriesRenderer):
                 cursor = datetime(cursor.year, cursor.month, cursor.day)
                 limit_ms = float(x_axis.vmax)
                 while _dt_to_ms(cursor) <= limit_ms:
-                    if cursor.weekday() >= 5:
+                    if self._is_nonwork(cursor):
                         x0 = x_axis.map(_dt_to_ms(cursor), plot.left(), plot.right())
                         x1 = x_axis.map(
                             _dt_to_ms(cursor + timedelta(days=1)),
@@ -649,6 +658,8 @@ class GanttSeriesRenderer(SeriesRenderer):
                             color,
                         )
                     cursor += timedelta(days=1)
+        self._paint_month_lines(p, coord)
+        self._paint_today_band(p, coord)
         if not self._row_stripe:
             return
         band = coord.y_axis.bandWidth(plot.top(), plot.bottom())
@@ -667,6 +678,89 @@ class GanttSeriesRenderer(SeriesRenderer):
                     ),
                     stripe,
                 )
+
+    def _is_nonwork(self, day: datetime) -> bool:
+        """周末，或 ``weekend.dates`` 里显式列出的非工作日。"""
+        return day.weekday() >= 5 or day.date() in self._nonwork_dates
+
+    def _month_line_positions(self, coord: GridCoord) -> list:
+        """可见窗口内的月首像素位置；跨度不足 35 天时不画（避免糊成一片）。"""
+        x_axis = coord.x_axis
+        if not x_axis.is_time:
+            return []
+        span = float(x_axis.vmax) - float(x_axis.vmin)
+        if not _finite(span) or span < 35 * 86400000.0:
+            return []
+        plot = coord.plot
+        year, month = _ms_to_dt(x_axis.vmin).year, _ms_to_dt(x_axis.vmin).month
+        out = []
+        for _ in range(240):
+            year, month = (year + 1, 1) if month == 12 else (year, month + 1)
+            stamp = _dt_to_ms(datetime(year, month, 1))
+            if stamp > float(x_axis.vmax):
+                break
+            if stamp < float(x_axis.vmin):
+                continue
+            x = x_axis.map(stamp, plot.left(), plot.right())
+            if not _finite(x) or x > plot.right():
+                break
+            # 贴边的月首线会和轴边框重叠，没有信息量。
+            if plot.left() + 0.5 < x < plot.right() - 0.5:
+                out.append(x)
+        return out
+
+    def _paint_month_lines(self, p: QPainter, coord: GridCoord) -> None:
+        if not self._month_cfg.get("show", True):
+            return
+        positions = self._month_line_positions(coord)
+        if not positions:
+            return
+        color = self.resolveColor(
+            self._month_cfg.get("color") or T("color.border.strong", self.chart)
+        )
+        ratio = max(0.0, min(1.0, _to_float(self._month_cfg.get("opacity"), 0.35)))
+        color = with_alpha(color, int(color.alpha() * ratio))
+        p.save()
+        p.setPen(QPen(color, _to_float(self._month_cfg.get("width"), 1.0)))
+        for x in positions:
+            # 贴到半像素，1px 线才不会被抗锯齿摊成两列浅灰。
+            px = math.floor(x) + 0.5
+            p.drawLine(QPointF(px, coord.plot.top()), QPointF(px, coord.plot.bottom()))
+        p.restore()
+
+    def _today_band(self, coord: GridCoord):
+        """今天所在整天的底纹矩形；``todayLine.band=False`` 或非时间轴返回 ``None``。"""
+        if self._today_ms is None or not coord.x_axis.is_time:
+            return None
+        if self._today_cfg.get("band", True) is False:
+            return None
+        plot = coord.plot
+        day = _ms_to_dt(self._today_ms)
+        start = datetime(day.year, day.month, day.day)
+        x0 = coord.x_axis.map(_dt_to_ms(start), plot.left(), plot.right())
+        x1 = coord.x_axis.map(
+            _dt_to_ms(start + timedelta(days=1)), plot.left(), plot.right()
+        )
+        if not (_finite(x0) and _finite(x1)):
+            return None
+        lo, hi = sorted((x0, x1))
+        rect = QRectF(lo, plot.top(), max(1.0, hi - lo), plot.height()).intersected(
+            plot
+        )
+        return rect if rect.width() > 0.0 else None
+
+    def _paint_today_band(self, p: QPainter, coord: GridCoord) -> None:
+        rect = self._today_band(coord)
+        if rect is None:
+            return
+        color = self.resolveColor(
+            self._today_cfg.get("color") or T("color.danger", self.chart)
+        )
+        p.save()
+        p.setPen(Qt.PenStyle.NoPen)
+        p.setBrush(with_alpha(color, 18))
+        p.drawRect(rect)
+        p.restore()
 
     def _paint_bar(self, p, item, rect, color, alpha, border_color, border_w):
         progress = item["progress"]
@@ -1837,3 +1931,30 @@ def _finite(value) -> bool:
         return math.isfinite(float(value))
     except (TypeError, ValueError, OverflowError):
         return False
+
+
+def _nonwork_dates(raw) -> frozenset:
+    """``weekend.dates`` → 额外非工作日集合（非法项静默跳过）。"""
+    if not isinstance(raw, (list, tuple, set, frozenset)):
+        return frozenset()
+    out = set()
+    for entry in raw:
+        if isinstance(entry, datetime):
+            out.add(entry.date())
+        elif isinstance(entry, date):
+            out.add(entry)
+        elif isinstance(entry, str) and entry.strip():
+            try:
+                out.add(date.fromisoformat(entry.strip()[:10]))
+            except ValueError:
+                continue
+        else:
+            if isinstance(entry, bool) or not isinstance(entry, (int, float)):
+                continue
+            # 毫秒时间戳才收；`1` / `True` 这类噪声按 1970 处理会凭空多出非工作日。
+            if abs(float(entry)) < 1e11:
+                continue
+            stamp = _to_timestamp(entry)
+            if stamp is not None:
+                out.add(_ms_to_dt(stamp).date())
+    return frozenset(out)

@@ -16,6 +16,7 @@ import pytest
 from pyqt6_ela_pro.charts import ElaChartWidget
 from pyqt6_ela_pro.charts._tokens import T
 from pyqt6_ela_pro.charts._utils import merged_text_style, text_weight
+from pyqt6_ela_pro.charts.axes.grid import _elide_to_width
 
 
 def _chart(make) -> ElaChartWidget:
@@ -346,3 +347,33 @@ class TestInvalidValuesAreIgnored:
         chart.setOption({"textStyle": {"fontSize": "abc"}})
         assert chart.legend._font().pixelSize() == T("font.xs")
         assert chart.coords[0].x_axes[0].labelFont().pixelSize() == T("font.xs")
+
+class TestAxisLabelElide:
+    """y 轴标签超宽时右侧省略，而不是把最后一个字切成半个。"""
+
+    @staticmethod
+    def _fm(size: int = 12):
+        from PyQt6.QtGui import QFont, QFontMetricsF
+
+        return QFontMetricsF(QFont("Segoe UI", size))
+
+    def test_short_text_untouched(self):
+        fm = self._fm()
+        assert _elide_to_width(fm, "联调", 200.0) == "联调"
+
+    def test_text_exactly_fitting_not_elided(self):
+        fm = self._fm()
+        text = "环境准备"
+        assert _elide_to_width(fm, text, fm.horizontalAdvance(text)) == text
+
+    def test_long_text_elided(self):
+        fm = self._fm()
+        text = "接口开发与联调验收阶段"
+        out = _elide_to_width(fm, text, 60.0)
+        assert out != text
+        assert out.endswith("…")
+        assert fm.horizontalAdvance(out) <= 60.0
+
+    def test_too_narrow_keeps_text(self):
+        fm = self._fm()
+        assert _elide_to_width(fm, "联调", 0.0) == "联调"

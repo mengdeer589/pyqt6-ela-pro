@@ -556,7 +556,7 @@ chart.setChartTheme("brand")
   `scale` / `nameLocation` / `nameGap` / `interval` / `minInterval` /
   `maxInterval` / `splitNumber` / `axisLabel`（`show` / `interval` / `rotate` /
   `formatter`（模板或 `callable(value, index)`，category 轴同样生效）/ `color` /
-  `fontSize`）/ `axisTick` / `axisLine` / `splitLine` /
+  `fontSize` / `monthFirst`（时间轴：每月第一个刻度显示 `11月`））/ `axisTick` / `axisLine` / `splitLine` /
   `splitArea`；运行时用 `setAxisLabelFormatter(...)` / `setCategoryLabels(...)` /
   `updateAxis(...)`，不要为了改一条轴而重写整个轴数组；`grid` 支持 `show` / `containLabel` / `borderColor` /
   `borderWidth` / `backgroundColor`。`xAxis` / `yAxis` 可传数组，系列用
@@ -631,7 +631,8 @@ chart.setChartTheme("brand")
   但**任一条目缺 `name` 就整轴跳过自动生成**（此时必须显式给 `yAxis.data`）。
 - 类目轴沿用 ECharts 语义：0 在底部。工作计划一般加 `yAxis.inverse: True`
   让第一行在顶部；此时任务条、轴标签、axis tooltip 会一起翻转。
-- 长任务名需要 `grid.left` 留白（或 `grid.containLabel: true`）；`xAxis.type: "log"` /
+- 长任务名需要 `grid.left` 留白（或 `grid.containLabel: true`）；空间不足时
+  y 轴标签右侧省略（`…`）而不是切半个字；`xAxis.type: "log"` /
   类目 x 轴不支持，`yAxis` 非 `category` 时整系列跳过并告警。
 
 ### 任务选项
@@ -645,8 +646,9 @@ chart.setChartTheme("brand")
 | `criticalPath` | `{"show": False, "color": None, "width": 1.5, "arrows": True}`；单系列内按 finish-to-start 依赖找**最长依赖链**（按工期累加，不把日期空隙算浮动），关键任务加描边、关键箭头用危险色 |
 | `milestone` | `{"symbolSize": 12}`；数据项 `milestone: true` 或只给 `start` 时画菱形 |
 | `dependencies` | `{"show": True, "color": None, "width": 1}`；数据项 `dependencies: ["前置任务名"]`，可跨甘特系列按名查找 |
-| `todayLine` | `{"show": False, "date": None, "color": None, "label": "今天"}`；`date` 缺省取当前时间，测试 / 演示建议固定 |
-| `weekend` | `{"show": False, "color": None, "opacity": 0.55}`；时间轴周六 / 周日底纹（默认关） |
+| `todayLine` | `{"show": False, "date": None, "color": None, "label": "今天", "band": True}`；`date` 缺省取当前时间，测试 / 演示建议固定；`band` 给当天整列加淡色底纹 |
+| `weekend` | `{"show": False, "color": None, "opacity": 0.55, "dates": []}`；时间轴周六 / 周日底纹（默认关）；`dates` 追加法定假日 / 调休等额外非工作日（日期对象、`YYYY-MM-DD` 或毫秒） |
+| `monthLine` | `{"show": True, "color": None, "width": 1, "opacity": 0.35}`；时间轴跨度 ≥ 35 天时在月首画竖线，默认跟随 `color.border.strong` |
 | `rowStripe` | 交替行底纹，默认 `False`；需要密集任务分带时再开 |
 | `label` | 标准标签键：`show` / `position`（`inside` / `left` / `right`）/ `formatter`；`{b}` 是任务名，`{c}` 也是任务名 |
 | `editable` | 默认 `False`；开启后左键拖动任务条整体平移，拖动左右 6px 边缘拉伸 |

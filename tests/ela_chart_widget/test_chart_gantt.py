@@ -842,3 +842,87 @@ class TestCriticalPath:
         ]
         chart = _chart(make, tasks=tasks, series_extra={"criticalPath": {"show": True}})
         assert all(not item["critical"] for item in _renderer(chart)._items)
+
+class TestAxisPolish:
+    """非工作日 / 月首线 / 今天列 / 月首标签 / y 轴省略。"""
+
+    def test_weekend_dates_add_nonwork_days(self, qapp, make):
+        chart = _chart(
+            make,
+            series_extra={
+                "weekend": {"show": True, "dates": ["2026-11-18", "2026-11-16"]}
+            },
+        )
+        renderer = _renderer(chart)
+        assert renderer._is_nonwork(datetime(2026, 11, 18)) is True
+        assert renderer._is_nonwork(datetime(2026, 11, 16)) is True
+        assert renderer._is_nonwork(datetime(2026, 11, 17)) is False
+        assert renderer._is_nonwork(datetime(2026, 11, 21)) is True  # 周六
+
+    def test_weekend_dates_reject_garbage(self, qapp, make):
+        chart = _chart(
+            make,
+            series_extra={"weekend": {"show": True, "dates": ["not-a-date", None, 1]}},
+        )
+        assert _renderer(chart)._nonwork_dates == frozenset()
+
+    def test_month_lines_at_month_edges(self, qapp, make):
+        chart = _chart(
+            make,
+            xAxis={"type": "time", "min": "2026-10-20", "max": "2026-12-20"},
+        )
+        coord = chart.coords[0]
+        positions = _renderer(chart)._month_line_positions(coord)
+        assert len(positions) == 2  # 11-01 / 12-01
+        assert positions[0] < positions[1]
+        assert coord.plot.left() <= positions[0] <= coord.plot.right()
+
+    def test_month_lines_skip_short_span(self, qapp, make):
+        chart = _chart(
+            make,
+            xAxis={"type": "time", "min": "2026-11-01", "max": "2026-11-20"},
+        )
+        assert _renderer(chart)._month_line_positions(chart.coords[0]) == []
+
+    def test_month_line_can_be_disabled(self, qapp, make):
+        chart = _chart(
+            make,
+            series_extra={"monthLine": {"show": False}},
+            xAxis={"type": "time", "min": "2026-10-20", "max": "2026-12-20"},
+        )
+        assert _renderer(chart)._month_cfg["show"] is False
+
+    def test_today_band_covers_one_day(self, qapp, make):
+        chart = _chart(make)
+        coord = chart.coords[0]
+        rect = _renderer(chart)._today_band(coord)
+        assert rect is not None
+        x_axis = coord.x_axis
+        one_day = x_axis.map(_to_timestamp("2026-11-19"), coord.plot.left(), coord.plot.right()) - x_axis.map(
+            _to_timestamp("2026-11-18"), coord.plot.left(), coord.plot.right()
+        )
+        assert abs(rect.width() - one_day) <= 1.5
+
+    def test_today_band_can_be_disabled(self, qapp, make):
+        chart = _chart(
+            make, series_extra={"todayLine": {"show": True, "date": "2026-11-18", "band": False}}
+        )
+        assert _renderer(chart)._today_band(chart.coords[0]) is None
+
+    def test_month_first_axis_label(self, qapp, make):
+        chart = _chart(
+            make,
+            xAxis={
+                "type": "time",
+                "min": "2026-10-20",
+                "max": "2026-12-20",
+                "splitNumber": 6,
+                "axisLabel": {"formatter": "{MM}-{dd}", "monthFirst": True},
+            },
+        )
+        axis = chart.coords[0].x_axis
+        ticks = axis.ticks()
+        labels = [axis.formatTickLabel(value, i) for i, value in enumerate(ticks)]
+        assert any(text.endswith("月") for text in labels)
+        first = next(text for text in labels if text.endswith("月"))
+        assert first in ("11月", "12月")

@@ -323,10 +323,14 @@ class AxisModel:
             "value": formatValue(value),
         }
 
-    def _format_time_tick(self, value, formatter=None) -> str:
+    def _format_time_tick(self, value, formatter=None, index=None) -> str:
+        if self.axisLabelOption().get("monthFirst") and self._is_month_first(
+            value, index
+        ):
+            return f"{_ms_to_dt(value).month}月"
         if callable(formatter):
             try:
-                out = formatter(value, 0)
+                out = formatter(value, 0 if index is None else int(index))
             except TypeError:
                 try:
                     out = formatter(value)
@@ -352,6 +356,29 @@ class AxisModel:
         if step < 31536000000:
             return dt.strftime("%Y-%m")
         return dt.strftime("%Y")
+
+    def _is_month_first(self, value, index=None) -> bool:
+        """该刻度是否为所在月份的第一个刻度（``axisLabel.monthFirst``）。
+
+        需要与**前一个刻度**比较月份，因此依赖刻度列表；下标不可用时按值查找。
+        """
+        ticks = self._ticks
+        if not ticks:
+            return False
+        try:
+            idx = int(index) if index is not None else None
+        except (TypeError, ValueError, OverflowError):
+            idx = None
+        if idx is None or not 0 <= idx < len(ticks):
+            try:
+                idx = ticks.index(value)
+            except (ValueError, TypeError):
+                return False
+        if idx <= 0:
+            return False
+        prev = _ms_to_dt(ticks[idx - 1])
+        cur = _ms_to_dt(value)
+        return (prev.year, prev.month) != (cur.year, cur.month)
 
     def _format_time_value(self, value) -> str:
         dt = _ms_to_dt(value)
@@ -857,7 +884,7 @@ class AxisModel:
         label = self.axisLabelOption()
         formatter = label.get("formatter")
         if self.is_time:
-            return self._format_time_tick(value, formatter)
+            return self._format_time_tick(value, formatter, index)
         if self.type != "category":
             raw = (
                 int(value) if isinstance(value, float) and value.is_integer() else value

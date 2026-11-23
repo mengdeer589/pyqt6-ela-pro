@@ -110,7 +110,10 @@ class TestWorkspaceControls:
         page = _page(make)
         page._activate_workspace(1)
         chart = page._gantt_chart
-        assert chart.getOption()["series"][0]["type"] == "gantt"
+        series = chart.getOption()["series"][0]
+        assert series["type"] == "gantt"
+        assert series["rowStripe"] is True
+        assert series["weekend"]["show"] is True
         assert chart.seriesRenderers[0]._items
         assert chart.seriesRenderers[0]._editable is True
         assert page._gantt_view.chart() is chart

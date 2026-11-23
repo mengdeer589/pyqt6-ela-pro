@@ -3818,9 +3818,29 @@ class ChartsPage(ExamplePage):
                 "xAxis": {
                     "type": "time",
                     "splitNumber": 6,
-                    "axisLabel": {"formatter": "{MM}-{dd}"},
+                    "axisLine": {
+                        "show": True,
+                        "lineStyle": {"color": "color.border.strong"},
+                    },
+                    "axisTick": {"show": True, "length": 4},
+                    "axisLabel": {
+                        "formatter": "{MM}-{dd}",
+                        "fontSize": 12,
+                        "color": "color.text.secondary",
+                        "monthFirst": True,
+                    },
+                    "splitLine": {
+                        "show": True,
+                        "lineStyle": {"color": "color.border"},
+                    },
                 },
-                "yAxis": {"type": "category", "inverse": True},
+                "yAxis": {
+                    "type": "category",
+                    "inverse": True,
+                    "axisLine": {"show": False},
+                    "axisTick": {"show": False},
+                    "axisLabel": {"fontSize": 12, "color": "color.text.primary"},
+                },
                 "series": [
                     {
                         "type": "gantt",
@@ -3859,6 +3879,8 @@ class ChartsPage(ExamplePage):
                             ),
                         },
                         "dependencies": {"show": True, "width": 1.2},
+                        "rowStripe": True,
+                        "weekend": {"show": True, "opacity": 0.1},
                         "todayLine": {"show": True, "date": "2026-11-18"},
                     }
                 ],
