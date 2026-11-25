@@ -191,7 +191,7 @@ class ElaSeverity(IntEnum):
 
 
 def statusColor(mode, role: ElaStatusRoleType) -> QColor:
-    """校验 / 提示状态的文字与图标色。
+    """校验 / 提示状态的文字与图标色（沿用上游 ``Status*`` 令牌）。
 
     ``Error`` / ``Warning`` / ``Success`` 分别取上游 ``StatusDanger`` /
     ``StatusWarning`` / ``StatusSuccess``；``Neutral`` 回落次要文字色。
@@ -223,7 +223,7 @@ _SEVERITY_ROLE = {
 
 
 def severityColor(mode, severity: ElaSeverity) -> QColor:
-    """消息等级的图标 / 指示色：``Info`` 用强调色，其余走状态色。
+    """消息等级的图标 / 指示色（饱和档）：``Info`` 用强调色，其余走语义色。
 
     :param mode: ``None`` = 当前模式。
     :param severity: 也接受裸 int；非法值按 ``Info`` 处理。

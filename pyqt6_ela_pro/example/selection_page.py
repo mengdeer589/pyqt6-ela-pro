@@ -7,7 +7,6 @@ from datetime import datetime
 from PyQt6.QtCore import QTimer, pyqtSignal
 from PyQt6.QtGui import QCursor, QTextCursor
 from PyQt6.QtWidgets import (
-    QApplication,
     QHBoxLayout,
     QWidget,
 )
@@ -26,6 +25,7 @@ from pyqt6_ela_pro import (
     ElaSelectionAssistant,
     ElaSelectionResultDialog,
 )
+from pyqt6_ela_pro._clipboard import set_clipboard_text
 
 from .base_page import ExamplePage
 
@@ -398,8 +398,15 @@ class SelectionAssistantPage(ExamplePage):
     def _on_action_triggered(self, actionId: str, text: str, pos) -> None:
         self._log_line(f"actionTriggered：{actionId} ← {text.strip()[:30]!r}")
         if actionId == "copy":
-            QApplication.clipboard().setText(text)
-            self._log_line("  宿主实现：已写入剪贴板")
+            set_clipboard_text(
+                text,
+                self,
+                lambda ok: self._log_line(
+                    "  宿主实现：已写入剪贴板"
+                    if ok
+                    else "  宿主实现：复制失败（剪贴板被占用）"
+                ),
+            )
         elif actionId in _FAKE_REPLIES:
             self._start_action(actionId, text)
 

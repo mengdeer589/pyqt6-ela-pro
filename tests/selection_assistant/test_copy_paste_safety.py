@@ -369,10 +369,15 @@ class TestRestoreKeepsUserCopy:
         for _ in range(5):
             QCoreApplication.processEvents()
         assert _has_non_text_format(cb) is True
-        cb.setText("纯文本")
-        for _ in range(5):
-            QCoreApplication.processEvents()
-        assert _has_non_text_format(cb) is False, "纯文本剪贴板不该被误判成含非文本"
+        # Windows 上 setText 可能被静默丢弃（并行跑时更明显）：重发直到图片格式被清掉
+        assert (
+            wait_for_clipboard(
+                qapp,
+                lambda _text: not _has_non_text_format(cb),
+                write=lambda: cb.setText("纯文本"),
+            )
+            == "纯文本"
+        ), "纯文本剪贴板不该被误判成含非文本"
 
     def test_plain_restore_still_works(self, qapp, clipboard):
         """对照组：没人动过剪贴板时仍然正常还原。"""

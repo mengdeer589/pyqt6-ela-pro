@@ -14,8 +14,8 @@ from PyQt6.QtGui import (
     QTextDocument,
     QTextImageFormat,
 )
-from PyQt6.QtWidgets import QApplication
 
+from .._clipboard import set_clipboard_text
 from .._internal import is_deleted
 from .. import mermaid_support
 from ..mermaid_support import ElaMermaidRenderer
@@ -438,5 +438,5 @@ class _MarkdownMermaidMixin:
         code = self._mermaid_source_at_cursor()
         if not code:
             return
-        QApplication.clipboard().setText(code)
+        set_clipboard_text(code, self)
         self.mermaidCopied.emit(code)

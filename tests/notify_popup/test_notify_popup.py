@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import pytest
-from PyQt6.QtCore import QAbstractAnimation, QRect, Qt
+from PyQt6.QtCore import QAbstractAnimation, QEvent, QPointF, QRect, QRectF, Qt
+from PyQt6.QtGui import QEnterEvent, QPainter, QPixmap
+from PyQt6ElaWidgetTools import ElaThemeType
 
 from pyqt6_ela_pro import ElaSeverity
 from pyqt6_ela_pro.notify_popup import (
@@ -11,6 +13,54 @@ from pyqt6_ela_pro.notify_popup import (
     ElaNotifyPopup,
     show_notify,
 )
+
+
+class TestNotifyColors:
+    """通知等级色沿用上游 ``Status*``；彩色表面走统一软底配方。"""
+
+    def test_chip_hover_uses_stronger_tint(self, monkeypatch):
+        import pyqt6_ela_pro._notify_common as common
+        from pyqt6_ela_pro._colors import SOFT_TINT_ALPHA
+        from pyqt6_ela_pro._theme import severityColor
+
+        captured = []
+        monkeypatch.setattr(
+            common,
+            "paintRoundedCard",
+            lambda _p, _r, **kw: captured.append(kw.get("background")),
+        )
+        mode = ElaThemeType.ThemeMode.Light
+        _idle, hover, _press = SOFT_TINT_ALPHA["light"]
+        pixmap = QPixmap(24, 24)
+        painter = QPainter(pixmap)
+        try:
+            common.paintNotificationChip(
+                painter,
+                QRectF(0, 0, 24, 24),
+                ElaSeverity.Success,
+                common.SEVERITY_ICONS[ElaSeverity.Success],
+                mode=mode,
+                surface=common.notificationCardBackground(mode, ElaSeverity.Success),
+                hovered=True,
+            )
+        finally:
+            painter.end()
+        accent = severityColor(mode, ElaSeverity.Success)
+        assert captured[0].alpha() == hover
+        assert captured[0].rgb() == accent.rgb()
+
+    def test_card_background_is_severity_tinted_popup(self):
+        import pyqt6_ela_pro._notify_common as common
+        from pyqt6_ela_pro._theme import blend, severityColor, surfacePopup
+
+        mode = ElaThemeType.ThemeMode.Light
+        expected = blend(
+            surfacePopup(mode), severityColor(mode, ElaSeverity.Warning), 0.04
+        )
+        assert (
+            common.notificationCardBackground(mode, ElaSeverity.Warning).name()
+            == expected.name()
+        )
 
 
 class TestElaNotifyPopup:
@@ -178,6 +228,54 @@ class TestElaNotifyLayout:
             assert popup._progress == -1.0
         finally:
             popup._close_animation()
+            popup.deleteLater()
+
+    def test_fade_in_runs_alongside_slide(self):
+        popup = ElaNotifyPopup(title="t", content="c", timeout=0)
+        popup.showNotification()
+        try:
+            assert popup._fade_anim.startValue() == 0.0
+            assert popup._fade_anim.endValue() == 1.0
+            assert popup._fade_anim.duration() > 0
+        finally:
+            popup._close_animation()
+            popup.deleteLater()
+
+    def test_replay_restores_opacity(self, qapp):
+        from _qthelpers import wait_until
+
+        popup = ElaNotifyPopup(title="t", content="c", timeout=0)
+        try:
+            popup.showNotification()
+            popup._on_close()
+            wait_until(
+                qapp, lambda: not popup.isVisible(), timeout_ms=2000, use_qwait=True
+            )
+            assert popup.windowOpacity() == pytest.approx(1.0)
+            popup.showNotification("t2", "c2")
+            wait_until(
+                qapp,
+                lambda: popup.windowOpacity() == pytest.approx(1.0),
+                timeout_ms=2000,
+                use_qwait=True,
+            )
+            assert popup.isVisible()
+        finally:
+            popup._close_animation()
+            popup.deleteLater()
+
+    def test_hover_toggles_card_highlight(self):
+        popup = ElaNotifyPopup(title="t", content="c", timeout=0)
+        try:
+            assert popup._hovered is False
+            assert popup._badge._hovered is False
+            popup.enterEvent(QEnterEvent(QPointF(0, 0), QPointF(0, 0), QPointF(0, 0)))
+            assert popup._hovered is True
+            assert popup._badge._hovered is True
+            popup.leaveEvent(QEvent(QEvent.Type.Leave))
+            assert popup._hovered is False
+            assert popup._badge._hovered is False
+        finally:
             popup.deleteLater()
 
     def test_reflow_moves_remaining_popup_down(self, qapp, monkeypatch):

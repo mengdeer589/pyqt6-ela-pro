@@ -36,36 +36,36 @@ from PyQt6ElaWidgetTools import ElaIconButton, ElaIconType, ElaThemeType, eTheme
 from ._internal import connect_theme_signal, disconnect_theme, is_deleted
 from ._motion import Duration, start_transition
 from ._notify_common import (
-    BADGE_SIZE,
+    CHIP_SIZE,
     GAP,
     RADIUS,
     STACK_GAP,
     coerceSeverity,
     liveItems,
+    notificationCardBackground,
     paintNotificationCard,
+    paintNotificationChip,
     severityIcon,
     stackOffset,
     stackStep,
 )
-from ._styles import (
-    SHADOW_MARGIN,
-    ColorText,
-    paintOverlayShadow,
-    paintSeverityBadge,
-)
-from ._theme import ElaSeverity, severityColor, text, textMuted
+from ._styles import SHADOW_MARGIN, ColorText, paintOverlayShadow
+from ._theme import ElaSeverity, text, textMuted
 
 #: 卡片内容宽（不含两侧阴影边距）
 _CONTENT_WIDTH = 300
-#: 卡片内边距
+#: 卡片内边距；底部要额外让出时间条的位置
 _PAD_X = 16
 _PAD_Y = 14
+_PAD_BOTTOM = 18
 #: 卡片圆角
 _RADIUS = RADIUS
-#: 等级圆直径
-_BADGE_SIZE = BADGE_SIZE
-#: 等级圆与标题 / 标题与关闭键的间距
-_GAP = GAP
+#: 等级 chip 边长
+_CHIP_SIZE = CHIP_SIZE
+#: 行内间距（chip ↔ 标题 / 标题 ↔ 关闭键）
+_ROW_GAP = GAP
+#: 标题与正文的间距
+_TITLE_BODY_GAP = 5
 #: 关闭键热区
 _CLOSE_SIZE = 24
 #: 卡片最小高度（不含阴影边距）
@@ -74,14 +74,15 @@ _MIN_CARD_HEIGHT = 76
 _STACK_GAP = STACK_GAP
 
 
-class _SeverityBadge(QWidget):
-    """实心等级色圆 + ElaAwesome 字形（与上游 ElaMessageBar 同款）。"""
+class _SeverityChip(QWidget):
+    """等级 chip：ElaButton filled 变体的浅底 + 可读彩字。"""
 
     def __init__(self, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
-        self.setFixedSize(_BADGE_SIZE, _BADGE_SIZE)
+        self.setFixedSize(_CHIP_SIZE, _CHIP_SIZE)
         self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
         self._severity = ElaSeverity.Info
+        self._hovered = False
 
     def setSeverity(self, severity: ElaSeverity) -> None:
         if severity == self._severity:
@@ -92,14 +93,23 @@ class _SeverityBadge(QWidget):
     def severity(self) -> ElaSeverity:
         return self._severity
 
+    def setHovered(self, hovered: bool) -> None:
+        if hovered == self._hovered:
+            return
+        self._hovered = hovered
+        self.update()
+
     def paintEvent(self, _event: QPaintEvent) -> None:
         mode = eTheme.getThemeMode()
         painter = QPainter(self)
-        paintSeverityBadge(
+        paintNotificationChip(
             painter,
             self.rect(),
-            severityColor(mode, self._severity),
+            self._severity,
             severityIcon(self._severity),
+            mode=mode,
+            surface=notificationCardBackground(mode, self._severity),
+            hovered=self._hovered,
         )
 
 
@@ -125,7 +135,9 @@ class ElaNotifyPopup(QWidget):
         self._severity = coerceSeverity(severity)
         self._y_offset = y_offset
         self._is_closing = False
+        self._hovered = False
         self._animation = None
+        self._fade_anim = None
         self._progress_anim = None
         self._timer = None
         self._theme_mode = eTheme.getThemeMode()
@@ -139,13 +151,15 @@ class ElaNotifyPopup(QWidget):
     def _setup_ui(self):
         sm = self._shadow_margin
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(_PAD_X + sm, _PAD_Y + sm, _PAD_X + sm, _PAD_Y + sm)
-        layout.setSpacing(_GAP)
+        layout.setContentsMargins(
+            _PAD_X + sm, _PAD_Y + sm, _PAD_X + sm, _PAD_BOTTOM + sm
+        )
+        layout.setSpacing(_TITLE_BODY_GAP)
 
         header = QHBoxLayout()
-        header.setSpacing(_GAP)
+        header.setSpacing(_ROW_GAP)
 
-        self._badge = _SeverityBadge(self)
+        self._badge = _SeverityChip(self)
         self._badge.setSeverity(self._severity)
         header.addWidget(self._badge, 0, Qt.AlignmentFlag.AlignVCenter)
 
@@ -177,7 +191,7 @@ class ElaNotifyPopup(QWidget):
         layout.addLayout(header)
 
         self._content_text = ColorText(self)
-        self._content_text.setTextPixelSize(12)
+        self._content_text.setTextPixelSize(13)
         self._content_text.setTextFormat(Qt.TextFormat.PlainText)
         self._content_text.setAlignment(
             Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop
@@ -187,7 +201,7 @@ class ElaNotifyPopup(QWidget):
         self._content_text.setVisible(bool(self._content))
 
         body = QHBoxLayout()
-        body.setContentsMargins(_BADGE_SIZE + _GAP, 0, 0, 0)
+        body.setContentsMargins(_CHIP_SIZE + _ROW_GAP, 0, 0, 0)
         body.addWidget(self._content_text, 1)
         layout.addLayout(body, 1)
 
@@ -205,6 +219,7 @@ class ElaNotifyPopup(QWidget):
         self._sync_height()
 
         self._animation = QPropertyAnimation(self, b"pos")
+        self._fade_anim = QPropertyAnimation(self, b"windowOpacity")
 
         # 功能进度：不接 start_transition —— Reduced 会把时长压到 50ms，
         # 时间条就和 timeout 脱节了（同长按按钮的进度环）。
@@ -234,10 +249,10 @@ class ElaNotifyPopup(QWidget):
             self.width()
             - 2 * self._shadow_margin
             - 2 * _PAD_X
-            - _BADGE_SIZE
-            - _GAP
+            - _CHIP_SIZE
+            - _ROW_GAP
             - _CLOSE_SIZE
-            - _GAP
+            - _ROW_GAP
         )
         elided = self._title_text.fontMetrics().elidedText(
             self._title, Qt.TextElideMode.ElideRight, max(0, avail)
@@ -249,10 +264,12 @@ class ElaNotifyPopup(QWidget):
         """按内容折行高度定高；长文本不裁、短文本不留白。"""
         sm = self._shadow_margin
         card_w = self.width() - 2 * sm
-        card_h = _PAD_Y * 2 + max(_BADGE_SIZE, _CLOSE_SIZE)
+        card_h = _PAD_Y + _PAD_BOTTOM + max(_CHIP_SIZE, _CLOSE_SIZE)
         if self._content:
-            body_w = card_w - 2 * _PAD_X - _BADGE_SIZE - _GAP
-            card_h += _GAP + max(0, self._content_text.heightForWidth(body_w))
+            body_w = card_w - 2 * _PAD_X - _CHIP_SIZE - _ROW_GAP
+            card_h += _TITLE_BODY_GAP + max(
+                0, self._content_text.heightForWidth(body_w)
+            )
         self.setFixedHeight(max(_MIN_CARD_HEIGHT, card_h) + 2 * sm)
         self._update_title_elide()
 
@@ -342,13 +359,19 @@ class ElaNotifyPopup(QWidget):
         self._timer.stop()
         self._is_closing = False
         self._animation.stop()
+        self._fade_anim.stop()
         self.move(self._start_pos)
+        self.setWindowOpacity(0.0)
         super().show()
 
         self._animation.setStartValue(self.pos())
         self._animation.setEndValue(self._end_pos)
         # 滑入**不传 on_complete** —— 传了会在滑入结束时把弹窗关掉。
         start_transition(self._animation, Duration.Normal)
+
+        self._fade_anim.setStartValue(0.0)
+        self._fade_anim.setEndValue(1.0)
+        start_transition(self._fade_anim, Duration.Normal)
 
         if self._timeout > 0:
             self._timer.start(self._timeout)
@@ -366,11 +389,15 @@ class ElaNotifyPopup(QWidget):
         self._timer.stop()
         self._progress_anim.stop()
         self._animation.stop()
+        self._fade_anim.stop()
         self._animation.setStartValue(self.pos())
         self._animation.setEndValue(self._start_pos)
-        # 收尾只有这一个注册点。start_transition 内部保证「先断旧再连新」，
-        # 所以关闭动画进行中收到 showNotification 会正确地取消收尾、弹回打开态，
-        # 而不会叠连接让 _on_animation_end 跑两次（两次 closed.emit()）。
+        self._fade_anim.setStartValue(self.windowOpacity())
+        self._fade_anim.setEndValue(0.0)
+        # 淡出先于收尾：Disabled 下两者同步落终值，收尾时透明度已归零。
+        # 收尾只有这一个注册点；start_transition 内部先断旧再连新，
+        # 关闭中重播会取消收尾、弹回打开态，不会 double emit closed。
+        start_transition(self._fade_anim, Duration.Normal)
         start_transition(
             self._animation, Duration.Normal, on_complete=self._on_animation_end
         )
@@ -378,6 +405,7 @@ class ElaNotifyPopup(QWidget):
     def _on_animation_end(self):
         self._is_closing = False
         self.hide()
+        self.setWindowOpacity(1.0)
         self.closed.emit()
 
     def _on_timeout(self):
@@ -386,12 +414,18 @@ class ElaNotifyPopup(QWidget):
     def enterEvent(self, event: QEnterEvent) -> None:
         self._timer.stop()
         self._progress_anim.stop()
+        self._hovered = True
+        self._badge.setHovered(True)
+        self.update()
         super().enterEvent(event)
 
     def leaveEvent(self, event: QEvent) -> None:
         if self._timeout > 0 and self.isVisible() and not self._is_closing:
             self._timer.start(self._timeout)
             self._start_progress()
+        self._hovered = False
+        self._badge.setHovered(False)
+        self.update()
         super().leaveEvent(event)
 
     def resizeEvent(self, event: QResizeEvent) -> None:
@@ -440,6 +474,7 @@ class ElaNotifyPopup(QWidget):
         """
         self._timer.stop()
         self._animation.stop()
+        self._fade_anim.stop()
         self._progress_anim.stop()
         disconnect_theme(self)
         slot = getattr(self, "_closeSlot", None)
@@ -469,6 +504,7 @@ class ElaNotifyPopup(QWidget):
             self._severity,
             progress=self._progress,
             radius=_RADIUS,
+            hovered=self._hovered,
         )
 
 

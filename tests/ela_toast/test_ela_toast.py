@@ -12,7 +12,7 @@ from pyqt6_ela_pro.ela_toast import _LIVE_TOASTS, _TOAST_GAP, ElaToast
 class TestElaToastInit:
     def test_initialization_with_defaults(self):
         toast = ElaToast(ElaSeverity.Info, "提示信息", 2000)
-        assert toast._border_radius == 8
+        assert toast._border_radius == 10
         assert toast._display_msec == 2000
         assert toast._severity == ElaSeverity.Info
         assert toast._text == "提示信息"
@@ -133,3 +133,15 @@ class TestElaToastHover:
         toast._dwell_timer.stop()
         toast.close()
         toast.deleteLater()
+
+    def test_hover_toggles_card_highlight(self, qapp):
+        toast = ElaToast(ElaSeverity.Info, "提示", 1000)
+        try:
+            assert toast._hovered is False
+            toast.enterEvent(QEnterEvent(QPointF(0, 0), QPointF(0, 0), QPointF(0, 0)))
+            assert toast._hovered is True
+            toast.leaveEvent(QEvent(QEvent.Type.Leave))
+            assert toast._hovered is False
+        finally:
+            toast.close()
+            toast.deleteLater()

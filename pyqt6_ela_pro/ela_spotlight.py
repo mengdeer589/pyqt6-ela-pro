@@ -20,15 +20,18 @@ from PyQt6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout
 
 from PyQt6ElaWidgetTools import (
     eTheme,
+    ElaIconButton,
+    ElaIconType,
     ElaThemeType,
     ElaText,
     ElaTextType,
-    ElaPushButton,
 )
 
-from ._internal import _ThemeAwareMixin, is_deleted
+from ._internal import _ThemeAwareMixin, is_deleted, safe_connect
 from ._motion import start_transition_timer
 from ._styles import paintRoundedCard
+from .ela_button import ElaButton
+from .tooltips import set_tooltip
 from .widget_base import ElaThemeWidget
 
 
@@ -63,6 +66,8 @@ class ElaSpotlight(ElaThemeWidget):
     """引导遮罩。
 
     覆盖在父控件之上，用遮罩突出显示目标控件，并显示提示文字。
+    多步骤模式每步右上角都有「退出教程」图标按钮；上一步为中性描边、
+    下一步为主色实心（最后一步文案「完成」）。
 
     :param parent: 父控件
     """
@@ -114,20 +119,38 @@ class ElaSpotlight(ElaThemeWidget):
         self._step_indicator = ElaText(self._tip_widget)
         self._step_indicator.setTextStyle(ElaTextType.TextStyle.Caption)
 
-        self._prev_btn = ElaPushButton("上一步", self._tip_widget)
-        self._prev_btn.setFixedSize(70, 30)
-        self._prev_btn.setBorderRadius(4)
-        self._prev_btn.clicked.connect(self.previous)
-
-        self._next_btn = ElaPushButton("下一步", self._tip_widget)
-        self._next_btn.setFixedSize(70, 30)
-        self._next_btn.setBorderRadius(4)
-        self._next_btn.clicked.connect(self._onNextClicked)
+        self._prev_btn = ElaButton(
+            "上一步",
+            variant="outlined",
+            color="default",
+            size="middle",
+            parent=self._tip_widget,
+        )
+        self._next_btn = ElaButton(
+            "下一步",
+            variant="solid",
+            color="primary",
+            size="middle",
+            parent=self._tip_widget,
+        )
+        self._exit_btn = ElaIconButton(
+            ElaIconType.IconName.Xmark, 12, 20, 20, self._tip_widget
+        )
+        self._exit_btn.setBorderRadius(4)
+        set_tooltip(self._exit_btn, "退出教程")
+        safe_connect(self._prev_btn, "clicked", self.previous)
+        safe_connect(self._next_btn, "clicked", self._onNextClicked)
+        safe_connect(self._exit_btn, "clicked", self.finish)
 
         tip_layout = QVBoxLayout(self._tip_widget)
         tip_layout.setContentsMargins(16, 12, 16, 12)
         tip_layout.setSpacing(6)
-        tip_layout.addWidget(self._tip_title)
+        header = QHBoxLayout()
+        header.setSpacing(8)
+        header.addWidget(self._tip_title)
+        header.addStretch()
+        header.addWidget(self._exit_btn)
+        tip_layout.addLayout(header)
         tip_layout.addWidget(self._tip_content)
         tip_layout.addSpacing(4)
         btn_layout = QHBoxLayout()
@@ -147,6 +170,7 @@ class ElaSpotlight(ElaThemeWidget):
         self._prev_btn.setVisible(False)
         self._next_btn.setText(button_text)
         self._step_indicator.setVisible(False)
+        self._exit_btn.setVisible(False)
         self.start()
 
     def setSteps(self, steps: list[SpotlightStep]) -> None:
@@ -247,12 +271,15 @@ class ElaSpotlight(ElaThemeWidget):
         self._tip_content.setText(step.content)
         self._tip_content.setVisible(bool(step.content))
 
-        if len(self._steps) > 1:
-            self._prev_btn.setVisible(self._current_step > 0)
+        multi = len(self._steps) > 1
+        # 单步骤（含 setSteps 只给一步）不显示上一步 / 退出 / 指示器
+        self._prev_btn.setVisible(multi and self._current_step > 0)
+        self._exit_btn.setVisible(multi)
+        self._step_indicator.setVisible(multi)
+        if multi:
             self._next_btn.setText(
                 "完成" if self._current_step >= len(self._steps) - 1 else "下一步"
             )
-            self._step_indicator.setVisible(True)
             self._step_indicator.setText(
                 f"{self._current_step + 1} / {len(self._steps)}"
             )

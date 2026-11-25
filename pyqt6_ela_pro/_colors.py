@@ -591,3 +591,75 @@ def state_tint(mode: ElaThemeType.ThemeMode, *, pressed: bool = False) -> QColor
     if mode == ElaThemeType.ThemeMode.Dark:
         return QColor(255, 255, 255, alpha)
     return QColor(0, 0, 0, alpha)
+
+
+# ── 软彩色表面（ElaChip 配方，全库统一）─────────────────────────
+
+#: 彩底 alpha 三档（idle / hover / press，0–255）；暗色要更重才看得见。
+SOFT_TINT_ALPHA = {"light": (25, 45, 65), "dark": (55, 85, 115)}
+#: 彩底描边 alpha（idle / hover|press）。
+SOFT_BORDER_ALPHA = {"light": (77, 150), "dark": (115, 150)}
+
+_SOFT_CACHE: dict[tuple, tuple[QColor, QColor, QColor]] = {}
+_SOFT_CACHE_MAX = 256
+
+
+def soft_surface(
+    accent,
+    mode: ElaThemeType.ThemeMode,
+    surface,
+    *,
+    hovered: bool = False,
+    pressed: bool = False,
+) -> tuple[QColor, QColor, QColor]:
+    """软彩色表面 ``(底, 描边, 可读彩字)``。
+
+    底 / 描边是 accent 的半透明档，叠在 ``surface`` 上透出；文字按**最强态
+    （press）**合成后的底计算，保证 idle / hover / press 都 ≥ 4.5。
+
+    :param accent: 饱和强调色（``scheme["accent"]`` / 等级色）。
+    :param surface: 组件实际所在的表面色。
+    """
+    mode_key = _mode_key(mode)
+    accent = QColor(accent)
+    surface = parse_color(surface)
+    key = (accent.rgba(), mode_key, surface.rgba(), bool(hovered), bool(pressed))
+    cached = _SOFT_CACHE.get(key)
+    if cached is None:
+        idle, hover, press = SOFT_TINT_ALPHA[mode_key]
+        alpha = press if pressed else (hover if hovered else idle)
+        border_alpha = SOFT_BORDER_ALPHA[mode_key][1 if (hovered or pressed) else 0]
+        bg = QColor(accent)
+        bg.setAlpha(alpha)
+        border = QColor(accent)
+        border.setAlpha(border_alpha)
+        worst = mixColor(surface, accent, press / 255.0, rounding=True)
+        cached = (bg, border, _readable_accent(accent, mode, worst))
+        if len(_SOFT_CACHE) >= _SOFT_CACHE_MAX:
+            _SOFT_CACHE.clear()
+        _SOFT_CACHE[key] = cached
+    return tuple(QColor(value) for value in cached)
+
+
+def soft_colors(
+    color_name: str,
+    mode: ElaThemeType.ThemeMode,
+    surface,
+    *,
+    hovered: bool = False,
+    pressed: bool = False,
+    selected: bool = False,
+) -> tuple[QColor, QColor, QColor]:
+    """按色板取软彩色表面；``selected`` 走实心档（``solid*`` + ``solidText``）。"""
+    scheme = get_color_scheme(color_name, mode)
+    if selected:
+        if pressed:
+            bg = scheme["solidActive"]
+        elif hovered:
+            bg = scheme["solidHover"]
+        else:
+            bg = scheme["solid"]
+        return QColor(bg), QColor(bg), QColor(scheme["solidText"])
+    return soft_surface(
+        scheme["accent"], mode, surface, hovered=hovered, pressed=pressed
+    )

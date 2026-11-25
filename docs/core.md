@@ -55,14 +55,22 @@ Running，再 `setCurrentTime(duration())` 跳到终点，终值仍经过真实 
 
 强调色只写 `PrimaryNormal`，`PrimaryHover` / `PrimaryPress` 由上游按 alpha
 0.9 / 0.8 自动派生；`resetAccentColor()` 写回导入时快照的出厂三元组。
-`ElaSeverity`（Info / Success / Warning / Error）是 toast 与通知弹窗共用的消息等级，
-`Info` 走强调色、其余走状态色。
+`ElaSeverity`（Info / Success / Warning / Error）是 toast 与通知弹窗共用的消息等级；
+`Info` 走强调色，其余沿用上游 `StatusSuccess` / `StatusWarning` / `StatusDanger`。
+彩色表面（按钮 / chip / toast / 通知）的底与描边走 `soft_colors()` 软底配方，
+组件不再自己写 tint alpha。
 
 ## 配色（`_colors.py`）
 
 颜色字符串的唯一入口是 `_colors.parse_color`：`QColor("rgb(...)")` 会得到无效色、
 绘制成纯黑且零报错。色板提供 `accent` / `accentHover` / `accentActive` / `accentBg` /
 `textColor`，实心按钮另有 `solid` / `solidHover` / `solidText` 等派生色。
+
+彩色表面统一由 `soft_surface(accent, mode, surface, ...)` 派生：底与描边是 accent
+的半透明档（alpha 浅色 25/45/65、深色 55/85/115），文字对 press 最强态合成底保证
+≥ 4.5。`soft_colors(color_name, mode, surface, ...)` 是命名版；`selected=True` 走
+`solid` 档。**语义状态色不走这条**：`statusColor()` 仍取上游 `Status*`，与移植的
+C++ 控件保持一致。
 
 `primary` / `blue` 的强调色取 `eTheme` 实时值（跟随 `setAccentColor`）；其余色系是
 库自带的固定色板。

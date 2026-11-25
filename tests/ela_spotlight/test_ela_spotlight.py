@@ -6,9 +6,10 @@ import pytest
 from PyQt6.QtCore import QEvent, QPointF, Qt
 from PyQt6.QtGui import QMouseEvent
 from PyQt6.QtWidgets import QWidget
-from PyQt6ElaWidgetTools import ElaThemeType, eTheme
+from PyQt6ElaWidgetTools import ElaIconType, ElaThemeType, eTheme
 
 from pyqt6_ela_pro.ela_spotlight import ElaSpotlight
+from pyqt6_ela_pro.tooltips import _tooltip_dict
 
 
 @pytest.fixture
@@ -71,6 +72,7 @@ class TestElaSpotlightSteps:
             s.showSpotlight(target, "知道了")
             assert len(s._steps) == 1
             assert s._prev_btn.isVisible() is False
+            assert s._exit_btn.isHidden() is True
             assert s._next_btn.text() == "知道了"
 
     def test_set_steps(self, s, steps):
@@ -105,6 +107,74 @@ class TestElaSpotlightNavigation:
         s._is_active = True
         s.finish()
         assert s._is_active is False
+
+
+class TestElaSpotlightExit:
+    @pytest.fixture
+    def multi(self, make, s, qapp):
+        parent = s.parent()
+        parent.resize(600, 400)
+        target = make(QWidget, parent)
+        target.setGeometry(20, 20, 80, 40)
+        s.setSteps(
+            [
+                ElaSpotlight.SpotlightStep(target, "一", ""),
+                ElaSpotlight.SpotlightStep(target, "二", ""),
+                ElaSpotlight.SpotlightStep(target, "三", ""),
+            ]
+        )
+        s.start()
+        qapp.processEvents()
+        return s
+
+    def test_exit_icon_button(self, multi):
+        button = multi._exit_btn
+        assert button.getAwesome() == ElaIconType.IconName.Xmark
+        assert button.width() == 20 and button.height() == 20
+        assert button.isHidden() is False
+
+    def test_exit_tooltip_text(self, multi):
+        tooltip = _tooltip_dict.get(multi._exit_btn)
+        assert tooltip is not None
+        assert tooltip._text == "退出教程"
+
+    def test_exit_visible_on_every_step(self, multi):
+        assert multi.currentStep() == 0
+        assert multi._exit_btn.isHidden() is False
+        multi.next()
+        assert multi.currentStep() == 1
+        assert multi._exit_btn.isHidden() is False
+        multi.next()
+        assert multi.currentStep() == 2
+        assert multi._exit_btn.isHidden() is False
+
+    def test_exit_click_finishes_immediately(self, qapp, multi):
+        received = []
+        multi.finished.connect(lambda: received.append(True))
+        multi.next()
+        multi._exit_btn.click()
+        qapp.processEvents()
+        assert received == [True]
+        assert multi._is_active is False
+        assert multi._tip_widget.isHidden() is True
+
+    def test_navigation_button_hierarchy(self, multi):
+        assert multi._prev_btn.variant() == "outlined"
+        assert multi._prev_btn.color() == "default"
+        assert multi._next_btn.variant() == "solid"
+        assert multi._next_btn.color() == "primary"
+
+    def test_set_steps_single_hides_navigation_extras(self, make, s, qapp):
+        parent = s.parent()
+        parent.resize(600, 400)
+        target = make(QWidget, parent)
+        target.setGeometry(20, 20, 80, 40)
+        s.setSteps([ElaSpotlight.SpotlightStep(target, "一", "")])
+        s.start()
+        qapp.processEvents()
+        assert s._prev_btn.isHidden() is True
+        assert s._exit_btn.isHidden() is True
+        assert s._step_indicator.isHidden() is True
 
 
 class TestElaSpotlightMousePress:
@@ -184,7 +254,6 @@ class TestElaSpotlightTargetRect:
 
 
 class TestElaSpotlightTheme:
-
     def test_tip_card_repaints_on_theme_switch(self, s, make, qapp):
         """回归：卡片配色原先缓存、只在重定位时刷新，开着遮罩切主题会停在旧色。
 

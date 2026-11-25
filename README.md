@@ -48,7 +48,8 @@ tests/                     回归测试（按组件 / 家族目录组织；`-m "
 - **控件全家桶**：输入、按钮、弹窗与提示、导航与布局、数据展示共 100+ 组件；
   所有下拉框支持拼音搜索（`bj` → 北京）。
 - **主题与外观**：浅 / 深主题自适应、语义色令牌、全局强调色换肤
-  （`setAccentColor` 只写基色，hover / press 由上游按 alpha 自动派生）；**全库零 QSS**，控件全部 `QPainter` 自绘。
+  （`setAccentColor` 只写基色，hover / press 由上游按 alpha 自动派生）；自研彩色表面统一走
+  软底 + 软描边配方，状态色沿用上游 `Status*`；**全库零 QSS**，控件全部 `QPainter` 自绘。
 - **动效策略**：`motion` 全局三档（`Full` / `Reduced` / `Disabled`），默认跟随系统
   「关闭动画」设置 —— `Reduced` 把状态过渡压到 ≤50ms 并停掉持续动效。
 - **AI 对话栈**：命令式回合 API + `ElaChatStreamBinder` 一键接线、分段时间线
@@ -169,7 +170,7 @@ sys.exit(app.exec())
 | `start_transition_timer(timer)` | 同上，给 `QTimer` 手搓插值的过渡；返回 `False` 时调用方要自己落终值 |
 | `start_idle_loop(timer, ms, on_stop=)` | 启动持续动效循环；`Reduced` 下停掉，`on_stop` 落到静态基态 |
 | `surface(mode)` / `text(mode)` / `accent(mode)` | 语义令牌（`surface`/`surfaceRaised`/`surfaceControl`/`surfacePopup`/`surfaceDialog`/`border`/`text`/`textMuted`/`accent`…） |
-| `statusColor(mode, ElaStatusRoleType.X)` | 校验/提示状态色（`Neutral`/`Error`/`Warning`/`Success`） |
+| `statusColor(mode, ElaStatusRoleType.X)` | 校验/提示状态色（上游 `StatusDanger/Warning/Success`；`Neutral` 走次要文字色） |
 | `setAccentColor(color)` | 换强调色（`QColor` / hex / `rgb()` / `rgba()`）；hover / press 由上游按同色 alpha 0.9 / 0.8 自动派生，`resetAccentColor()` 回工厂快照 |
 | `motion.setMode(ElaMotionModeType.Reduced)` | 全局动效：状态过渡压到 ≤50ms、持续动效停止 |
 | `set_tooltip(widget, text, position, theme)` | 设置自定义工具提示 |
@@ -224,7 +225,7 @@ sys.exit(app.exec())
 
 | 组件 | 说明 |
 |---|---|
-| **ElaButton** | 统一按钮（6 变体 × 16 色，Ant Design 风格；`primary` 跟随主题强调色与 `setAccentColor`；focus ring / loading） |
+| **ElaButton** | 统一按钮（6 变体 × 16 色，Ant Design 风格；彩色变体为软底 + accent 描边、hover / press 三档；`primary` 跟随主题强调色与 `setAccentColor`；focus ring / loading） |
 | **ElaDropDownButton** | 下拉按钮（点击弹出 ElaMenu） |
 | **ElaSplitButton** | 拆分按钮（主操作 + 下拉菜单） |
 | **ElaLongPressButton** | 长按触发按钮（继承 `ElaButton`：三档尺寸 / 变体 / 颜色；按住面包裹主题色进度） |
@@ -237,13 +238,13 @@ sys.exit(app.exec())
 | **ElaMessageDialog** | 消息确认对话框 |
 | **ElaConfirmDialog** | 贴锚点弹出的轻量确认弹框（Ela 原生文字按钮 + PopupBase 表面） |
 | **ElaDialogBase** | 可定制按钮的对话框基类 |
-| **ElaToast** | 顶部居中单行提示（成功/信息/警告/错误，等级色圆标 + 淡入淡出自动关闭；等级枚举 `ElaSeverity`） |
-| **ElaNotifyPopup** | 右下角通知弹窗（信息/成功/警告/错误，等级色圆标 + 底部剩余时间条） |
+| **ElaToast** | 顶部居中单行提示（成功/信息/警告/错误，等级色图标 chip + 淡入淡出自动关闭；等级枚举 `ElaSeverity`） |
+| **ElaNotifyPopup** | 右下角通知弹窗（信息/成功/警告/错误，等级色图标 chip + 底部剩余时间条） |
 | **ElaNotifyManager** | 通知堆叠管理（`show_notify()` 是它的自由函数入口） |
 | **ElaToolTip** | 自定义工具提示 |
 | **ElaStateToolTip** | 加载 / 完成状态提示（宽度随内容自适应，完成自动淡出） |
 | **ElaToolTipPositionType** | 提示位置枚举 |
-| **ElaSpotlight** | 引导遮罩（单目标/多步骤，淡入淡出） |
+| **ElaSpotlight** | 引导遮罩（单目标/多步骤，右上角可随时退出，淡入淡出） |
 
 #### 导航与布局
 
@@ -281,7 +282,7 @@ sys.exit(app.exec())
 | **ElaFigureCanvas** | Matplotlib 画布（主题感知，可选依赖） |
 | **ElaTimeline** | 时间线（时间戳/标题/内容/图标；垂直/水平） |
 | **ElaMarkdownViewer** | Markdown 查看器（主题自适应；主字体缺字形时单族符号字体兜底，不改文本） |
-| **ElaChip** | 标签纸片（16 色，可关闭/可选择/胶囊/前置图标） |
+| **ElaChip** | 标签纸片（16 色软彩色表面，可关闭/可选择/胶囊/前置图标） |
 | **ElaInfoBadge** | 角标（Dot/Value/Icon 模式，5 种级别） |
 | **ElaTerminalView** | 终端输出（ANSI 色彩 / 行号 / 自动滚动 / 搜索过滤 / 选区复制 / 导出；`append` 吃 str 与 bytes；缺字形单族符号字体兜底；`setEmbedded(True)` 去边框并改用 raised 表面） |
 
@@ -444,6 +445,7 @@ python -m pyqt6_ela_pro.example
 ## 设计原则
 
 - **零 QSS**：控件状态（hover / press / focus / 动效）全部 `QPainter` 自绘，主题经 `eTheme` 语义令牌取色；
+- **一套彩色表面**：button / chip / toast / 通知共用 `_colors.soft_colors` 的软底 + 软描边 + 可读彩字；语义状态色沿用上游 `Status*`（`statusColor`），与移植控件保持一致；
 - **集中换肤与动效**：强调色（`setAccentColor`）与动效策略（`motion`）都是全局单点，组件不私藏字面量；
 - **可拆分复用**：大块子系统（`chat/` / `charts/` / `blueprint/` / `ElaMarkdownViewer`）的每一层
   （气泡、查看器、图表控件、节点画布）都可以脱离整机单独使用；
@@ -458,7 +460,7 @@ Windows AMD64（**Windows 7 SP1+**；交付线使用 PyQt6 6.8.1 + 自编译 Qt 
 | 组件 / 模块 | 来源 |
 |---|---|
 | 输入、容器、展示、对话框等原生组件 | 上游 [ElaWidgetTools](https://github.com/Liniyous/ElaWidgetTools) C++ + [PyQt6-ElaWidgetTools](https://github.com/HIllya51/PyElaWidgetTools) 绑定 |
-| `ElaSplitter`、`ElaPagination`、`ElaToast`、`ElaSpotlight`、`ElaSteps`、`ElaTimeline`、`ElaRatingControl`、`ElaInfoBadge`、`ElaChip`、`ElaDropDownButton`、`ElaSplitButton`、`ElaPasswordEdit`、`ElaConfirmDialog`、`ElaMarkdownViewer`、`ElaUploadArea`、`ElaSplashScreen` | [ElaWidgetTools（RainbowCandyX fork）](https://github.com/RainbowCandyX/ElaWidgetTools) C++ 源码移植 |
+| `ElaSplitter`、`ElaPagination`、`ElaToast`、`ElaSpotlight`、`ElaSteps`、`ElaTimeline`、`ElaRatingControl`、`ElaInfoBadge`、`ElaDropDownButton`、`ElaSplitButton`、`ElaPasswordEdit`、`ElaConfirmDialog`、`ElaMarkdownViewer`、`ElaUploadArea`、`ElaSplashScreen` | [ElaWidgetTools（RainbowCandyX fork）](https://github.com/RainbowCandyX/ElaWidgetTools) C++ 源码移植 |
 | `ElaDrawer` | PyQt-SiliconUI `SiLayerDrawer` 设计（内容槽走 `ElaWidgetOwnershipType` 三态；`setMaskEnabled(False)` 无遮罩侧栏） |
 | `ElaDrawerArea` | 上游 `ElaDrawerArea` 子类化修复（点击标题栏展开 / 收起） |
 | `ElaButton`、`ElaDivider`、`ElaChip` 等 | Ant Design 风格自研（对照 ElaWidgetTools 既有组件） |

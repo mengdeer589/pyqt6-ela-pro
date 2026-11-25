@@ -23,7 +23,6 @@ from PyQt6.QtGui import (
     QPixmap,
 )
 from PyQt6.QtWidgets import (
-    QApplication,
     QHBoxLayout,
     QSizePolicy,
     QVBoxLayout,
@@ -31,6 +30,7 @@ from PyQt6.QtWidgets import (
 )
 from PyQt6ElaWidgetTools import ElaIconType, ElaMenu, ElaText, ElaThemeType
 
+from .._clipboard import set_clipboard_text
 from .._colors import accent_text
 from .._styles import ColorText
 from ..ela_markdown_viewer import ElaMarkdownViewer
@@ -126,7 +126,7 @@ class _SelectableLabel(ColorText):
         text = self.selectedText()
         if text:
             # Qt 的选区用 U+2029 表示换行，剪贴板里要还原成 \n（对齐原生菜单）
-            QApplication.clipboard().setText(text.replace("\u2029", "\n"))
+            set_clipboard_text(text.replace("\u2029", "\n"), self)
 
     def _select_all(self) -> None:
         # Qt 文本位置按 UTF-16 码元计（emoji 占 2 个），不能直接用 len(text)
@@ -331,7 +331,7 @@ class ElaChatBubble(
         #: 底部「AI 生成」提示（仅助手消息；文本 / 显隐见 setDisclaimer）
         self._disclaimer_text = DISCLAIMER_TEXT
         self._disclaimer_visible = True
-        #: 点击「复制」后是否弹「已复制到剪贴板」提示（由 view 建卡时下推）
+        #: 点击「复制」后是否弹「已复制到剪贴板」成功提示（由 view 建卡时下推）
         self._copy_notification_enabled = True
         self._disclaimer: Optional[ElaText] = None
         self._stats_host: Optional[QWidget] = None
@@ -565,23 +565,42 @@ class ElaChatBubble(
         self._set_actions_revealed(not self._actions_hover_reveal)
 
     def _on_copy(self) -> None:
-        QApplication.clipboard().setText(self.text())
+        text = self.text()
+        if text:
+            set_clipboard_text(text, self, self._on_copy_done)
         self.copyRequested.emit()
-        if self._copy_notification_enabled:
-            self.alert(
-                "已复制到剪贴板",
-                level="success",
-                title="",
-                duration=1200,
-                parent=self.window(),
-            )
+
+    def _on_copy_done(self, ok: bool) -> None:
+        """写入落定后的提示：成功受宿主开关控制，失败始终提示。"""
+        if is_deleted(self):
+            return
+        if ok:
+            if self._copy_notification_enabled:
+                self.alert(
+                    "已复制到剪贴板",
+                    level="success",
+                    title="",
+                    duration=1200,
+                    parent=self.window(),
+                )
+            return
+        self.alert(
+            "复制失败，剪贴板可能被其他程序占用",
+            level="error",
+            title="",
+            duration=1800,
+            parent=self.window(),
+        )
 
     def setCopyNotificationEnabled(self, on: bool) -> None:
-        """设置点击「复制」后是否弹 ``ElaMessageBar`` 成功提示（默认开）。"""
+        """设置点击「复制」后是否弹 ``ElaMessageBar`` 成功提示（默认开）。
+
+        写入失败的提示不受此开关影响，始终显示。
+        """
         self._copy_notification_enabled = bool(on)
 
     def copyNotificationEnabled(self) -> bool:
-        """复制后是否弹成功提示。"""
+        """复制成功后是否弹成功提示。"""
         return self._copy_notification_enabled
 
     def setActionsHoverReveal(self, on: bool) -> None:
@@ -736,9 +755,7 @@ class ElaChatBubble(
     def setMentions(self, mentions) -> None:
         """设置用户文本里的 @ 引用区间并立即重绘高亮。"""
         self._mentions = tuple(
-            item
-            if isinstance(item, ElaChatMention)
-            else ElaChatMention.fromDict(item)
+            item if isinstance(item, ElaChatMention) else ElaChatMention.fromDict(item)
             for item in (mentions or ())
             if item is not None
         )

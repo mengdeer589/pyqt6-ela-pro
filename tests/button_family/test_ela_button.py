@@ -9,8 +9,8 @@ from PyQt6.QtGui import QFocusEvent, QImage, QPainter
 from PyQt6.QtTest import QTest
 from PyQt6ElaWidgetTools import eApp, eTheme, ElaIconType, ElaPushButton, ElaThemeType
 
-from pyqt6_ela_pro._colors import contrastRatio
-from pyqt6_ela_pro._theme import surface
+from pyqt6_ela_pro._colors import contrastRatio, state_tint
+from pyqt6_ela_pro._theme import blend, surface, surfaceRaised
 from pyqt6_ela_pro.ela_button import ElaButton
 
 VARIANTS = ["solid", "dashed", "filled", "text", "link"]
@@ -367,24 +367,39 @@ class TestElaButtonLoading:
 
 
 class TestElaButtonAccentText:
-    """彩色变体的文字走可读档 ``accentText``（对比度 ≥ 4.5）。"""
+    """彩色变体的文字对实际表面（按下最强态）保证 ≥ 4.5。"""
 
+    @pytest.mark.parametrize(
+        "variant", ["outlined", "dashed", "filled", "text", "link"]
+    )
     @pytest.mark.parametrize(
         "mode",
         [ElaThemeType.ThemeMode.Light, ElaThemeType.ThemeMode.Dark],
         ids=["light", "dark"],
     )
-    def test_outlined_text_uses_readable_accent(self, make, mode):
+    def test_colored_text_is_readable_on_surface(self, make, variant, mode):
         previous = eTheme.getThemeMode()
         eTheme.setThemeMode(mode)
         try:
-            btn = make(ElaButton, "按钮", variant="outlined", color="blue")
+            btn = make(ElaButton, "按钮", variant=variant, color="blue")
             scheme = btn._scheme()
-            _bg, _border, fg = btn._state_colors(scheme, False, False)
+            press_bg, _border, fg = btn._state_colors(scheme, True, True)
         finally:
             eTheme.setThemeMode(previous)
-        assert fg.name() == scheme["accentText"].name()
-        assert contrastRatio(fg, scheme["accentBg"]) >= 4.5
+        worst = surfaceRaised(mode)
+        if variant == "text":
+            tint = state_tint(mode, pressed=True)
+            alpha = tint.alphaF()
+            tint.setAlpha(255)
+            worst = blend(worst, tint, alpha)
+        elif press_bg.alphaF() > 0:
+            worst = blend(worst, press_bg, press_bg.alphaF())
+        assert contrastRatio(fg, worst) >= 4.5
+
+    def test_filled_has_border(self, make):
+        btn = make(ElaButton, "按钮", variant="filled", color="green")
+        _bg, border, _fg = btn._state_colors(btn._scheme(), False, False)
+        assert border is not None
 
 
 class TestElaButtonDisabled:

@@ -28,16 +28,17 @@ from PyQt6ElaWidgetTools import ElaThemeType
 from ._internal import is_deleted
 from ._motion import Duration, Easing, start_transition
 from ._notify_common import (
-    BADGE_SIZE,
+    CHIP_SIZE,
     GAP,
     SEVERITY_ICONS,
     STACK_GAP,
     liveItems,
     paintNotificationCard,
+    paintNotificationChip,
     stackOffset,
     stackStep,
 )
-from ._styles import SHADOW_MARGIN, paintOverlayShadow, paintSeverityBadge
+from ._styles import SHADOW_MARGIN, paintOverlayShadow
 from ._theme import ElaSeverity, text
 from .widget_base import ElaThemeWidget
 
@@ -52,9 +53,9 @@ _TOAST_GAP = STACK_GAP
 _TOAST_HEIGHT = 40
 #: 卡片左右内边距
 _PAD_X = 14
-#: 等级圆直径
-_BADGE_SIZE = BADGE_SIZE
-#: 等级圆与文本间距
+#: 等级 chip 边长
+_CHIP_SIZE = CHIP_SIZE
+#: 等级 chip 与文本间距
 _GAP = GAP
 #: 文本额外留白（避免刚好卡在宽度上限时频繁省略）
 _TEXT_SLACK = 12
@@ -108,12 +109,13 @@ class ElaToast(ElaThemeWidget):
     ) -> None:
         super().__init__(None)
 
-        self._border_radius = 8
+        self._border_radius = 10
         self._display_msec = display_msec
         self._severity = ElaSeverity(severity)
         self._text = text
         self._shadow_border = SHADOW_MARGIN
         self._is_closing = False
+        self._hovered = False
 
         self.setObjectName("ElaToast")
         self.setWindowFlags(
@@ -135,7 +137,7 @@ class ElaToast(ElaThemeWidget):
         self._text_font.setPixelSize(14)
         fm = QFontMetrics(self._text_font)
         tw = fm.horizontalAdvance(text)
-        chrome = 2 * _PAD_X + _BADGE_SIZE + _GAP
+        chrome = 2 * _PAD_X + _CHIP_SIZE + _GAP
         total_w = max(_MIN_WIDTH, min(_MAX_WIDTH, tw + chrome + _TEXT_SLACK))
         self._elided_text = fm.elidedText(
             text, Qt.TextElideMode.ElideRight, total_w - chrome
@@ -267,11 +269,15 @@ class ElaToast(ElaThemeWidget):
 
     def enterEvent(self, event: QEnterEvent) -> None:
         self._dwell_timer.stop()
+        self._hovered = True
+        self.update()
         super().enterEvent(event)
 
     def leaveEvent(self, event: QEvent) -> None:
         if self.isVisible() and not self._is_closing:
             self._dwell_timer.start(self._display_msec)
+        self._hovered = False
+        self.update()
         super().leaveEvent(event)
 
     def _onThemeChanged(self, mode: ElaThemeType.ThemeMode) -> None:
@@ -294,18 +300,26 @@ class ElaToast(ElaThemeWidget):
         paintOverlayShadow(painter, self.rect(), margin=sb, radius=br)
         painter.translate(sb, sb)
 
-        sev_color = paintNotificationCard(
-            painter, QRectF(0, 0, card_w, card_h), self._severity, radius=br
+        card_bg = paintNotificationCard(
+            painter,
+            QRectF(0, 0, card_w, card_h),
+            self._severity,
+            radius=br,
+            hovered=self._hovered,
         )
 
-        badge_rect = QRectF(
-            _PAD_X, (card_h - _BADGE_SIZE) / 2, _BADGE_SIZE, _BADGE_SIZE
-        )
-        paintSeverityBadge(
-            painter, badge_rect, sev_color, SEVERITY_ICONS[self._severity]
+        chip_rect = QRectF(_PAD_X, (card_h - _CHIP_SIZE) / 2, _CHIP_SIZE, _CHIP_SIZE)
+        paintNotificationChip(
+            painter,
+            chip_rect,
+            self._severity,
+            SEVERITY_ICONS[self._severity],
+            mode=mode,
+            surface=card_bg,
+            hovered=self._hovered,
         )
 
-        text_left = _PAD_X + _BADGE_SIZE + _GAP
+        text_left = _PAD_X + _CHIP_SIZE + _GAP
         text_width = card_w - text_left - _PAD_X
         painter.setFont(self._text_font)
         painter.setPen(text(mode))

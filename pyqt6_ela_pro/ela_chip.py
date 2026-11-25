@@ -21,7 +21,7 @@ from PyQt6.QtWidgets import QWidget
 
 from PyQt6ElaWidgetTools import eTheme, ElaIconType, ElaThemeType
 
-from ._colors import accent_text, get_color_scheme
+from ._colors import STATE_HOVER_ALPHA, STATE_PRESS_ALPHA, soft_colors
 from ._motion import Duration, start_transition
 from ._styles import drawElaIcon
 from ._theme import blend, surfaceControl
@@ -60,10 +60,6 @@ class ElaChip(ElaThemeWidget):
     _CLOSE_WIDTH = 20
     #: 前置图标槽宽度（px）
     _ICON_WIDTH = 14
-    #: hover 状态层透明度（≈8%）
-    _HOVER_ALPHA = 20
-    #: press 状态层透明度（≈12%）
-    _PRESS_ALPHA = 31
 
     def __init__(
         self,
@@ -90,7 +86,6 @@ class ElaChip(ElaThemeWidget):
         self._close_hovered = False
         self._hover_t = 0.0
         self._fade_opacity = 1.0
-        self._fg_cache: tuple = ()
 
         self.setObjectName("ElaChip")
         self.setMouseTracking(True)
@@ -192,95 +187,46 @@ class ElaChip(ElaThemeWidget):
     def _is_colored(self) -> bool:
         return self._chip_color != self.ElaChipColorType.Default
 
-    def _scheme(self) -> dict:
-        return get_color_scheme(
-            self._COLOR_NAMES.get(self._chip_color, "default"), self._theme_mode
-        )
-
     def _state_layer(self) -> QColor:
         """状态层颜色：暗色叠白、亮色叠黑（Fluent 语义）。"""
         if self._theme_mode == ElaThemeType.ThemeMode.Dark:
             return QColor(255, 255, 255)
         return QColor(0, 0, 0)
 
-    def _tint_alpha(self, hovered: bool, pressed: bool) -> int:
-        """彩色 chip 半透明底的 accent 透明度（保持原来的「浅色药丸」观感）。"""
-        dark = self._theme_mode == ElaThemeType.ThemeMode.Dark
-        if pressed:
-            return 115 if dark else 65
-        if hovered:
-            return 85 if dark else 45
-        return 55 if dark else 25
-
-    def _surface_color(self) -> QColor:
-        """chip 所在的主题表面（文字对比度按「半透明底合成到它上面」计算）。
-
-        V3.0 的 ``BasicBase`` 是 alpha 叠色，直接当合成底会把颜色算白；
-        用读取层合成的卡片表面。
-        """
-        return surfaceControl(self._theme_mode)
-
     def _getBackgroundColor(self) -> QColor:
         """空闲态底色（彩色为 accent 半透明 tint，随所在表面透出）。"""
         mode = self._theme_mode
         if not self._is_colored():
             return eTheme.getThemeColor(mode, ElaThemeType.ThemeColor.BasicBase)
-        tint = QColor(self._scheme()["accent"])
-        tint.setAlpha(self._tint_alpha(False, False))
-        return tint
+        return QColor(self._resolve_colors(False, False)[0])
 
     def _getForegroundColor(self) -> QColor:
         """彩字：按「半透明底合成到主题表面」后的实际颜色取可读档（≥4.5）。"""
         mode = self._theme_mode
         if not self._is_colored():
             return eTheme.getThemeColor(mode, ElaThemeType.ThemeColor.BasicText)
-        key = (self._chip_color, mode, self._scheme()["accent"].name())
-        if self._fg_cache and self._fg_cache[0] == key:
-            return QColor(self._fg_cache[1])
-        # 按**最强档 tint（press）**合成后的底色取色：hover / 空闲的对比度只会更高
-        tint = QColor(self._scheme()["accent"])
-        tint.setAlpha(self._tint_alpha(True, True))
-        composited = blend(
-            self._surface_color(),
-            QColor(tint.red(), tint.green(), tint.blue()),
-            tint.alphaF(),
-        )
-        color = accent_text(
-            self._COLOR_NAMES.get(self._chip_color, "default"), mode, composited
-        )
-        self._fg_cache = (key, color)
-        return QColor(color)
+        return QColor(self._resolve_colors(False, False)[2])
 
     def _resolve_colors(self, hovered: bool, pressed: bool) -> tuple:
-        """按状态解析 ``(底, 描边, 文字)``。"""
+        """按状态解析 ``(底, 描边, 文字)``；彩色走全库统一的软表面配方。"""
         mode = self._theme_mode
         if not self._is_colored():
             base = eTheme.getThemeColor(mode, ElaThemeType.ThemeColor.BasicBase)
             border = eTheme.getThemeColor(mode, ElaThemeType.ThemeColor.BasicBorder)
             text = eTheme.getThemeColor(mode, ElaThemeType.ThemeColor.BasicText)
-            alpha = self._PRESS_ALPHA if pressed else self._HOVER_ALPHA
+            alpha = STATE_PRESS_ALPHA if pressed else STATE_HOVER_ALPHA
             if hovered or pressed:
                 base = blend(base, self._state_layer(), alpha / 255.0)
             return base, border, text
 
-        scheme = self._scheme()
-        if self._is_checkable and self._is_checked:
-            bg = scheme["solid"]
-            if pressed:
-                bg = scheme["solidActive"]
-            elif hovered:
-                bg = scheme["solidHover"]
-            return bg, QColor(bg), scheme["solidText"]
-
-        accent = QColor(scheme["accent"])
-        bg = QColor(accent)
-        bg.setAlpha(self._tint_alpha(hovered, pressed))
-        border = QColor(accent)
-        if hovered or pressed:
-            border.setAlpha(150)
-        else:
-            border.setAlpha(115 if mode == ElaThemeType.ThemeMode.Dark else 77)
-        return bg, border, self._getForegroundColor()
+        return soft_colors(
+            self._COLOR_NAMES.get(self._chip_color, "default"),
+            mode,
+            surfaceControl(mode),
+            hovered=hovered,
+            pressed=pressed,
+            selected=self._is_checkable and self._is_checked,
+        )
 
     def _close_rect(self) -> QRectF:
         return QRectF(
@@ -476,7 +422,7 @@ class ElaChip(ElaThemeWidget):
             if self._close_hovered:
                 painter.setPen(Qt.PenStyle.NoPen)
                 painter.setBrush(
-                    blend(bg_color, self._state_layer(), self._PRESS_ALPHA / 255.0)
+                    blend(bg_color, self._state_layer(), STATE_PRESS_ALPHA / 255.0)
                 )
                 painter.drawEllipse(close_rect.center(), 9.0, 9.0)
             self._icon_font.setPixelSize(10)

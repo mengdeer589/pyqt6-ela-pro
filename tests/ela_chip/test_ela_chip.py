@@ -210,3 +210,25 @@ class TestElaChipStates:
         chip = make(ElaChip, text="标签")
         chip.setClosable(True)
         assert chip._close_rect().width() >= 20
+
+
+class TestElaChipSoftRecipe:
+    """chip 的彩色表面必须逐值来自共享 ``soft_colors`` 配方。"""
+
+    def test_colored_idle_matches_soft_colors(self, make):
+        from pyqt6_ela_pro._colors import soft_colors
+
+        chip = make(ElaChip, text="标签")
+        mode = chip._theme_mode
+        for color_type, name in chip._COLOR_NAMES.items():
+            if color_type == ElaChip.ElaChipColorType.Default:
+                continue
+            chip.setColor(color_type)
+            bg, border, fg = chip._resolve_colors(False, False)
+            expected_bg, expected_border, expected_fg = soft_colors(
+                name, mode, surfaceControl(mode)
+            )
+            assert bg.name() == expected_bg.name()
+            assert bg.alpha() == expected_bg.alpha()
+            assert border.alpha() == expected_border.alpha()
+            assert fg.name() == expected_fg.name()

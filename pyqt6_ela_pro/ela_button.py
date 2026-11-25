@@ -29,10 +29,16 @@ from PyQt6.QtWidgets import QPushButton, QWidget
 from PyQt6ElaWidgetTools import eApp, eTheme, ElaThemeType, ElaIcon, ElaIconType
 
 from ._internal import _ThemeAwareMixin
-from ._colors import get_color_scheme, state_tint, text_on_color
+from ._colors import (
+    accent_text,
+    get_color_scheme,
+    soft_colors,
+    state_tint,
+    text_on_color,
+)
 from ._motion import Duration, start_idle_loop, start_transition
 from ._styles import coerceElaIcon
-from ._theme import accent as theme_accent, blend
+from ._theme import accent as theme_accent, blend, surfaceRaised
 from .svg_icon import svg_icon_loader, svg_to_pixmap
 
 
@@ -414,8 +420,8 @@ class ElaButton(_ThemeAwareMixin, QPushButton):
         self, scheme: dict[str, QColor], hovered: bool, pressed: bool
     ) -> tuple:
         """某状态下的 ``(底, 描边, 文字)``；描边为 ``None`` 表示不画。
-        彩色变体的文字一律走 ``accentText``（浅底上的可读档，对比度 ≥ 4.5），
-        ``accent`` 只用于填充 / 描边。
+        彩色变体走全库统一的软表面配方（``soft_colors``）：底色 / 描边是 accent
+        半透明档，文字对**实际表面**保证对比度 ≥ 4.5。
         """
         variant = self._variant
         is_default = self._effective_color() == "default"
@@ -431,31 +437,47 @@ class ElaButton(_ThemeAwareMixin, QPushButton):
             if is_default:
                 bg = self._hover_tint() if (hovered or pressed) else transparent
                 return bg, self._neutral_border(), self._neutral_text()
-            bg = scheme["accentBgHover"] if (hovered or pressed) else scheme["accentBg"]
-            border = QColor(scheme["accent"])
-            border.setAlpha(110 if not self._is_dark() else 150)
-            return bg, border, scheme["accentText"]
+            return soft_colors(
+                self._effective_color(),
+                self._theme_mode,
+                surfaceRaised(self._theme_mode),
+                hovered=hovered,
+                pressed=pressed,
+            )
         if variant == "filled":
-            bg = scheme["accentBgHover"] if (hovered or pressed) else scheme["accentBg"]
-            return bg, None, scheme["accentText"]
+            return soft_colors(
+                self._effective_color(),
+                self._theme_mode,
+                surfaceRaised(self._theme_mode),
+                hovered=hovered,
+                pressed=pressed,
+            )
         if variant == "text":
             bg = (
                 self._pressed_tint()
                 if pressed
                 else (self._hover_tint() if hovered else transparent)
             )
-            return (
-                bg,
-                None,
-                scheme["accentText"] if not is_default else self._neutral_text(),
-            )
+            return bg, None, self._readable_fg(is_default, pressed_surface=True)
         if variant == "link":
             return (
                 transparent,
                 None,
-                scheme["accentText"] if not is_default else self._neutral_text(),
+                self._readable_fg(is_default, pressed_surface=False),
             )
         return transparent, None, self._neutral_text()
+
+    def _readable_fg(self, is_default: bool, *, pressed_surface: bool) -> QColor:
+        """透明底彩字的可读档；``text`` 变体按按下时的状态层算最差底色。"""
+        if is_default:
+            return self._neutral_text()
+        surface = surfaceRaised(self._theme_mode)
+        if pressed_surface:
+            tint = state_tint(self._theme_mode, pressed=True)
+            alpha = tint.alphaF()
+            tint.setAlpha(255)
+            surface = blend(surface, tint, alpha)
+        return accent_text(self._effective_color(), self._theme_mode, surface)
 
     # ── Events ────────────────────────────────────────────
 
@@ -581,8 +603,8 @@ class ElaButton(_ThemeAwareMixin, QPushButton):
                 br,
             )
 
-            # 彩色文字一律走 accentText（可读档）；hover 用 _hover_t 在两套状态
-            # 色之间插值（150ms 淡入淡出，Reduced/Disabled 下同步落终值）。
+            # 软彩色表面：底 / 描边是半透明档；hover 用 _hover_t 在两套状态色之间
+            # 插值（150ms 淡入淡出，Reduced/Disabled 下同步落终值）。
             if disabled:
                 bg = (
                     Qt.GlobalColor.transparent

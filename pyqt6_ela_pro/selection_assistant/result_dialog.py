@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from typing import Optional
 
+from .._clipboard import set_clipboard_text
 from .._internal import is_deleted, safe_connect
 from PyQt6.QtCore import QEvent, QPoint, QRect, QSize, Qt, pyqtSignal
 from PyQt6.QtGui import QIcon, QKeySequence, QShortcut
@@ -204,16 +205,12 @@ class ElaSelectionResultDialog(ElaWidget):
 
         # 查看器一旦获得焦点，QTextBrowser 会吞掉 Ctrl+C；用窗口级快捷键抢回来。
         self._copy_shortcut = QShortcut(QKeySequence.StandardKey.Copy, self)
-        self._copy_shortcut.setContext(
-            Qt.ShortcutContext.WidgetWithChildrenShortcut
-        )
+        self._copy_shortcut.setContext(Qt.ShortcutContext.WidgetWithChildrenShortcut)
         safe_connect(
             self._copy_shortcut, "activated", self.copyPlainText, "result.copy_key"
         )
         self._md_shortcut = QShortcut(QKeySequence("Ctrl+Shift+C"), self)
-        self._md_shortcut.setContext(
-            Qt.ShortcutContext.WidgetWithChildrenShortcut
-        )
+        self._md_shortcut.setContext(Qt.ShortcutContext.WidgetWithChildrenShortcut)
         safe_connect(
             self._md_shortcut, "activated", self._on_copy, "result.copy_md_key"
         )
@@ -332,7 +329,9 @@ class ElaSelectionResultDialog(ElaWidget):
             "复制纯文本（去掉 Markdown 标记，Ctrl+C）",
             ElaToolTipPositionType.Top,
         )
-        set_tooltip(self._regen_button, "用同样的输入重新生成", ElaToolTipPositionType.Top)
+        set_tooltip(
+            self._regen_button, "用同样的输入重新生成", ElaToolTipPositionType.Top
+        )
 
         # 标题栏 ✕ 不用接：上游默认 ``IsDefaultClosed``，点它就是 ``window()->close()``，
         # 会正常走到 ``closeEvent``（与 Esc、页脚「关闭」同一入口）。
@@ -509,10 +508,7 @@ class ElaSelectionResultDialog(ElaWidget):
         """
         if not self.hasResult():
             return
-        clipboard = QApplication.clipboard()
-        if clipboard is None:
-            return
-        clipboard.setText(self._viewer.toPlainText())
+        set_clipboard_text(self._viewer.toPlainText(), self)
         self.plainCopied.emit(self._action_id)
 
     def actionId(self) -> str:  # noqa: N802 (Qt 命名)
@@ -626,10 +622,7 @@ class ElaSelectionResultDialog(ElaWidget):
         # 复制只在已落定时可用：半句话不算结果。
         if not self.hasResult():
             return
-        clipboard = QApplication.clipboard()
-        if clipboard is None:
-            return
-        clipboard.setText(self._result_text)
+        set_clipboard_text(self._result_text, self)
         self.copied.emit(self._action_id)
 
     # ── 内部：控件状态 ────────────────────────────────────────────

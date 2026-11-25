@@ -26,7 +26,6 @@ from PyQt6.QtGui import (
     QTextCursor,
 )
 from PyQt6.QtWidgets import (
-    QApplication,
     QFileDialog,
     QFrame,
     QHBoxLayout,
@@ -43,6 +42,7 @@ from PyQt6ElaWidgetTools import (
     ElaThemeType,
 )
 
+from .._clipboard import set_clipboard_text
 from .._colors import parse_color
 from .._internal import (
     applyMissingGlyphFonts,
@@ -557,7 +557,7 @@ class ElaTerminalView(ElaThemeWidget):
 
     def copyAll(self) -> None:
         """复制全部内容到剪贴板。"""
-        QApplication.clipboard().setText(self.toPlainText())
+        set_clipboard_text(self.toPlainText(), self)
 
     def selectedText(self) -> str:
         """获取当前选中的文本（无选区时为空串）。"""
@@ -567,9 +567,10 @@ class ElaTerminalView(ElaThemeWidget):
 
     def copySelection(self) -> bool:
         """把当前选区复制到剪贴板，有选区并已复制才返回 ``True``。"""
-        if not self.selectedText():
+        text = self.selectedText()
+        if not text:
             return False
-        self._edit.copy()
+        set_clipboard_text(text, self)
         return True
 
     def selectAll(self) -> None:

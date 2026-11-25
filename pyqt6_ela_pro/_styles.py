@@ -259,7 +259,7 @@ def paintSeverityBadge(  # noqa: N802
     pixel_size: int = 12,
     rotation: float = 0.0,
 ) -> None:
-    """实心等级色圆 + 对比色 ElaAwesome 字形（toast / 通知弹窗 / 状态提示共用）。
+    """实心等级色圆 + 对比色 ElaAwesome 字形（状态提示 tooltip 用）。
 
     :param rotation: 字形绕圆心旋转的角度；圆本身不转（加载态 spinner 用）。
     """

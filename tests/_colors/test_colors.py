@@ -287,3 +287,97 @@ class TestTextOnColor:
             assert (
                 text_on_color(scheme["solid"]).name() == scheme["solidText"].name()
             ), f"{name}/{mode}"
+
+
+class TestSoftSurface:
+    """软彩色表面配方（ElaChip / ElaButton / 通知共用）。"""
+
+    def test_alpha_ramp_follows_shared_constants(self):
+        from pyqt6_ela_pro._colors import (
+            SOFT_BORDER_ALPHA,
+            SOFT_TINT_ALPHA,
+            soft_surface,
+        )
+        from pyqt6_ela_pro._theme import surfaceRaised
+
+        for mode_key, mode in (
+            ("light", ElaThemeType.ThemeMode.Light),
+            ("dark", ElaThemeType.ThemeMode.Dark),
+        ):
+            idle, hover, press = SOFT_TINT_ALPHA[mode_key]
+            border_idle, border_hot = SOFT_BORDER_ALPHA[mode_key]
+            surface = surfaceRaised(mode)
+            accent = QColor("#52c41a")
+            for hovered, pressed, expected in (
+                (False, False, idle),
+                (True, False, hover),
+                (True, True, press),
+            ):
+                bg, border, _fg = soft_surface(
+                    accent, mode, surface, hovered=hovered, pressed=pressed
+                )
+                assert bg.alpha() == expected
+                assert border.alpha() == (
+                    border_idle if not (hovered or pressed) else border_hot
+                )
+
+    def test_selected_uses_solid_ramp(self):
+        from pyqt6_ela_pro._colors import soft_colors
+        from pyqt6_ela_pro._theme import surfaceRaised
+
+        mode = ElaThemeType.ThemeMode.Light
+        for name in ("primary", "green", "orange", "red"):
+            scheme = get_color_scheme(name, mode)
+            for hovered, pressed, key in (
+                (False, False, "solid"),
+                (True, False, "solidHover"),
+                (True, True, "solidActive"),
+            ):
+                bg, border, fg = soft_colors(
+                    name,
+                    mode,
+                    surfaceRaised(mode),
+                    hovered=hovered,
+                    pressed=pressed,
+                    selected=True,
+                )
+                assert bg.name() == scheme[key].name()
+                assert border.name() == scheme[key].name()
+                assert fg.name() == scheme["solidText"].name()
+
+    @pytest.mark.parametrize(
+        "mode",
+        [ElaThemeType.ThemeMode.Light, ElaThemeType.ThemeMode.Dark],
+        ids=["light", "dark"],
+    )
+    def test_all_palette_colors_readable_in_all_states(self, mode):
+        from pyqt6_ela_pro._colors import soft_colors
+        from pyqt6_ela_pro._theme import (
+            blend,
+            surfaceControl,
+            surfacePopup,
+            surfaceRaised,
+        )
+
+        for name in _COLOR_PALETTE:
+            for surface in (
+                surfaceRaised(mode),
+                surfaceControl(mode),
+                surfacePopup(mode),
+            ):
+                for hovered, pressed in (
+                    (False, False),
+                    (True, False),
+                    (True, True),
+                ):
+                    bg, _border, fg = soft_colors(
+                        name, mode, surface, hovered=hovered, pressed=pressed
+                    )
+                    composited = blend(surface, bg, bg.alphaF())
+                    assert contrastRatio(fg, composited) >= 4.5, (
+                        name,
+                        mode,
+                        surface.name(),
+                        hovered,
+                        pressed,
+                    )

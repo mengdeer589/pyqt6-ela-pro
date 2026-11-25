@@ -111,13 +111,16 @@ class _ViewAppearanceMixin:
         return changesFromPartsOrMessage(self.message(messageId))
 
     def setCopyNotificationEnabled(self, on: bool) -> None:
-        """设置点击「复制」后是否弹成功提示（默认开；应用偏好，不进 bundle 视图段）。"""
+        """设置点击「复制」后是否弹成功提示（默认开；应用偏好，不进 bundle 视图段）。
+
+        写入失败的提示不受此开关影响，始终显示。
+        """
         self._copy_notification_enabled = bool(on)
         for bubble in self._bubbles.values():
             bubble.setCopyNotificationEnabled(self._copy_notification_enabled)
 
     def copyNotificationEnabled(self) -> bool:
-        """复制后是否弹成功提示。"""
+        """复制成功后是否弹成功提示。"""
         return self._copy_notification_enabled
 
     def setWaitingPlaceholderEnabled(self, on: bool = True) -> None:

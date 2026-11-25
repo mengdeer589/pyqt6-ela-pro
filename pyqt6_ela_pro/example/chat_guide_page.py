@@ -643,7 +643,7 @@ binder 和窗口（本页示例里 `worker` 就是这个角色）。
 | `setReasoningStyle(style)` / `setStatsMode(mode)` | 展示形态，立即对已有消息生效 |
 | `setToolGrouping(on)` | 是否把连续上下文工具合并为分组卡；只影响之后新建的工具卡，已建卡不重组 |
 | `setDisclaimer(text)` / `setDisclaimerVisible(on)` | 助手消息底部的「内容由 AI 生成，仅供参考」提示（默认开启；流式期间随整行隐藏）；`DISCLAIMER_TEXT` 是默认文案 |
-| `setCopyNotificationEnabled(on)` | 点击消息底部「复制」后是否弹 `ElaMessageBar`「已复制到剪贴板」成功提示（默认开启，立即对已有消息生效；应用偏好，不进 `exportSession`） |
+| `setCopyNotificationEnabled(on)` | 点击消息底部「复制」后是否弹 `ElaMessageBar`「已复制到剪贴板」成功提示（默认开启，立即对已有消息生效；应用偏好，不进 `exportSession`；写入失败的提示不受此开关影响，始终显示） |
 | `setWaitingPlaceholderEnabled(on)` | 等待首个 token（TTFT）期间是否在助手气泡内显示 `ElaShimmer` 骨架（默认开启，立即对已有消息生效）。骨架不是 part：不进 `parts` / 导出 / journal；收到首个正文 / 思考 / 工具 / 审批 / 统计即隐藏。应用偏好，不进 `exportSession` |
 | `setUserAvatar(source)` / `setAssistantAvatar(source)` / `setAvatarShape(shape)` | 头像自定义：SVG / 路径 / `QPixmap` / `QImage` / `QIcon` / `bytes` 等（含已存在与后续消息）；形状 `"circle"`（默认）/ `"rounded"`（**带圆角的矩形**）/ `"square"`，非法值回落圆形 |
 | `setToolDefaultOpen(policy)` | 注入工具卡展开策略（`policy(name, args, ok) -> bool`），只影响**之后新建**的卡片 |

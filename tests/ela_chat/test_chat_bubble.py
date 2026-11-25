@@ -84,8 +84,8 @@ class TestUserBubble:
         copy_button = bubble.actions().toolButton("copy")
         copy_button.click()
         assert copied == [1]
-        # Windows 上这次写可能被静默丢弃（实测读回空串、只轮询等不来）：必须重发才落盘
-        assert _wait_for_clipboard(qapp, "复制我", copy_button.click) == "复制我"
+        # helper 内部会在写入被占用时异步重试，不需要再手动重发 click
+        assert _wait_for_clipboard(qapp, "复制我") == "复制我"
 
     def test_context_menu_uses_ela_menu(self, qapp, make):
         """用户消息右键菜单是 ElaMenu（QLabel 原生菜单是 Qt 外观）。"""
@@ -194,14 +194,30 @@ class TestCopyNotification:
             if widget.objectName() == "ElaMessageBar"
         ]
 
-    def test_default_enabled_shows_message_bar(self, qapp, make):
+    @staticmethod
+    def _fake_copy(monkeypatch, ok):
+        calls = []
+
+        def fake(text, ctx=None, done=None):
+            calls.append((text, ctx))
+            if done is not None:
+                done(ok)
+            return ok
+
+        monkeypatch.setattr("pyqt6_ela_pro.chat.bubble.set_clipboard_text", fake)
+        return calls
+
+    def test_default_enabled_shows_message_bar(self, qapp, make, monkeypatch):
+        calls = self._fake_copy(monkeypatch, True)
         bubble = make(ElaChatBubble, ElaChatRoleType.User, "复制我")
         assert bubble.copyNotificationEnabled() is True
         bubble.actions().toolButton("copy").click()
         qapp.processEvents()
+        assert calls and calls[0][0] == "复制我"
         assert self._bars(bubble), "默认开启时复制应弹 ElaMessageBar"
 
-    def test_disabled_skips_message_bar(self, qapp, make):
+    def test_disabled_skips_message_bar(self, qapp, make, monkeypatch):
+        self._fake_copy(monkeypatch, True)
         bubble = make(ElaChatBubble, ElaChatRoleType.User, "复制我")
         bubble.setCopyNotificationEnabled(False)
         assert bubble.copyNotificationEnabled() is False
@@ -209,10 +225,20 @@ class TestCopyNotification:
         qapp.processEvents()
         assert not self._bars(bubble)
 
-    def test_reenabled_shows_again(self, qapp, make):
+    def test_reenabled_shows_again(self, qapp, make, monkeypatch):
+        self._fake_copy(monkeypatch, True)
         bubble = make(ElaChatBubble, ElaChatRoleType.User, "复制我")
         bubble.setCopyNotificationEnabled(False)
         bubble.setCopyNotificationEnabled(True)
+        bubble.actions().toolButton("copy").click()
+        qapp.processEvents()
+        assert self._bars(bubble)
+
+    def test_failure_shows_bar_even_when_disabled(self, qapp, make, monkeypatch):
+        """写入最终失败不能静默：关掉成功提示也要弹错误提示。"""
+        self._fake_copy(monkeypatch, False)
+        bubble = make(ElaChatBubble, ElaChatRoleType.User, "复制我")
+        bubble.setCopyNotificationEnabled(False)
         bubble.actions().toolButton("copy").click()
         qapp.processEvents()
         assert self._bars(bubble)

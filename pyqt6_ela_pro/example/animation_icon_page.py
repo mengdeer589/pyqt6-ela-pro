@@ -2,7 +2,7 @@
 
 import os
 
-from PyQt6.QtWidgets import QApplication, QHBoxLayout, QListView, QVBoxLayout, QWidget
+from PyQt6.QtWidgets import QHBoxLayout, QListView, QVBoxLayout, QWidget
 from PyQt6.QtCore import Qt, QModelIndex
 from PyQt6ElaWidgetTools import (
     ElaText,
@@ -30,6 +30,7 @@ from pyqt6_ela_pro import (
 from pyqt6_ela_pro.svg_icon import (
     ElaSvgIconLoader,
 )
+from pyqt6_ela_pro._clipboard import set_clipboard_text
 from .base_page import ExamplePage
 from ..blueprint._spinner import SpinnerArc
 from .icon_model import T_IconModel
@@ -299,16 +300,30 @@ class AnimationIconPage(ExamplePage):
         iconName = self._iconModel.getIconNameFromModelIndex(index)
         if not iconName:
             return
-        from PyQt6.QtWidgets import QApplication
+        self._copy_icon_name(iconName)
 
-        QApplication.clipboard().setText(iconName)
-        ElaMessageBar.success(
-            ElaMessageBarType.PositionPolicy.Top,
-            "复制完成",
-            f"{iconName}已被复制到剪贴板",
-            1000,
-            self,
-        )
+    def _copy_icon_name(self, name: str) -> None:
+        """复制图标名并提示结果（Windows 剪贴板被占用时异步重试）。"""
+
+        def notify(ok: bool) -> None:
+            if ok:
+                ElaMessageBar.success(
+                    ElaMessageBarType.PositionPolicy.Top,
+                    "复制完成",
+                    f"{name}已被复制到剪贴板",
+                    1000,
+                    self,
+                )
+            else:
+                ElaMessageBar.error(
+                    ElaMessageBarType.PositionPolicy.Top,
+                    "复制失败",
+                    "剪贴板可能被其他程序占用",
+                    1800,
+                    self,
+                )
+
+        set_clipboard_text(name, self, notify)
 
     def _onSearchEditTextEdit(self, searchText: str):
         if not searchText:
@@ -483,15 +498,7 @@ class AnimationIconPage(ExamplePage):
         icon_name = index.data()
         if not icon_name:
             return
-
-        QApplication.clipboard().setText(icon_name)
-        ElaMessageBar.success(
-            ElaMessageBarType.PositionPolicy.Top,
-            "复制完成",
-            f"{icon_name}已被复制到剪贴板",
-            1000,
-            self,
-        )
+        self._copy_icon_name(icon_name)
 
     def _onSvgSearchEditTextEdit(self, searchText: str, model, view):
         if not searchText:

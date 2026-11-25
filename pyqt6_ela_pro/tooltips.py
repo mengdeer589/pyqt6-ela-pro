@@ -932,7 +932,7 @@ class ElaStateToolTip(ElaThemeWidget):
             radius=radius,
         )
 
-        # 状态图标：实心等级圆 + 旋转箭头 / 对勾，与 toast / 通知弹窗同一套
+        # 状态图标：实心等级圆 + 旋转箭头 / 对勾（toast / 通知弹窗已改用 chip）
         badge_rect = QRectF(
             _ST_LEFT_PAD,
             (card_height - _ST_ICON_BOX) / 2,

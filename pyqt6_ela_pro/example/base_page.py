@@ -35,6 +35,7 @@ from pyqt6_ela_pro import (
     ElaButton,
     setResizeReflowDeferred,
 )
+from pyqt6_ela_pro._clipboard import set_clipboard_text
 
 RESOURCE_PATH = os.path.join(os.path.dirname(__file__), "resource", "images")
 
@@ -155,18 +156,7 @@ class ExamplePage(ElaThemeWidget):
             color="primary",
             parent=container,
         )
-        copy_btn.clicked.connect(
-            lambda: (
-                QApplication.clipboard().setText(source),
-                ElaMessageBar.success(
-                    ElaMessageBarType.PositionPolicy.TopRight,
-                    "",
-                    "代码已复制到剪贴板",
-                    1000,
-                    dlg,
-                ),
-            )
-        )
+        copy_btn.clicked.connect(lambda: self._copy_code_source(source, copy_btn, dlg))
         container_layout.addWidget(copy_btn)
         dlg._paramLay.setContentsMargins(15, 25, 15, 2)
         dlg.setParamWidget(container)
@@ -174,6 +164,29 @@ class ExamplePage(ElaThemeWidget):
         dlg.setAutoFit(False)
         dlg.resize(*self._code_dialog_size())
         return dlg
+
+    def _copy_code_source(self, source: str, ctx, parent) -> None:
+        """复制代码并提示结果（Windows 剪贴板被占用时异步重试）。"""
+
+        def notify(ok: bool) -> None:
+            if ok:
+                ElaMessageBar.success(
+                    ElaMessageBarType.PositionPolicy.TopRight,
+                    "",
+                    "代码已复制到剪贴板",
+                    1000,
+                    parent,
+                )
+            else:
+                ElaMessageBar.error(
+                    ElaMessageBarType.PositionPolicy.TopRight,
+                    "复制失败",
+                    "剪贴板可能被其他程序占用",
+                    1800,
+                    parent,
+                )
+
+        set_clipboard_text(source, ctx, notify)
 
     def _code_dialog_size(self):
         """代码对话框尺寸：跟随宿主窗口按比例放大，再夹到窗口与屏幕可用区内。"""

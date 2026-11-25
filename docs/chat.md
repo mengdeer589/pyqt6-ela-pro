@@ -212,7 +212,7 @@
   `RetainSizeWhenHidden` 保留、消息区不跳动，按钮带 ElaToolTip 提示；
   未悬停时 `actions().isVisibleTo(...)` 为 False 属预期，判断可用性看
   `actions()` 是否存在 + `isEnabled()`；复制落定弹 `ElaMessageBar`
-  确认，默认开、`setCopyNotificationEnabled` 可关）；助手流式
+  确认（成功默认开、`setCopyNotificationEnabled` 可关；最终失败始终弹错误提示）；助手流式
   `beginStream` / `appendText` / `endStream`（`streamFinished` 信号），
   **等待首个 token（TTFT）期间默认在气泡内显示 `ElaShimmer` 文本骨架** ——
   它不是 `ElaChatPart`，不进 `parts` / 导出 / journal；收到首个正文 / 思考 /

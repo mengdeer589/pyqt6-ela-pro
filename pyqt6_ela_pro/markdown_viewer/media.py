@@ -17,8 +17,9 @@ from PyQt6.QtGui import (
     QTextDocument,
     QTextImageFormat,
 )
-from PyQt6.QtWidgets import QApplication, QFileDialog
+from PyQt6.QtWidgets import QFileDialog
 
+from .._clipboard import set_clipboard_text
 from ..math_lite import render_formula
 from ..tooltip_targets import DOCUMENT_TOOLTIP_PROPERTY
 from .syntax import _clamp_pos
@@ -95,13 +96,13 @@ class _MarkdownMediaMixin:
             if name.startswith("elamath://"):
                 if tooltip.startswith("LaTeX: "):
                     latex = tooltip[len("LaTeX: ") :]
-                    QApplication.clipboard().setText(latex)
+                    set_clipboard_text(latex, self)
                     self.formulaCopied.emit(latex)
                 return
             if name.startswith(_MERMAID_IMAGE_PREFIX):
                 if tooltip.startswith(_MERMAID_TIP_PREFIX):
                     code = tooltip[len(_MERMAID_TIP_PREFIX) :]
-                    QApplication.clipboard().setText(code)
+                    set_clipboard_text(code, self)
                     self.mermaidCopied.emit(code)
                 return
             url = self._resolve_image_url(name, self.document().baseUrl())

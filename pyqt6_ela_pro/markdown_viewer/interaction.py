@@ -16,6 +16,7 @@ from PyQt6.QtGui import (
 )
 from PyQt6.QtWidgets import QApplication, QTextEdit
 
+from .._clipboard import set_clipboard_text
 from .._internal import execElaMenu, is_deleted, safe_connect, single_shot_on
 from .preprocess import _TASK_LIST_RE
 
@@ -488,7 +489,7 @@ class _MarkdownInteractionMixin:
         latex = self._formula_latex_at_cursor()
         if not latex:
             return
-        QApplication.clipboard().setText(latex)
+        set_clipboard_text(latex, self)
         self.formulaCopied.emit(latex)
 
     def _copy_all(self) -> None:
@@ -501,11 +502,11 @@ class _MarkdownInteractionMixin:
         quote = self.markdownSelection()
         if not quote:
             return
-        QApplication.clipboard().setText(quote)
+        set_clipboard_text(quote, self)
         self.selectionQuoted.emit(quote)
 
     def _copy_text(self, text: str) -> None:
-        QApplication.clipboard().setText(text)
+        set_clipboard_text(text, self)
         self.codeCopied.emit(text)
 
     def _on_layout_refresh(self) -> None:
