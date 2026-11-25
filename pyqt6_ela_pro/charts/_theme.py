@@ -27,7 +27,7 @@ ELA_PALETTE_LIGHT = [
 
 #: Ela / Fluent 分类色板（暗色）
 ELA_PALETTE_DARK = [
-    "#4cc2ff",
+    "#60cdff",
     "#00d5e0",
     "#6ccb5f",
     "#fce100",

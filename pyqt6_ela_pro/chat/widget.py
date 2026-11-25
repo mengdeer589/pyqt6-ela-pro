@@ -119,6 +119,7 @@ class ElaChatWidget(
         #: 当前话题 id（纯标记，见 setCurrentSessionId）
         self._current_session_id = ""
         self._queue_enabled = True
+        self._follow_up_delivery = "queue"
         self._queue: list = []
         self._queue_history: list = []
         self._auto_send_queue = True
@@ -414,7 +415,11 @@ class ElaChatWidget(
         if not same_part and current is not None:
             self._recount_permission_queue()
             return
-        if same_part and current is not None and current is not self._permission_dock_card:
+        if (
+            same_part
+            and current is not None
+            and current is not self._permission_dock_card
+        ):
             # 宿主直接 setCard(other)：不要用 promote 把 other 顶掉
             self._permission_dock_part = ""
             self._permission_dock_card = None

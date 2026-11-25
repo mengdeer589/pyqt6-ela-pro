@@ -48,10 +48,15 @@ Running，再 `setCurrentTime(duration())` 跳到终点，终值仍经过真实 
 1. 把槽位翻译成「这层表面 / 这级文字 / 这条边」的可读角色；
 2. 补齐上游缺的语义，例如 Success / Warning 状态色与 charts 调色板。
 
-常用入口：`currentMode()`、`surface()`、`text()`、`textMuted()`、`border()`、
-`statusColor(mode, role)`、`severityColor(mode, severity)`、`chartPalette()`、
-`setAccentColor()` / `resetAccentColor()`。`ElaSeverity`（Info / Success / Warning /
-Error）是 toast 与通知弹窗共用的消息等级，`Info` 走强调色、其余走状态色。
+常用的表面入口：`surface()`（窗口底）、`surfaceRaised()`（卡片 / 内容层，
+`BasicBaseAlpha`）、`surfaceControl()`（控件填充，`BasicBase`）、
+`surfacePopup()` / `surfaceDialog()`。文字 / 边框 / 状态色走 `text()` /
+`textMuted()` / `border()` / `statusColor()`；`chartPalette()` 给分类色。
+
+强调色只写 `PrimaryNormal`，`PrimaryHover` / `PrimaryPress` 由上游按 alpha
+0.9 / 0.8 自动派生；`resetAccentColor()` 写回导入时快照的出厂三元组。
+`ElaSeverity`（Info / Success / Warning / Error）是 toast 与通知弹窗共用的消息等级，
+`Info` 走强调色、其余走状态色。
 
 ## 配色（`_colors.py`）
 

@@ -74,6 +74,7 @@ class ElaChatAsyncWorker(QThread):
         self._cancel = threading.Event()
         self._cancel_turn: Optional[int] = None
         self._closing = False
+        self._submit_lock = threading.Lock()
         self._token_lock = threading.Lock()
         #: 回合 token 自增源。token 是「这轮生杀」的凭据：``cancel()`` 是异步的
         #: （轮询命中才收尾），旧回合的 ``turnFinished`` 可能晚到几十毫秒，
@@ -288,9 +289,7 @@ class ElaChatAsyncWorker(QThread):
         必须带上原消息的附件，否则模型看不见用户上传的文件。
         """
         turn = self._next_turn_token()
-        submitted = self._submit(
-            ("regenerate", (text, list(attachments or ())), turn)
-        )
+        submitted = self._submit(("regenerate", (text, list(attachments or ())), turn))
         if submitted:
             self._pending_turns.add(turn)
         return turn if submitted else None
@@ -318,30 +317,26 @@ class ElaChatAsyncWorker(QThread):
         ``ask()`` 从 GUI 线程直接调用，异常穿过 C++ 边界就是 0xC0000409，所以
         「事件循环已关闭」也必须走返回路径。
         """
-        loop = self._loop
-        if loop is None or self._queue is None or self._closing:
-            # 已请求关闭：不再受理命令（只查 loop/queue 会在 shutdown 之后、
-            # 线程收尾前的窗口里让 ask() 假成功，命令永不执行）。
-            return False
-
-        async def enqueue():
-            # 提交与 shutdown 竞态：入队协程里再查一次，关闭后投递的命令要补收尾。
-            if self._closing:
+        with self._submit_lock:
+            loop = self._loop
+            if loop is None or self._queue is None or self._closing:
                 return False
-            await self._queue.put(command)
-            return True
 
-        put = enqueue()
-        try:
-            future = asyncio.run_coroutine_threadsafe(put, loop)
-        except RuntimeError:
-            # 协程已建出但没被调度 —— 必须显式关掉，否则 RuntimeWarning + 悬空
-            put.close()
-            return False
-        future.add_done_callback(
-            lambda item, cmd=command: self._submit_finished(item, cmd)
-        )
-        return True
+            async def enqueue():
+                await self._queue.put(command)
+                return True
+
+            put = enqueue()
+            try:
+                future = asyncio.run_coroutine_threadsafe(put, loop)
+            except RuntimeError:
+                # 协程已建出但没被调度 —— 必须显式关掉，否则 RuntimeWarning + 悬空
+                put.close()
+                return False
+            future.add_done_callback(
+                lambda item, cmd=command: self._submit_finished(item, cmd)
+            )
+            return True
 
     def _submit_finished(self, future, command) -> None:
         """入队失败（已关闭）时补发 ``turnFinished``，避免宿主回合永久挂起。"""
@@ -371,7 +366,8 @@ class ElaChatAsyncWorker(QThread):
         只置关闭标记、中止当前回合、投递 ``None`` 哨兵；线程随后在 :meth:`_arm_watchdog`
         的非阻塞轮询下自行收尾。确实要等线程退出时用 :meth:`waitForShutdown`。
         """
-        self._closing = True
+        with self._submit_lock:
+            self._closing = True
         self.cancel()
         self._request_sentinel()
         self._arm_watchdog()

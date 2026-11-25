@@ -409,7 +409,7 @@ chartThemes()                        # ["ela", "echarts", ...]
 registerChartTheme(
     "brand",
     palette=["#0b6e99", "#e08a1e", "#7a5ea8"],
-    palette_dark=["#4cc2ff", "#ffb86b", "#c4a7e7"],
+    palette_dark=["#60cdff", "#ffb86b", "#c4a7e7"],
     light={"color.bg.base": "#ffffff", "color.text.primary": "#1f2328"},
     dark={"color.bg.base": "#15181e", "color.text.primary": "#f0f6fc"},
 )

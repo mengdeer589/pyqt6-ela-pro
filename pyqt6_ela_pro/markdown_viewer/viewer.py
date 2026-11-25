@@ -47,7 +47,11 @@ from .code import (
     _default_latin_code_font_family,
 )
 from .export import _MarkdownExportMixin
-from .interaction import _EXTERNAL_LINK_SCHEMES, _MarkdownInteractionMixin
+from .interaction import (
+    _DRAG_SCROLL_INTERVAL_MS,
+    _EXTERNAL_LINK_SCHEMES,
+    _MarkdownInteractionMixin,
+)
 from .media import _MarkdownMediaMixin
 from .mermaid import _MERMAID_PRIORITY_INTERVAL_MS, _MarkdownMermaidMixin
 from .paint import _MarkdownPaintMixin
@@ -320,6 +324,13 @@ class ElaMarkdownViewer(
         self._caret_visible = False
         self._caret_timer = QTimer(self)
         safe_connect(self._caret_timer, "timeout", self._toggle_stream_caret)
+
+        # 拖选超出可见带时的自动滚动（独立模式滚自身，嵌入模式滚外层滚动区）
+        self._drag_selecting = False
+        self._drag_global_pos = None
+        self._drag_scroll_timer = QTimer(self)
+        self._drag_scroll_timer.setInterval(_DRAG_SCROLL_INTERVAL_MS)
+        safe_connect(self._drag_scroll_timer, "timeout", self._drag_scroll_tick)
 
         # 大文档分块渲染状态
         self._large_render_chunks: list[str] = []

@@ -10,6 +10,7 @@ from PyQt6.QtGui import (
     QBrush,
     QColor,
     QFont,
+    QFontMetricsF,
     QShowEvent,
     QTextBlockFormat,
     QTextCharFormat,
@@ -41,6 +42,19 @@ logger = logging.getLogger(__name__)
 
 
 _BATCH_ATTACHED_RENDERS = True
+
+
+def _block_has_inline_image(block, text: str) -> bool:
+    """块内是否有图片片段（图片行高由资源尺寸决定，不能再乘百分比行高）。"""
+    if "\ufffc" not in text:
+        return False
+    iterator = block.begin()
+    while not iterator.atEnd():
+        fragment = iterator.fragment()
+        if fragment.isValid() and fragment.charFormat().isImageFormat():
+            return True
+        iterator += 1
+    return False
 
 
 class _MarkdownRenderMixin:
@@ -276,6 +290,10 @@ class _MarkdownRenderMixin:
         body_line_height = layout["body_line_height"]
         paragraph_margin = layout["paragraph_margin"]
         list_item_margin = layout["list_item_margin"]
+        metrics = QFontMetricsF(document.defaultFont())
+        image_min_height = max(
+            1.0, (metrics.lineSpacing() or metrics.height()) * body_line_height / 100.0
+        )
         quote_left_margin = quote_layout["left_margin"]
         quote_block_margin = quote_layout["block_margin"]
         cursor = QTextCursor(document)
@@ -344,10 +362,19 @@ class _MarkdownRenderMixin:
                     block_format.setBottomMargin(16.0)
                     self._apply_block_format(document, block, block_format, cursor)
                 else:
-                    block_format.setLineHeight(
-                        body_line_height,
-                        QTextBlockFormat.LineHeightTypes.ProportionalHeight.value,
-                    )
+                    text = block.text()
+                    # 图片行的自然高度就是图片高度；百分比行高会把下一行推到
+                    # (pct-100)% 图高之后（165% 主题 = 图后 65% 空白）。
+                    if _block_has_inline_image(block, text):
+                        block_format.setLineHeight(
+                            image_min_height,
+                            QTextBlockFormat.LineHeightTypes.MinimumHeight.value,
+                        )
+                    else:
+                        block_format.setLineHeight(
+                            body_line_height,
+                            QTextBlockFormat.LineHeightTypes.ProportionalHeight.value,
+                        )
                     if block.textList() is not None:
                         block_format.setTopMargin(list_item_margin)
                         block_format.setBottomMargin(list_item_margin)
@@ -360,7 +387,7 @@ class _MarkdownRenderMixin:
                         ):
                             block_format.setBackground(QBrush(self._quote_bg_color))
                         self._mute_quote_fragments(document, block, cursor)
-                    elif block.text().strip():
+                    elif text.strip():
                         block_format.setBottomMargin(paragraph_margin)
                     self._apply_block_format(document, block, block_format, cursor)
                 block = block.next()

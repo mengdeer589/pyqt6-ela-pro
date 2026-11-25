@@ -564,7 +564,7 @@ binder 和窗口（本页示例里 `worker` 就是这个角色）。
 | `undoMessage(id)` / `undoLastUserMessage()` | 撤回用户消息：删除该条及其后消息，原文 / 附件回填输入框。`undoMessage` **只对用户消息生效**（传助手消息返回 `None`，别拿 `messages()[-1]` 的助手回答 id 去撤）；`undoLastUserMessage()` 自己找**最后一条用户消息**，是「撤回最后一条消息」的正确入口 |
 | `regenerateFrom(id)` | 删除该回答，返回前置用户消息（**按钮与整条底部行只在回合结束后出现** —— 流式 / 排队中不显示：回答没写完点了会整段丢掉，复制到的也只是半句话） |
 | `retryMessage(id)` | **重试**（同参数重发）：清错误并把状态落成 `stopped`、**保留消息位置与 id**，返回前置用户消息。与 `regenerateFrom` 的区别就是不删消息 —— 删掉重建会让「重试」看起来像「重新生成」，也会打断用户正在读的上下文 |
-| `steerMessage(text, attachments=None, messageId=None, *, mentions=None)` / `drainSteer()` / `setSteerEnabled(on)` | 生成中插话：在 `beginStep` 安全边界把新指令送进**正在跑的这一轮**（对齐 opencode 的 `Delivery = "steer" \| "queue"`，那边 prompt 默认 steer），而不是排队等它跑完。`mentions` 是用户文本里的 `@` 区间；`drainSteer()` 一次只投一条。`setSteerEnabled(False)` 同时关闭自动投递与内置 dock 入口：`steerQueued` 返回 `False`、`Ctrl+Enter` 回退排队 |
+| `steerMessage(text, attachments=None, messageId=None, *, mentions=None)` / `drainSteer()` / `setSteerEnabled(on)` | 生成中插话：在 `beginStep` 安全边界把新指令送进**正在跑的这一轮**（对齐 opencode 的 `Delivery = "steer" \| "queue"`，那边 prompt 默认 steer），而不是排队等它跑完。`mentions` 是用户文本里的 `@` 区间；`drainSteer()` 一次只投一条。`setSteerEnabled(False)` 同时关闭自动投递与内置 dock 入口：`steerQueued` 返回 `False`、`Ctrl+Enter` 回退排队；`setFollowUpDelivery("steer")` 后 `Enter` 走插话、`Ctrl+Enter` 走排队 |
 | `sendNextQueued()` / `setAutoSendQueue(on)` | 排队续发（回合结束默认自动发送队首；仅空闲时发送） |
 | `sendQueuedNow(id)` | 排队 dock「立即发送」：先按 `Stopped` 收尾当前流并发出 `stopRequested`，再提交该条（同一时刻只有一个活跃流）。**只发被点的那条**，其余排队消息保持排队 |
 | `clear()` | 清空消息与排队（**输入区草稿 / 附件保留**）；生成中会发出 `stopRequested`；发出 `cleared` 信号 |

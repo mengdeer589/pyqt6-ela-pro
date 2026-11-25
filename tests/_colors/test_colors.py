@@ -184,7 +184,7 @@ class TestColorsGetAccentColor:
     def test_get_accent_color_dark_value(self):
         """深色档必须与 ``eTheme`` 的 ``PrimaryNormal`` 逐值一致。
 
-        库内固定色板写的是 ``#4cc2ff``，而系统主题实际给的是 ``#4abcf7`` ——
+        库内固定色板不能写死旧值；系统主题实际给的是 ``#60CDFF`` ——
         两边不一致正是「ElaButton 主题色和 Ela 自带的对不上」的来源。
         """
         color = get_accent_color("blue", ElaThemeType.ThemeMode.Dark)
@@ -251,6 +251,18 @@ class TestLiveAccent:
             setAccentColor("#12ab56", modes=[mode])
             bg = get_color_scheme("primary", mode)["accentBg"]
             assert bg.green() > bg.red() and bg.green() > bg.blue()
+        finally:
+            resetAccentColor([mode])
+
+    def test_cache_key_includes_accent_alpha(self):
+        """同 RGB、不同 alpha 的强调色不能命中旧缓存（C++ hover/press 带 alpha）。"""
+        mode = ElaThemeType.ThemeMode.Light
+        try:
+            setAccentColor(QColor(18, 171, 86, 255), modes=[mode])
+            opaque = get_color_scheme("primary", mode)["accentHover"].name()
+            setAccentColor(QColor(18, 171, 86, 128), modes=[mode])
+            translucent = get_color_scheme("primary", mode)["accentHover"].name()
+            assert translucent != opaque
         finally:
             resetAccentColor([mode])
 

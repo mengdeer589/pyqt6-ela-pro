@@ -39,7 +39,7 @@ from ._theme import (
     accent,
     blend,
     currentMode,
-    surfaceRaised,
+    surfaceControl,
     text,
     textDisabled,
     textMuted,
@@ -844,7 +844,7 @@ class ElaSelectorBar(ElaThemeWidget):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
         mode = currentMode()
-        painter.fillRect(self.rect(), surfaceRaised(mode))
+        painter.fillRect(self.rect(), surfaceControl(mode))
         for index in self._visible:
             self._paintItem(painter, index, mode)
         if self._overflown:
@@ -858,7 +858,7 @@ class ElaSelectorBar(ElaThemeWidget):
             return
         if self._hovered is ElaHitType.Item and self._hovered_index == index:
             # 悬浮底用一层极淡的强调色（8%），不用 QSS。
-            painter.fillRect(rect, blend(surfaceRaised(mode), accent(mode), 0.08))
+            painter.fillRect(rect, blend(surfaceControl(mode), accent(mode), 0.08))
 
         color = self._itemTextColor(index)
         contentX = rect.left() + _Metrics.horizontalPadding

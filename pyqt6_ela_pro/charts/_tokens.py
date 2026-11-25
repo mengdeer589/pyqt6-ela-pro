@@ -48,7 +48,7 @@ EFFECT_TICK_MS = 40
 
 #: 源令牌键 -> ElaThemeType.ThemeColor 成员名
 _ELA_COLOR_KEYS = {
-    "color.bg.base": "BasicBase",  # 画布底色（Ela 窗口基础色）
+    "color.bg.base": "BasicBaseAlpha",  # 画布底色（卡片 / 内容层）
     "color.bg.elevated": "PopupBase",  # 浮层 / 数据点内芯底色
     "color.bg.muted": "BasicHoverAlpha",  # 次级填充背景
     "color.border": "BasicBorder",  # 网格线
@@ -87,7 +87,7 @@ def _subtle_primary(mode, chart=None) -> QColor:
     """color.primary.subtle：主色与不透明画布底的 12% 混合色（主题感知）。"""
     bg = theme_override(chart, mode, "color.bg.base")
     if bg is None:
-        # BasicBase 是白色 alpha 叠色：直混得到近白，暗色热力图 / graphic 会过曝
+        # 卡片层是白色 alpha 叠色：直混得到近白，暗色热力图 / graphic 会过曝
         bg = surfaceRaised(mode)
     primary = theme_override(chart, mode, "color.primary")
     if primary is None:
@@ -141,7 +141,7 @@ def chart_token(mode, key, chart=None):
     if key == "color.primary.subtle":
         return _subtle_primary(mode, chart)
     if key == "color.bg.base":
-        # V3.0 的 BasicBase 是 alpha 叠色：画布底必须不透明，否则导出图/抓图半透明
+        # V3.0 的 BasicBaseAlpha 是 alpha 叠色：画布底必须不透明，否则导出图/抓图半透明
         return surfaceRaised(mode)
     member = _ELA_COLOR_KEYS.get(key)
     if member is not None:

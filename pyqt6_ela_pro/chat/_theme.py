@@ -43,7 +43,7 @@ def base_color(mode) -> QColor:
     """基础背景色（卡片 / 气泡表面）。
 
     V3.0 的 ``BasicPress`` 是 alpha 叠色，不能直接当底色；用读取层合成的
-    不透明卡片表面（``BasicBase`` 叠 ``WindowBase``）。
+    不透明卡片表面（``BasicBaseAlpha`` 叠 ``WindowBase``）。
     """
     return surfaceRaised(mode)
 

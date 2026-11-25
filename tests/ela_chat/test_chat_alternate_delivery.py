@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import pytest
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QKeyEvent
 
@@ -91,3 +92,55 @@ class TestAlternateDelivery:
         mention = pending[0].mentions[0]
         assert pending[0].text[mention.start : mention.end] == "@Al"
         assert chat.steerMessages()[0]["mentions"]
+
+
+class TestFollowUpDelivery:
+    def test_default_is_queue(self, qapp, make):
+        chat = make(ElaChatWidget)
+        assert chat.followUpDelivery() == "queue"
+
+    def test_enter_uses_steer_when_configured(self, qapp, make):
+        chat = make(ElaChatWidget)
+        chat.setGenerating(True)
+        chat.setFollowUpDelivery("steer")
+        chat.chatInput().setText("插一句")
+        chat.chatInput().submit()
+        assert chat.steerCount() == 1
+        assert chat.queueCount() == 0
+
+    def test_enter_falls_back_to_queue_when_steer_disabled(self, qapp, make):
+        chat = make(ElaChatWidget)
+        chat.setGenerating(True)
+        chat.setFollowUpDelivery("steer")
+        chat.setSteerEnabled(False)
+        chat.chatInput().setText("排队")
+        chat.chatInput().submit()
+        assert chat.steerCount() == 0
+        assert chat.queueCount() == 1
+
+    def test_enter_is_blocked_when_queue_disabled(self, qapp, make):
+        """``queueEnabled=False`` 仍按输入区原语义拦截生成中提交。"""
+        chat = make(ElaChatWidget)
+        chat.setGenerating(True)
+        chat.setFollowUpDelivery("steer")
+        chat.setSteerEnabled(False)
+        chat.setQueueEnabled(False)
+        chat.chatInput().setText("直接发")
+        assert chat.chatInput().submit() is False
+        assert chat.steerCount() == 0
+        assert chat.queueCount() == 0
+        assert chat.chatView().count() == 0
+
+    def test_ctrl_enter_uses_the_other_channel(self, qapp, make):
+        chat = make(ElaChatWidget)
+        chat.setGenerating(True)
+        chat.setFollowUpDelivery("steer")
+        chat.chatInput().setText("排队")
+        _ctrl_enter(chat)
+        assert chat.steerCount() == 0
+        assert chat.queueCount() == 1
+
+    def test_invalid_delivery_raises(self, qapp, make):
+        chat = make(ElaChatWidget)
+        with pytest.raises(ValueError):
+            chat.setFollowUpDelivery("sideways")

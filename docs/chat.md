@@ -169,6 +169,8 @@
   随附件对象流转 —— 消息气泡与撤回回填都有缩略图，**不序列化**，落库 /
   恢复历史后回退为文件 chip）；
   多行输入（默认 3–8 行，`Enter` 发送 / `Shift+Enter` 换行，IME 安全）；
+  生成中 `Enter` 的投递通道由 `setFollowUpDelivery("queue" | "steer")` 决定
+  （默认 `"queue"`，`Ctrl+Enter` 固定走另一条）；
   工具栏左组 = 新建话题 + 添加文件（`Ctrl+U`，回形针）+ 清空上下文，右组 =
   发送 / 停止；三个左组按钮各自可隐（`setNewTopicVisible` /
   `setAddFileVisible` / `setClearVisible`，文件选择走 `setFilePicker`）；
@@ -481,6 +483,7 @@ chat.sendNextQueued()                         # 或手动触发
   拖动换位与「上移 / 下移」按钮；
   `setSteerEnabled(False)` 时行按钮置灰、`steerQueued(queueId)` 返回 `False`
   （消息留在队列），`Ctrl+Enter` 回退排队（不受 `setQueueEnabled(False)` 限制）；
+  `setFollowUpDelivery("steer")` 后 `Enter` 走插话、`Ctrl+Enter` 走排队；
   `ElaChatWidget.moveQueued(queueId, toIndex)` / `steerQueued(queueId)` /
   `undoQueueChange()`（快照栈上限 20）。撤销覆盖队列增删改 / 排序 / 转为插话；
   `steerMessage` / `clearSteer` / `dequeueSteer` 不进撤销栈。`steerMessage` 在时间线上

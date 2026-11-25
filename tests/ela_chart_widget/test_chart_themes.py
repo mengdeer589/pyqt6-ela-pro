@@ -370,7 +370,7 @@ class TestRamp:
         assert top == expected[-1]
 
     def test_ela_derived_ramp_follows_mode(self, make):
-        """``ela`` 的派生色带：暗色档低端必须是深色底（``BasicBase`` 直混得到近白）。"""
+        """``ela`` 的派生色带：暗色档低端必须是深色底（``BasicBaseAlpha`` 直混得到近白）。"""
         previous = eTheme.getThemeMode()
         chart = _chart(make)
         try:

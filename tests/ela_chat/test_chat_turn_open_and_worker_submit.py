@@ -16,6 +16,7 @@
 from __future__ import annotations
 
 import asyncio
+import threading
 import time
 
 import pytest
@@ -382,6 +383,48 @@ class TestBinderShutdownOnClose:
         host.close()  # 不得抛、不得 abort
         _spin(100)
         assert True
+
+
+class TestAcceptedCommandsSurviveShutdown:
+    """``_submit`` 返回 ``True`` 的命令必须排在哨兵前执行。"""
+
+    def test_submit_then_shutdown_keeps_command_before_sentinel(self, qapp, make):
+        worker = make(_Worker)
+        worker.start()
+        _spin(400)
+        assert worker._loop is not None
+        assert worker._queue is not None
+
+        puts = []
+        orig_put = worker._queue.put
+
+        async def traced_put(item):
+            puts.append(item)
+            await orig_put(item)
+
+        worker._queue.put = traced_put
+
+        started = threading.Event()
+
+        def block_loop():
+            started.set()
+            time.sleep(0.2)
+
+        worker._loop.call_soon_threadsafe(block_loop)
+        assert started.wait(1.0), "worker loop 未按预期阻塞"
+
+        assert worker._submit(("save", None, 0)) is True
+        worker.shutdown()
+        assert worker.waitForShutdown(3000)
+        assert puts and puts[0] == ("save", None, 0), "shutdown 不得丢弃已受理的命令"
+
+    def test_submit_after_shutdown_is_rejected(self, qapp, make):
+        worker = make(_Worker)
+        worker.start()
+        _spin(400)
+        worker.shutdown()
+        assert worker.waitForShutdown(1500)
+        assert worker._submit(("save", None, 0)) is False
 
 
 class TestWorkerStreamsAndFinishes:

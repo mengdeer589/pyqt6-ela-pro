@@ -24,7 +24,7 @@ class TestThemeWidget:
         assert tw.objectName() == "ElaThemeWidget"
 
     def test_background_palette_is_opaque_surface(self, tw):
-        """V3.0 的 BasicPress 是 alpha 叠色，基类底色必须走合成后的不透明表面。"""
+        """V3.0 的 BasicBaseAlpha 是 alpha 叠色，基类底色必须走合成后的不透明表面。"""
         from PyQt6.QtGui import QPalette
         from PyQt6ElaWidgetTools import ElaThemeType
 

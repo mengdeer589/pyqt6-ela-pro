@@ -387,7 +387,7 @@ class TestTitleTextContrast:
             eTheme.setThemeMode(previous)
 
     def test_dark_primary_picks_dark_text(self, qapp):
-        """深色主题的亮蓝 accent（#4cc2ff）配白字只有 ~1.6:1。"""
+        """深色主题的亮蓝 accent（#60CDFF）配白字只有 ~1.6:1。"""
         previous = eTheme.getThemeMode()
         eTheme.setThemeMode(ElaThemeType.ThemeMode.Dark)
         try:

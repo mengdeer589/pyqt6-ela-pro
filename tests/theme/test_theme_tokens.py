@@ -2,10 +2,10 @@
 
 三条要钉住的不变量：
 
-1. **派生能还原出厂值** —— 用默认强调色走一遍 ``setAccentColor`` 必须**逐值**还原
-   上游的 ``PrimaryHover`` / ``PrimaryPress``。这条钉住了标定表不被误改。
-2. **换色后 hover/press 跟着换** —— 这正是修掉的 bug：只写 ``PrimaryNormal`` 会让
-   「按钮本体是新色、悬停又跳回出厂蓝」。
+1. **强调色派生归 C++** —— ``setAccentColor`` 只写 ``PrimaryNormal``，hover / press
+   由上游按 alpha 0.9 / 0.8 派生；Python 侧不得再维护 HSL 表。
+2. **reset 还原出厂三元组** —— 换色后再 reset，normal / hover / press 必须逐值
+   （含 alpha）回到导入时快照。
 3. **状态色不从强调色派生** —— 语义来自色相（琥珀=警告 / 绿=成功），跟着强调色走
    语义就没了。
 """
@@ -13,6 +13,7 @@
 from __future__ import annotations
 
 import pathlib
+from unittest.mock import patch
 
 import pytest
 from PyQt6.QtGui import QColor
@@ -26,17 +27,28 @@ _L = ElaThemeType.ThemeMode.Light
 _D = ElaThemeType.ThemeMode.Dark
 _TC = ElaThemeType.ThemeColor
 
-#: 上游出厂值（用于验证派生能还原）。改动 eTheme 上游默认值时这里要一起改。
-#: 暗色 primary 在 V3.0 由 `#4cc2ff` 改为 `#4abcf7`（hover / press 未变），
-#: 暗色派生步长已按新基点重新反解（见 `_theme._ACCENT_STEPS`）。
+#: 上游 V3.0 出厂值（normal 不透明，hover / press 是同色 alpha 0.9 / 0.8）。
+#: 改动 eTheme 上游默认值时这里要一起改。
 _FACTORY = {
-    _L: {"primary": "#0067c0", "hover": "#1975c5", "press": "#3183ca"},
-    _D: {"primary": "#4abcf7", "hover": "#47b1e8", "press": "#42a1d2"},
+    _L: {
+        "normal": QColor(0x00, 0x67, 0xC0, 0xFF),
+        "hover": QColor(0x00, 0x67, 0xC0, 0xE6),
+        "press": QColor(0x00, 0x67, 0xC0, 0xCC),
+    },
+    _D: {
+        "normal": QColor(0x60, 0xCD, 0xFF, 0xFF),
+        "hover": QColor(0x60, 0xCD, 0xFF, 0xE6),
+        "press": QColor(0x60, 0xCD, 0xFF, 0xCC),
+    },
 }
 
 
 def _slot(mode, token) -> str:
     return QColor(eTheme.getThemeColor(mode, token)).name()
+
+
+def _rgba(mode, token) -> int:
+    return QColor(eTheme.getThemeColor(mode, token)).rgba()
 
 
 @pytest.fixture(autouse=True)
@@ -52,6 +64,7 @@ class TestReadingLayer:
         [
             T.surface,
             T.surfaceRaised,
+            T.surfaceControl,
             T.surfacePopup,
             T.surfaceDialog,
             T.border,
@@ -83,29 +96,45 @@ class TestReadingLayer:
         for fn in (T.surface, T.text, T.accent, T.border):
             assert fn(_L).name() != fn(_D).name(), f"{fn.__name__} 深浅色应不同"
 
+    @pytest.mark.parametrize("mode", [_L, _D], ids=["light", "dark"])
+    def test_surface_raised_uses_card_alpha_token(self, mode):
+        expected = T._composite(
+            T.surface(mode), eTheme.getThemeColor(mode, _TC.BasicBaseAlpha)
+        )
+        assert T.surfaceRaised(mode).rgba() == expected.rgba()
+
+    @pytest.mark.parametrize("mode", [_L, _D], ids=["light", "dark"])
+    def test_surface_control_uses_control_token(self, mode):
+        expected = T._composite(
+            T.surfaceRaised(mode), eTheme.getThemeColor(mode, _TC.BasicBase)
+        )
+        assert T.surfaceControl(mode).rgba() == expected.rgba()
+
 
 class TestAccentDerivation:
     @pytest.mark.parametrize("mode", [_L, _D], ids=["light", "dark"])
-    def test_derivation_reproduces_factory_values(self, mode):
-        """核心不变量：派生表必须能逐值还原上游出厂的 hover / press。
+    def test_cpp_derives_hover_and_press(self, mode):
+        """C++ 在写 ``PrimaryNormal`` 时自动派生同色 @0.9 / @0.8。"""
+        T.setAccentColor(_FACTORY[mode]["normal"], modes=[mode])
+        assert _rgba(mode, _TC.PrimaryNormal) == _FACTORY[mode]["normal"].rgba()
+        assert _rgba(mode, _TC.PrimaryHover) == _FACTORY[mode]["hover"].rgba()
+        assert _rgba(mode, _TC.PrimaryPress) == _FACTORY[mode]["press"].rgba()
 
-        这条钉住 ``_ACCENT_STEPS`` 的标定值 —— 有人「顺手改成降 alpha 阶梯」时
-        这里立刻红。
-        """
-        T.setAccentColor(QColor(_FACTORY[mode]["primary"]))
-        assert _slot(mode, _TC.PrimaryNormal) == _FACTORY[mode]["primary"]
-        assert _slot(mode, _TC.PrimaryHover) == _FACTORY[mode]["hover"]
-        assert _slot(mode, _TC.PrimaryPress) == _FACTORY[mode]["press"]
+    def test_set_accent_writes_only_primary_normal(self):
+        """回归：Python 再写 hover / press 会覆盖 C++ 的派生。"""
+        with patch.object(eTheme, "setThemeColor", wraps=eTheme.setThemeColor) as spy:
+            T.setAccentColor(QColor("#c0392b"))
+        assert [call.args[1] for call in spy.call_args_list] == [
+            _TC.PrimaryNormal,
+            _TC.PrimaryNormal,
+        ]
 
-    def test_set_accent_also_moves_hover_and_press(self):
-        """回归：只写 PrimaryNormal 会留下出厂蓝的 hover/press（色相不匹配）。"""
+    def test_set_accent_moves_hover_and_press(self):
         T.setAccentColor(QColor("#c0392b"))
         hover = QColor(eTheme.getThemeColor(_L, _TC.PrimaryHover))
         press = QColor(eTheme.getThemeColor(_L, _TC.PrimaryPress))
-        assert hover != QColor("#1975c5"), "hover 必须跟着换"
-        assert press != QColor("#3183ca"), "press 必须跟着换"
-        # 派生保持色相：红强调色的 hover 仍是红系，不是蓝
-        assert abs(hover.getHslF()[0] - QColor("#c0392b").getHslF()[0]) < 0.02
+        assert (hover.name(), hover.alpha()) == ("#c0392b", 230)
+        assert (press.name(), press.alpha()) == ("#c0392b", 204)
 
     @pytest.mark.parametrize(
         ("mode", "factory"),
@@ -119,18 +148,25 @@ class TestAccentDerivation:
         T.resetAccentColor()
         assert eTheme.getThemeColor(mode, _TC.BasicAltBase).rgba() == factory
 
-    def test_reset_round_trip_is_visually_identical(self):
-        """换色再换回来必须**逐值**一致（不是「差不多」）。"""
-        before = tuple(
-            _slot(_L, t)
-            for t in (_TC.PrimaryNormal, _TC.PrimaryHover, _TC.PrimaryPress)
-        )
+    @pytest.mark.parametrize("mode", [_L, _D], ids=["light", "dark"])
+    def test_reset_restores_factory_exact(self, mode):
+        """换色后 reset 必须逐值（含 alpha）回到导入时快照。"""
         T.setAccentColor(QColor("#16a085"))
         T.resetAccentColor()
-        after = tuple(
-            _slot(_L, t)
-            for t in (_TC.PrimaryNormal, _TC.PrimaryHover, _TC.PrimaryPress)
-        )
+        for key, token in (
+            ("normal", _TC.PrimaryNormal),
+            ("hover", _TC.PrimaryHover),
+            ("press", _TC.PrimaryPress),
+        ):
+            assert _rgba(mode, token) == _FACTORY[mode][key].rgba()
+
+    def test_reset_round_trip_is_visually_identical(self):
+        """换色再换回来必须**逐值**一致（不是「差不多」）。"""
+        tokens = (_TC.PrimaryNormal, _TC.PrimaryHover, _TC.PrimaryPress)
+        before = {mode: tuple(_rgba(mode, t) for t in tokens) for mode in (_L, _D)}
+        T.setAccentColor(QColor("#16a085"))
+        T.resetAccentColor()
+        after = {mode: tuple(_rgba(mode, t) for t in tokens) for mode in (_L, _D)}
         assert before == after
 
     def test_set_accent_covers_both_modes_by_default(self):
@@ -141,7 +177,7 @@ class TestAccentDerivation:
     def test_set_accent_can_target_single_mode(self):
         T.setAccentColor(QColor("#c0392b"), modes=[_L])
         assert _slot(_L, _TC.PrimaryNormal) == "#c0392b"
-        assert _slot(_D, _TC.PrimaryNormal) == _FACTORY[_D]["primary"]
+        assert _slot(_D, _TC.PrimaryNormal) == _FACTORY[_D]["normal"].name()
 
     @pytest.mark.parametrize("bad", [None, 42, "", "not-a-color"])
     def test_set_accent_rejects_non_color(self, bad):

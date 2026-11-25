@@ -97,7 +97,7 @@ class ElaChatInput(
     shellSubmitted = pyqtSignal(str)
     #: 草稿变化（防抖；参数：``draftState()`` 快照）
     draftChanged = pyqtSignal(dict)
-    #: 备选投递（``Ctrl+Enter``：生成中走插话，否则普通发送）
+    #: 备选投递（``Ctrl+Enter``：生成中走与 Enter 相反的通道，否则普通发送）
     alternateSubmitted = pyqtSignal(str, list)
     #: 点击「清空上下文」（**尚未执行清空**，宿主或组件弹确认后自行处理）
     clearRequested = pyqtSignal()

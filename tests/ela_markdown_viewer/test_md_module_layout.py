@@ -69,6 +69,7 @@ def test_implementation_blocks_live_in_their_module():
         "_preprocess": preprocess,
         "_render_into_stages": render,
         "searchText": interaction,
+        "_drag_scroll_tick": interaction,
         "_applyThemeStyle": appearance,
         "markdownSelection": selection,
         "_ElaTextBrowser": text_browser,

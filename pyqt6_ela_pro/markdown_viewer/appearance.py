@@ -24,7 +24,7 @@ from .._colors import parse_color
 from .._content_colors import calloutColors, diffColors
 from .._internal import is_deleted, system_cjk_font_family
 from .._styles import setTextBaseColor, setTextSelectionColors
-from .._theme import surfaceRaised
+from .._theme import surfaceRaised, text
 from .code import (
     _default_code_font_family,
     _default_latin_code_font_family,
@@ -530,7 +530,7 @@ class _MarkdownAppearanceMixin:
         """
         mode = self._theme_mode
         self._is_dark_theme = mode == ElaThemeType.ThemeMode.Dark
-        self._text_color = eTheme.getThemeColor(mode, ElaThemeType.ThemeColor.BasicText)
+        self._text_color = text(mode)
         self._code_text = self._text_color
         # 表格 / 代码背景：与查看器背景预混合成不透明色
         # （QTextDocument 的 CSS 不支持 alpha 通道；V3.0 的 BasicPress/BasicBase

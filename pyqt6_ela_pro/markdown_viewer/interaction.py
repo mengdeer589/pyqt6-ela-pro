@@ -5,10 +5,11 @@ from __future__ import annotations
 import logging
 
 from PyQt6ElaWidgetTools import ElaIconType, ElaMenu
-from PyQt6.QtCore import QEvent, QPointF, Qt, QUrl
+from PyQt6.QtCore import QEvent, QPoint, QPointF, QRect, Qt, QUrl
 from PyQt6.QtGui import (
     QCursor,
     QDesktopServices,
+    QMouseEvent,
     QTextCharFormat,
     QTextCursor,
     QTextDocument,
@@ -30,6 +31,13 @@ _ANCHOR_HISTORY_CAP = 50
 
 #: 文档内搜索命中上限：单字符搜索长文时避免创建数万条 ExtraSelection
 _SEARCH_HIT_LIMIT = 500
+
+#: 拖选自动滚动：tick 间隔与每 tick 步长（超出越远越快）。
+#: 直接 setValue 绕开 ElaScrollBar 的缓动：Qt 自带的 autoscroll 用
+#: triggerAction，每 tick 会被缓动吞成 ~1px。
+_DRAG_SCROLL_INTERVAL_MS = 16
+_DRAG_SCROLL_MIN_STEP = 6
+_DRAG_SCROLL_MAX_STEP = 64
 
 
 class _MarkdownInteractionMixin:
@@ -220,9 +228,16 @@ class _MarkdownInteractionMixin:
         self._text_browser.setExtraSelections([])
 
     def eventFilter(self, obj, event) -> bool:  # noqa: N802 (Qt 命名)
-        """拦截右键菜单，并在鼠标移动时管理代码复制按钮显隐。"""
+        """拦截右键菜单，管理复制按钮显隐与拖选自动滚动。"""
         viewport = self._text_browser.viewport()
         event_type = event.type()
+        if event_type in (
+            QEvent.Type.FocusOut,
+            QEvent.Type.WindowDeactivate,
+            QEvent.Type.Hide,
+        ):
+            # 松手事件丢失（切窗口 / 宿主隐藏）时不能让定时器继续滚
+            self._end_drag_select()
         if event_type == QEvent.Type.ContextMenu and obj in (
             self._text_browser,
             viewport,
@@ -245,13 +260,160 @@ class _MarkdownInteractionMixin:
                 self._update_code_button_hover(
                     event.position().toPoint(), pressed=pressed
                 )
+                if self._drag_selecting:
+                    self._update_drag_select(event)
             elif event_type == QEvent.Type.Leave:
                 # 移向复制按钮（viewport 子控件）也会触发 Leave：
                 # 按光标实际位置判定，避免按钮在点击前消失
                 self._on_viewport_leave()
+            elif event_type in (
+                QEvent.Type.MouseButtonPress,
+                QEvent.Type.MouseButtonDblClick,
+            ):
+                # 双击按词选中的第二下是 DblClick，也要算拖选起点
+                if event.button() == Qt.MouseButton.LeftButton:
+                    self._begin_drag_select(event)
+            elif event_type == QEvent.Type.MouseButtonRelease:
+                if event.button() == Qt.MouseButton.LeftButton:
+                    self._end_drag_select()
         elif obj in self._code_button_widgets and event_type == QEvent.Type.Leave:
             single_shot_on(self, 0, self._hover_from_cursor)
         return super().eventFilter(obj, event)
+
+    def _begin_drag_select(self, event) -> None:
+        """左键按下：记录拖选起点。"""
+        self._drag_selecting = True
+        self._drag_global_pos = event.globalPosition().toPoint()
+        self._drag_scroll_timer.stop()
+
+    def _update_drag_select(self, event) -> None:
+        """拖选移动：指针离开可见带就启动自动滚动，回到带内即停。"""
+        self._drag_global_pos = event.globalPosition().toPoint()
+        band = self._drag_band()
+        if band is None or band.contains(self._drag_global_pos):
+            self._drag_scroll_timer.stop()
+        elif not self._drag_scroll_timer.isActive():
+            self._drag_scroll_timer.start()
+
+    def _end_drag_select(self) -> None:
+        """结束拖选：停掉自动滚动。"""
+        self._drag_selecting = False
+        self._drag_global_pos = None
+        self._drag_scroll_timer.stop()
+
+    def _drag_visible_rect(self) -> QRect:
+        """文档在视口里真正可见的区域（viewport 坐标）。
+
+        嵌入模式下 ``viewport()`` 等于全文高度，可见带取外层滚动区视口
+        映射回本视口后的交集。
+        """
+        viewport = self._text_browser.viewport()
+        if not self._embedded:
+            return viewport.rect()
+        area = self._enclosing_scroll_area()
+        if area is None:
+            return viewport.rect()
+        host = area.viewport()
+        rect = QRect(viewport.mapFrom(host, QPoint(0, 0)), host.size())
+        return rect.intersected(viewport.rect())
+
+    def _drag_band(self):
+        """可见带在屏幕上的矩形；完全不可见时返回 ``None``。"""
+        rect = self._drag_visible_rect()
+        if rect.isEmpty():
+            return None
+        viewport = self._text_browser.viewport()
+        return QRect(viewport.mapToGlobal(rect.topLeft()), rect.size())
+
+    def _drag_scroll_bar(self, orientation):
+        """拖选要驱动的滚动条：独立模式用自身，嵌入模式用外层滚动区。"""
+        if self._embedded:
+            area = self._enclosing_scroll_area()
+            if area is None:
+                return None
+            bar = (
+                area.verticalScrollBar()
+                if orientation == Qt.Orientation.Vertical
+                else area.horizontalScrollBar()
+            )
+        else:
+            browser = self._text_browser
+            bar = (
+                browser.verticalScrollBar()
+                if orientation == Qt.Orientation.Vertical
+                else browser.horizontalScrollBar()
+            )
+        if bar is None or bar.maximum() <= bar.minimum():
+            return None
+        return bar
+
+    @staticmethod
+    def _drag_scroll_step(bar, distance: int) -> None:
+        """按指针超出可见带的距离直接改滚动条值（不触发缓动）。"""
+        step = min(
+            _DRAG_SCROLL_MAX_STEP, max(_DRAG_SCROLL_MIN_STEP, abs(distance) // 2)
+        )
+        target = bar.value() + (step if distance > 0 else -step)
+        bar.setValue(min(max(target, bar.minimum()), bar.maximum()))
+
+    def _drag_scroll_tick(self) -> None:
+        """自动滚动一帧：滚可见带外的方向，再补发 MouseMove 扩展选区。"""
+        if is_deleted(self) or is_deleted(self._text_browser):
+            self._drag_scroll_timer.stop()
+            return
+        if not self._drag_selecting or self._drag_global_pos is None:
+            self._drag_scroll_timer.stop()
+            return
+        viewport = self._text_browser.viewport()
+        rect = self._drag_visible_rect()
+        if rect.isEmpty() or is_deleted(viewport):
+            self._drag_scroll_timer.stop()
+            return
+        band = QRect(viewport.mapToGlobal(rect.topLeft()), rect.size())
+        pos = self._drag_global_pos
+        dx = dy = 0
+        if pos.x() < band.left():
+            dx = pos.x() - band.left()
+        elif pos.x() > band.right():
+            dx = pos.x() - band.right()
+        if pos.y() < band.top():
+            dy = pos.y() - band.top()
+        elif pos.y() > band.bottom():
+            dy = pos.y() - band.bottom()
+        if dx == 0 and dy == 0:
+            self._drag_scroll_timer.stop()
+            return
+        if dy:
+            bar = self._drag_scroll_bar(Qt.Orientation.Vertical)
+            if bar is not None:
+                self._drag_scroll_step(bar, dy)
+        if dx:
+            bar = self._drag_scroll_bar(Qt.Orientation.Horizontal)
+            if bar is not None:
+                self._drag_scroll_step(bar, dx)
+        if is_deleted(viewport) or is_deleted(self):
+            return
+        # 嵌入模式滚动后宿主视口在浏览器里的位置变了，按新的可见带取落点
+        rect = self._drag_visible_rect()
+        if rect.isEmpty():
+            self._drag_scroll_timer.stop()
+            return
+        # 沿用 Qt 自己的选区扩展逻辑（双击按词 / 表格 / 剪贴板语义），
+        # 只把落点夹到可见边缘 —— 滚动后这里就是新露出来的内容。
+        local = viewport.mapFromGlobal(pos)
+        local.setX(min(max(local.x(), rect.left()), rect.right()))
+        local.setY(min(max(local.y(), rect.top()), rect.bottom()))
+        QApplication.sendEvent(
+            viewport,
+            QMouseEvent(
+                QEvent.Type.MouseMove,
+                QPointF(local),
+                QPointF(pos),
+                Qt.MouseButton.NoButton,
+                Qt.MouseButton.LeftButton,
+                Qt.KeyboardModifier.NoModifier,
+            ),
+        )
 
     def _on_viewport_leave(self, global_pos=None) -> None:
         """viewport 离开处理：光标仍落在代码块矩形内（如按钮上）时保持显示。"""

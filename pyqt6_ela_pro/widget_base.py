@@ -39,7 +39,7 @@ class ElaThemeWidget(_ThemeAwareMixin, QWidget):
         """按主题模式更新 widget 的背景调色板。
 
         V3.0 的 ``BasicPress`` 是 alpha 叠色，直接设进 palette 会变成半透明；
-        用读取层合成的卡片表面（``BasicBase`` 叠 ``WindowBase``）。
+        用读取层合成的卡片表面（``BasicBaseAlpha`` 叠 ``WindowBase``）。
         """
         bg_color = surfaceRaised(mode)
         palette = self.palette()

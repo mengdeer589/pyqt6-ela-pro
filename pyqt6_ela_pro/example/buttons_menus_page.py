@@ -106,9 +106,9 @@ class ButtonsMenusPage(ExamplePage):
             )
         )
         self._addInfoText(
-            "换强调色时 hover / press 会一并派生写入 —— 只改基础色的话，\n"
-            "按钮本体是新色、悬停又跳回出厂蓝。派生规则是从出厂值反解的，所以\n"
-            "「换色再换回来」是逐值一致的。注意 eTheme 没有换色通知，需要自行重绘。",
+            "换强调色只写 PrimaryNormal，hover / press 由 C++ 按同色 alpha\n"
+            "0.9 / 0.8 自动派生；「还原」写回导入时快照的出厂三元组，逐值一致。\n"
+            "换色后当前模式会发 themeModeChanged，自绘控件仍建议主动 update。",
             parent_layout,
         )
         row = QHBoxLayout()
@@ -140,11 +140,11 @@ class ButtonsMenusPage(ExamplePage):
         )
         self._accentInfo.setText(
             f"当前强调色  Light {light.name()}   Dark {dark.name()}   "
-            f"派生 hover {hover.name()}"
+            f"派生 hover {hover.name()} @{hover.alphaF():.2f}"
         )
 
     def _repaint_all(self):
-        """``eTheme.setThemeColor`` 没有 NOTIFY 信号，换完色得自己让界面重画。"""
+        """当前模式会发 ``themeModeChanged``；这里再主动重绘，覆盖自绘控件。"""
         app = QApplication.instance()
         if app is None:
             return

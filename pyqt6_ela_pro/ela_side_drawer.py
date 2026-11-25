@@ -208,8 +208,8 @@ class ElaDrawer(ElaThemeWidget):
         self._onThemeChanged(self._theme_mode)
 
     def _onThemeChanged(self, mode: ElaThemeType.ThemeMode) -> None:
-        # 表面跟内容基面一致：V3.0 的 BasicPress 是 alpha 叠色，改用读取层合成的
-        # 不透明卡片表面，否则抽屉会透出下面的页面
+        # 表面跟内容基面一致：V3.0 的 BasicBaseAlpha 是 alpha 叠色，改用读取层
+        # 合成的不透明卡片表面，否则抽屉会透出下面的页面
         bg_color = surfaceRaised(mode)
         self._drawer_widget.setBgColor(bg_color)
         dim_color = QColor(0, 0, 0, 102)

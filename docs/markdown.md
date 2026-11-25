@@ -175,6 +175,9 @@ viewer.setBodyFontFamily(family)
 ## 图片与媒体
 
 - 图片基准路径与超宽缩放；
+- 图片块不套正文百分比行高（改用 `MinimumHeight`）：否则 Qt 会把图片行的自然高度
+  也乘上 1.65，图注 / 下一段被推远约 65% 图高；`<p align>` 图注与图片同块时同样生效，
+  图注行仍保持正文行距；
 - 远程图片默认拦截（需要时由宿主放开；放开后按阅读列宽缩放）；
 - 图片点击信号与预览；本地图片右键另存为；
 - 公式 / Mermaid / 外链悬浮显示源码或 URL（`install_document_tooltips`
@@ -192,6 +195,9 @@ viewer.setBodyFontFamily(family)
 ## 引用回复与流式
 
 - `markdownSelection()` / `selectionQuoted`：把选中内容还原为 Markdown 源（引用回复用）；
+- 拖选自动滚动：选区拖出可见范围时自动滚并继续扩展（独立查看器滚自身，嵌入模式滚最近的
+  外层滚动区）；不依赖 Qt 自带 autoscroll —— 它经 `ElaScrollBar` 的缓动后每 tick 只走约
+  1px，嵌入模式内部滚动条无范围时更是完全不动；
 - 滚动语义：`setStickToBottom(True)`（默认，聊天 / 流式）贴底时自动跟随；
   `setStickToBottom(False)`（阅读器）让 `setMarkdown` 换新内容后回到顶部，同内容
   重渲（切主题 / 表格样式 / 字号）保留当前位置。内容可以在控件首次显示前设置

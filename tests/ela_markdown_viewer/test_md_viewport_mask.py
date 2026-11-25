@@ -1,7 +1,7 @@
 """圆角视口底色与 mask（bug 报告 §4）。
 
 圆角形态不再切透明视口：保持与自绘圆角背景同色的不透明卡片表面
-（``_theme.surfaceRaised``，V3.0 起由 ``BasicBase`` 叠在 ``WindowBase`` 上合成；
+（``_theme.surfaceRaised``，V3.0 起由 ``BasicBaseAlpha`` 叠在 ``WindowBase`` 上合成；
 走快重绘路径），四角由 ``QRegion`` mask 裁掉后透出外层自绘背景；
 嵌入模式保持透明，由宿主传自己的背景色作不透明底色。
 """

@@ -7,7 +7,7 @@ from PyQt6.QtGui import QColor
 from PyQt6ElaWidgetTools import ElaIconType, eTheme, ElaThemeType
 
 from pyqt6_ela_pro._colors import contrastRatio, get_color_scheme
-from pyqt6_ela_pro._theme import blend, surfaceRaised
+from pyqt6_ela_pro._theme import blend, surfaceControl
 from pyqt6_ela_pro.ela_chip import ElaChip
 
 
@@ -140,7 +140,9 @@ class TestElaChipContrast:
     """
 
     @pytest.mark.parametrize(
-        "color", list(ElaChip.ElaChipColorType), ids=[c.name for c in ElaChip.ElaChipColorType]
+        "color",
+        list(ElaChip.ElaChipColorType),
+        ids=[c.name for c in ElaChip.ElaChipColorType],
     )
     @pytest.mark.parametrize(
         "mode",
@@ -154,7 +156,7 @@ class TestElaChipContrast:
         try:
             chip = make(ElaChip, text="标签")
             chip.setColor(color)
-            surface = surfaceRaised(mode)
+            surface = surfaceControl(mode)
             samples = []
             for hovered, pressed in ((False, False), (True, False), (True, True)):
                 bg, _border, fg = chip._resolve_colors(hovered, pressed)

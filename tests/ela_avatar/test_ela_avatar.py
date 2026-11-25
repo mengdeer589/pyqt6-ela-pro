@@ -28,7 +28,7 @@ from pyqt6_ela_pro._theme import (
     relativeLuminance,
     statusColor,
     surface,
-    surfaceRaised,
+    surfaceControl,
     textDisabled,
 )
 from pyqt6_ela_pro.ela_avatar import (
@@ -151,7 +151,7 @@ class TestBackgroundFallbackChain:
     def test_unnamed_falls_back_to_raised_surface(self, avatar):
         assert (
             avatar.effectiveBackgroundColor().name()
-            == surfaceRaised(currentMode()).name()
+            == surfaceControl(currentMode()).name()
         )
 
     def test_stable_hash_is_not_python_hash(self):
@@ -341,7 +341,12 @@ class TestPaintSafety:
         with pytest.raises(TypeError):
             QRect(0, 0, 10, 10).adjusted(0.5, 0.5, -0.5, -0.5)
         inset = QRectF(QRect(0, 0, 10, 10)).adjusted(0.5, 0.5, -0.5, -0.5)
-        assert (inset.x(), inset.y(), inset.width(), inset.height()) == (0.5, 0.5, 9.0, 9.0)
+        assert (inset.x(), inset.y(), inset.width(), inset.height()) == (
+            0.5,
+            0.5,
+            9.0,
+            9.0,
+        )
 
     def test_device_independent_size_exists(self):
         """Qt6 / PyQt6 暴露了 ``QPixmap.deviceIndependentSize()``（= 物理尺寸 / DPR）。"""

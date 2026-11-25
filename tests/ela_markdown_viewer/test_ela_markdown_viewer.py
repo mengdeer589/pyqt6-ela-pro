@@ -5,6 +5,7 @@ from PyQt6.QtGui import QColor, QFont, QPalette, QTextLength, QTextTable
 from PyQt6ElaWidgetTools import ElaScrollBar, ElaThemeType, eTheme
 
 from pyqt6_ela_pro.markdown_viewer import viewer as viewer_module
+from pyqt6_ela_pro._theme import text as theme_text
 from pyqt6_ela_pro.ela_markdown_viewer import _INLINE_CODE_MARK, ElaMarkdownViewer
 
 
@@ -245,9 +246,7 @@ class TestElaMarkdownViewerThemeColors:
 
         fragment = self._find(v, "plain text")
         assert fragment.charFormat().foreground().style() == Qt.BrushStyle.NoBrush
-        expected = eTheme.getThemeColor(
-            v._theme_mode, ElaThemeType.ThemeColor.BasicText
-        )
+        expected = theme_text(v._theme_mode)
         palette = v.textBrowser().palette()
         assert palette.color(QPalette.ColorRole.Text).name() == expected.name()
         v.deleteLater()
@@ -262,9 +261,7 @@ class TestElaMarkdownViewerThemeColors:
             fragment = self._find(v, "plain text")
             assert fragment.charFormat().foreground().style() == Qt.BrushStyle.NoBrush
             palette = v.textBrowser().palette()
-            expected = eTheme.getThemeColor(
-                ElaThemeType.ThemeMode.Dark, ElaThemeType.ThemeColor.BasicText
-            )
+            expected = theme_text(ElaThemeType.ThemeMode.Dark)
             assert palette.color(QPalette.ColorRole.Text).name() == expected.name()
             v.deleteLater()
         finally:

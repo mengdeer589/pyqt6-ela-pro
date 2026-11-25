@@ -30,13 +30,18 @@ from ._theme import (
     currentMode,
     relativeLuminance,
     surface,
-    surfaceRaised,
+    surfaceControl,
     statusColor,
     textDisabled,
 )
 from .widget_base import ElaThemeWidget
 
-__all__ = ["ElaAvatar", "ElaAvatarPresenceType", "ElaAvatarShapeType", "ElaAvatarSizeType"]
+__all__ = [
+    "ElaAvatar",
+    "ElaAvatarPresenceType",
+    "ElaAvatarShapeType",
+    "ElaAvatarSizeType",
+]
 
 
 #: 「圆角方」的圆角（对齐 Fluent ``CornerRadius::Control``）。
@@ -211,7 +216,6 @@ class ElaAvatar(ElaThemeWidget):
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
         self._applyExtent()
 
-
     def name(self) -> str:
         return self._name
 
@@ -380,7 +384,7 @@ class ElaAvatar(ElaThemeWidget):
             else:
                 color = accent(currentMode())
         else:
-            color = surfaceRaised(currentMode())
+            color = surfaceControl(currentMode())
         if not self.isEnabled():
             color.setAlpha(_DISABLED_BG_ALPHA)
         return color
@@ -390,7 +394,6 @@ class ElaAvatar(ElaThemeWidget):
 
     def minimumSizeHint(self) -> QSize:  # noqa: N802
         return self.sizeHint()
-
 
     def _clipPath(self) -> QPainterPath:  # noqa: N802
         path = QPainterPath()

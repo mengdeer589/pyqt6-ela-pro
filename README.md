@@ -48,7 +48,7 @@ tests/                     回归测试（按组件 / 家族目录组织；`-m "
 - **控件全家桶**：输入、按钮、弹窗与提示、导航与布局、数据展示共 100+ 组件；
   所有下拉框支持拼音搜索（`bj` → 北京）。
 - **主题与外观**：浅 / 深主题自适应、语义色令牌、全局强调色换肤
-  （`setAccentColor` 一并对 hover / press 等派生槽位写入）；**全库零 QSS**，控件全部 `QPainter` 自绘。
+  （`setAccentColor` 只写基色，hover / press 由上游按 alpha 自动派生）；**全库零 QSS**，控件全部 `QPainter` 自绘。
 - **动效策略**：`motion` 全局三档（`Full` / `Reduced` / `Disabled`），默认跟随系统
   「关闭动画」设置 —— `Reduced` 把状态过渡压到 ≤50ms 并停掉持续动效。
 - **AI 对话栈**：命令式回合 API + `ElaChatStreamBinder` 一键接线、分段时间线
@@ -168,9 +168,9 @@ sys.exit(app.exec())
 | `start_transition(anim, full_ms, ...)` | 按全局动效策略启动一次过渡，返回是否真的播放 |
 | `start_transition_timer(timer)` | 同上，给 `QTimer` 手搓插值的过渡；返回 `False` 时调用方要自己落终值 |
 | `start_idle_loop(timer, ms, on_stop=)` | 启动持续动效循环；`Reduced` 下停掉，`on_stop` 落到静态基态 |
-| `surface(mode)` / `text(mode)` / `accent(mode)` | 语义令牌（`surface`/`surfaceRaised`/`surfacePopup`/`surfaceDialog`/`border`/`text`/`textMuted`/`accent`…） |
+| `surface(mode)` / `text(mode)` / `accent(mode)` | 语义令牌（`surface`/`surfaceRaised`/`surfaceControl`/`surfacePopup`/`surfaceDialog`/`border`/`text`/`textMuted`/`accent`…） |
 | `statusColor(mode, ElaStatusRoleType.X)` | 校验/提示状态色（`Neutral`/`Error`/`Warning`/`Success`） |
-| `setAccentColor(color)` | 换强调色（`QColor` / hex / `rgb()` / `rgba()`），**并一并派生写入 hover/press**（换色后需自行触发重绘） |
+| `setAccentColor(color)` | 换强调色（`QColor` / hex / `rgb()` / `rgba()`）；hover / press 由上游按同色 alpha 0.9 / 0.8 自动派生，`resetAccentColor()` 回工厂快照 |
 | `motion.setMode(ElaMotionModeType.Reduced)` | 全局动效：状态过渡压到 ≤50ms、持续动效停止 |
 | `set_tooltip(widget, text, position, theme)` | 设置自定义工具提示 |
 | `remove_tooltip(widget)` | 移除自定义工具提示 |

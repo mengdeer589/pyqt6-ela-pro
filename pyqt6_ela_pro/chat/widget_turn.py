@@ -58,18 +58,51 @@ class _WidgetTurnMixin:
         self.messageSubmittedFull.emit(text, list(attachments or []))
         return messageId
 
-    def _on_input_submitted(self, text: str, attachments: list) -> None:
-        mentions = self._input.mentionSpans(text)
-        if self._generating and self._queue_enabled:
+    def setFollowUpDelivery(self, delivery: str) -> None:
+        """生成中 ``Enter`` 的投递通道：``"queue"``（默认）/ ``"steer"``。
+
+        ``Ctrl+Enter`` 固定走另一条；空闲时两键都是普通发送。
+        """
+        value = str(delivery or "").strip().lower()
+        if value not in ("queue", "steer"):
+            raise ValueError("setFollowUpDelivery: delivery 必须是 'queue' 或 'steer'")
+        self._follow_up_delivery = value
+
+    def followUpDelivery(self) -> str:
+        """生成中 ``Enter`` 的投递通道。"""
+        return self._follow_up_delivery
+
+    def _deliverFollowUp(self, text: str, attachments: list, mentions) -> None:
+        """生成中按配置投递；所选通道关闭时按开关回退。"""
+        if self._follow_up_delivery == "steer":
+            if self.steerEnabled():
+                self.steerMessage(text, attachments, mentions=mentions)
+                return
+            if self.queueEnabled():
+                self.enqueueMessage(text, attachments, mentions=mentions)
+                return
+            self.sendUserMessage(text, attachments, mentions=mentions)
+            return
+        if self.queueEnabled():
             self.enqueueMessage(text, attachments, mentions=mentions)
             return
         self.sendUserMessage(text, attachments, mentions=mentions)
 
-    def _on_alternate_submitted(self, text: str, attachments: list) -> None:
-        """``Ctrl+Enter``：生成中走插话，插话关闭时回退排队，空闲时普通发送。"""
+    def _on_input_submitted(self, text: str, attachments: list) -> None:
         mentions = self._input.mentionSpans(text)
         if self._generating:
-            if self.steerEnabled():
+            self._deliverFollowUp(text, attachments, mentions)
+            return
+        self.sendUserMessage(text, attachments, mentions=mentions)
+
+    def _on_alternate_submitted(self, text: str, attachments: list) -> None:
+        """``Ctrl+Enter``：走与 ``Enter`` 相反的通道；插话关闭时回退排队。"""
+        mentions = self._input.mentionSpans(text)
+        if self._generating:
+            if self._follow_up_delivery == "steer":
+                # Enter 已占用 steer；备选键固定排队，保留原有的 queueEnabled 例外
+                self.enqueueMessage(text, attachments, mentions=mentions)
+            elif self.steerEnabled():
                 self.steerMessage(text, attachments, mentions=mentions)
             else:
                 self.enqueueMessage(text, attachments, mentions=mentions)

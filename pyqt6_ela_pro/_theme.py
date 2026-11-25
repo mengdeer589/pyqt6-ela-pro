@@ -28,6 +28,7 @@ __all__ = [
     "severityColor",
     "statusColor",
     "surface",
+    "surfaceControl",
     "surfaceDialog",
     "surfacePopup",
     "surfaceRaised",
@@ -73,7 +74,7 @@ def relativeLuminance(color: QColor) -> float:  # noqa: N802 (与数学名一致
 def _composite(base: QColor, overlay: QColor) -> QColor:
     """把半透明 ``overlay`` 按 source-over 压到不透明 ``base`` 上，返回不透明色。
 
-    V3.0 起 ``BasicBase`` / ``BasicBorder`` / ``BasicText*`` 都是 alpha 叠色；
+    V3.0 起 ``BasicBaseAlpha`` / ``BasicBorder`` / ``BasicText*`` 都是 alpha 叠色；
     读取层必须给不透明色 —— ``QTextDocument`` 的 CSS、matplotlib 的 ``.name()``
     等场景会直接丢弃 alpha，半透明色在那里会退化成纯白/纯黑。
     """
@@ -108,8 +109,13 @@ def surface(mode) -> QColor:
 
 
 def surfaceRaised(mode) -> QColor:
-    """抬起一层的表面（卡片 / 输入框）。``BasicBase`` 叠在 ``WindowBase`` 上。"""
-    return _composite(surface(mode), _color(mode, _TC.BasicBase))
+    """卡片 / 内容层表面。``BasicBaseAlpha`` 叠在 ``WindowBase`` 上。"""
+    return _composite(surface(mode), _color(mode, _TC.BasicBaseAlpha))
+
+
+def surfaceControl(mode) -> QColor:
+    """普通控件填充。``BasicBase`` 叠在卡片层上。"""
+    return _composite(surfaceRaised(mode), _color(mode, _TC.BasicBase))
 
 
 def surfacePopup(mode) -> QColor:
@@ -184,22 +190,6 @@ class ElaSeverity(IntEnum):
     Error = 3
 
 
-def _shift(base: QColor, d_s: float, d_l: float) -> QColor:
-    """保持色相与 alpha，按 HSL 偏移饱和度 / 亮度。
-    ``QColor.getHslF()`` 返回 **4 元组**（含 alpha），写成 3 元组会
-    ``ValueError``。
-    """
-    hue, sat, light, alpha = base.getHslF()
-    out = QColor()
-    out.setHslF(
-        hue,
-        min(max(sat + d_s, 0.0), 1.0),
-        min(max(light + d_l, 0.0), 1.0),
-        alpha,
-    )
-    return out
-
-
 def statusColor(mode, role: ElaStatusRoleType) -> QColor:
     """校验 / 提示状态的文字与图标色。
 
@@ -265,22 +255,21 @@ def chartPalette(mode=None) -> List[QColor]:
 # ── 强调色换色 ────────────────────────────────────────────────
 
 
-#: 强调色 hover / press 的 HSL 偏移 ``(ΔS, ΔL)``，从上游出厂值反解；默认色经
-#: :func:`setAccentColor` → :func:`resetAccentColor` 必须逐值还原（``tests/theme/`` 钉住）。
-_ACCENT_STEPS = {
-    _TM.Light: {"hover": (-0.225, +0.059), "press": (-0.390, +0.116)},
-    _TM.Dark: {"hover": (-0.1376, -0.0353), "press": (-0.2999, -0.0883)},
-}
-
-#: 上游出厂强调色，供 :func:`resetAccentColor` 还原。
-_DEFAULT_ACCENT = {
-    _TM.Light: QColor("#0067c0"),
-    _TM.Dark: QColor("#4abcf7"),
-}
+#: 上游出厂强调色三元组（normal / hover / press），导入时快照。
+#: 宿主应在 import 之后再换色；reload 不重新快照，否则会把自定义色当成工厂色。
+if "_FACTORY_ACCENT" not in globals():
+    _FACTORY_ACCENT = {
+        mode: (
+            _color(mode, _TC.PrimaryNormal),
+            _color(mode, _TC.PrimaryHover),
+            _color(mode, _TC.PrimaryPress),
+        )
+        for mode in (_TM.Light, _TM.Dark)
+    }
 
 
 def setAccentColor(color, modes=None) -> None:
-    """换强调色，**并一并派生写入 hover / press**（换色后不自动重绘，见模块 docstring）。
+    """换强调色（hover / press 由上游 ``setThemeColor`` 自动派生）。
 
     ``color`` 收 ``QColor`` / hex / ``rgb()`` / ``rgba()``；非法值忽略。
     """
@@ -289,29 +278,20 @@ def setAccentColor(color, modes=None) -> None:
         return
     targets = list(modes) if modes else [_TM.Light, _TM.Dark]
     for mode in targets:
-        steps = _ACCENT_STEPS.get(mode, _ACCENT_STEPS[_TM.Light])
         eTheme.setThemeColor(mode, _TC.PrimaryNormal, QColor(value))
-        for slot, key in (
-            (_TC.PrimaryHover, "hover"),
-            (_TC.PrimaryPress, "press"),
-        ):
-            d_s, d_l = steps[key]
-            eTheme.setThemeColor(mode, slot, _shift(value, d_s, d_l))
 
 
 def resetAccentColor(modes=None) -> None:
-    """还原成上游出厂强调色（hover / press 一并回出厂值，不重新派生）。"""
+    """还原成导入时快照的上游出厂强调色（normal / hover / press 逐值写回）。"""
     targets = list(modes) if modes else [_TM.Light, _TM.Dark]
     for mode in targets:
-        base = _DEFAULT_ACCENT.get(mode)
-        if base is None:
+        factory = _FACTORY_ACCENT.get(mode)
+        if factory is None:
             continue
-        eTheme.setThemeColor(mode, _TC.PrimaryNormal, QColor(base))
-        # hover / press 一并回到出厂值，换回后视觉与「从未换过色」完全相同
-        steps = _ACCENT_STEPS.get(mode, _ACCENT_STEPS[_TM.Light])
-        for slot, key in ((_TC.PrimaryHover, "hover"), (_TC.PrimaryPress, "press")):
-            d_s, d_l = steps[key]
-            eTheme.setThemeColor(mode, slot, _shift(base, d_s, d_l))
+        normal, hover, press = factory
+        eTheme.setThemeColor(mode, _TC.PrimaryNormal, QColor(normal))
+        eTheme.setThemeColor(mode, _TC.PrimaryHover, QColor(hover))
+        eTheme.setThemeColor(mode, _TC.PrimaryPress, QColor(press))
 
 
 def textOnAccent(color: Optional[QColor] = None) -> QColor:

@@ -81,9 +81,10 @@ _COLOR_PALETTE: dict[str, dict[str, dict[str, str]]] = {
             "textColor": "#ffffff",
         },
         "dark": {
-            "accent": "#4cc2ff",
-            "accentHover": "#70cfff",
-            "accentActive": "#38ade8",
+            # blue 走 live scheme；这三项只做色表兜底，hover / press 实为同色 alpha。
+            "accent": "#60cdff",
+            "accentHover": "#60cdff",
+            "accentActive": "#60cdff",
             "accentBg": "#142a38",
             "accentBgHover": "#1e4059",
             "textColor": "#ffffff",
@@ -333,8 +334,8 @@ _COLOR_ALIAS: dict[str, str] = {
 #: 其余色系为固定色板；主色必须与 Ela 控件一致，否则换强调色后按钮仍是出厂蓝。
 _LIVE_ACCENT_COLORS = frozenset({"blue"})
 
-#: 主色色板缓存：键 = 模式 + 三个强调色槽的 hex。换色后自然换键。
-_LIVE_SCHEME_CACHE: dict[tuple[str, str, str, str], dict[str, QColor]] = {}
+#: 主色色板缓存：键 = 模式 + 三个强调槽 + 卡片的 rgba。换色 / 换 alpha 后自然换键。
+_LIVE_SCHEME_CACHE: dict[tuple, dict[str, QColor]] = {}
 
 #: ``accentBg`` / ``accentBgHover`` 的 tint 强度（强调色占背景的比例）。
 #: 由出厂色板反解：亮色 10% / 22%，暗色 22% / 35%（往白 / 往黑混合）。
@@ -459,13 +460,23 @@ def _readable_accent(
 
 def _live_accent_scheme(mode: ElaThemeType.ThemeMode) -> dict[str, QColor]:
     """主色色板：``accent`` / hover / press 全部取 ``eTheme`` **实时**值。
+    C++ 派生的 hover / press 带 alpha，合成到卡片层后保持色板的不透明契约；
     ``accentBg`` 由强调色按出厂比例 tint 出来（亮色往白、暗色往黑），
     ``solid*`` 仍是 ``_solid_palette`` 派生（压暗保证白字 ≥ 4.5）。
     """
+    from ._theme import _composite, surfaceRaised
+
     accent = _theme_color(mode, ElaThemeType.ThemeColor.PrimaryNormal)
     hover = _theme_color(mode, ElaThemeType.ThemeColor.PrimaryHover)
     press = _theme_color(mode, ElaThemeType.ThemeColor.PrimaryPress)
-    key = (_mode_key(mode), accent.name(), hover.name(), press.name())
+    surface = surfaceRaised(mode)
+    key = (
+        _mode_key(mode),
+        accent.rgba(),
+        hover.rgba(),
+        press.rgba(),
+        surface.rgba(),
+    )
     cached = _LIVE_SCHEME_CACHE.get(key)
     if cached is None:
         base = (
@@ -476,8 +487,8 @@ def _live_accent_scheme(mode: ElaThemeType.ThemeMode) -> dict[str, QColor]:
         bg_tint, bg_hover_tint = _BG_TINT[_mode_key(mode)]
         scheme = {
             "accent": accent,
-            "accentHover": hover,
-            "accentActive": press,
+            "accentHover": _composite(surface, hover),
+            "accentActive": _composite(surface, press),
             "accentBg": mixColor(base, accent, bg_tint),
             "accentBgHover": mixColor(base, accent, bg_hover_tint),
             "textColor": QColor("#ffffff"),
